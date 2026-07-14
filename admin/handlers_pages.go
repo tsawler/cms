@@ -17,10 +17,13 @@ import (
 // editorHTMLPolicy sanitizes region HTML saved by non-admin users.
 // contenteditable output and hand-written HTML from editors is untrusted;
 // UGCPolicy strips scripts, event handlers, and the like, while "class" is
-// allowed so framework-styled markup (e.g. Tailwind) survives.
+// allowed so framework-styled markup (e.g. Tailwind) survives. Inline
+// styles are stripped except text-align with known values, which is how
+// the editor's alignment buttons work.
 var editorHTMLPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class").Globally()
+	p.AllowStyles("text-align").MatchingEnum("left", "right", "center", "justify").Globally()
 	return p
 }()
 

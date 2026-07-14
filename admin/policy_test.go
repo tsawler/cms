@@ -10,6 +10,9 @@ import (
 // inserted through the TinyMCE upload flow, which use app-relative URLs.
 func TestEditorHTMLPolicy(t *testing.T) {
 	in := `<h2>Title</h2>` +
+		`<p style="text-align: center;">centered</p>` +
+		`<p style="text-align: center; position: fixed;">sneaky</p>` +
+		`<p style="color: red;">styled</p>` +
 		`<p class="fancy">Text <strong>bold</strong> <em>it</em></p>` +
 		`<ul><li>one</li></ul>` +
 		`<blockquote>quote</blockquote>` +
@@ -25,6 +28,7 @@ func TestEditorHTMLPolicy(t *testing.T) {
 
 	for _, want := range []string{
 		"<h2>Title</h2>",
+		"text-align: center", // alignment buttons emit this; must survive
 		`class="fancy"`,
 		"<strong>bold</strong>",
 		"<ul><li>one</li></ul>",
@@ -38,7 +42,7 @@ func TestEditorHTMLPolicy(t *testing.T) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)
 		}
 	}
-	for _, banned := range []string{"<script", "onerror", "javascript:"} {
+	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("sanitized output kept %q:\n%s", banned, out)
 		}

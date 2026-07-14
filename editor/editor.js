@@ -315,7 +315,7 @@
                 // In inline mode the toolbar floats docked to the region
                 // as soon as it gains focus — a click is enough, no text
                 // selection needed.
-                toolbar: "bold italic | h2 h3 | bullist numlist | blockquote | link unlink" +
+                toolbar: "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" +
                     (mediaEnabled ? " | cmsimage cmsdoc" : "") + " | removeformat",
                 fixed_toolbar_container: "#cms-mce-toolbar",
                 plugins: "lists link autolink",
