@@ -55,7 +55,7 @@ func TestRenderFillsRegionsAndEscapesText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, blocks, "en"); err != nil {
+	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -84,11 +84,53 @@ func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, nil, "en"); err != nil {
+	if err := r.Render(&buf, page, nil, "en", nil); err != nil {
 		t.Fatalf("Render with no blocks: %v", err)
 	}
 	if !strings.Contains(buf.String(), "<div></div>") {
 		t.Errorf("empty region should render empty, got:\n%s", buf.String())
+	}
+}
+
+func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 7, TemplateName: "pages/home.tmpl", Title: "Home"}
+	blocks := []content.Block{
+		{Region: "site-name", Kind: content.KindText, Content: "Acme <sneaky>"},
+		{Region: "main", Kind: content.KindHTML, Content: "<p>Hello</p>"},
+	}
+
+	var buf bytes.Buffer
+	err := r.Render(&buf, page, blocks, "en", &EditInfo{
+		PageID: 7, AdminPath: "/admin", CSRFToken: "tok123", Locale: "en",
+		Status: "draft", MediaEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, `<span data-cms-region="site-name" data-cms-kind="text">Acme &lt;sneaky&gt;</span>`) {
+		t.Errorf("text region marker missing or unescaped:\n%s", out)
+	}
+	if !strings.Contains(out, `<div data-cms-region="main" data-cms-kind="html"><p>Hello</p></div>`) {
+		t.Errorf("html region marker missing:\n%s", out)
+	}
+	if !strings.Contains(out, `src="`+EditorScriptPath+`"`) || !strings.Contains(out, `data-csrf="tok123"`) {
+		t.Errorf("editor script tag missing:\n%s", out)
+	}
+	// The script must land before </body>, inside the document.
+	if strings.Index(out, EditorScriptPath) > strings.LastIndex(strings.ToLower(out), "</body>") {
+		t.Error("editor script injected after </body>")
+	}
+
+	// A plain render of the same page must carry no editor artifacts.
+	buf.Reset()
+	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
+		t.Fatalf("plain Render: %v", err)
+	}
+	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath) {
+		t.Error("plain render leaked editor markers")
 	}
 }
 

@@ -11,6 +11,14 @@
         }
     });
 
+    // Auto-submitting selects: <select data-autosubmit> posts its form on
+    // change (used for "move to folder").
+    document.addEventListener("change", function (e) {
+        if (e.target.matches && e.target.matches("select[data-autosubmit]")) {
+            e.target.form.submit();
+        }
+    });
+
     // Copy-to-clipboard: <button data-copy="https://...">
     document.addEventListener("click", function (e) {
         var btn = e.target.closest ? e.target.closest("[data-copy]") : null;

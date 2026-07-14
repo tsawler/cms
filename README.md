@@ -5,12 +5,20 @@ as a module, hand it a Postgres pool, and mount its handlers — no external
 files, no separate install. See [DESIGN.md](DESIGN.md) for the full
 architecture and build plan.
 
-**Status: phase 3 (media).** Auth, user management, page CRUD with
-draft/publish, public rendering through the host's own templates, draft
-preview, per-page CSS/JS, editor-content sanitization, and the media
-library (uploads to any S3-compatible bucket, automatic resizing, image
-regions) are working. In-place editing, snippets, blog/news, and FR/EN
+**Status: phase 4 (in-place editing).** Auth, user management, page CRUD
+with draft/publish, public rendering through the host's own templates, the
+media library (any S3-compatible bucket, automatic resizing), and in-place
+editing are working: log in, browse the site, click Edit, change text and
+images directly on the page, save drafts, publish. Rich regions use
+TinyMCE 6 (the last MIT release, vendored and self-hosted) in inline mode
+with a floating selection toolbar. Snippets, blog/news, and FR/EN
 localization are next.
+
+To make an image editable in place, add `data-cms-image` to the tag:
+
+```html
+<img data-cms-image="hero" src="{{cmsImage "hero"}}" alt="...">
+```
 
 ## Quick start
 
@@ -72,6 +80,13 @@ Then open <http://localhost:4000/admin/> and log in with
 `CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
 
 ## Notes for host applications
+
+- **Style your rich regions.** The CMS never injects styles into your
+  pages, so headings, lists, and blockquotes created by editors look
+  however *your* CSS says. With Tailwind this matters: Preflight resets
+  h1–h6/ul/blockquote to plain text, so give rich regions typography
+  styles (e.g. the `@tailwindcss/typography` plugin's `prose` class, as
+  `examples/basic` does) or editors' formatting will be invisible.
 
 - All tables are prefixed `cms_`, so the CMS can share a database with the
   host app.

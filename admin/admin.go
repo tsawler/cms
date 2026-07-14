@@ -81,6 +81,10 @@ func New(d Deps) http.Handler {
 			r.Post("/pages/{id}", s.pageUpdate)
 			r.Post("/pages/{id}/delete", s.pageDelete)
 			r.Get("/pages/{id}/preview", s.pagePreview)
+
+			// JSON API for the in-place editor.
+			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
+			r.Post("/api/pages/{id}/publish", s.apiPublish)
 		}
 
 		if d.Media != nil {
@@ -88,6 +92,14 @@ func New(d Deps) http.Handler {
 			r.Post("/media/upload", s.mediaUpload)
 			r.Post("/media/{id}/alt", s.mediaUpdateAlt)
 			r.Post("/media/{id}/delete", s.mediaDelete)
+			r.Post("/media/{id}/move", s.mediaMove)
+			r.Post("/media/folders/new", s.mediaFolderCreate)
+			r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
+
+			r.Get("/api/media", s.apiMediaList)
+			r.Post("/api/media", s.apiMediaUpload)
+			r.Get("/api/media/folders", s.apiFoldersList)
+			r.Post("/api/media/folders", s.apiFolderCreate)
 		}
 
 		r.Group(func(r chi.Router) {
@@ -144,7 +156,11 @@ type templateData struct {
 
 	// Media pages.
 	MediaEnabled bool
-	Media        []media.View
+	Media        []media.View // images
+	Documents    []media.View // files (PDFs, office docs, ...)
+	Folders      []media.Folder
+	MediaQuery   string // active search filter
+	MediaFolder  string // active folder filter ("", "root", or an id)
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {

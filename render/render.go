@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/cms/content"
@@ -41,6 +42,22 @@ var stubFuncs = template.FuncMap{
 	"cmsImage":   func(string) string { return "" },
 	"cmsHead":    func() template.HTML { return "" },
 	"cmsScripts": func() template.HTML { return "" },
+}
+
+// EditorScriptPath is the public route the in-place editor script is served
+// from.
+const EditorScriptPath = "/cms/editor/editor.js"
+
+// EditInfo turns a render into an editable one: regions are wrapped in
+// marker elements and the in-place editor script is injected before
+// </body>. Pass nil for a plain public render.
+type EditInfo struct {
+	PageID       int64
+	AdminPath    string
+	CSRFToken    string
+	Locale       string
+	Status       string // "draft" or "published"
+	MediaEnabled bool
 }
 
 // Renderer holds one parsed template set per page template: the shared
@@ -89,8 +106,9 @@ func (r *Renderer) Knows(file string) bool {
 
 // Render executes the page's template with the given blocks and writes the
 // result to w. Output is buffered so a template error never sends a partial
-// page.
-func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Block, locale string) error {
+// page. A non-nil edit produces the editable variant of the page; see
+// EditInfo.
+func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Block, locale string, edit *EditInfo) error {
 	set, ok := r.sets[page.TemplateName]
 	if !ok {
 		return fmt.Errorf("render: page %d uses unknown template %q", page.ID, page.TemplateName)
@@ -105,22 +123,25 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		byRegion[b.Region] = append(byRegion[b.Region], b)
 	}
 
-	clone.Funcs(template.FuncMap{
-		"cmsText": func(key string) string {
-			for _, b := range byRegion[key] {
-				if b.Kind == content.KindText {
-					return b.Content
-				}
+	text := func(key string) string {
+		for _, b := range byRegion[key] {
+			if b.Kind == content.KindText {
+				return b.Content
 			}
-			return ""
-		},
-		"cmsRegion": func(key string) template.HTML {
-			var sb strings.Builder
-			for _, b := range byRegion[key] {
-				sb.WriteString(b.Content)
-			}
-			return template.HTML(sb.String())
-		},
+		}
+		return ""
+	}
+	region := func(key string) string {
+		var sb strings.Builder
+		for _, b := range byRegion[key] {
+			sb.WriteString(b.Content)
+		}
+		return sb.String()
+	}
+
+	funcs := template.FuncMap{
+		"cmsText":   func(key string) string { return text(key) },
+		"cmsRegion": func(key string) template.HTML { return template.HTML(region(key)) },
 		"cmsImage": func(key string) string {
 			for _, b := range byRegion[key] {
 				if b.Kind == content.KindImage {
@@ -131,7 +152,21 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		},
 		"cmsHead":    func() template.HTML { return headHTML(page) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
-	})
+	}
+	if edit != nil {
+		// Editable renders wrap region output in marker elements the
+		// editor script finds. cmsText escapes its content itself here,
+		// since the wrapper obliges it to return trusted HTML.
+		funcs["cmsText"] = func(key string) template.HTML {
+			return template.HTML(`<span data-cms-region="` + html.EscapeString(key) +
+				`" data-cms-kind="text">` + html.EscapeString(text(key)) + `</span>`)
+		}
+		funcs["cmsRegion"] = func(key string) template.HTML {
+			return template.HTML(`<div data-cms-region="` + html.EscapeString(key) +
+				`" data-cms-kind="html">` + region(key) + `</div>`)
+		}
+	}
+	clone.Funcs(funcs)
 
 	var buf bytes.Buffer
 	if err := clone.ExecuteTemplate(&buf, path.Base(page.TemplateName), PageData{
@@ -142,8 +177,40 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 	}); err != nil {
 		return fmt.Errorf("render: executing %s: %w", page.TemplateName, err)
 	}
-	_, err = buf.WriteTo(w)
+
+	out := buf.Bytes()
+	if edit != nil {
+		out = injectEditorScript(out, edit)
+	}
+	_, err = w.Write(out)
 	return err
+}
+
+// injectEditorScript inserts the in-place editor's script tag before the
+// closing </body> tag (or at the end when there isn't one).
+func injectEditorScript(page []byte, edit *EditInfo) []byte {
+	mediaFlag := "0"
+	if edit.MediaEnabled {
+		mediaFlag = "1"
+	}
+	tag := `<script src="` + EditorScriptPath + `" defer` +
+		` data-page-id="` + strconv.FormatInt(edit.PageID, 10) + `"` +
+		` data-admin-path="` + html.EscapeString(edit.AdminPath) + `"` +
+		` data-csrf="` + html.EscapeString(edit.CSRFToken) + `"` +
+		` data-status="` + html.EscapeString(edit.Status) + `"` +
+		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
+		` data-media="` + mediaFlag + `"></script>`
+
+	idx := strings.LastIndex(strings.ToLower(string(page)), "</body>")
+	if idx < 0 {
+		return append(page, []byte(tag)...)
+	}
+	var out bytes.Buffer
+	out.Grow(len(page) + len(tag))
+	out.Write(page[:idx])
+	out.WriteString(tag)
+	out.Write(page[idx:])
+	return out.Bytes()
 }
 
 // headHTML builds what {{cmsHead}} emits inside <head>: the page's meta

@@ -278,6 +278,45 @@ a.cms-card:hover { border-color: var(--cms-primary); }
     margin-bottom: .5rem;
 }
 
+.cms-section-head { margin-top: 2rem; }
+.cms-filter-bar {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+.cms-filter-form { display: flex; gap: .5rem; align-items: center; }
+.cms-filter-form input[type="search"],
+.cms-filter-form input[type="text"],
+.cms-filter-form select,
+.cms-upload-row select {
+    padding: .45rem .6rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    font: inherit;
+    font-size: .9rem;
+    background: var(--cms-surface);
+}
+.cms-media-move { margin-bottom: .5rem; }
+.cms-media-move select {
+    width: 100%;
+    font-size: .82rem;
+    padding: .3rem .4rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    background: var(--cms-surface);
+}
+.cms-table .cms-actions select {
+    font-size: .82rem;
+    padding: .3rem .4rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    background: var(--cms-surface);
+}
+.cms-table .cms-actions { display: flex; gap: .4rem; justify-content: flex-end; }
+.cms-table .cms-actions form { margin: 0; }
+
 /* Badges */
 .cms-badge {
     display: inline-block;

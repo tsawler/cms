@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/media"
 )
 
 // editorHTMLPolicy sanitizes region HTML saved by non-admin users.
@@ -138,27 +140,50 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
 	if !s.deps.Renderer.Knows(regionsTemplate) {
 		return nil
 	}
-	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
-
+	values := map[string]string{}
 	for _, region := range s.deps.Renderer.Regions(regionsTemplate) {
-		value := r.PostFormValue("region-" + region.Name)
+		values[region.Name] = r.PostFormValue("region-" + region.Name)
+	}
+	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
+	return s.saveRegions(r.Context(), page.ID, regionsTemplate, values, isAdmin)
+}
+
+// saveRegions writes region values as draft blocks. Only regions the
+// template actually declares are stored — unknown names in values are
+// ignored — and each value is treated per its region's kind: text is stored
+// raw (escaped at render time), image URLs are validated, and HTML from
+// non-admins is sanitized. Shared by the page form and the in-place editor
+// API.
+func (s *server) saveRegions(ctx context.Context, pageID int64, templateName string, values map[string]string, isAdmin bool) error {
+	for _, region := range s.deps.Renderer.Regions(templateName) {
+		value, ok := values[region.Name]
+		if !ok {
+			continue
+		}
 		kind := content.KindHTML
 		switch {
 		case region.Kind == "text":
-			// Plain text is escaped at render time, so it needs no
-			// sanitizing here.
 			kind = content.KindText
 		case region.Kind == "image":
 			kind = content.KindImage
+			if !validImageURL(value) {
+				continue
+			}
 		case !isAdmin:
 			value = editorHTMLPolicy.Sanitize(value)
 		}
-		if err := s.deps.Content.UpsertDraftBlock(r.Context(), page.ID, region.Name,
+		if err := s.deps.Content.UpsertDraftBlock(ctx, pageID, region.Name,
 			s.deps.DefaultLocale, kind, value); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// validImageURL accepts empty (no image), app-relative, or http(s) URLs.
+func validImageURL(v string) bool {
+	return v == "" || strings.HasPrefix(v, "/") ||
+		strings.HasPrefix(v, "https://") || strings.HasPrefix(v, "http://")
 }
 
 func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +212,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.deps.Renderer.Render(w, page, blocks, s.deps.DefaultLocale); err != nil {
+	if err := s.deps.Renderer.Render(w, page, blocks, s.deps.DefaultLocale, nil); err != nil {
 		s.serverError(w, err)
 	}
 }
@@ -245,7 +270,7 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 		if s.deps.Media != nil {
 			for _, region := range data.Regions {
 				if region.Kind == "image" {
-					items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale)
+					items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{Kind: media.KindImage})
 					if err != nil {
 						s.serverError(w, err)
 						return

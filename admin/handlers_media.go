@@ -18,14 +18,49 @@ func (s *server) mediaList(w http.ResponseWriter, r *http.Request) {
 	s.renderMediaList(w, r, http.StatusOK, "")
 }
 
+// parseFolderParam maps a folder query/form value to list options: "" means
+// no filter, "root" means unfiled, digits mean a folder id.
+func parseFolderParam(v string) (folderID *int64, unfiled bool) {
+	if v == "root" {
+		return nil, true
+	}
+	if id, err := strconv.ParseInt(v, 10, 64); err == nil && id > 0 {
+		return &id, false
+	}
+	return nil, false
+}
+
 func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status int, formError string) {
-	items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	folderParam := r.URL.Query().Get("folder")
+	folderID, unfiled := parseFolderParam(folderParam)
+
+	items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{
+		Query:    query,
+		FolderID: folderID,
+		Unfiled:  unfiled,
+	})
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
+	folders, err := s.deps.Media.Folders(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+
 	data := s.newTemplateData(r)
-	data.Media = s.deps.Media.Views(items)
+	for _, v := range s.deps.Media.Views(items) {
+		if v.Kind == media.KindFile {
+			data.Documents = append(data.Documents, v)
+		} else {
+			data.Media = append(data.Media, v)
+		}
+	}
+	data.Folders = folders
+	data.MediaQuery = query
+	data.MediaFolder = folderParam
 	data.Error = formError
 	s.render(w, status, "media", data)
 }
@@ -56,10 +91,11 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := s.currentUser(r)
-	md, err := s.deps.Media.Upload(r.Context(), sanitizeFilename(header.Filename), data, user.ID)
+	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
+	md, err := s.deps.Media.Upload(r.Context(), sanitizeFilename(header.Filename), data, user.ID, folderID)
 	if err != nil {
 		if errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image") {
-			s.renderMediaList(w, r, http.StatusUnprocessableEntity, "That doesn't look like an image. Use a JPEG, PNG, GIF, or WebP file.")
+			s.renderMediaList(w, r, http.StatusUnprocessableEntity, "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), PDF, office document, text/CSV, or ZIP.")
 			return
 		}
 		s.serverError(w, err)
@@ -108,6 +144,61 @@ func (s *server) mediaDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.flash(r, "Image deleted.")
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
+}
+
+// mediaMove refiles one media item into a folder ("" form value = unfiled).
+func (s *server) mediaMove(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.mediaIDFromURL(w, r)
+	if !ok {
+		return
+	}
+	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
+	if err := s.deps.Media.Move(r.Context(), id, folderID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	dest := r.Header.Get("Referer")
+	if dest == "" {
+		dest = s.deps.AdminPath + "/media"
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// mediaFolderCreate adds a folder from the admin media page.
+func (s *server) mediaFolderCreate(w http.ResponseWriter, r *http.Request) {
+	_, err := s.deps.Media.CreateFolder(r.Context(), r.PostFormValue("name"))
+	if errors.Is(err, media.ErrDuplicateFolder) || errors.Is(err, media.ErrBadFolderName) {
+		s.renderMediaList(w, r, http.StatusUnprocessableEntity, friendlyFolderError(err))
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Folder created.")
+	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
+}
+
+// mediaFolderDelete removes a folder; its contents become unfiled.
+func (s *server) mediaFolderDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.deps.Media.DeleteFolder(r.Context(), id); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Folder deleted — its files are now unfiled.")
+	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
+}
+
+func friendlyFolderError(err error) string {
+	if errors.Is(err, media.ErrDuplicateFolder) {
+		return "A folder with that name already exists."
+	}
+	return "Folder names must be between 1 and 60 characters."
 }
 
 func (s *server) mediaIDFromURL(w http.ResponseWriter, r *http.Request) (int64, bool) {

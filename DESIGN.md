@@ -97,15 +97,68 @@ markup structure except inside regions.
 
 ### 3. In-place editing
 
-When a logged-in editor visits a page, middleware injects one `<script>` tag.
-That script:
+When a logged-in CMS user visits the public site, they see the **draft**
+version of each page with the editor script injected before `</body>`. In
+edit renders, `cmsText`/`cmsRegion` output is wrapped in marker elements
+(`<span/div data-cms-region data-cms-kind>`); images become in-place
+editable when the template adds `data-cms-image="region-name"` to the img
+tag (an attribute can't be wrapped from a template func).
 
-- outlines the editable regions and makes them `contenteditable`
-- shows a floating formatting toolbar (bold, italic, headings, links, lists) — Shadow DOM
-- click an image → media dialog → upload straight to S3
-- saves via `fetch` to the JSON API; the server sanitizes all HTML with
-  **bluemonday** (critical — contenteditable output is untrusted)
-- draft/publish toggle so edits aren't live until published
+The glue script (vanilla JS, chrome in Shadow DOM) provides:
+
+- floating bottom toolbar: status chip, Edit toggle, Save draft, Publish,
+  admin link
+- Edit mode outlines regions; plain-text regions get `contenteditable`
+  (plaintext-only); **rich HTML regions are edited with TinyMCE 6.8.6 in
+  inline mode** — the last MIT-licensed TinyMCE release, vendored into the
+  module (`editor/tinymce/`, ~1.1 MB, self-hosted, no CDN or build step)
+  and lazy-loaded only when "Edit page" is pressed. Inline mode edits the
+  real element with the page's own styles, keeps `class` attributes (so
+  framework-styled markup survives), and shows a floating selection
+  toolbar (bold, italic, headings, lists, blockquote, links) via the
+  quickbars plugin.
+
+  Why TinyMCE 6 and not the alternatives: CKEditor 5 and TinyMCE 7+ are
+  GPL/commercial (unsafe for closed customer deployments); TipTap/
+  ProseMirror need a build pipeline and normalize unknown markup away
+  (they would mangle snippet HTML); Editor.js/Trix own the whole editing
+  surface rather than editing in place. TinyMCE 6.x is EOL upstream —
+  acceptable because the integration surface is thin (one `init` call)
+  and all HTML is sanitized server-side regardless.
+
+- click an image → Shadow DOM media picker (grid from `GET /api/media`)
+  with direct upload (`POST /api/media`)
+- images inside rich regions: the toolbar's image button opens the CMS
+  media picker directly (browse the library or upload — no URL field, no
+  TinyMCE dialog), and paste/drag of image data uploads through
+  `images_upload_handler`; every path stores to the bucket and inserts
+  the resized web-variant URL. `convert_urls` is disabled so TinyMCE
+  never rewrites `/cms/media/…` paths relative to the current page.
+- the media picker is a centered modal with a folder sidebar, name search,
+  and grid/list views. Folders are metadata only — a Postgres table plus a
+  `folder_id` on media — so the bucket's object keys never change and
+  "moving" a file is one UPDATE; search is a SQL ILIKE on filename. The
+  admin media page has the same search/folder filters plus per-item
+  move-to-folder controls.
+- documents: the media library also accepts non-image files behind a
+  strict whitelist — PDF, Word/Excel/PowerPoint (legacy + OOXML),
+  OpenDocument, text/CSV, ZIP — validated by extension *and* sniffed
+  content (an HTML file renamed `.pdf` is rejected; HTML/SVG/JS are never
+  accepted since proxied media is same-origin). Files are stored as-is
+  under a sanitized filename so downloads are readable
+  (`q3-report-final.pdf`). The toolbar's paperclip button opens the same
+  picker filtered to documents and inserts a link: selected text becomes
+  the link, otherwise the filename is inserted as link text.
+- Save posts dirty regions to `POST /admin/api/pages/{id}/regions` with the
+  session CSRF token in `X-CSRF-Token`; the server validates region names
+  against the template, sanitizes HTML from non-admins with **bluemonday**,
+  validates image URLs, and stores draft blocks
+- Publish hits `POST /admin/api/pages/{id}/publish` — same snapshot
+  mechanics as the admin form
+- `beforeunload` warning when there are unsaved changes
+
+Nothing an editor does is visible to the public until Publish. The admin
+form remains as the fallback/"source view" for the same content.
 
 ### 4. Snippets (drag & drop)
 
@@ -189,7 +242,7 @@ previous state.
 | S3              | aws-sdk-go-v2                 | works with every S3-compatible store |
 | Images          | disintegration/imaging        | thumbnails/resizes on upload |
 | Migrations      | embedded SQL + tiny runner    | no external tool for customers to run |
-| Editor JS       | vanilla ES modules, no build step | nothing to break, nothing to depend on |
+| Editor JS       | vanilla glue + vendored TinyMCE 6 (MIT) | proven WYSIWYG UX, inline mode, no build step, no CDN |
 
 Admin UI: server-rendered Go templates + a little vanilla JS. No SPA — keeps
 the module self-contained and the surface area small.
@@ -217,8 +270,10 @@ the module self-contained and the surface area small.
 3. **Media** ✅ — S3 uploads (any S3-compatible store), automatic web/thumb
    variants, media library UI, cmsImage template func with picker, private
    buckets supported by proxying media through the CMS (/cms/media/)
-4. **In-place editor** — injected script, contenteditable + toolbar in
-   Shadow DOM, save API with sanitization
+4. **In-place editor** ✅ — injected script, Shadow DOM toolbar, TinyMCE
+   6 (MIT, vendored) inline editing for rich regions, click-to-replace
+   images with media picker and upload, JSON save/publish API with
+   sanitization
 5. **Snippets** — registry, palette, drag & drop, block reordering
 6. **Blog & news** — posts, listing/detail helpers, RSS, categories/tags
 7. **i18n** — locale routing, fallback, in-place locale switching, FR admin

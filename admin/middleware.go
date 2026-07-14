@@ -1,20 +1,19 @@
 package admin
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/internal/sessiondata"
 )
 
 const (
-	sessionKeyUserID = "cmsUserID"
-	sessionKeyCSRF   = "cmsCSRFToken"
-	sessionKeyFlash  = "cmsFlash"
+	sessionKeyUserID = sessiondata.KeyUserID
+	sessionKeyCSRF   = sessiondata.KeyCSRF
+	sessionKeyFlash  = sessiondata.KeyFlash
 )
 
 // currentUser returns the logged-in, active user for the request, or nil.
@@ -65,16 +64,10 @@ func (s *server) requireAdmin(next http.Handler) http.Handler {
 // field or the X-CSRF-Token header.
 func (s *server) csrf(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		token := s.deps.Sessions.GetString(ctx, sessionKeyCSRF)
-		if token == "" {
-			buf := make([]byte, 32)
-			if _, err := rand.Read(buf); err != nil {
-				s.serverError(w, err)
-				return
-			}
-			token = hex.EncodeToString(buf)
-			s.deps.Sessions.Put(ctx, sessionKeyCSRF, token)
+		token, err := sessiondata.EnsureCSRF(r.Context(), s.deps.Sessions)
+		if err != nil {
+			s.serverError(w, err)
+			return
 		}
 
 		switch r.Method {

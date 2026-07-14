@@ -8,26 +8,48 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Media is one uploaded image. Alt is the alt text for the locale it was
-// loaded with.
+// Kind distinguishes images (resized, embeddable) from plain files like
+// PDFs and office documents (stored as-is, linked to).
+type Kind string
+
+const (
+	KindImage Kind = "image"
+	KindFile  Kind = "file"
+)
+
+// Media is one uploaded image or document. Alt is the alt text for the
+// locale it was loaded with (images only).
 type Media struct {
-	ID         int64
-	S3Key      string // key prefix; objects live at S3Key/original.<ext> etc.
+	ID    int64
+	Kind  Kind
+	S3Key string // images: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
 	Filename   string
 	Mime       string
 	Ext        string
-	Width      int
-	Height     int
+	Width      int // zero for files
+	Height     int // zero for files
 	Size       int64
+	FolderID   *int64 // nil = unfiled
 	UploadedBy *int64
 	CreatedAt  time.Time
 	Alt        string
+}
+
+// FolderIDValue returns the folder id, or 0 when unfiled — convenient in
+// templates, where pointers are awkward to compare.
+func (md Media) FolderIDValue() int64 {
+	if md.FolderID == nil {
+		return 0
+	}
+	return *md.FolderID
 }
 
 // ErrNotFound is returned when no media matches the query.
@@ -46,16 +68,11 @@ func NewManager(db *pgxpool.Pool, objects ObjectStore, logger *slog.Logger) *Man
 	return &Manager{db: db, objects: objects, logger: logger}
 }
 
-// Upload validates, processes, and stores an image, returning its record.
-// The original is stored untouched alongside resized web and thumb
-// variants.
-func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uploadedBy int64) (*Media, error) {
-	mime := http.DetectContentType(data)
-	p, err := process(data, mime)
-	if err != nil {
-		return nil, err
-	}
-
+// Upload validates and stores an upload, returning its record. Images are
+// stored untouched alongside resized web and thumb variants; whitelisted
+// documents (PDF, office formats, text/CSV, ZIP) are stored as-is. A
+// non-nil folderID files the upload into that folder.
+func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uploadedBy int64, folderID *int64) (*Media, error) {
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
 		return nil, err
@@ -70,7 +87,6 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 			}
 		}
 	}
-
 	put := func(key, contentType string, body []byte) error {
 		if err := m.objects.Put(ctx, key, contentType, bytes.NewReader(body)); err != nil {
 			return err
@@ -79,33 +95,56 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 		return nil
 	}
 
-	if err := put(prefix+"/original"+p.Ext, mime, data); err != nil {
-		return nil, err
-	}
-	for _, v := range p.Variants {
-		if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, v.Data); err != nil {
-			cleanup()
-			return nil, err
-		}
-	}
-
 	md := &Media{
-		S3Key:    prefix,
 		Filename: filename,
-		Mime:     mime,
-		Ext:      p.Ext,
-		Width:    p.Width,
-		Height:   p.Height,
 		Size:     int64(len(data)),
+		FolderID: folderID,
 	}
 	if uploadedBy != 0 {
 		md.UploadedBy = &uploadedBy
 	}
-	err = m.db.QueryRow(ctx, `
-		INSERT INTO cms_media (s3_key, filename, mime, ext, width, height, size, uploaded_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+
+	sniffed := http.DetectContentType(data)
+	if strings.HasPrefix(sniffed, "image/") {
+		p, err := process(data, sniffed)
+		if err != nil {
+			return nil, err
+		}
+		md.Kind = KindImage
+		md.S3Key = prefix
+		md.Mime = sniffed
+		md.Ext = p.Ext
+		md.Width, md.Height = p.Width, p.Height
+
+		if err := put(prefix+"/original"+p.Ext, sniffed, data); err != nil {
+			return nil, err
+		}
+		for _, v := range p.Variants {
+			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, v.Data); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
+	} else {
+		ext, contentType, ok := docTypeFor(filename, sniffed)
+		if !ok {
+			return nil, ErrUnsupportedType
+		}
+		md.Kind = KindFile
+		md.S3Key = prefix + "/" + safeObjectName(filename, ext)
+		md.Mime = contentType
+		md.Ext = ext
+
+		if err := put(md.S3Key, contentType, data); err != nil {
+			return nil, err
+		}
+	}
+
+	err := m.db.QueryRow(ctx, `
+		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, width, height, size, folder_id, uploaded_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at`,
-		md.S3Key, md.Filename, md.Mime, md.Ext, md.Width, md.Height, md.Size, md.UploadedBy,
+		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy,
 	).Scan(&md.ID, &md.CreatedAt)
 	if err != nil {
 		cleanup()
@@ -114,13 +153,13 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 	return md, nil
 }
 
-const mediaColumns = `m.id, m.s3_key, m.filename, m.mime, m.ext, m.width, m.height, m.size,
-	m.uploaded_by, m.created_at, COALESCE(t.alt_text, '')`
+const mediaColumns = `m.id, m.kind, m.s3_key, m.filename, m.mime, m.ext, m.width, m.height, m.size,
+	m.folder_id, m.uploaded_by, m.created_at, COALESCE(t.alt_text, '')`
 
 func scanMedia(row pgx.Row) (*Media, error) {
 	var md Media
-	err := row.Scan(&md.ID, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.Width, &md.Height,
-		&md.Size, &md.UploadedBy, &md.CreatedAt, &md.Alt)
+	err := row.Scan(&md.ID, &md.Kind, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.Width, &md.Height,
+		&md.Size, &md.FolderID, &md.UploadedBy, &md.CreatedAt, &md.Alt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -139,13 +178,46 @@ func (m *Manager) GetByID(ctx context.Context, id int64, locale string) (*Media,
 		WHERE m.id = $1`, id, locale))
 }
 
-// All returns every media record with alt text for locale, newest first.
-func (m *Manager) All(ctx context.Context, locale string) ([]Media, error) {
-	rows, err := m.db.Query(ctx, `
-		SELECT `+mediaColumns+`
+// ListOptions filters All. The zero value lists everything.
+type ListOptions struct {
+	Kind     Kind    // "" = both images and files
+	Query    string  // case-insensitive substring match on filename
+	FolderID *int64  // only items in this folder
+	Unfiled  bool    // only items in no folder (ignored when FolderID set)
+}
+
+var ilikeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// All returns media records with alt text for locale, newest first,
+// filtered by opts.
+func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]Media, error) {
+	q := `
+		SELECT ` + mediaColumns + `
 		FROM cms_media m
-		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $1
-		ORDER BY m.created_at DESC, m.id DESC`, locale)
+		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $1`
+	args := []any{locale}
+	where := []string{}
+	arg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if opts.Kind != "" {
+		where = append(where, "m.kind = "+arg(opts.Kind))
+	}
+	if opts.Query != "" {
+		where = append(where, "m.filename ILIKE "+arg("%"+ilikeEscaper.Replace(opts.Query)+"%"))
+	}
+	switch {
+	case opts.FolderID != nil:
+		where = append(where, "m.folder_id = "+arg(*opts.FolderID))
+	case opts.Unfiled:
+		where = append(where, "m.folder_id IS NULL")
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += ` ORDER BY m.created_at DESC, m.id DESC`
+	rows, err := m.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +258,9 @@ func (m *Manager) Delete(ctx context.Context, id int64, locale string) error {
 }
 
 func (m *Manager) objectKeys(md *Media) []string {
+	if md.Kind == KindFile {
+		return []string{md.S3Key}
+	}
 	variantExt := ".jpg"
 	if md.Mime == "image/png" {
 		variantExt = ".png"
@@ -198,8 +273,11 @@ func (m *Manager) objectKeys(md *Media) []string {
 }
 
 // URL returns the public URL of one rendition: "original", "web", or
-// "thumb".
+// "thumb". Files have a single rendition, returned for any name.
 func (m *Manager) URL(md *Media, rendition string) string {
+	if md.Kind == KindFile {
+		return m.objects.PublicURL(md.S3Key)
+	}
 	variantExt := ".jpg"
 	if md.Mime == "image/png" {
 		variantExt = ".png"
@@ -222,16 +300,33 @@ type View struct {
 	ThumbURL    string
 }
 
-// Views converts records to template-ready views.
+// Views converts records to template-ready views. Files have no thumbnail;
+// their web and original URLs are the document itself.
 func (m *Manager) Views(items []Media) []View {
 	out := make([]View, len(items))
 	for i, md := range items {
-		out[i] = View{
-			Media:       md,
-			OriginalURL: m.URL(&md, "original"),
-			WebURL:      m.URL(&md, "web"),
-			ThumbURL:    m.URL(&md, "thumb"),
+		v := View{Media: md}
+		if md.Kind == KindFile {
+			url := m.URL(&md, "original")
+			v.OriginalURL, v.WebURL = url, url
+		} else {
+			v.OriginalURL = m.URL(&md, "original")
+			v.WebURL = m.URL(&md, "web")
+			v.ThumbURL = m.URL(&md, "thumb")
 		}
+		out[i] = v
 	}
 	return out
+}
+
+// SizeHuman renders Size for people, e.g. "1.4 MB".
+func (md Media) SizeHuman() string {
+	switch {
+	case md.Size >= 1<<20:
+		return strconv.FormatFloat(float64(md.Size)/(1<<20), 'f', 1, 64) + " MB"
+	case md.Size >= 1<<10:
+		return strconv.FormatInt(md.Size/(1<<10), 10) + " KB"
+	default:
+		return strconv.FormatInt(md.Size, 10) + " B"
+	}
 }

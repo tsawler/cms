@@ -29,6 +29,8 @@ import (
 	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/editor"
+	"github.com/tsawler/cms/internal/sessiondata"
 	"github.com/tsawler/cms/internal/sessionstore"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/migrations"
@@ -226,59 +228,118 @@ func (c *CMS) Admin() http.Handler {
 	return c.admin
 }
 
-// Pages returns the public site handler: it looks up the published page for
-// the request path and renders it with the host's templates. When no
-// TemplateFS is configured it serves a placeholder instead.
+// Pages returns the public site handler: it looks up the page for the
+// request path and renders it with the host's templates. Anonymous visitors
+// get the published version; logged-in CMS users get the draft version with
+// the in-place editor injected. The handler also serves proxied media and
+// the editor script under /cms/. When no TemplateFS is configured it serves
+// a placeholder instead.
 func (c *CMS) Pages() http.Handler {
-	if c.renderer == nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(`<!doctype html>
+	editorAssets := editor.Handler()
+	withSession := c.sessions.LoadAndSave(http.HandlerFunc(c.servePage))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Media and the editor script are served outside the session
+		// wrapper so their responses stay cacheable.
+		if c.objects != nil && strings.HasPrefix(r.URL.Path, media.ProxyPathPrefix) {
+			c.serveMedia(w, r)
+			return
+		}
+		if c.renderer == nil {
+			c.placeholder(w)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, editor.PathPrefix) {
+			editorAssets.ServeHTTP(w, r)
+			return
+		}
+		withSession.ServeHTTP(w, r)
+	})
+}
+
+func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
+	locale := c.cfg.Locales[0]
+	slug := strings.Trim(r.URL.Path, "/")
+
+	user := c.sessionUser(r)
+	editing := user != nil
+
+	// Editors see draft pages and draft content; the public sees only
+	// what is published.
+	page, err := c.content.GetBySlug(r.Context(), slug, locale, !editing)
+	if errors.Is(err, content.ErrNotFound) {
+		c.notFound(w)
+		return
+	}
+	if err != nil {
+		c.cfg.Logger.Error("cms: loading page", "slug", slug, "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+
+	blockStatus := content.StatusPublished
+	if editing {
+		blockStatus = content.StatusDraft
+	}
+	blocks, err := c.content.BlocksFor(r.Context(), page.ID, locale, blockStatus)
+	if err != nil {
+		c.cfg.Logger.Error("cms: loading blocks", "slug", slug, "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+
+	var edit *render.EditInfo
+	if editing {
+		csrf, err := sessiondata.EnsureCSRF(r.Context(), c.sessions)
+		if err != nil {
+			c.cfg.Logger.Error("cms: generating csrf token", "err", err)
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			return
+		}
+		edit = &render.EditInfo{
+			PageID:       page.ID,
+			AdminPath:    c.cfg.AdminPath,
+			CSRFToken:    csrf,
+			Locale:       locale,
+			Status:       string(page.Status),
+			MediaEnabled: c.media != nil,
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := c.renderer.Render(w, page, blocks, locale, edit); err != nil {
+		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+	}
+}
+
+// sessionUser returns the logged-in, active CMS user for a public page
+// request, or nil for ordinary visitors.
+func (c *CMS) sessionUser(r *http.Request) *auth.User {
+	id := c.sessions.GetInt64(r.Context(), sessiondata.KeyUserID)
+	if id == 0 {
+		return nil
+	}
+	u, err := c.users.GetByID(r.Context(), id)
+	if err != nil || !u.Active {
+		return nil
+	}
+	return u
+}
+
+func (c *CMS) placeholder(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>CMS</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;">
 <h1>It works</h1>
 <p>Configure Config.TemplateFS and Config.PageTemplates to render pages here.
 The admin area is available at <a href="` + c.cfg.AdminPath + `/">` + c.cfg.AdminPath + `/</a>.</p>
 </body></html>`))
-		})
-	}
-
-	locale := c.cfg.Locales[0]
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if c.objects != nil && strings.HasPrefix(r.URL.Path, media.ProxyPathPrefix) {
-			c.serveMedia(w, r)
-			return
-		}
-		slug := strings.Trim(r.URL.Path, "/")
-
-		page, err := c.content.GetBySlug(r.Context(), slug, locale, true)
-		if errors.Is(err, content.ErrNotFound) {
-			c.notFound(w)
-			return
-		}
-		if err != nil {
-			c.cfg.Logger.Error("cms: loading page", "slug", slug, "err", err)
-			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
-			return
-		}
-
-		blocks, err := c.content.BlocksFor(r.Context(), page.ID, locale, content.StatusPublished)
-		if err != nil {
-			c.cfg.Logger.Error("cms: loading blocks", "slug", slug, "err", err)
-			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := c.renderer.Render(w, page, blocks, locale); err != nil {
-			c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
-			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
-		}
-	})
 }
 
 // serveMedia streams an uploaded object from the (possibly private) bucket.

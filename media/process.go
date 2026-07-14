@@ -13,9 +13,10 @@ import (
 	_ "golang.org/x/image/webp" // decode-only
 )
 
-// ErrUnsupportedType is returned for uploads that are not JPEG, PNG, GIF,
-// or WebP images.
-var ErrUnsupportedType = errors.New("media: unsupported file type — use a JPEG, PNG, GIF, or WebP image")
+// ErrUnsupportedType is returned for uploads that are neither a supported
+// image (JPEG, PNG, GIF, WebP) nor a whitelisted document type (PDF,
+// office formats, text/CSV, ZIP).
+var ErrUnsupportedType = errors.New("media: unsupported file type")
 
 const (
 	// webMaxWidth is the largest width served to pages; wider originals
