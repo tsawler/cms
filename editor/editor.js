@@ -43,7 +43,17 @@
         /* ---- bottom pill bar (dark) ---- */
         ".bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;" +
         "display:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;" +
-        "padding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap}" +
+        "padding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap;" +
+        "transition:transform .25s ease,opacity .25s ease}" +
+        ".bar.min{transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none}" +
+        ".fab{position:fixed;bottom:20px;left:50%;z-index:2147483000;width:48px;height:48px;" +
+        "border-radius:50%;background:#1c2128;color:#fff;border:none;cursor:pointer;" +
+        "box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:0;" +
+        "transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none;" +
+        "transition:transform .25s ease,opacity .25s ease}" +
+        ".fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}" +
+        ".fab:hover{background:#2a3140}" +
+        ".fab svg{width:20px;height:20px;fill:currentColor}" +
         ".brand{font-weight:700;letter-spacing:.04em}" +
         ".chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}" +
         ".chip.published{background:#1e7e4e}" +
@@ -101,8 +111,27 @@
         ".items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
         ".items.list .sz{color:#667085;font-size:12px;white-space:nowrap}" +
         ".empty{color:#667085;font-size:13px}" +
+        /* ---- small dialog (replaces window.confirm / window.prompt) ---- */
+        ".dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}" +
+        ".dlg-overlay.on{display:block}" +
+        ".dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;" +
+        "width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;" +
+        "box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}" +
+        ".dlg.on{display:block}" +
+        ".dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}" +
+        ".dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;" +
+        "font:inherit;font-size:13px;margin-bottom:14px}" +
+        ".dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}" +
+        ".dlg .acts{display:flex;justify-content:flex-end;gap:8px}" +
+        ".dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;" +
+        "border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}" +
+        ".dlg button:hover{background:#f4f5f7}" +
+        ".dlg button.ok{background:#2f5fe0;border-color:#2f5fe0;color:#fff}" +
+        ".dlg button.ok:hover{background:#2149b8}" +
+        ".dlg button.ok.danger{background:#c0392b;border-color:#c0392b}" +
+        ".dlg button.ok.danger:hover{background:#a03024}" +
         "</style>" +
-        '<div class="bar">' +
+        '<div class="bar" id="bar">' +
         '<span class="brand">CMS</span>' +
         '<span class="chip" id="chip"></span>' +
         '<span class="msg" id="msg"></span>' +
@@ -111,8 +140,11 @@
         '<button id="save" disabled>Save draft</button>' +
         '<button id="publish" class="primary">Publish</button>' +
         '<a id="admin" href="#">Admin</a>' +
-        '<button id="close" class="quiet" title="Hide editor">×</button>' +
+        '<button id="close" class="quiet" title="Minimize editing tools">×</button>' +
         "</div>" +
+        '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
+        '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
+        "</button>" +
         '<div class="overlay" id="overlay"></div>' +
         '<div class="panel" id="picker">' +
         '<div class="head">' +
@@ -129,12 +161,76 @@
         '<div class="main">' +
         '<div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div>' +
         '<div class="items grid" id="grid"></div>' +
-        "</div></div></div>";
+        "</div></div></div>" +
+        '<div class="dlg-overlay" id="dlg-overlay"></div>' +
+        '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
+        '<p id="dlg-msg"></p>' +
+        '<input type="text" id="dlg-input" hidden>' +
+        '<div class="acts">' +
+        '<button id="dlg-cancel">Cancel</button>' +
+        '<button id="dlg-ok" class="ok">OK</button>' +
+        "</div></div>";
     document.documentElement.appendChild(host);
 
     var $ = function (id) { return shadow.getElementById(id); };
     $("admin").href = adminPath + "/";
     setChip(pageStatus);
+
+    /* ------------------------------------------------------------------ *
+     * Dialogs — styled replacements for window.confirm / window.prompt
+     * ------------------------------------------------------------------ */
+
+    var dlgResolve = null;
+    var dlgIsPrompt = false;
+
+    function openDialog(opts) {
+        return new Promise(function (resolve) {
+            dlgResolve = resolve;
+            dlgIsPrompt = !!opts.prompt;
+            $("dlg-msg").textContent = opts.message;
+            var input = $("dlg-input");
+            input.hidden = !opts.prompt;
+            input.value = "";
+            input.placeholder = opts.placeholder || "";
+            var ok = $("dlg-ok");
+            ok.textContent = opts.okLabel || "OK";
+            ok.classList.toggle("danger", !!opts.danger);
+            $("dlg-overlay").classList.add("on");
+            $("dlg").classList.add("on");
+            (opts.prompt ? input : ok).focus();
+        });
+    }
+
+    function settleDialog(value) {
+        if (!dlgResolve) return;
+        $("dlg-overlay").classList.remove("on");
+        $("dlg").classList.remove("on");
+        var resolve = dlgResolve;
+        dlgResolve = null;
+        resolve(value);
+    }
+
+    // cmsConfirm resolves true/false; cmsPrompt resolves the entered text
+    // or null when dismissed.
+    function cmsConfirm(message, okLabel, danger) {
+        return openDialog({ message: message, okLabel: okLabel, danger: danger });
+    }
+    function cmsPrompt(message, placeholder, okLabel) {
+        return openDialog({ message: message, prompt: true, placeholder: placeholder, okLabel: okLabel });
+    }
+
+    function dialogOK() { settleDialog(dlgIsPrompt ? $("dlg-input").value.trim() : true); }
+    function dialogDismiss() { settleDialog(dlgIsPrompt ? null : false); }
+
+    $("dlg-ok").addEventListener("click", dialogOK);
+    $("dlg-cancel").addEventListener("click", dialogDismiss);
+    $("dlg-overlay").addEventListener("click", dialogDismiss);
+    $("dlg").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            dialogOK();
+        }
+    });
 
     /* Fixed strip TinyMCE renders its toolbar into (light DOM — TinyMCE
      * can't reach into our shadow root). Pinned to the top of the
@@ -467,27 +563,45 @@
 
     $("edit").addEventListener("click", function () { setEditing(!editing); });
     $("cancel").addEventListener("click", function () {
-        if (Object.keys(dirty).length > 0 &&
-            !window.confirm("Discard your unsaved changes?")) {
-            return;
+        var discard = function () {
+            var snap = snapshot;
+            setEditing(false); // tears down TinyMCE before the DOM is restored
+            if (snap) restoreSnapshot(snap);
+            dirty = {};
+            imageValues = {};
+            $("save").disabled = true;
+            setMsg("");
+        };
+        if (Object.keys(dirty).length > 0) {
+            cmsConfirm("Discard your unsaved changes? The page will go back to how it was before you started editing.",
+                "Discard changes", true).then(function (yes) {
+                if (yes) discard();
+            });
+        } else {
+            discard();
         }
-        var snap = snapshot;
-        setEditing(false); // tears down TinyMCE before the DOM is restored
-        if (snap) restoreSnapshot(snap);
-        dirty = {};
-        imageValues = {};
-        $("save").disabled = true;
-        setMsg("");
     });
     $("save").addEventListener("click", function () {
         save().catch(function (err) { setMsg(err.message); });
     });
     $("publish").addEventListener("click", publish);
+    // The × doesn't remove the toolbar — it minimizes it (animated) to a
+    // pencil button in the same spot; clicking that brings the bar back.
+    // Minimizing exits edit mode for a clean view of the page, but any
+    // unsaved changes stay in the page and Save stays available.
     $("close").addEventListener("click", function () {
+        closePicker();
         setEditing(false);
-        host.remove();
-        lightCss.remove();
-        mceBar.remove();
+        $("bar").classList.add("min");
+        $("fab").classList.add("on");
+    });
+    $("fab").addEventListener("click", function () {
+        $("fab").classList.remove("on");
+        $("bar").classList.remove("min");
+        if (Object.keys(dirty).length > 0) {
+            $("save").disabled = false;
+            setMsg("Unsaved changes");
+        }
     });
 
     /* ------------------------------------------------------------------ *
@@ -581,17 +695,18 @@
         newf.className = "newf";
         newf.textContent = "＋ New folder";
         newf.addEventListener("click", function () {
-            var name = window.prompt("Folder name");
-            if (!name || !name.trim()) return;
-            api("/media/folders", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name.trim() }),
-            }).then(function (body) {
-                pickerFolder = String(body.folder.id);
-                loadFolders();
-                loadMedia();
-            }).catch(function (err) { setMsg(err.message); });
+            cmsPrompt("Name the new folder", "e.g. Hero images", "Create folder").then(function (name) {
+                if (!name) return;
+                api("/media/folders", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name }),
+                }).then(function (body) {
+                    pickerFolder = String(body.folder.id);
+                    loadFolders();
+                    loadMedia();
+                }).catch(function (err) { setMsg(err.message); });
+            });
         });
         side.appendChild(newf);
     }
@@ -700,6 +815,11 @@
     $("overlay").addEventListener("click", closePicker);
 
     document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") closePicker();
+        if (e.key !== "Escape") return;
+        if (dlgResolve) {
+            dialogDismiss(); // an open dialog captures Escape before the picker
+            return;
+        }
+        closePicker();
     });
 })();
