@@ -38,6 +38,7 @@ type PageData struct {
 var stubFuncs = template.FuncMap{
 	"cmsText":    func(string) string { return "" },
 	"cmsRegion":  func(string) template.HTML { return "" },
+	"cmsImage":   func(string) string { return "" },
 	"cmsHead":    func() template.HTML { return "" },
 	"cmsScripts": func() template.HTML { return "" },
 }
@@ -119,6 +120,14 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 				sb.WriteString(b.Content)
 			}
 			return template.HTML(sb.String())
+		},
+		"cmsImage": func(key string) string {
+			for _, b := range byRegion[key] {
+				if b.Kind == content.KindImage {
+					return b.Content
+				}
+			}
+			return ""
 		},
 		"cmsHead":    func() template.HTML { return headHTML(page) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },

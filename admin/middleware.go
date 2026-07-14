@@ -103,7 +103,9 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		if !strings.HasSuffix(r.URL.Path, "/preview") {
-			h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+			// img-src allows https so the media library can show images
+			// served from the site's bucket/CDN.
+			h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https: data:; frame-ancestors 'none'")
 		}
 		next.ServeHTTP(w, r)
 	})

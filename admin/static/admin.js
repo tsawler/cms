@@ -11,6 +11,17 @@
         }
     });
 
+    // Copy-to-clipboard: <button data-copy="https://...">
+    document.addEventListener("click", function (e) {
+        var btn = e.target.closest ? e.target.closest("[data-copy]") : null;
+        if (!btn) return;
+        navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function () {
+            var original = btn.textContent;
+            btn.textContent = "Copied!";
+            setTimeout(function () { btn.textContent = original; }, 1500);
+        });
+    });
+
     // Slug suggestion on the new-page form: fill [data-slug-target] from
     // [data-slug-source] until the user edits the slug themselves.
     var source = document.querySelector("[data-slug-source]");

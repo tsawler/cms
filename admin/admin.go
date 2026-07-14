@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 )
 
@@ -31,6 +32,7 @@ type Deps struct {
 	Users         *auth.Store
 	Content       *content.Store
 	Renderer      *render.Renderer // nil when the host has not configured templates
+	Media         *media.Manager   // nil when the host has not configured an object store
 	Logger        *slog.Logger
 	AdminPath     string
 	DefaultLocale string
@@ -81,6 +83,13 @@ func New(d Deps) http.Handler {
 			r.Get("/pages/{id}/preview", s.pagePreview)
 		}
 
+		if d.Media != nil {
+			r.Get("/media", s.mediaList)
+			r.Post("/media/upload", s.mediaUpload)
+			r.Post("/media/{id}/alt", s.mediaUpdateAlt)
+			r.Post("/media/{id}/delete", s.mediaDelete)
+		}
+
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/users", s.usersList)
@@ -97,7 +106,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form"}
+	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -132,6 +141,10 @@ type templateData struct {
 	PageTemplates []render.PageTemplate
 	Regions       []render.Region
 	BlockContent  map[string]string // draft content keyed by region name
+
+	// Media pages.
+	MediaEnabled bool
+	Media        []media.View
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
@@ -141,6 +154,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		CSRFToken:    s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
 		Flash:        s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
 		PagesEnabled: s.deps.Renderer != nil,
+		MediaEnabled: s.deps.Media != nil,
 	}
 }
 

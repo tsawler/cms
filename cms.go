@@ -17,6 +17,7 @@ package cms
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/sessionstore"
+	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/migrations"
 	"github.com/tsawler/cms/render"
 )
@@ -36,6 +38,10 @@ import (
 // PageTemplate is one template the host application offers for pages; see
 // render.PageTemplate.
 type PageTemplate = render.PageTemplate
+
+// S3Config configures the S3-compatible object store for uploads; see
+// media.S3Config.
+type S3Config = media.S3Config
 
 // Config holds everything the host application provides to the CMS.
 type Config struct {
@@ -75,6 +81,15 @@ type Config struct {
 	// own set, so different pages may define the same block names.
 	PageTemplates []PageTemplate
 
+	// S3 configures the object store for image uploads. If nil, the
+	// media library is disabled.
+	S3 *S3Config
+
+	// ObjectStore overrides the S3 object store with a custom
+	// implementation (e.g. local disk for development). When set, S3 is
+	// ignored.
+	ObjectStore media.ObjectStore
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -86,6 +101,8 @@ type CMS struct {
 	users    *auth.Store
 	content  *content.Store
 	renderer *render.Renderer
+	media    *media.Manager
+	objects  media.ObjectStore
 	admin    http.Handler
 }
 
@@ -129,18 +146,34 @@ func New(cfg Config) (*CMS, error) {
 		}
 	}
 
+	objects := cfg.ObjectStore
+	if objects == nil && cfg.S3 != nil {
+		var err error
+		objects, err = media.NewS3Store(*cfg.S3)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var mediaManager *media.Manager
+	if objects != nil {
+		mediaManager = media.NewManager(cfg.DB, objects, cfg.Logger)
+	}
+
 	c := &CMS{
 		cfg:      cfg,
 		sessions: sessions,
 		users:    users,
 		content:  contentStore,
 		renderer: renderer,
+		media:    mediaManager,
+		objects:  objects,
 	}
 	c.admin = admin.New(admin.Deps{
 		Sessions:      sessions,
 		Users:         users,
 		Content:       contentStore,
 		Renderer:      renderer,
+		Media:         mediaManager,
 		Logger:        cfg.Logger,
 		AdminPath:     cfg.AdminPath,
 		DefaultLocale: cfg.Locales[0],
@@ -216,6 +249,10 @@ The admin area is available at <a href="` + c.cfg.AdminPath + `/">` + c.cfg.Admi
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if c.objects != nil && strings.HasPrefix(r.URL.Path, media.ProxyPathPrefix) {
+			c.serveMedia(w, r)
+			return
+		}
 		slug := strings.Trim(r.URL.Path, "/")
 
 		page, err := c.content.GetBySlug(r.Context(), slug, locale, true)
@@ -242,6 +279,42 @@ The admin area is available at <a href="` + c.cfg.AdminPath + `/">` + c.cfg.Admi
 			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		}
 	})
+}
+
+// serveMedia streams an uploaded object from the (possibly private) bucket.
+// Objects are immutable — every upload gets a fresh key — so responses are
+// cached hard.
+func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, media.ProxyPathPrefix)
+	if rest == "" || strings.Contains(rest, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	key := "media/" + rest
+
+	body, contentType, err := c.objects.Get(r.Context(), key)
+	if errors.Is(err, media.ErrObjectNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		c.cfg.Logger.Error("cms: serving media", "key", key, "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+	defer body.Close()
+
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := io.Copy(w, body); err != nil {
+		c.cfg.Logger.Debug("cms: streaming media interrupted", "key", key, "err", err)
+	}
 }
 
 func (c *CMS) notFound(w http.ResponseWriter) {

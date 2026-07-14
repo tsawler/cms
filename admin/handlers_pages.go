@@ -143,11 +143,14 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
 	for _, region := range s.deps.Renderer.Regions(regionsTemplate) {
 		value := r.PostFormValue("region-" + region.Name)
 		kind := content.KindHTML
-		if region.Kind == "text" {
+		switch {
+		case region.Kind == "text":
 			// Plain text is escaped at render time, so it needs no
 			// sanitizing here.
 			kind = content.KindText
-		} else if !isAdmin {
+		case region.Kind == "image":
+			kind = content.KindImage
+		case !isAdmin:
 			value = editorHTMLPolicy.Sanitize(value)
 		}
 		if err := s.deps.Content.UpsertDraftBlock(r.Context(), page.ID, region.Name,
@@ -236,6 +239,21 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 		data.BlockContent = make(map[string]string, len(blocks))
 		for _, b := range blocks {
 			data.BlockContent[b.Region] = b.Content
+		}
+
+		// Image regions render a picker, which needs the media library.
+		if s.deps.Media != nil {
+			for _, region := range data.Regions {
+				if region.Kind == "image" {
+					items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale)
+					if err != nil {
+						s.serverError(w, err)
+						return
+					}
+					data.Media = s.deps.Media.Views(items)
+					break
+				}
+			}
 		}
 	}
 

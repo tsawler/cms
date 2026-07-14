@@ -1,0 +1,48 @@
+{{define "title"}}Media — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>Media</h1>
+</div>
+
+{{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
+
+<form class="cms-upload" method="post" action="{{.AdminPath}}/media/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="cms-upload-row">
+        <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp" required>
+        <input type="text" name="alt" placeholder="Description (alt text, optional)">
+        <button type="submit" class="cms-btn cms-btn-primary">Upload</button>
+    </div>
+    <p class="cms-hint">JPEG, PNG, GIF, or WebP, up to 25&nbsp;MB. Images are stored on your site's bucket and resized automatically.</p>
+</form>
+
+<div class="cms-media-grid">
+    {{range .Media}}
+    <div class="cms-media-card">
+        <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
+            <img src="{{.ThumbURL}}" alt="{{.Alt}}" loading="lazy">
+        </a>
+        <div class="cms-media-body">
+            <p class="cms-media-name" title="{{.Filename}}">{{.Filename}}</p>
+            <p class="cms-muted cms-media-dims">{{.Width}}×{{.Height}}</p>
+            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/alt" class="cms-media-alt">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <input type="text" name="alt" value="{{.Alt}}" placeholder="Description (alt text)">
+                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">Save</button>
+            </form>
+            <div class="cms-media-actions">
+                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.WebURL}}">Copy link</button>
+                <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
+                      data-confirm="Delete this image? Pages still using it will show a broken picture.">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {{else}}
+    <p class="cms-muted">No images yet — upload your first one above.</p>
+    {{end}}
+</div>
+{{end}}

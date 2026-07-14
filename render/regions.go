@@ -5,11 +5,11 @@ import (
 	"text/template/parse"
 )
 
-// Region is an editable area a page template declares via {{cmsText "key"}}
-// or {{cmsRegion "key"}}.
+// Region is an editable area a page template declares via {{cmsText "key"}},
+// {{cmsRegion "key"}}, or {{cmsImage "key"}}.
 type Region struct {
 	Name string
-	Kind string // "text" or "html"
+	Kind string // "text", "html", or "image"
 }
 
 // Regions walks the parse tree of a page template (and every template it
@@ -50,6 +50,8 @@ func (r *Renderer) Regions(templateFile string) []Region {
 							record("text", str.Text)
 						case "cmsRegion":
 							record("html", str.Text)
+						case "cmsImage":
+							record("image", str.Text)
 						}
 					}
 				}

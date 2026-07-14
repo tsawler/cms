@@ -11,8 +11,9 @@ import (
 type Kind string
 
 const (
-	KindText Kind = "text"
-	KindHTML Kind = "html"
+	KindText  Kind = "text"
+	KindHTML  Kind = "html"
+	KindImage Kind = "image" // content holds the image's public URL
 )
 
 // Block is one unit of editable content inside a page region. Phase 2 uses

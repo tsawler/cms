@@ -128,7 +128,30 @@ text), which also provides reordering.
 - Sites that don't want French configure `Locales: []string{"en"}` and none
   of it surfaces.
 
-### 6. Per-page CSS/JS
+### 6. Media serving — proxy by default, direct when possible
+
+Uploads always live on the S3-compatible bucket, but the URL pages embed
+depends on configuration:
+
+- **Default (private bucket):** media is served by the CMS itself at
+  `/cms/media/…` — the app streams from the bucket with immutable cache
+  headers. Works everywhere with zero bucket configuration; modern stores
+  (AWS with ACLs disabled, newer Linode clusters) reject per-object ACLs
+  anyway.
+- **`PublicRead: true`:** pages embed direct bucket URLs; the bucket must
+  allow public `s3:GetObject` (bucket policy / provider access setting;
+  `ApplyPublicReadPolicy` can set it where the key is allowed to).
+- **`PublicBaseURL`:** pages embed CDN/custom-domain URLs.
+
+The `ObjectStore` interface (Put/Get/Delete/PublicURL) is an extension
+point — hosts can swap in local disk for development or anything else.
+
+One S3-compatibility caveat baked in: the AWS SDK's default streaming
+checksums (aws-chunked + CRC32 trailers) are rejected by Ceph-based stores
+(Linode, DigitalOcean), so the client only computes checksums when an
+operation requires them.
+
+### 7. Per-page CSS/JS
 
 Each page has optional `head_css` and `body_js` fields (plus attachable
 uploaded asset files), injected by the renderer. Editable in admin under an
@@ -191,7 +214,9 @@ the module self-contained and the surface area small.
 2. **Pages & rendering** ✅ — page CRUD, template funcs, region storage,
    draft/publish, per-page CSS/JS, region auto-detection from parse trees,
    draft preview, editor-content sanitization
-3. **Media** — S3 uploads, variants, media library UI
+3. **Media** ✅ — S3 uploads (any S3-compatible store), automatic web/thumb
+   variants, media library UI, cmsImage template func with picker, private
+   buckets supported by proxying media through the CMS (/cms/media/)
 4. **In-place editor** — injected script, contenteditable + toolbar in
    Shadow DOM, save API with sanitization
 5. **Snippets** — registry, palette, drag & drop, block reordering

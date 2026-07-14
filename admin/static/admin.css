@@ -212,6 +212,72 @@ a.cms-card:hover { border-color: var(--cms-primary); }
 .cms-table tr:last-child td { border-bottom: none; }
 .cms-table-actions { text-align: right; }
 
+/* Media library */
+.cms-upload {
+    background: var(--cms-surface);
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+}
+.cms-upload-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.cms-upload-row input[type="text"] {
+    flex: 1;
+    min-width: 12rem;
+    padding: .5rem .65rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    font: inherit;
+}
+.cms-media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: 1rem;
+}
+.cms-media-card {
+    background: var(--cms-surface);
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    overflow: hidden;
+}
+.cms-media-card > a { display: block; background: #eceef1; }
+.cms-media-card img {
+    display: block;
+    width: 100%;
+    height: 9rem;
+    object-fit: cover;
+}
+.cms-media-body { padding: .75rem; }
+.cms-media-name {
+    margin: 0;
+    font-size: .85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cms-media-dims { margin: 0 0 .5rem; font-size: .78rem; }
+.cms-media-alt { display: flex; gap: .4rem; margin-bottom: .5rem; }
+.cms-media-alt input {
+    flex: 1;
+    min-width: 0;
+    padding: .35rem .5rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    font: inherit;
+    font-size: .82rem;
+}
+.cms-media-actions { display: flex; gap: .4rem; justify-content: space-between; }
+.cms-btn-sm { padding: .3rem .6rem; font-size: .82rem; }
+.cms-image-current {
+    display: block;
+    max-width: 14rem;
+    max-height: 9rem;
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    margin-bottom: .5rem;
+}
+
 /* Badges */
 .cms-badge {
     display: inline-block;

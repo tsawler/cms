@@ -22,10 +22,17 @@
         <p>Add and manage the people who can edit this site.</p>
     </a>
     {{end}}
+    {{if .MediaEnabled}}
+    <a class="cms-card" href="{{.AdminPath}}/media">
+        <h2>Media</h2>
+        <p>Upload and manage the images used on your site.</p>
+    </a>
+    {{else}}
     <div class="cms-card cms-card-disabled">
         <h2>Media</h2>
-        <p>Coming in phase 3.</p>
+        <p>Not configured — the host application must set Config.S3.</p>
     </div>
+    {{end}}
     <div class="cms-card cms-card-disabled">
         <h2>Blog &amp; News</h2>
         <p>Coming in phase 6.</p>
