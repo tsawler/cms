@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: cms
+      POSTGRES_DB: cms
+    ports:
+      # 5433 on the host to stay clear of any Postgres already on 5432.
+      - "5433:5432"
+    volumes:
+      - cms_pgdata:/var/lib/postgresql/data
+
+volumes:
+  cms_pgdata:

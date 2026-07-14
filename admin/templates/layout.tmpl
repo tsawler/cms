@@ -1,0 +1,32 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>{{block "title" .}}CMS{{end}}</title>
+    <link rel="stylesheet" href="{{.AdminPath}}/static/admin.css">
+</head>
+<body class="cms-admin">
+{{if .User}}
+<header class="cms-topbar">
+    <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+    <nav class="cms-nav">
+        <a href="{{.AdminPath}}/">Dashboard</a>
+        {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">Users</a>{{end}}
+    </nav>
+    <div class="cms-topbar-right">
+        <span class="cms-whoami">{{.User.Name}}</span>
+        <form method="post" action="{{.AdminPath}}/logout">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="cms-btn cms-btn-ghost">Log out</button>
+        </form>
+    </div>
+</header>
+{{end}}
+<main class="cms-main">
+    {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}
+    {{template "content" .}}
+</main>
+</body>
+</html>{{end}}

@@ -1,0 +1,20 @@
+{{define "title"}}Log in — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-login-card">
+    <h1>Log in</h1>
+    {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
+    <form method="post" action="{{.AdminPath}}/login" novalidate>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <div class="cms-field">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" autocomplete="username" required autofocus>
+        </div>
+        <div class="cms-field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">Log in</button>
+    </form>
+</div>
+{{end}}

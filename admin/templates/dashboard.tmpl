@@ -1,0 +1,27 @@
+{{define "title"}}Dashboard — CMS{{end}}
+
+{{define "content"}}
+<h1>Dashboard</h1>
+<p class="cms-muted">Welcome back, {{.User.Name}}.</p>
+
+<div class="cms-cards">
+    {{if eq .User.Role "admin"}}
+    <a class="cms-card" href="{{.AdminPath}}/users">
+        <h2>Users</h2>
+        <p>Add and manage the people who can edit this site.</p>
+    </a>
+    {{end}}
+    <div class="cms-card cms-card-disabled">
+        <h2>Pages</h2>
+        <p>Coming in phase 2.</p>
+    </div>
+    <div class="cms-card cms-card-disabled">
+        <h2>Media</h2>
+        <p>Coming in phase 3.</p>
+    </div>
+    <div class="cms-card cms-card-disabled">
+        <h2>Blog &amp; News</h2>
+        <p>Coming in phase 6.</p>
+    </div>
+</div>
+{{end}}
