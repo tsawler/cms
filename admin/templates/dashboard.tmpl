@@ -5,16 +5,23 @@
 <p class="cms-muted">Welcome back, {{.User.Name}}.</p>
 
 <div class="cms-cards">
+    {{if .PagesEnabled}}
+    <a class="cms-card" href="{{.AdminPath}}/pages">
+        <h2>Pages</h2>
+        <p>Create and edit the pages on your site.</p>
+    </a>
+    {{else}}
+    <div class="cms-card cms-card-disabled">
+        <h2>Pages</h2>
+        <p>Not configured — the host application must set TemplateFS and PageTemplates.</p>
+    </div>
+    {{end}}
     {{if eq .User.Role "admin"}}
     <a class="cms-card" href="{{.AdminPath}}/users">
         <h2>Users</h2>
         <p>Add and manage the people who can edit this site.</p>
     </a>
     {{end}}
-    <div class="cms-card cms-card-disabled">
-        <h2>Pages</h2>
-        <p>Coming in phase 2.</p>
-    </div>
     <div class="cms-card cms-card-disabled">
         <h2>Media</h2>
         <p>Coming in phase 3.</p>

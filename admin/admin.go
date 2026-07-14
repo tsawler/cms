@@ -15,6 +15,8 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/render"
 )
 
 //go:embed templates/*.tmpl
@@ -25,10 +27,13 @@ var staticFS embed.FS
 
 // Deps is everything the admin area needs from the rest of the CMS.
 type Deps struct {
-	Sessions  *scs.SessionManager
-	Users     *auth.Store
-	Logger    *slog.Logger
-	AdminPath string
+	Sessions      *scs.SessionManager
+	Users         *auth.Store
+	Content       *content.Store
+	Renderer      *render.Renderer // nil when the host has not configured templates
+	Logger        *slog.Logger
+	AdminPath     string
+	DefaultLocale string
 }
 
 type server struct {
@@ -66,6 +71,16 @@ func New(d Deps) http.Handler {
 		r.Get("/", s.dashboard)
 		r.Post("/logout", s.logout)
 
+		if d.Renderer != nil {
+			r.Get("/pages", s.pagesList)
+			r.Get("/pages/new", s.pageNew)
+			r.Post("/pages/new", s.pageCreate)
+			r.Get("/pages/{id}", s.pageEdit)
+			r.Post("/pages/{id}", s.pageUpdate)
+			r.Post("/pages/{id}/delete", s.pageDelete)
+			r.Get("/pages/{id}/preview", s.pagePreview)
+		}
+
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/users", s.usersList)
@@ -82,7 +97,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form"}
+	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -109,15 +124,41 @@ type templateData struct {
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
+
+	// Page management pages.
+	PagesEnabled  bool
+	Pages         []content.Page
+	FormPage      *content.Page
+	PageTemplates []render.PageTemplate
+	Regions       []render.Region
+	BlockContent  map[string]string // draft content keyed by region name
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
 	return templateData{
-		AdminPath: s.deps.AdminPath,
-		User:      s.currentUser(r),
-		CSRFToken: s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
-		Flash:     s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
+		AdminPath:    s.deps.AdminPath,
+		User:         s.currentUser(r),
+		CSRFToken:    s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
+		Flash:        s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
+		PagesEnabled: s.deps.Renderer != nil,
 	}
+}
+
+// IsAdmin reports whether the logged-in user has the admin role; used by
+// templates to show admin-only fields.
+func (td templateData) IsAdmin() bool {
+	return td.User != nil && td.User.Role == auth.RoleAdmin
+}
+
+// TemplateLabel returns the human label for a page template file, for the
+// pages list.
+func (td templateData) TemplateLabel(file string) string {
+	for _, pt := range td.PageTemplates {
+		if pt.File == file {
+			return pt.Label
+		}
+	}
+	return file
 }
 
 func (s *server) render(w http.ResponseWriter, status int, page string, data templateData) {

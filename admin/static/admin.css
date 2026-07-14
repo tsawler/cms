@@ -119,12 +119,14 @@ a.cms-card:hover { border-color: var(--cms-primary); }
     padding: 1.5rem;
     max-width: 28rem;
 }
+.cms-form-wide { max-width: 46rem; }
 .cms-login-card { margin: 4rem auto 0; }
 .cms-field { margin-bottom: 1rem; }
 .cms-field label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: .3rem; }
 .cms-field input[type="text"],
 .cms-field input[type="email"],
 .cms-field input[type="password"],
+.cms-field textarea,
 .cms-field select {
     width: 100%;
     padding: .5rem .65rem;
@@ -134,13 +136,36 @@ a.cms-card:hover { border-color: var(--cms-primary); }
     background: var(--cms-surface);
     color: var(--cms-text);
 }
-.cms-field input:focus, .cms-field select:focus {
+.cms-field input:focus, .cms-field textarea:focus, .cms-field select:focus {
     outline: 2px solid var(--cms-primary);
     outline-offset: 0;
     border-color: var(--cms-primary);
 }
 .cms-field-check label { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
 .cms-field-error { color: var(--cms-danger); font-size: .85rem; margin: .3rem 0 0; }
+.cms-hint { color: var(--cms-muted); font-size: .85rem; margin: .3rem 0 0; }
+.cms-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; }
+.cms-fieldset {
+    border: 1px solid var(--cms-border);
+    border-radius: var(--cms-radius);
+    padding: 1rem 1.25rem;
+    margin: 1.25rem 0;
+}
+.cms-fieldset legend {
+    font-weight: 600;
+    font-size: .9rem;
+    padding: 0 .4rem;
+}
+.cms-advanced { margin: 1.25rem 0; }
+.cms-advanced summary { cursor: pointer; color: var(--cms-muted); font-size: .9rem; margin-bottom: .75rem; }
+.cms-actions { display: flex; gap: .5rem; align-items: center; }
+.cms-btn-danger {
+    background: transparent;
+    color: var(--cms-danger);
+    border-color: #eac5c0;
+}
+.cms-btn-danger:hover { background: #fbeae8; }
+.cms-danger-zone { margin-top: 1.5rem; }
 
 /* Alerts and flash messages */
 .cms-alert {

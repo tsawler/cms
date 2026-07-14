@@ -6,6 +6,7 @@
     <meta name="robots" content="noindex">
     <title>{{block "title" .}}CMS{{end}}</title>
     <link rel="stylesheet" href="{{.AdminPath}}/static/admin.css">
+    <script src="{{.AdminPath}}/static/admin.js" defer></script>
 </head>
 <body class="cms-admin">
 {{if .User}}
@@ -13,6 +14,7 @@
     <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
     <nav class="cms-nav">
         <a href="{{.AdminPath}}/">Dashboard</a>
+        {{if .PagesEnabled}}<a href="{{.AdminPath}}/pages">Pages</a>{{end}}
         {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">Users</a>{{end}}
     </nav>
     <div class="cms-topbar-right">

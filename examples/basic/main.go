@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +19,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms"
 )
+
+//go:embed templates
+var templateFS embed.FS
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -38,9 +42,15 @@ func run(logger *slog.Logger) error {
 	defer db.Close()
 
 	c, err := cms.New(cms.Config{
-		DB:      db,
-		Locales: []string{"en", "fr"},
-		Logger:  logger,
+		DB:              db,
+		Locales:         []string{"en", "fr"},
+		Logger:          logger,
+		TemplateFS:      templateFS,
+		SharedTemplates: []string{"templates/base.tmpl"},
+		PageTemplates: []cms.PageTemplate{
+			{File: "templates/pages/home.tmpl", Label: "Home page"},
+			{File: "templates/pages/standard.tmpl", Label: "Standard page"},
+		},
 	})
 	if err != nil {
 		return err

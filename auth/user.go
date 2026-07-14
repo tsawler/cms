@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tsawler/cms/internal/pgutil"
 )
 
 // Role controls what a user may do in the admin area.
@@ -117,7 +117,7 @@ func (s *Store) Insert(ctx context.Context, u *User) (int64, error) {
 		RETURNING id`,
 		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.PasswordHash, u.Role, u.Active,
 	).Scan(&u.ID)
-	if isUniqueViolation(err) {
+	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateEmail
 	}
 	return u.ID, err
@@ -131,7 +131,7 @@ func (s *Store) Update(ctx context.Context, u *User) error {
 		SET email = $1, name = $2, role = $3, active = $4, updated_at = now()
 		WHERE id = $5`,
 		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.Role, u.Active, u.ID)
-	if isUniqueViolation(err) {
+	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateEmail
 	}
 	if err != nil {
@@ -179,8 +179,3 @@ func (s *Store) Authenticate(ctx context.Context, email, password string) (*User
 // dummyHash is a hash of no particular password, verified when an unknown
 // email is submitted so that known and unknown addresses take the same time.
 const dummyHash = "$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$t8VtC1hK9dQ3yLxkzPPmm9jTKQJyPmNkAkD6xhhrLPM"
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}

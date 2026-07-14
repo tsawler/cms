@@ -1,0 +1,30 @@
+{{define "base"}}<!doctype html>
+<html lang="{{.Locale}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Title}} — Example Site</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{cmsHead}}
+</head>
+<body class="bg-white text-slate-800 antialiased">
+<header class="border-b border-slate-200">
+    <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
+        <a href="/" class="text-lg font-bold tracking-tight">Example&nbsp;Site</a>
+        <nav class="flex gap-6 text-sm text-slate-600">
+            <a href="/" class="hover:text-slate-900">Home</a>
+            <a href="/about" class="hover:text-slate-900">About</a>
+        </nav>
+    </div>
+</header>
+
+<main>{{block "content" .}}{{end}}</main>
+
+<footer class="border-t border-slate-200 mt-16">
+    <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
+        Built with the cms module.
+    </div>
+</footer>
+{{cmsScripts}}
+</body>
+</html>{{end}}

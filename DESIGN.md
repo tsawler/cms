@@ -188,8 +188,9 @@ the module self-contained and the surface area small.
 1. **Foundation** ✅ — module skeleton, config, migrations runner, auth
    (login, sessions, CSRF, roles, throttling), admin shell, user management,
    example app
-2. **Pages & rendering** — page CRUD, template funcs, region storage,
-   draft/publish, per-page CSS/JS
+2. **Pages & rendering** ✅ — page CRUD, template funcs, region storage,
+   draft/publish, per-page CSS/JS, region auto-detection from parse trees,
+   draft preview, editor-content sanitization
 3. **Media** — S3 uploads, variants, media library UI
 4. **In-place editor** — injected script, contenteditable + toolbar in
    Shadow DOM, save API with sanitization

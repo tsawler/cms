@@ -17,6 +17,7 @@ package cms
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -26,9 +27,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/sessionstore"
 	"github.com/tsawler/cms/migrations"
+	"github.com/tsawler/cms/render"
 )
+
+// PageTemplate is one template the host application offers for pages; see
+// render.PageTemplate.
+type PageTemplate = render.PageTemplate
 
 // Config holds everything the host application provides to the CMS.
 type Config struct {
@@ -54,6 +61,20 @@ type Config struct {
 	// over plain HTTP.
 	SecureCookies bool
 
+	// TemplateFS holds the host application's page templates (often an
+	// embed.FS). If nil, the public Pages handler serves a placeholder.
+	TemplateFS fs.FS
+
+	// SharedTemplates are glob patterns within TemplateFS for layouts and
+	// partials parsed into every page's template set, e.g.
+	// []string{"templates/base.tmpl", "templates/partials/*.tmpl"}.
+	SharedTemplates []string
+
+	// PageTemplates lists the templates editors may choose for a page.
+	// Each entry's File is parsed together with SharedTemplates into its
+	// own set, so different pages may define the same block names.
+	PageTemplates []PageTemplate
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -63,6 +84,8 @@ type CMS struct {
 	cfg      Config
 	sessions *scs.SessionManager
 	users    *auth.Store
+	content  *content.Store
+	renderer *render.Renderer
 	admin    http.Handler
 }
 
@@ -95,17 +118,32 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.Secure = cfg.SecureCookies
 
 	users := auth.NewStore(cfg.DB)
+	contentStore := content.NewStore(cfg.DB)
+
+	var renderer *render.Renderer
+	if cfg.TemplateFS != nil {
+		var err error
+		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	c := &CMS{
 		cfg:      cfg,
 		sessions: sessions,
 		users:    users,
+		content:  contentStore,
+		renderer: renderer,
 	}
 	c.admin = admin.New(admin.Deps{
-		Sessions:  sessions,
-		Users:     users,
-		Logger:    cfg.Logger,
-		AdminPath: cfg.AdminPath,
+		Sessions:      sessions,
+		Users:         users,
+		Content:       contentStore,
+		Renderer:      renderer,
+		Logger:        cfg.Logger,
+		AdminPath:     cfg.AdminPath,
+		DefaultLocale: cfg.Locales[0],
 	})
 	return c, nil
 }
@@ -155,22 +193,63 @@ func (c *CMS) Admin() http.Handler {
 	return c.admin
 }
 
-// Pages returns the public site handler. Page rendering arrives in phase 2;
-// until then this serves a small placeholder so the example application runs
-// end to end.
+// Pages returns the public site handler: it looks up the published page for
+// the request path and renders it with the host's templates. When no
+// TemplateFS is configured it serves a placeholder instead.
 func (c *CMS) Pages() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(`<!doctype html>
+	if c.renderer == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>CMS</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;">
 <h1>It works</h1>
-<p>Public page rendering arrives in phase 2. The admin area is available at
-<a href="` + c.cfg.AdminPath + `/">` + c.cfg.AdminPath + `/</a>.</p>
+<p>Configure Config.TemplateFS and Config.PageTemplates to render pages here.
+The admin area is available at <a href="` + c.cfg.AdminPath + `/">` + c.cfg.AdminPath + `/</a>.</p>
 </body></html>`))
+		})
+	}
+
+	locale := c.cfg.Locales[0]
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		slug := strings.Trim(r.URL.Path, "/")
+
+		page, err := c.content.GetBySlug(r.Context(), slug, locale, true)
+		if errors.Is(err, content.ErrNotFound) {
+			c.notFound(w)
+			return
+		}
+		if err != nil {
+			c.cfg.Logger.Error("cms: loading page", "slug", slug, "err", err)
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			return
+		}
+
+		blocks, err := c.content.BlocksFor(r.Context(), page.ID, locale, content.StatusPublished)
+		if err != nil {
+			c.cfg.Logger.Error("cms: loading blocks", "slug", slug, "err", err)
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := c.renderer.Render(w, page, blocks, locale); err != nil {
+			c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		}
 	})
+}
+
+func (c *CMS) notFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Page not found</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;">
+<h1>Page not found</h1><p>The page you're looking for doesn't exist or isn't published.</p>
+</body></html>`))
 }

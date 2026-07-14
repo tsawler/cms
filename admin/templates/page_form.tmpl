@@ -1,0 +1,99 @@
+{{define "title"}}{{if .IsNew}}New page{{else}}Edit page{{end}} — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>{{if .IsNew}}New page{{else}}Edit page{{end}}</h1>
+    <div class="cms-actions">
+        {{if not .IsNew}}
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages/{{.FormPage.ID}}/preview" target="_blank" rel="noopener">Preview draft</a>
+        {{end}}
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages">Back to pages</a>
+    </div>
+</div>
+
+<form class="cms-form cms-form-wide" method="post"
+      action="{{if .IsNew}}{{.AdminPath}}/pages/new{{else}}{{.AdminPath}}/pages/{{.FormPage.ID}}{{end}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <div class="cms-field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{.FormPage.Title}}" required {{if .IsNew}}data-slug-source{{end}}>
+        {{with index .FormErrors "title"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <div class="cms-field">
+        <label for="slug">Address <span class="cms-muted">(leave empty for the homepage)</span></label>
+        <input type="text" id="slug" name="slug" value="{{.FormPage.Slug}}" placeholder="about-us" {{if .IsNew}}data-slug-target{{end}}>
+        {{with index .FormErrors "slug"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <div class="cms-field">
+        <label for="description">Description <span class="cms-muted">(for search engines)</span></label>
+        <input type="text" id="description" name="description" value="{{.FormPage.Description}}">
+    </div>
+
+    <div class="cms-field">
+        <label for="template_name">Template</label>
+        <select id="template_name" name="template_name">
+            {{$current := .FormPage.TemplateName}}
+            {{range .PageTemplates}}
+            <option value="{{.File}}" {{if eq .File $current}}selected{{end}}>{{.Label}}</option>
+            {{end}}
+        </select>
+        {{with index .FormErrors "template_name"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        {{if not .IsNew}}<p class="cms-hint">Changing the template takes effect after saving; the content fields below will update to match.</p>{{end}}
+    </div>
+
+    {{if .Regions}}
+    <input type="hidden" name="regions_template" value="{{.FormPage.TemplateName}}">
+    <fieldset class="cms-fieldset">
+        <legend>Content</legend>
+        {{$content := .BlockContent}}
+        {{range .Regions}}
+        <div class="cms-field">
+            <label for="region-{{.Name}}">{{.Name}}</label>
+            {{if eq .Kind "text"}}
+            <input type="text" id="region-{{.Name}}" name="region-{{.Name}}" value="{{index $content .Name}}">
+            {{else}}
+            <textarea id="region-{{.Name}}" name="region-{{.Name}}" rows="8" class="cms-code">{{index $content .Name}}</textarea>
+            {{end}}
+        </div>
+        {{end}}
+    </fieldset>
+    {{end}}
+
+    {{if and .IsAdmin (not .IsNew)}}
+    <details class="cms-advanced">
+        <summary>Advanced: page-specific CSS and JavaScript</summary>
+        <div class="cms-field">
+            <label for="head_css">Extra CSS <span class="cms-muted">(added to this page's &lt;head&gt;)</span></label>
+            <textarea id="head_css" name="head_css" rows="5" class="cms-code">{{.FormPage.HeadCSS}}</textarea>
+        </div>
+        <div class="cms-field">
+            <label for="body_js">Extra JavaScript <span class="cms-muted">(added before &lt;/body&gt;)</span></label>
+            <textarea id="body_js" name="body_js" rows="5" class="cms-code">{{.FormPage.BodyJS}}</textarea>
+        </div>
+    </details>
+    {{end}}
+
+    <div class="cms-actions">
+        {{if .IsNew}}
+        <button type="submit" class="cms-btn cms-btn-primary">Create page</button>
+        {{else}}
+        <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">Save draft</button>
+        <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">Save &amp; publish</button>
+        {{if eq .FormPage.Status "published"}}
+        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">Unpublish</button>
+        {{end}}
+        {{end}}
+    </div>
+</form>
+
+{{if not .IsNew}}
+<form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/delete" class="cms-danger-zone"
+      data-confirm="Delete this page and all of its content? This cannot be undone.">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" class="cms-btn cms-btn-danger">Delete page</button>
+</form>
+{{end}}
+{{end}}

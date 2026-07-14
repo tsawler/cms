@@ -5,20 +5,43 @@ as a module, hand it a Postgres pool, and mount its handlers — no external
 files, no separate install. See [DESIGN.md](DESIGN.md) for the full
 architecture and build plan.
 
-**Status: phase 1 (foundation).** Auth, sessions, migrations, and the admin
-shell with user management are working. Page rendering, media, in-place
-editing, snippets, blog/news, and FR/EN localization are next.
+**Status: phase 2 (pages & rendering).** Auth, user management, page CRUD
+with draft/publish, public rendering through the host's own templates,
+draft preview, per-page CSS/JS, and editor-content sanitization are
+working. Media, in-place editing, snippets, blog/news, and FR/EN
+localization are next.
 
 ## Quick start
 
 ```go
-c, err := cms.New(cms.Config{DB: pool}) // pool is a *pgxpool.Pool
+//go:embed templates
+var templateFS embed.FS
+
+c, err := cms.New(cms.Config{
+    DB:              pool, // *pgxpool.Pool
+    TemplateFS:      templateFS,
+    SharedTemplates: []string{"templates/base.tmpl"},
+    PageTemplates: []cms.PageTemplate{
+        {File: "templates/pages/home.tmpl", Label: "Home page"},
+        {File: "templates/pages/standard.tmpl", Label: "Standard page"},
+    },
+})
 if err != nil { ... }
 if err := c.Migrate(ctx); err != nil { ... }          // embedded migrations
 if _, err := c.SeedAdmin(ctx, "you@example.com", "You", "a strong password"); err != nil { ... }
 
 mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
 mux.Handle("/", c.Pages())
+```
+
+Templates declare editable areas with the CMS template funcs, and the admin
+UI discovers them automatically:
+
+```html
+<h1>{{cmsText "hero-title"}}</h1>       <!-- short plain text -->
+<div>{{cmsRegion "main"}}</div>         <!-- rich HTML content -->
+<head> ... {{cmsHead}} ... </head>      <!-- meta description + per-page CSS -->
+... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
 
 ## Running the example

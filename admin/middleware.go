@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/tsawler/cms/auth"
 )
@@ -93,13 +94,17 @@ func (s *server) csrf(next http.Handler) http.Handler {
 }
 
 // secureHeaders sets conservative security headers on every admin response.
+// Page previews are exempt from the CSP: they render the host site's own
+// templates, which may legitimately load framework CSS/JS from CDNs.
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+		if !strings.HasSuffix(r.URL.Path, "/preview") {
+			h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
