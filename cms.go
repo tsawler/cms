@@ -45,6 +45,10 @@ type PageTemplate = render.PageTemplate
 // media.S3Config.
 type S3Config = media.S3Config
 
+// EditorStyle is one entry in the in-place editor's Styles menu; see
+// render.EditorStyle.
+type EditorStyle = render.EditorStyle
+
 // Config holds everything the host application provides to the CMS.
 type Config struct {
 	// DB is the Postgres connection pool. Required. All CMS tables are
@@ -92,6 +96,15 @@ type Config struct {
 	// ignored.
 	ObjectStore media.ObjectStore
 
+	// EditorStyles populates the in-place editor's Styles menu — named,
+	// on-brand text styles that apply CSS classes. Nil gets the
+	// Tailwind-first defaults (render.DefaultEditorStyles); an empty
+	// non-nil slice disables the menu. Classes used here must exist in
+	// the site's CSS — with Tailwind, safelist them, since editor
+	// content lives in the database where the source scanner can't see
+	// it.
+	EditorStyles []EditorStyle
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -126,6 +139,9 @@ func New(cfg Config) (*CMS, error) {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.EditorStyles == nil {
+		cfg.EditorStyles = render.DefaultEditorStyles()
 	}
 
 	sessions := scs.New()
@@ -307,6 +323,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			Locale:       locale,
 			Status:       string(page.Status),
 			MediaEnabled: c.media != nil,
+			Styles:       c.cfg.EditorStyles,
 		}
 	}
 

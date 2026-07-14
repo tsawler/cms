@@ -63,6 +63,91 @@ UI discovers them automatically:
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
 
+## The Styles menu (Tailwind-first)
+
+The in-place editor's toolbar starts with a **Styles** dropdown: a short
+list of named, on-brand text styles editors can apply to a selection.
+There is deliberately no free color picker and no font-family menu — every
+style applies CSS **classes**, so your stylesheet stays the single source
+of design truth, and a later redesign restyles existing content by
+changing the CSS rather than hunting down baked-in inline styles.
+
+### The defaults
+
+With no configuration, the menu ships a Tailwind-flavored default set:
+
+| Label          | Classes                  | Applies to |
+|----------------|--------------------------|------------|
+| Muted          | `text-slate-500`         | selection  |
+| Red            | `text-red-600`           | selection  |
+| Green          | `text-emerald-600`       | selection  |
+| Blue           | `text-blue-600`          | selection  |
+| Highlight      | `bg-yellow-200`          | selection  |
+| Serif          | `font-serif`             | selection  |
+| Monospace      | `font-mono`              | selection  |
+| Lead paragraph | `text-lg text-slate-600` | whole `<p>` |
+| Small print    | `text-sm text-slate-500` | selection  |
+
+### Safelist the classes (important)
+
+Editor content lives in the database, and production Tailwind only
+generates CSS for classes it finds while scanning your **source files** —
+so every class the menu can apply must be safelisted, or applied styles
+will silently not render in production. For the default menu:
+
+```js
+// tailwind.config.js (Tailwind v3)
+safelist: [
+    "text-slate-500", "text-red-600", "text-emerald-600",
+    "text-blue-600", "bg-yellow-200", "font-serif", "font-mono",
+    "text-lg", "text-slate-600", "text-sm",
+],
+```
+
+```css
+/* Tailwind v4: in your main CSS file */
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm");
+```
+
+(The example site uses the Tailwind Play CDN, which generates CSS in the
+browser and needs no safelist — fine for development, not for
+production.)
+
+### Customizing the menu
+
+Define your own entries with `Config.EditorStyles`; whatever you set
+replaces the defaults entirely:
+
+```go
+c, err := cms.New(cms.Config{
+    // ...
+    EditorStyles: []cms.EditorStyle{
+        // Inline styles wrap the selected text in a <span>.
+        {Label: "Brand", Class: "text-brand-600"},
+        {Label: "Subtle", Class: "text-slate-400"},
+        {Label: "Highlight", Class: "bg-amber-100 px-1 rounded"}, // several classes are fine
+        // A Block entry converts and styles the whole surrounding
+        // block instead ("p", "h2", ...).
+        {Label: "Lead paragraph", Class: "text-lg text-slate-600", Block: "p"},
+        // Fonts are styles too: name the *role*, not the typeface. The
+        // template must already load any webfont the class uses.
+        {Label: "Display type", Class: "font-display"},
+    },
+})
+```
+
+Rules of thumb:
+
+- Keep the list short and named for meaning ("Brand", "Warning", "Display
+  type"), not appearance ("Dark red #8b0000") — that's what makes it safe
+  to hand to non-technical editors.
+- Every class must exist in the site's CSS *and* be safelisted (when
+  using Tailwind). Custom classes like `text-brand-600` come from your
+  Tailwind theme; bespoke-CSS sites can point entries at their own
+  classes — the mechanism doesn't require Tailwind.
+- `EditorStyles: []cms.EditorStyle{}` (empty, non-nil) removes the Styles
+  dropdown altogether.
+
 ## Running the example
 
 ```sh
@@ -87,7 +172,9 @@ Then open <http://localhost:4000/admin/> and log in with
   h1–h6/ul/blockquote to plain text, so give rich regions typography
   styles (e.g. the `@tailwindcss/typography` plugin's `prose` class, as
   `examples/basic` does) or editors' formatting will be invisible.
-
+- **Safelist the editor's style classes** — see
+  [The Styles menu](#the-styles-menu-tailwind-first) above; skipping this
+  makes applied styles silently invisible in production Tailwind builds.
 - All tables are prefixed `cms_`, so the CMS can share a database with the
   host app.
 - `Migrate` is safe to run on every startup and from multiple instances

@@ -17,6 +17,19 @@
     var mediaEnabled = cfg.media === "1";
     var pageStatus = cfg.status || "draft";
 
+    // The Styles menu: named, on-brand styles configured on the server.
+    // Each applies CSS classes, so the site's stylesheet stays in charge.
+    var styleFormats = [];
+    try {
+        (JSON.parse(cfg.styles || "[]") || []).forEach(function (s) {
+            if (!s || !s.label || !s.class) return;
+            var f = { title: s.label, classes: s.class.split(/\s+/) };
+            if (s.block) f.block = s.block;
+            else f.inline = "span";
+            styleFormats.push(f);
+        });
+    } catch (e) { /* malformed config: no Styles menu */ }
+
     var EDITOR_BASE = "/cms/editor/";
 
     var editing = false;
@@ -308,14 +321,15 @@
         htmlRegions().forEach(function (el) {
             var name = el.dataset.cmsRegion;
             if (mceEditors[name]) return;
-            window.tinymce.init({
+            var opts = {
                 target: el,
                 inline: true,
                 menubar: false,
                 // In inline mode the toolbar floats docked to the region
                 // as soon as it gains focus — a click is enough, no text
                 // selection needed.
-                toolbar: "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" +
+                toolbar: (styleFormats.length ? "styles | " : "") +
+                    "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" +
                     (mediaEnabled ? " | cmsimage cmsdoc" : "") + " | removeformat",
                 fixed_toolbar_container: "#cms-mce-toolbar",
                 plugins: "lists link autolink",
@@ -380,7 +394,11 @@
                         if (ed.isDirty()) markDirty(name);
                     });
                 },
-            });
+            };
+            if (styleFormats.length) {
+                opts.style_formats = styleFormats; // replaces TinyMCE's default menu
+            }
+            window.tinymce.init(opts);
         });
     }
 

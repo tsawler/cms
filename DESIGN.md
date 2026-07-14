@@ -67,6 +67,33 @@ are prefixed `cms_` so the module can share a database with the host app.
 
 ## Key design decisions
 
+### 0. Tailwind-first, not Tailwind-only
+
+The core is framework-agnostic (nothing in rendering, editing, or storage
+depends on any CSS framework), but Tailwind is the blessed path: shipped
+defaults — the editor's Styles menu, and (phase 5) the snippet library —
+are written against Tailwind's class vocabulary, and the example site and
+docs assume it. Sites on other CSS define their own styles/snippets and
+lose only the batteries-included defaults.
+
+**The Tailwind/CMS trap this creates:** production Tailwind generates CSS
+by scanning source files, and editor content lives in the database where
+the scanner never looks. Any class the editor can apply must therefore be
+safelisted in the site's Tailwind build or it will silently not render.
+The README carries the safelist for the default styles.
+
+### 0.1 Editor color and font — a curated Styles menu, never pickers
+
+The editor deliberately has no color picker and no font-family menu:
+free-form pickers wreck design consistency in exactly the hands this CMS
+targets, inline styles can't be restyled at the next redesign, and a font
+menu can only truthfully offer fonts the template already loads. Instead,
+the toolbar has a **Styles** dropdown of named, on-brand styles configured
+by the developer (`Config.EditorStyles`) — each applies CSS classes, so
+the host stylesheet stays the single source of design truth. Nil config
+gets Tailwind-first defaults (colors, serif/mono, highlight, lead, small
+print); empty config disables the menu.
+
 ### 1. CSS isolation — Shadow DOM for CMS chrome, prefixed classes for regions
 
 All CMS UI injected into *customer pages* (edit toolbar, dialogs, snippet

@@ -6,6 +6,7 @@ package render
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	"html/template"
@@ -48,6 +49,37 @@ var stubFuncs = template.FuncMap{
 // from.
 const EditorScriptPath = "/cms/editor/editor.js"
 
+// EditorStyle is one entry in the in-place editor's "Styles" menu. Styles
+// apply CSS classes — never inline styles — so the host site's stylesheet
+// stays the single source of design truth and a redesign can restyle
+// existing content. Class may hold several space-separated classes.
+type EditorStyle struct {
+	Label string `json:"label"`
+	Class string `json:"class"`
+	// Block applies the style to the whole surrounding block, converted
+	// to this element ("p", "h2", ...). Empty applies the style inline
+	// to the selected text.
+	Block string `json:"block,omitempty"`
+}
+
+// DefaultEditorStyles is the Tailwind-first default Styles menu, used when
+// the host does not configure its own. Every class here must be safelisted
+// in the site's Tailwind build (see the README) — editor content lives in
+// the database, which Tailwind's source scanner never sees.
+func DefaultEditorStyles() []EditorStyle {
+	return []EditorStyle{
+		{Label: "Muted", Class: "text-slate-500"},
+		{Label: "Red", Class: "text-red-600"},
+		{Label: "Green", Class: "text-emerald-600"},
+		{Label: "Blue", Class: "text-blue-600"},
+		{Label: "Highlight", Class: "bg-yellow-200"},
+		{Label: "Serif", Class: "font-serif"},
+		{Label: "Monospace", Class: "font-mono"},
+		{Label: "Lead paragraph", Class: "text-lg text-slate-600", Block: "p"},
+		{Label: "Small print", Class: "text-sm text-slate-500"},
+	}
+}
+
 // EditInfo turns a render into an editable one: regions are wrapped in
 // marker elements and the in-place editor script is injected before
 // </body>. Pass nil for a plain public render.
@@ -58,6 +90,7 @@ type EditInfo struct {
 	Locale       string
 	Status       string // "draft" or "published"
 	MediaEnabled bool
+	Styles       []EditorStyle // entries for the editor's Styles menu
 }
 
 // Renderer holds one parsed template set per page template: the shared
@@ -193,13 +226,18 @@ func injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.MediaEnabled {
 		mediaFlag = "1"
 	}
+	stylesJSON, err := json.Marshal(edit.Styles)
+	if err != nil || edit.Styles == nil {
+		stylesJSON = []byte("[]")
+	}
 	tag := `<script src="` + EditorScriptPath + `" defer` +
 		` data-page-id="` + strconv.FormatInt(edit.PageID, 10) + `"` +
 		` data-admin-path="` + html.EscapeString(edit.AdminPath) + `"` +
 		` data-csrf="` + html.EscapeString(edit.CSRFToken) + `"` +
 		` data-status="` + html.EscapeString(edit.Status) + `"` +
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
-		` data-media="` + mediaFlag + `"></script>`
+		` data-media="` + mediaFlag + `"` +
+		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"></script>`
 
 	idx := strings.LastIndex(strings.ToLower(string(page)), "</body>")
 	if idx < 0 {

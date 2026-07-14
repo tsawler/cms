@@ -104,11 +104,16 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	err := r.Render(&buf, page, blocks, "en", &EditInfo{
 		PageID: 7, AdminPath: "/admin", CSRFToken: "tok123", Locale: "en",
 		Status: "draft", MediaEnabled: true,
+		Styles: []EditorStyle{{Label: "Red", Class: "text-red-600"}},
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
+
+	if !strings.Contains(out, `data-styles="[{&#34;label&#34;:&#34;Red&#34;,&#34;class&#34;:&#34;text-red-600&#34;}]"`) {
+		t.Errorf("styles JSON missing or unescaped in script tag:\n%s", out)
+	}
 
 	if !strings.Contains(out, `<span data-cms-region="site-name" data-cms-kind="text">Acme &lt;sneaky&gt;</span>`) {
 		t.Errorf("text region marker missing or unescaped:\n%s", out)
