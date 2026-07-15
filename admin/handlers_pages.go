@@ -167,6 +167,10 @@ func (s *server) saveRegions(ctx context.Context, pageID int64, templateName str
 		}
 		kind := content.KindHTML
 		switch {
+		case region.Kind == "sections":
+			// Sections save through their own endpoint; a single-block
+			// upsert here would clobber the section list.
+			continue
 		case region.Kind == "text":
 			kind = content.KindText
 		case region.Kind == "image":
@@ -194,6 +198,11 @@ func validImageURL(v string) bool {
 func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.pageFromURL(w, r)
 	if !ok {
+		return
+	}
+	if page.Slug == "" {
+		s.flash(r, "The home page can't be deleted.")
+		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 		return
 	}
 	if err := s.deps.Content.Delete(r.Context(), page.ID); err != nil {

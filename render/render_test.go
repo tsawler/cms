@@ -15,12 +15,12 @@ var testFS = fstest.MapFS{
 			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
 	"pages/home.tmpl": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
-			`<div>{{cmsRegion "main"}}</div>{{end}}`)},
+			`<div>{{cmsRegion "main"}}</div>{{cmsSections "extra"}}{{end}}`)},
 }
 
 func newTestRenderer(t *testing.T) *Renderer {
 	t.Helper()
-	r, err := New(testFS, []string{"base.tmpl"}, []PageTemplate{{File: "pages/home.tmpl", Label: "Home"}})
+	r, err := New(testFS, []string{"base.tmpl"}, []PageTemplate{{File: "pages/home.tmpl", Label: "Home"}}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestRegionsWalksIncludedTemplatesAndBranches(t *testing.T) {
 	r := newTestRenderer(t)
 	regions := r.Regions("pages/home.tmpl")
 
-	want := map[string]string{"site-name": "text", "tagline": "text", "main": "html"}
+	want := map[string]string{"site-name": "text", "tagline": "text", "main": "html", "extra": "sections"}
 	if len(regions) != len(want) {
 		t.Fatalf("got %d regions %v, want %d", len(regions), regions, len(want))
 	}
@@ -140,8 +140,55 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 }
 
 func TestNewRejectsUnknownPageTemplate(t *testing.T) {
-	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.tmpl", Label: "X"}})
+	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.tmpl", Label: "X"}}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing page template file")
+	}
+}
+
+func TestRenderSections(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
+	blocks := []content.Block{
+		{Region: "extra", Kind: content.KindHTML, Sort: 0, Content: "<p>First</p>",
+			Settings: map[string]string{"bg": "dark", "width": "full"}},
+		{Region: "extra", Kind: content.KindHTML, Sort: 1, Content: "<p>Second</p>",
+			Settings: map[string]string{"bg": "bogus-key", "width": "normal"}},
+	}
+
+	// Plain render: wrapper + container classes from settings, unknown
+	// keys fall back to the first option, no editor attributes.
+	var buf bytes.Buffer
+	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<section class="bg-slate-900"><div class="prose prose-slate max-w-none px-6 py-12 prose-invert"><p>First</p></div></section>`) {
+		t.Errorf("dark/full section markup wrong:\n%s", out)
+	}
+	if !strings.Contains(out, `<section><div class="prose prose-slate mx-auto max-w-3xl px-6 py-12"><p>Second</p></div></section>`) {
+		t.Errorf("fallback/default section markup wrong:\n%s", out)
+	}
+	if strings.Contains(out, "data-cms-section") || strings.Contains(out, "data-cms-sections") {
+		t.Error("plain render leaked section edit markers")
+	}
+
+	// Edit render: container plus per-section markers with resolved keys.
+	buf.Reset()
+	if err := r.Render(&buf, page, blocks, "en", &EditInfo{PageID: 1, AdminPath: "/admin", CSRFToken: "t", Locale: "en", Status: "draft"}); err != nil {
+		t.Fatalf("edit Render: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, `<div data-cms-sections="extra">`) {
+		t.Errorf("edit render missing sections container:\n%s", out)
+	}
+	if !strings.Contains(out, `data-cms-section data-cms-bg="dark" data-cms-width="full"`) {
+		t.Errorf("edit render missing section markers:\n%s", out)
+	}
+	if !strings.Contains(out, `data-cms-bg="default"`) {
+		t.Errorf("unknown bg key not resolved to fallback in edit render:\n%s", out)
+	}
+	if !strings.Contains(out, "data-section-styles=") {
+		t.Errorf("section styles JSON missing from script tag:\n%s", out)
 	}
 }

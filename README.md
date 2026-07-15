@@ -59,6 +59,7 @@ UI discovers them automatically:
 <h1>{{cmsText "hero-title"}}</h1>       <!-- short plain text -->
 <div>{{cmsRegion "main"}}</div>         <!-- rich HTML content -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
+{{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
 <head> ... {{cmsHead}} ... </head>      <!-- meta description + per-page CSS -->
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
@@ -150,10 +151,21 @@ Rules of thumb:
 
 ## Snippets
 
-While editing a page, the **Snippets** button opens a drawer of ready-made
-blocks: drag one onto a rich region (or click to insert at the cursor),
-then edit its text and images in place like any other content. Snippets
-come from two places:
+While editing, the **tool rail** (the dark strip on the left edge of the
+screen, visible only in edit mode) holds the creation tools: **＋
+Section**, **Snippets**, and **Page** — the last opens a "Create a new
+page" dialog (page name + page type from your configured
+`PageTemplates`), creates the draft with a slug derived from the name,
+and takes the editor straight to it.
+
+While editing, the edit bar also offers **Delete** for the current page
+(with a confirmation; the home page can't be deleted — the server refuses
+and the button doesn't appear on it).
+
+The rail's **Snippets** button opens a drawer of ready-made blocks: drag
+one onto a rich region (or click to insert at the cursor), then edit its
+text and images in place like any other content. Snippets come from two
+places:
 
 - **`Config.Snippets`** — per-customer components, versioned with your
   code. Nil gets a Tailwind-first default library (callout,
@@ -189,6 +201,56 @@ safelist: [
 
 Deleting a snippet never changes pages that already inserted it — inserted
 snippets are ordinary page content.
+
+## Sections
+
+Snippets live *inside* a region's column; **sections** let editors compose
+the page itself. Place `{{cmsSections "body"}}` in a template **outside
+any max-width container** (it renders full-bleed), and editors can add,
+reorder, restyle, and delete full-width sections directly on the page:
+each section has a control pill (↑ ↓ ＋ ⚙ ✕) in edit mode, new sections
+start from a snippet or empty, and the ⚙ settings offer curated choices
+only — background (Default / Light gray / Dark / Accent) and content
+width (Normal / Wide / Full width) by default. The ＋ buttons — on each
+section, at the bottom of the sections area, and on the tool rail — open
+an "Add a section" chooser: start empty, or seed the section from any
+snippet.
+
+Each section renders as:
+
+```html
+<section class="BG-CLASSES">
+  <div class="WIDTH-CLASSES">…editor content…</div>
+</section>
+```
+
+Customize the choices with `Config.SectionStyles` (nil gets the
+Tailwind-first defaults). Only the option *keys* are stored with content;
+classes resolve at render time, so changing an option's classes restyles
+every existing section using it:
+
+```go
+SectionStyles: &cms.SectionStyles{
+    Backgrounds: []cms.SectionOption{
+        {Key: "default", Label: "Default", Class: ""},
+        {Key: "brand", Label: "Brand", Class: "bg-brand-900", ContentClass: "prose-invert"},
+    },
+    Widths: []cms.SectionOption{
+        {Key: "normal", Label: "Normal", Class: "prose mx-auto max-w-3xl px-6 py-12"},
+        {Key: "full", Label: "Full width", Class: "prose max-w-none px-6 py-12"},
+    },
+},
+```
+
+Safelist the default section classes along with the rest:
+
+```js
+safelist: [
+    "bg-slate-50", "bg-slate-900", "bg-blue-700", "prose", "prose-slate",
+    "prose-invert", "mx-auto", "max-w-3xl", "max-w-5xl", "max-w-none",
+    "px-6", "py-12",
+],
+```
 
 ## Running the example
 

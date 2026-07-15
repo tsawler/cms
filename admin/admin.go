@@ -35,7 +35,8 @@ type Deps struct {
 	Renderer       *render.Renderer // nil when the host has not configured templates
 	Media          *media.Manager   // nil when the host has not configured an object store
 	Snippets       *snippets.Store
-	ConfigSnippets []snippets.Snippet // host-registered palette entries
+	ConfigSnippets []snippets.Snippet    // host-registered palette entries
+	SectionStyles  *render.SectionStyles // curated section settings
 	Logger         *slog.Logger
 	AdminPath      string
 	DefaultLocale  string
@@ -86,7 +87,10 @@ func New(d Deps) http.Handler {
 			r.Get("/pages/{id}/preview", s.pagePreview)
 
 			// JSON API for the in-place editor.
+			r.Post("/api/pages", s.apiCreatePage)
+			r.Delete("/api/pages/{id}", s.apiDeletePage)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
+			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
 			r.Get("/api/snippets", s.apiSnippetsList)
 

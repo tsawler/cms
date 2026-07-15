@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 )
 
@@ -52,6 +54,150 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
 	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, body.Regions, isAdmin); err != nil {
 		s.deps.Logger.Error("cms admin: api saving regions", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// apiCreatePage creates a draft page from the editor's "new page" dialog:
+// a title and a template choice; the slug is derived from the title, with
+// a numeric suffix when taken.
+// POST /api/pages  body: {"title": "...", "template": "..."}
+func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title    string `json:"title"`
+		Template string `json:"template"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Could not read the request — try again.")
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		jsonError(w, http.StatusUnprocessableEntity, "Give the page a name.")
+		return
+	}
+	if !s.deps.Renderer.Knows(body.Template) {
+		jsonError(w, http.StatusBadRequest, "Choose a page type.")
+		return
+	}
+
+	base := content.Slugify(title)
+	if base == "" {
+		base = "page"
+	}
+	page := &content.Page{Title: title, TemplateName: body.Template, Slug: base}
+	var err error
+	for i := 1; i <= 50; i++ {
+		if i > 1 {
+			page.Slug = base + "-" + strconv.Itoa(i)
+		}
+		_, err = s.deps.Content.Insert(r.Context(), page, s.deps.DefaultLocale)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, content.ErrDuplicateSlug) {
+			s.deps.Logger.Error("cms admin: api creating page", "err", err)
+			jsonError(w, http.StatusInternalServerError, "Creating the page failed — try again.")
+			return
+		}
+	}
+	if err != nil {
+		jsonError(w, http.StatusUnprocessableEntity, "Too many pages already use that name.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"id":   page.ID,
+		"slug": page.Slug,
+		"url":  "/" + page.Slug,
+	})
+}
+
+// apiDeletePage removes a page and all of its content. The home page
+// (empty slug) is not deletable — a site must always answer at /.
+// DELETE /api/pages/{id}
+func (s *server) apiDeletePage(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	if page.Slug == "" {
+		jsonError(w, http.StatusUnprocessableEntity, "The home page can't be deleted.")
+		return
+	}
+	if err := s.deps.Content.Delete(r.Context(), page.ID); err != nil {
+		s.deps.Logger.Error("cms admin: api deleting page", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, "Deleting the page failed — try again.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": "/"})
+}
+
+// apiSaveSections replaces a sections region's draft blocks with the
+// submitted ordered list.
+// POST /api/pages/{id}/sections
+// body: {"region": "...", "sections": [{"bg": "...", "width": "...", "html": "..."}]}
+func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Region   string `json:"region"`
+		Sections []struct {
+			BG    string `json:"bg"`
+			Width string `json:"width"`
+			HTML  string `json:"html"`
+		} `json:"sections"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Could not read the edit — try again.")
+		return
+	}
+	if len(body.Sections) > 100 {
+		jsonError(w, http.StatusBadRequest, "Too many sections on one page.")
+		return
+	}
+
+	// The target region must be a sections region the page's template
+	// actually declares.
+	valid := false
+	for _, region := range s.deps.Renderer.Regions(page.TemplateName) {
+		if region.Name == body.Region && region.Kind == "sections" {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		jsonError(w, http.StatusBadRequest, "Unknown sections area.")
+		return
+	}
+
+	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
+	inputs := make([]content.SectionInput, len(body.Sections))
+	for i, sec := range body.Sections {
+		html := sec.HTML
+		if !isAdmin {
+			html = editorHTMLPolicy.Sanitize(html)
+		}
+		inputs[i] = content.SectionInput{
+			Content: html,
+			// Resolve settings against the configured options so unknown
+			// keys are stored as the fallback rather than junk.
+			Settings: map[string]string{
+				"bg":    s.deps.SectionStyles.Background(sec.BG).Key,
+				"width": s.deps.SectionStyles.Width(sec.Width).Key,
+			},
+		}
+	}
+
+	if err := s.deps.Content.ReplaceDraftSections(r.Context(), page.ID, body.Region, s.deps.DefaultLocale, inputs); err != nil {
+		s.deps.Logger.Error("cms admin: api saving sections", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
 		return
 	}

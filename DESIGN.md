@@ -131,10 +131,23 @@ edit renders, `cmsText`/`cmsRegion` output is wrapped in marker elements
 editable when the template adds `data-cms-image="region-name"` to the img
 tag (an attribute can't be wrapped from a template func).
 
-The glue script (vanilla JS, chrome in Shadow DOM) provides:
+The glue script (vanilla JS, chrome in Shadow DOM) provides two pieces of
+persistent chrome — the **edit bar** (floating bottom pill: status chip,
+Edit toggle, Cancel, Save draft, Publish, admin link, minimize-to-pencil)
+and the **tool rail** (fixed full-height strip on the left, edit mode
+only: Add section, Snippets drawer toggle, New page). Document-level
+actions live in the edit bar; creation tools live in the rail. "New page"
+opens a dialog (name + page type from the host's PageTemplates), creates
+a draft via `POST /api/pages` with a slug derived from the name
+(`content.Slugify`, numeric suffix when taken), and navigates the editor
+straight into the new draft. The edit bar's Delete button
+(`DELETE /api/pages/{id}`) removes the current page after a danger
+confirm; the home page (empty slug) is not deletable — enforced
+server-side in both the API and the admin form, and the button is hidden
+on it. Specifically:
 
-- floating bottom toolbar: status chip, Edit toggle, Save draft, Publish,
-  admin link
+- the edit bar: status chip, Edit toggle, Save draft, Publish, admin
+  link
 - Edit mode outlines regions; plain-text regions get `contenteditable`
   (plaintext-only); **rich HTML regions are edited with TinyMCE 6.8.6 in
   inline mode** — the last MIT-licensed TinyMCE release, vendored into the
@@ -203,11 +216,38 @@ a snippet is ordinary region HTML — edited in place, sanitized on save
 (so default snippets avoid SVG/scripts), and styled by the host CSS.
 Deleting a snippet never affects pages that already used it.
 
-*Scope note:* snippets are fragments within a region's single HTML block,
-not a separate block model — regions are not split into reorderable block
-lists. Reordering inserted sections is manual (cut/paste or drag within
-the editable region). The `cms_blocks` schema still supports multi-block
-regions if a true block model is wanted later.
+*Scope note:* inside an ordinary `cmsRegion`, snippets are fragments of
+the region's single HTML block. Page-level composition — reorderable,
+full-width building blocks — is what **sections** are for.
+
+### 4.1 Sections (page-level layout for editors)
+
+`{{cmsSections "name"}}` declares a full-bleed area the template places
+outside any max-width container. It renders an ordered stack of sections;
+each section is a full-width `<section>` wrapper (background classes)
+around an inner container (width classes) around ordinary rich HTML. This
+is the one place the CMS generates page-level markup — the trade-off for
+letting editors compose layouts — and every class it emits comes from
+curated, configurable options (`Config.SectionStyles`: backgrounds and
+widths, Tailwind-first defaults, same no-pickers philosophy as the Styles
+menu; a dark background carries `prose-invert` via ContentClass).
+
+Data model: this activates the multi-block regions the `cms_blocks`
+schema anticipated — one block per section, ordered by `sort`, with a
+`settings` JSONB column holding the chosen background/width **keys**
+(classes are resolved at render time, so restyling options later
+restyles existing content). Saving replaces the region's draft blocks
+atomically with the submitted ordered list
+(`POST /api/pages/{id}/sections`); unknown setting keys fall back to the
+first option; draft/publish snapshotting is unchanged.
+
+In edit mode each section gets a floating control pill (move up/down,
+add below, settings, delete — all through the styled dialogs) and its own
+TinyMCE instance, so structure stays out of the editable surface. Adding
+a section opens the snippet drawer as a "choose a starting point" picker
+(any snippet, or an empty section). Section granularity is deliberate:
+per-paragraph block models fight TinyMCE; one editor per section
+composes cleanly with everything else.
 
 ### 5. i18n — locale is a column, not a fork
 
@@ -316,6 +356,10 @@ the module self-contained and the surface area small.
 5. **Snippets** ✅ — config + admin-created registry, Tailwind-first
    default library, palette drawer with click-to-insert and drag & drop
    into regions
+5.5. **Sections** ✅ — full-width, editor-composable page areas
+   (`cmsSections`): add/reorder/delete/settings controls in place,
+   curated backgrounds & widths, snippet-seeded new sections,
+   multi-block storage with settings JSONB
 6. **Blog & news** — posts, listing/detail helpers, RSS, categories/tags
 7. **i18n** — locale routing, fallback, in-place locale switching, FR admin
    strings

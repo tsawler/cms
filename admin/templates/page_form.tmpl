@@ -52,7 +52,10 @@
         {{range .Regions}}
         <div class="cms-field">
             <label for="region-{{.Name}}">{{.Name}}</label>
-            {{if eq .Kind "text"}}
+            {{if eq .Kind "sections"}}
+            <p class="cms-hint">This area is built from sections — open the page on the site and
+            press <strong>Edit</strong> to add, arrange, and edit them directly.</p>
+            {{else if eq .Kind "text"}}
             <input type="text" id="region-{{.Name}}" name="region-{{.Name}}" value="{{index $content .Name}}">
             {{else if eq .Kind "image"}}
             {{$current := index $content .Name}}
@@ -104,7 +107,7 @@
     </div>
 </form>
 
-{{if not .IsNew}}
+{{if and (not .IsNew) .FormPage.Slug}}
 <form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/delete" class="cms-danger-zone"
       data-confirm="Delete this page and all of its content? This cannot be undone.">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

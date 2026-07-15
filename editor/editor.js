@@ -38,8 +38,28 @@
     var pickerHandler = null; // function(mediaItem) while the picker is open
     var pickerKind = "image"; // "image" or "file" while the picker is open
     var mceEditors = {}; // region name -> TinyMCE editor instance
-    var lastEditorName = null; // region whose editor most recently had focus
+    var sectionEditors = []; // {el, ed, region} per section content container
+    var lastEditor = null; // most recently focused TinyMCE instance
+    var lastEditorDirty = null; // dirty-marker matching lastEditor
+    var sectionsDirty = {}; // sections region name -> true
+    var pendingSection = null; // {region, after} while choosing a new section's start
     var snapshot = null; // page state captured when Edit was pressed
+
+    // Curated section settings (backgrounds/widths) from the server.
+    var sectionStyles = { backgrounds: [{ key: "default", label: "Default", class: "" }],
+        widths: [{ key: "normal", label: "Normal", class: "" }] };
+    try {
+        var ss = JSON.parse(cfg.sectionStyles || "null");
+        if (ss && ss.backgrounds && ss.backgrounds.length && ss.widths && ss.widths.length) {
+            sectionStyles = ss;
+        }
+    } catch (e) { /* fall back to the minimal defaults above */ }
+
+    // Page templates the site offers, for the "new page" dialog.
+    var pageTemplates = [];
+    try {
+        pageTemplates = JSON.parse(cfg.pageTemplates || "[]") || [];
+    } catch (e) { /* no new-page button */ }
 
     var DOC_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip";
 
@@ -79,7 +99,21 @@
         ".bar button.primary{background:#2f5fe0;border-color:#2f5fe0}" +
         ".bar button.primary:hover{background:#2149b8}" +
         ".bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}" +
+        ".bar button.dngr{color:#fca5a5;border-color:rgba(252,165,165,.35)}" +
+        ".bar button.dngr:hover{background:rgba(252,165,165,.15)}" +
         ".bar a{color:#fff;opacity:.7;text-decoration:none;font-size:12px}.bar a:hover{opacity:1}" +
+        /* ---- tool rail (left edge, edit mode only) ---- */
+        ".rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;" +
+        "background:#1c2128;display:none;flex-direction:column;align-items:center;" +
+        "padding-top:14px;gap:6px;box-shadow:2px 0 12px rgba(0,0,0,.25)}" +
+        ".rail.on{display:flex}" +
+        ".rail button{width:46px;height:46px;border-radius:10px;border:none;background:transparent;" +
+        "color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;" +
+        "justify-content:center;gap:3px;font-size:17px;line-height:1;padding:0}" +
+        ".rail button span{font-size:9px;opacity:.75;letter-spacing:.02em}" +
+        ".rail button:hover:not(:disabled){background:rgba(255,255,255,.14)}" +
+        ".rail button.on{background:rgba(255,255,255,.2)}" +
+        ".rail button:disabled{opacity:.35;cursor:default}" +
         /* ---- media modal (light, centered) ---- */
         ".overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}" +
         ".overlay.on{display:block}" +
@@ -125,10 +159,11 @@
         ".items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
         ".items.list .sz{color:#667085;font-size:12px;white-space:nowrap}" +
         ".empty{color:#667085;font-size:13px}" +
-        /* ---- snippet drawer (non-modal, so drag-and-drop can reach the page) ---- */
-        ".drawer{position:fixed;top:0;right:0;bottom:0;width:300px;z-index:2147482997;" +
-        "background:#fff;color:#1c2128;box-shadow:-8px 0 32px rgba(0,0,0,.18);" +
-        "display:flex;flex-direction:column;transform:translateX(105%);transition:transform .25s ease}" +
+        /* ---- snippet drawer: slides out leftward from beside the tool
+           rail (non-modal, so drag-and-drop can reach the page) ---- */
+        ".drawer{position:fixed;top:0;left:56px;bottom:0;width:300px;z-index:2147482997;" +
+        "background:#fff;color:#1c2128;box-shadow:8px 0 32px rgba(0,0,0,.18);" +
+        "display:flex;flex-direction:column;transform:translateX(-130%);transition:transform .25s ease}" +
         ".drawer.on{transform:translateX(0)}" +
         ".drawer .dhead{display:flex;align-items:center;justify-content:space-between;" +
         "padding:14px 16px;border-bottom:1px solid #e3e6ea}" +
@@ -144,6 +179,9 @@
         ".snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}" +
         ".snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;" +
         "-webkit-line-clamp:2;-webkit-box-orient:vertical}" +
+        "#snip-empty{border-style:dashed}" +
+        ".sgroup{font-size:11px;font-weight:600;color:#98a2b3;text-transform:uppercase;" +
+        "letter-spacing:.05em;margin:14px 0 8px}" +
         /* ---- small dialog (replaces window.confirm / window.prompt) ---- */
         ".dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}" +
         ".dlg-overlay.on{display:block}" +
@@ -155,6 +193,10 @@
         ".dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;" +
         "font:inherit;font-size:13px;margin-bottom:14px}" +
         ".dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}" +
+        ".dlg .fld{margin:0 0 12px}" +
+        ".dlg .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475467}" +
+        ".dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;" +
+        "font:inherit;font-size:13px;background:#fff}" +
         ".dlg .acts{display:flex;justify-content:flex-end;gap:8px}" +
         ".dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;" +
         "border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}" +
@@ -169,12 +211,17 @@
         '<span class="chip" id="chip"></span>' +
         '<span class="msg" id="msg"></span>' +
         '<button id="edit">Edit page</button>' +
-        '<button id="snippets" hidden>Snippets</button>' +
         '<button id="cancel" hidden>Cancel</button>' +
+        '<button id="del-page" class="dngr" hidden>Delete</button>' +
         '<button id="save" disabled>Save draft</button>' +
         '<button id="publish" class="primary">Publish</button>' +
         '<a id="admin" href="#">Admin</a>' +
         '<button id="close" class="quiet" title="Minimize editing tools">×</button>' +
+        "</div>" +
+        '<div class="rail" id="rail">' +
+        '<button id="rail-add" title="Add a section">＋<span>Section</span></button>' +
+        '<button id="rail-snips" title="Snippets">⧉<span>Snippets</span></button>' +
+        '<button id="rail-page" title="New page">⊞<span>Page</span></button>' +
         "</div>" +
         '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
         '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
@@ -197,15 +244,16 @@
         '<div class="items grid" id="grid"></div>' +
         "</div></div></div>" +
         '<div class="drawer" id="drawer">' +
-        '<div class="dhead"><h2>Snippets</h2>' +
+        '<div class="dhead"><h2 id="drawer-title">Snippets</h2>' +
         '<button id="drawer-close" title="Close" aria-label="Close">×</button></div>' +
-        '<div class="dhint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
+        '<div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
         '<div class="dlist" id="snip-list"></div>' +
         "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
         '<input type="text" id="dlg-input" hidden>' +
+        '<div id="dlg-fields"></div>' +
         '<div class="acts">' +
         '<button id="dlg-cancel">Cancel</button>' +
         '<button id="dlg-ok" class="ok">OK</button>' +
@@ -222,16 +270,40 @@
 
     var dlgResolve = null;
     var dlgIsPrompt = false;
+    var dlgHasSelects = false;
 
     function openDialog(opts) {
         return new Promise(function (resolve) {
             dlgResolve = resolve;
             dlgIsPrompt = !!opts.prompt;
+            dlgHasSelects = !!(opts.selects && opts.selects.length);
             $("dlg-msg").textContent = opts.message;
             var input = $("dlg-input");
             input.hidden = !opts.prompt;
             input.value = "";
             input.placeholder = opts.placeholder || "";
+            var fields = $("dlg-fields");
+            fields.innerHTML = "";
+            if (dlgHasSelects) {
+                opts.selects.forEach(function (f) {
+                    var wrap = document.createElement("div");
+                    wrap.className = "fld";
+                    var label = document.createElement("label");
+                    label.textContent = f.label;
+                    var sel = document.createElement("select");
+                    sel.dataset.field = f.id;
+                    f.options.forEach(function (o) {
+                        var opt = document.createElement("option");
+                        opt.value = o.value;
+                        opt.textContent = o.label;
+                        if (o.value === f.value) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                    wrap.appendChild(label);
+                    wrap.appendChild(sel);
+                    fields.appendChild(wrap);
+                });
+            }
             var ok = $("dlg-ok");
             ok.textContent = opts.okLabel || "OK";
             ok.classList.toggle("danger", !!opts.danger);
@@ -259,8 +331,21 @@
         return openDialog({ message: message, prompt: true, placeholder: placeholder, okLabel: okLabel });
     }
 
-    function dialogOK() { settleDialog(dlgIsPrompt ? $("dlg-input").value.trim() : true); }
-    function dialogDismiss() { settleDialog(dlgIsPrompt ? null : false); }
+    function dialogOK() {
+        if (dlgHasSelects) {
+            var values = {};
+            $("dlg-fields").querySelectorAll("select").forEach(function (sel) {
+                values[sel.dataset.field] = sel.value;
+            });
+            // A dialog may combine a text input with selects; the input's
+            // value rides along under "input".
+            if (dlgIsPrompt) values.input = $("dlg-input").value.trim();
+            settleDialog(values);
+            return;
+        }
+        settleDialog(dlgIsPrompt ? $("dlg-input").value.trim() : true);
+    }
+    function dialogDismiss() { settleDialog(dlgIsPrompt || dlgHasSelects ? null : false); }
 
     $("dlg-ok").addEventListener("click", dialogOK);
     $("dlg-cancel").addEventListener("click", dialogDismiss);
@@ -300,7 +385,20 @@
         ".cms-editing [data-cms-image]:hover{outline-style:solid}" +
         /* TinyMCE inline adds its own focus outline; ours is enough. */
         ".cms-editing [data-cms-region].mce-edit-focus{outline:1.5px solid rgba(47,95,224,.6)}" +
-        "#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}";
+        "#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}" +
+        /* Sections */
+        ".cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}" +
+        ".cms-editing [data-cms-section]:hover{outline-style:solid}" +
+        ".cms-editing [data-cms-section-content]{min-height:2em}" +
+        ".cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;" +
+        "background:#1c2128;border-radius:999px;padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}" +
+        ".cms-sec-ui button{font:13px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;" +
+        "border-radius:999px;padding:5px 8px;cursor:pointer}" +
+        ".cms-sec-ui button:hover{background:rgba(255,255,255,.18)}" +
+        ".cms-add-section{padding:14px;text-align:center}" +
+        ".cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;" +
+        "border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}" +
+        ".cms-add-section button:hover{background:#dbe4fa}";
     document.head.appendChild(lightCss);
 
     /* ------------------------------------------------------------------ *
@@ -348,6 +446,28 @@
         htmlRegions().forEach(function (el) {
             var name = el.dataset.cmsRegion;
             if (mceEditors[name]) return;
+            initInlineEditor(el, function () { markDirty(name); }, function (ed) { mceEditors[name] = ed; });
+        });
+        initSectionEditors();
+    }
+
+    // initSectionEditors attaches an editor to every section's content
+    // container; each section is its own TinyMCE instance so structure
+    // (wrappers, settings) stays out of the editable surface.
+    function initSectionEditors() {
+        document.querySelectorAll("[data-cms-sections]").forEach(function (container) {
+            var region = container.getAttribute("data-cms-sections");
+            container.querySelectorAll("[data-cms-section-content]").forEach(function (el) {
+                var known = sectionEditors.some(function (s) { return s.el === el; });
+                if (known) return;
+                initInlineEditor(el, function () { markSectionsDirty(region); }, function (ed) {
+                    sectionEditors.push({ el: el, ed: ed, region: region });
+                });
+            });
+        });
+    }
+
+    function initInlineEditor(el, onDirty, register) {
             var opts = {
                 target: el,
                 inline: true,
@@ -374,8 +494,8 @@
                 browser_spellcheck: true,
                 contextmenu: false,
                 setup: function (ed) {
-                    mceEditors[name] = ed;
-                    ed.on("focus", function () { lastEditorName = name; });
+                    register(ed);
+                    ed.on("focus", function () { lastEditor = ed; lastEditorDirty = onDirty; });
                     // Both media buttons skip TinyMCE's URL dialogs and go
                     // straight to the CMS media picker (library + upload).
                     if (mediaEnabled) {
@@ -387,7 +507,7 @@
                                 openPicker("image", function (item) {
                                     ed.insertContent('<img src="' + escapeAttr(item.web) +
                                         '" alt="' + escapeAttr(item.alt || "") + '">');
-                                    markDirty(name);
+                                    onDirty();
                                 });
                             },
                         });
@@ -413,13 +533,13 @@
                                         ed.insertContent('<a href="' + escapeAttr(url) + '">' +
                                             escapeText(item.filename) + "</a>");
                                     }
-                                    markDirty(name);
+                                    onDirty();
                                 });
                             },
                         });
                     }
                     ed.on("input change undo redo SetContent", function () {
-                        if (ed.isDirty()) markDirty(name);
+                        if (ed.isDirty()) onDirty();
                     });
                 },
             };
@@ -427,7 +547,6 @@
                 opts.style_formats = styleFormats; // replaces TinyMCE's default menu
             }
             window.tinymce.init(opts);
-        });
     }
 
     function removeRichEditors() {
@@ -435,6 +554,12 @@
             mceEditors[name].remove();
         });
         mceEditors = {};
+        sectionEditors.forEach(function (s) { s.ed.remove(); });
+        sectionEditors = [];
+        lastEditor = null;
+        lastEditorDirty = null;
+        // Remove injected section toolbars and add-buttons.
+        document.querySelectorAll("[data-cms-ui]").forEach(function (el) { el.remove(); });
     }
 
     /* ------------------------------------------------------------------ *
@@ -462,11 +587,16 @@
         document.querySelectorAll("[data-cms-image]").forEach(function (el) {
             imgs.push({ el: el, src: el.getAttribute("src"), alt: el.getAttribute("alt") });
         });
-        return { regs: regs, imgs: imgs };
+        var secs = [];
+        document.querySelectorAll("[data-cms-sections]").forEach(function (el) {
+            secs.push({ el: el, html: el.innerHTML });
+        });
+        return { regs: regs, imgs: imgs, secs: secs };
     }
 
     function restoreSnapshot(s) {
         s.regs.forEach(function (r) { r.el.innerHTML = r.html; });
+        (s.secs || []).forEach(function (c) { c.el.innerHTML = c.html; });
         s.imgs.forEach(function (i) {
             if (i.src === null) i.el.removeAttribute("src");
             else i.el.setAttribute("src", i.src);
@@ -481,8 +611,13 @@
         document.body.classList.toggle("cms-editing", on);
         $("edit").textContent = on ? "Done editing" : "Edit page";
         $("cancel").hidden = !on;
-        $("snippets").hidden = !on;
-        if (!on) closeDrawer();
+        // The home page (empty slug) is never deletable.
+        $("del-page").hidden = !on || (cfg.slug || "") === "";
+        $("rail").classList.toggle("on", on);
+        if (!on) {
+            closeDrawer();
+            pendingSection = null;
+        }
         textRegions().forEach(function (el) {
             if (on) {
                 el.setAttribute("contenteditable", "plaintext-only");
@@ -495,6 +630,7 @@
             setMsg("Loading editor…");
             loadTinyMCE().then(function () {
                 initRichEditors();
+                injectSectionUI();
                 setMsg("");
             }).catch(function (err) { setMsg(err.message); });
         } else {
@@ -506,6 +642,16 @@
         dirty[name] = true;
         $("save").disabled = false;
         setMsg("Unsaved changes");
+    }
+
+    function markSectionsDirty(region) {
+        sectionsDirty[region] = true;
+        $("save").disabled = false;
+        setMsg("Unsaved changes");
+    }
+
+    function hasUnsaved() {
+        return Object.keys(dirty).length > 0 || Object.keys(sectionsDirty).length > 0;
     }
 
     document.addEventListener("input", function (e) {
@@ -530,7 +676,7 @@
     }, true);
 
     window.addEventListener("beforeunload", function (e) {
-        if (Object.keys(dirty).length > 0) {
+        if (hasUnsaved()) {
             e.preventDefault();
             e.returnValue = "";
         }
@@ -581,19 +727,56 @@
         });
     }
 
+    // collectSections reads a sections region's current DOM order plus
+    // each section's settings and (editor-cleaned) content.
+    function collectSections(region) {
+        var container = document.querySelector('[data-cms-sections="' + region + '"]');
+        var out = [];
+        if (!container) return out;
+        container.querySelectorAll("[data-cms-section]").forEach(function (wrapper) {
+            var contentEl = wrapper.querySelector("[data-cms-section-content]");
+            if (!contentEl) return;
+            var html = contentEl.innerHTML;
+            sectionEditors.some(function (s) {
+                if (s.el === contentEl) { html = s.ed.getContent(); return true; }
+                return false;
+            });
+            out.push({ bg: wrapper.dataset.cmsBg || "", width: wrapper.dataset.cmsWidth || "", html: html });
+        });
+        return out;
+    }
+
     function save() {
         var values = collect();
-        if (Object.keys(values).length === 0) return Promise.resolve();
+        var secRegions = Object.keys(sectionsDirty);
+        if (Object.keys(values).length === 0 && secRegions.length === 0) return Promise.resolve();
         setMsg("Saving…");
-        return api("/pages/" + pageId + "/regions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ locale: cfg.locale, regions: values }),
-        }).then(function () {
+        var chain = Promise.resolve();
+        if (Object.keys(values).length > 0) {
+            chain = chain.then(function () {
+                return api("/pages/" + pageId + "/regions", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ locale: cfg.locale, regions: values }),
+                });
+            });
+        }
+        secRegions.forEach(function (region) {
+            chain = chain.then(function () {
+                return api("/pages/" + pageId + "/sections", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ locale: cfg.locale, region: region, sections: collectSections(region) }),
+                });
+            });
+        });
+        return chain.then(function () {
             dirty = {};
+            sectionsDirty = {};
             Object.keys(mceEditors).forEach(function (name) {
                 mceEditors[name].setDirty(false);
             });
+            sectionEditors.forEach(function (s) { s.ed.setDirty(false); });
             $("save").disabled = true;
             setMsg("Draft saved");
         });
@@ -616,11 +799,12 @@
             setEditing(false); // tears down TinyMCE before the DOM is restored
             if (snap) restoreSnapshot(snap);
             dirty = {};
+            sectionsDirty = {};
             imageValues = {};
             $("save").disabled = true;
             setMsg("");
         };
-        if (Object.keys(dirty).length > 0) {
+        if (hasUnsaved()) {
             cmsConfirm("Discard your unsaved changes? The page will go back to how it was before you started editing.",
                 "Discard changes", true).then(function (yes) {
                 if (yes) discard();
@@ -628,6 +812,20 @@
         } else {
             discard();
         }
+    });
+    $("del-page").addEventListener("click", function () {
+        cmsConfirm("Delete this page and everything on it? This cannot be undone.",
+            "Delete page", true).then(function (yes) {
+            if (!yes) return;
+            setMsg("Deleting…");
+            api("/pages/" + pageId, { method: "DELETE" }).then(function (body) {
+                // Clear unsaved state so beforeunload doesn't second-guess
+                // the navigation away from the now-deleted page.
+                dirty = {};
+                sectionsDirty = {};
+                window.location.href = body.url || "/";
+            }).catch(function (err) { setMsg(err.message); });
+        });
     });
     $("save").addEventListener("click", function () {
         save().catch(function (err) { setMsg(err.message); });
@@ -646,7 +844,7 @@
     $("fab").addEventListener("click", function () {
         $("fab").classList.remove("on");
         $("bar").classList.remove("min");
-        if (Object.keys(dirty).length > 0) {
+        if (hasUnsaved()) {
             $("save").disabled = false;
             setMsg("Unsaved changes");
         }
@@ -660,16 +858,90 @@
 
     function openDrawer() {
         $("drawer").classList.add("on");
+        $("drawer-title").textContent = pendingSection ? "Add a section" : "Snippets";
+        $("drawer-hint").textContent = pendingSection
+            ? "Start with an empty section, or use a snippet as its starting content."
+            : "Drag a snippet onto the page, or click one to insert it at the cursor.";
+        var emptyCard = $("snip-empty");
+        if (emptyCard) emptyCard.hidden = !pendingSection;
+        var groupLabel = $("snip-group-label");
+        if (groupLabel) groupLabel.hidden = !pendingSection;
         if (!snippetsLoaded) loadSnippets();
+        updateRail();
     }
     function closeDrawer() {
         $("drawer").classList.remove("on");
+        pendingSection = null;
+        updateRail();
     }
 
-    $("snippets").addEventListener("click", function () {
-        if ($("drawer").classList.contains("on")) closeDrawer();
-        else openDrawer();
+    // updateRail highlights whichever rail button the open drawer belongs
+    // to (Section when choosing a new section's start, Snippets otherwise).
+    function updateRail() {
+        var open = $("drawer").classList.contains("on");
+        $("rail-add").classList.toggle("on", open && !!pendingSection);
+        $("rail-snips").classList.toggle("on", open && !pendingSection);
+    }
+
+    // Pages whose template declares no sections region get a visibly
+    // disabled Section button rather than a dead-feeling click.
+    if (!document.querySelector("[data-cms-sections]")) {
+        $("rail-add").disabled = true;
+        $("rail-add").title = "This page type has no sections area";
+    }
+
+    // Rail buttons toggle: the button matching the drawer's current mode
+    // closes it; the other button switches the drawer to its mode.
+    $("rail-snips").addEventListener("click", function () {
+        if ($("drawer").classList.contains("on") && !pendingSection) {
+            closeDrawer();
+            return;
+        }
+        pendingSection = null;
+        openDrawer();
     });
+    $("rail-add").addEventListener("click", function () {
+        if ($("drawer").classList.contains("on") && pendingSection) {
+            closeDrawer();
+            return;
+        }
+        var container = document.querySelector("[data-cms-sections]");
+        if (!container) {
+            setMsg("This page has no sections area.");
+            return;
+        }
+        pendingSection = { region: container.getAttribute("data-cms-sections"), after: null };
+        openDrawer();
+    });
+    $("rail-page").hidden = pageTemplates.length === 0;
+    $("rail-page").addEventListener("click", function () {
+        if (!pageTemplates.length) return;
+        openDialog({
+            message: "Create a new page",
+            prompt: true,
+            placeholder: "Page name",
+            okLabel: "Create page",
+            selects: [{
+                id: "template",
+                label: "Page type",
+                value: pageTemplates[0].file,
+                options: pageTemplates.map(function (t) { return { value: t.file, label: t.label }; }),
+            }],
+        }).then(function (values) {
+            if (!values || !values.input) return;
+            setMsg("Creating page…");
+            api("/pages", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: values.input, template: values.template }),
+            }).then(function (body) {
+                // The new page is a draft, so only editors see it —
+                // navigate straight into it to start writing.
+                window.location.href = body.url;
+            }).catch(function (err) { setMsg(err.message); });
+        });
+    });
+
     $("drawer-close").addEventListener("click", closeDrawer);
 
     function loadSnippets() {
@@ -678,8 +950,33 @@
         api("/snippets", { method: "GET" }).then(function (body) {
             snippetsLoaded = true;
             list.innerHTML = "";
+            // "Empty section" appears only when the drawer is choosing a
+            // new section's starting point.
+            var emptyCard = document.createElement("div");
+            emptyCard.className = "snip";
+            emptyCard.id = "snip-empty";
+            emptyCard.hidden = !pendingSection;
+            var enm = document.createElement("p");
+            enm.className = "sname";
+            enm.textContent = "Empty section";
+            var eds = document.createElement("p");
+            eds.className = "sdesc";
+            eds.textContent = "Start from a blank section.";
+            emptyCard.appendChild(enm);
+            emptyCard.appendChild(eds);
+            emptyCard.addEventListener("click", function () {
+                chooseSnippet({ name: "Empty", html: "<p>Start writing…</p>" });
+            });
+            list.appendChild(emptyCard);
+            var groupLabel = document.createElement("p");
+            groupLabel.className = "sgroup";
+            groupLabel.id = "snip-group-label";
+            groupLabel.hidden = !pendingSection;
+            groupLabel.textContent = "Or start from a snippet";
+            list.appendChild(groupLabel);
             if (!body.snippets || body.snippets.length === 0) {
-                list.innerHTML = '<span class="empty">No snippets available.</span>';
+                list.appendChild(Object.assign(document.createElement("span"),
+                    { className: "empty", textContent: "No snippets available." }));
                 return;
             }
             body.snippets.forEach(function (sn) {
@@ -703,9 +1000,9 @@
                     e.dataTransfer.setData("text/plain", sn.name);
                     e.dataTransfer.effectAllowed = "copy";
                 });
-                // Click: insert at the cursor in the most recently focused
-                // rich region (or the first one).
-                card.addEventListener("click", function () { insertSnippet(sn); });
+                // Click: new-section starting point when one is pending,
+                // otherwise insert at the cursor.
+                card.addEventListener("click", function () { chooseSnippet(sn); });
                 list.appendChild(card);
             });
         }).catch(function (err) {
@@ -717,20 +1014,192 @@
         });
     }
 
-    function insertSnippet(sn) {
-        var name = lastEditorName;
-        if (!name || !mceEditors[name]) {
-            name = Object.keys(mceEditors)[0];
+    function chooseSnippet(sn) {
+        if (pendingSection) {
+            var target = pendingSection;
+            closeDrawer();
+            createSection(target, sn.html);
+            return;
         }
-        var ed = name && mceEditors[name];
+        insertSnippet(sn);
+    }
+
+    function insertSnippet(sn) {
+        var ed = lastEditor && !lastEditor.removed ? lastEditor : null;
+        var onDirty = lastEditorDirty;
+        if (!ed) {
+            var first = Object.keys(mceEditors)[0];
+            if (first) {
+                ed = mceEditors[first];
+                onDirty = function () { markDirty(first); };
+            } else if (sectionEditors.length) {
+                ed = sectionEditors[0].ed;
+                var rg = sectionEditors[0].region;
+                onDirty = function () { markSectionsDirty(rg); };
+            }
+        }
         if (!ed) {
             setMsg("Click into a content area first, then insert the snippet.");
             return;
         }
         ed.focus();
         ed.insertContent(sn.html);
-        markDirty(name);
+        if (onDirty) onDirty();
         setMsg("Snippet inserted — click it to edit the text");
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Sections: per-section controls, add, reorder, settings
+     * ------------------------------------------------------------------ */
+
+    function sbOpt(list, key) {
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].key === key) return list[i];
+        }
+        return list[0];
+    }
+
+    function injectSectionUI() {
+        document.querySelectorAll("[data-cms-sections]").forEach(function (container) {
+            container.querySelectorAll("[data-cms-section]").forEach(injectSectionToolbar);
+            if (!container.querySelector(".cms-add-section")) {
+                var addWrap = document.createElement("div");
+                addWrap.setAttribute("data-cms-ui", "");
+                addWrap.className = "cms-add-section";
+                addWrap.contentEditable = "false";
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.setAttribute("data-secact", "addend");
+                btn.textContent = "＋ Add section";
+                addWrap.appendChild(btn);
+                container.appendChild(addWrap);
+            }
+        });
+    }
+
+    function injectSectionToolbar(wrapper) {
+        if (wrapper.querySelector(".cms-sec-ui")) return;
+        var tb = document.createElement("div");
+        tb.setAttribute("data-cms-ui", "");
+        tb.className = "cms-sec-ui";
+        tb.contentEditable = "false";
+        [["up", "↑", "Move up"], ["down", "↓", "Move down"], ["add", "＋", "Add section below"],
+            ["set", "⚙", "Section settings"], ["del", "✕", "Delete section"]].forEach(function (b) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.setAttribute("data-secact", b[0]);
+            btn.textContent = b[1];
+            btn.title = b[2];
+            tb.appendChild(btn);
+        });
+        wrapper.appendChild(tb);
+    }
+
+    document.addEventListener("click", function (e) {
+        if (!editing) return;
+        var btn = e.target.closest ? e.target.closest("[data-secact]") : null;
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var container = btn.closest("[data-cms-sections]");
+        if (!container) return;
+        var region = container.getAttribute("data-cms-sections");
+        var wrapper = btn.closest("[data-cms-section]");
+        var act = btn.getAttribute("data-secact");
+
+        if (act === "addend") {
+            pendingSection = { region: region, after: null };
+            openDrawer();
+            return;
+        }
+        if (!wrapper) return;
+
+        if (act === "add") {
+            pendingSection = { region: region, after: wrapper };
+            openDrawer();
+        } else if (act === "up") {
+            var prev = wrapper.previousElementSibling;
+            if (prev && prev.hasAttribute("data-cms-section")) {
+                container.insertBefore(wrapper, prev);
+                markSectionsDirty(region);
+            }
+        } else if (act === "down") {
+            var next = wrapper.nextElementSibling;
+            if (next && next.hasAttribute("data-cms-section")) {
+                container.insertBefore(next, wrapper);
+                markSectionsDirty(region);
+            }
+        } else if (act === "del") {
+            cmsConfirm("Delete this section and its content?", "Delete section", true).then(function (yes) {
+                if (!yes) return;
+                var contentEl = wrapper.querySelector("[data-cms-section-content]");
+                sectionEditors = sectionEditors.filter(function (s) {
+                    if (s.el === contentEl) {
+                        s.ed.remove();
+                        return false;
+                    }
+                    return true;
+                });
+                wrapper.remove();
+                markSectionsDirty(region);
+            });
+        } else if (act === "set") {
+            openDialog({
+                message: "Section settings",
+                okLabel: "Apply",
+                selects: [
+                    { id: "bg", label: "Background", value: wrapper.dataset.cmsBg || "",
+                        options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
+                    { id: "width", label: "Content width", value: wrapper.dataset.cmsWidth || "",
+                        options: sectionStyles.widths.map(function (o) { return { value: o.key, label: o.label }; }) },
+                ],
+            }).then(function (values) {
+                if (!values) return;
+                applySectionSettings(wrapper, values.bg, values.width);
+                markSectionsDirty(region);
+            });
+        }
+    });
+
+    function applySectionSettings(wrapper, bgKey, widthKey) {
+        var bg = sbOpt(sectionStyles.backgrounds, bgKey);
+        var w = sbOpt(sectionStyles.widths, widthKey);
+        wrapper.dataset.cmsBg = bg.key;
+        wrapper.dataset.cmsWidth = w.key;
+        wrapper.className = bg.class || "";
+        var contentEl = wrapper.querySelector("[data-cms-section-content]");
+        if (contentEl) contentEl.className = ((w.class || "") + " " + (bg.contentClass || "")).trim();
+    }
+
+    function createSection(target, html) {
+        var container = document.querySelector('[data-cms-sections="' + target.region + '"]');
+        if (!container) return;
+        var bg = sectionStyles.backgrounds[0];
+        var w = sectionStyles.widths[0];
+        var wrapper = document.createElement("section");
+        wrapper.setAttribute("data-cms-section", "");
+        wrapper.dataset.cmsBg = bg.key;
+        wrapper.dataset.cmsWidth = w.key;
+        if (bg.class) wrapper.className = bg.class;
+        var inner = document.createElement("div");
+        inner.setAttribute("data-cms-section-content", "");
+        var innerClass = ((w.class || "") + " " + (bg.contentClass || "")).trim();
+        if (innerClass) inner.className = innerClass;
+        inner.innerHTML = html;
+        wrapper.appendChild(inner);
+        if (target.after) {
+            target.after.insertAdjacentElement("afterend", wrapper);
+        } else {
+            var addWrap = container.querySelector(".cms-add-section");
+            if (addWrap) container.insertBefore(wrapper, addWrap);
+            else container.appendChild(wrapper);
+        }
+        injectSectionToolbar(wrapper);
+        initInlineEditor(inner, function () { markSectionsDirty(target.region); }, function (ed) {
+            sectionEditors.push({ el: inner, ed: ed, region: target.region });
+        });
+        markSectionsDirty(target.region);
+        wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
     /* ------------------------------------------------------------------ *

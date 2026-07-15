@@ -10,10 +10,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms/internal/pgutil"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Status is a page's or block set's publication state.
@@ -47,6 +49,26 @@ var (
 )
 
 var slugRe = regexp.MustCompile(`^[a-z0-9-]+(?:/[a-z0-9-]+)*$`)
+
+var slugCleanRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// Slugify derives a URL slug from a human title: lowercased, diacritics
+// stripped, everything else hyphenated — "Café & Bar!" becomes "cafe-bar".
+// Returns "" when nothing usable remains.
+func Slugify(title string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(strings.ToLower(title)) {
+		if unicode.Is(unicode.Mn, r) {
+			continue // combining marks left over from decomposed accents
+		}
+		b.WriteRune(r)
+	}
+	out := strings.Trim(slugCleanRe.ReplaceAllString(b.String(), "-"), "-")
+	if len(out) > 80 {
+		out = strings.Trim(out[:80], "-")
+	}
+	return out
+}
 
 // NormalizeSlug lowercases s and trims whitespace and surrounding slashes,
 // so "/About-Us/" becomes "about-us".
@@ -219,8 +241,8 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content)
-		SELECT page_id, region, locale, 'published', sort, kind, snippet_key, content
+		INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content, settings)
+		SELECT page_id, region, locale, 'published', sort, kind, snippet_key, content, settings
 		FROM cms_blocks WHERE page_id = $1 AND status = 'draft'`, pageID); err != nil {
 		return err
 	}

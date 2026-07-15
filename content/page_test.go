@@ -16,6 +16,28 @@ func TestNormalizeSlug(t *testing.T) {
 	}
 }
 
+func TestSlugify(t *testing.T) {
+	cases := map[string]string{
+		"About Us":        "about-us",
+		"Café & Bar!":     "cafe-bar",
+		"  Über uns  ":    "uber-uns",
+		"FAQ":             "faq",
+		"Prix / Tarifs":   "prix-tarifs",
+		"!!!":             "",
+		"Services—2026":   "services-2026",
+	}
+	for in, want := range cases {
+		if got := Slugify(in); got != want {
+			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, s := range []string{Slugify("About Us"), Slugify("Café & Bar!")} {
+		if s != "" && !ValidSlug(s) {
+			t.Errorf("Slugify output %q is not a valid slug", s)
+		}
+	}
+}
+
 func TestValidSlug(t *testing.T) {
 	valid := []string{"", "about", "about-us", "news/2026/launch", "a1-b2"}
 	invalid := []string{"About", "a b", "a_b", "a//b", "/about", "about/", "café"}

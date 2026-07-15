@@ -54,6 +54,13 @@ type EditorStyle = render.EditorStyle
 // snippets.Snippet.
 type Snippet = snippets.Snippet
 
+// SectionStyles is the curated set of section backgrounds and widths; see
+// render.SectionStyles.
+type SectionStyles = render.SectionStyles
+
+// SectionOption is one background or width choice; see render.SectionOption.
+type SectionOption = render.SectionOption
+
 // Config holds everything the host application provides to the CMS.
 type Config struct {
 	// DB is the Postgres connection pool. Required. All CMS tables are
@@ -118,6 +125,12 @@ type Config struct {
 	// Snippet classes need safelisting like editor styles do.
 	Snippets []Snippet
 
+	// SectionStyles are the curated background and width options for
+	// sections regions ({{cmsSections "name"}}). Nil gets the
+	// Tailwind-first defaults (render.DefaultSectionStyles). The classes
+	// need safelisting like editor styles do.
+	SectionStyles *SectionStyles
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -159,6 +172,9 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.Snippets == nil {
 		cfg.Snippets = snippets.DefaultSnippets()
 	}
+	if cfg.SectionStyles == nil {
+		cfg.SectionStyles = render.DefaultSectionStyles()
+	}
 
 	sessions := scs.New()
 	sessions.Store = sessionstore.New(cfg.DB)
@@ -174,7 +190,7 @@ func New(cfg Config) (*CMS, error) {
 	var renderer *render.Renderer
 	if cfg.TemplateFS != nil {
 		var err error
-		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates)
+		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates, cfg.SectionStyles)
 		if err != nil {
 			return nil, err
 		}
@@ -210,6 +226,7 @@ func New(cfg Config) (*CMS, error) {
 		Media:          mediaManager,
 		Snippets:       snippets.NewStore(cfg.DB),
 		ConfigSnippets: cfg.Snippets,
+		SectionStyles:  cfg.SectionStyles,
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
 		DefaultLocale:  cfg.Locales[0],
@@ -336,12 +353,14 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		}
 		edit = &render.EditInfo{
 			PageID:       page.ID,
+			Slug:         page.Slug,
 			AdminPath:    c.cfg.AdminPath,
 			CSRFToken:    csrf,
 			Locale:       locale,
 			Status:       string(page.Status),
 			MediaEnabled: c.media != nil,
 			Styles:       c.cfg.EditorStyles,
+			Sections:     c.cfg.SectionStyles,
 		}
 	}
 
