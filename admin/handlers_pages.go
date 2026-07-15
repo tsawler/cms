@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -21,12 +22,17 @@ import (
 // allowed so framework-styled markup (e.g. Tailwind) survives. Inline
 // styles are stripped except text-align with known values, which is how
 // the editor's alignment buttons work.
+var pixelHeightRe = regexp.MustCompile(`^[0-9]{1,4}px$`)
+
 var editorHTMLPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class").Globally()
 	p.AllowStyles("text-align").MatchingEnum("left", "right", "center", "justify").Globally()
 	// Used by snippets (e.g. quote cards).
 	p.AllowElements("figure", "figcaption")
+	// The "Flexible space" snippet stores its height on the element.
+	p.AllowStyles("height").Matching(pixelHeightRe).Globally()
+	p.AllowAttrs("data-height").Matching(pixelHeightRe).OnElements("div")
 	return p
 }()
 

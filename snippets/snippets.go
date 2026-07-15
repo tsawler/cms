@@ -55,6 +55,10 @@ func DefaultSnippets() []Snippet {
 		{Name: "Button link", HTML: `<p class="not-prose my-4">
 <a href="#" class="inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
 </p>`},
+		// Invisible on the live site; in edit mode the editor script makes
+		// it visible and click-to-adjust (see editor.js and the height
+		// allowance in the sanitizer policy).
+		{Name: "Flexible space", HTML: `<div class="cms-spacer" data-height="48px" style="height:48px"></div>`},
 	}
 }
 

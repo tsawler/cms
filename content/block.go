@@ -52,6 +52,20 @@ func (s *Store) BlocksFor(ctx context.Context, pageID int64, locale string, stat
 	})
 }
 
+// HasUnpublishedChanges reports whether a page's draft blocks differ from
+// its published blocks in any way (content, order, settings, or blocks
+// added/removed) for the locale.
+func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64, locale string) (bool, error) {
+	const blockSet = `SELECT region, sort, kind, coalesce(snippet_key, ''), content, settings::text
+		FROM cms_blocks WHERE page_id = $1 AND locale = $2 AND status = `
+	var changed bool
+	err := s.db.QueryRow(ctx, `
+		SELECT EXISTS ((`+blockSet+`'draft') EXCEPT (`+blockSet+`'published'))
+		    OR EXISTS ((`+blockSet+`'published') EXCEPT (`+blockSet+`'draft'))`,
+		pageID, locale).Scan(&changed)
+	return changed, err
+}
+
 // SectionInput is one section supplied to ReplaceDraftSections.
 type SectionInput struct {
 	Settings map[string]string

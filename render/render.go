@@ -192,7 +192,11 @@ type EditInfo struct {
 	CSRFToken    string
 	Locale       string
 	Status       string // "draft" or "published"
-	MediaEnabled bool
+	// HasUnpublished is true when a published page's draft content
+	// differs from what is live — the editor shows "Unpublished changes"
+	// and keeps Publish available.
+	HasUnpublished bool
+	MediaEnabled   bool
 	Styles       []EditorStyle  // entries for the editor's Styles menu
 	Sections     *SectionStyles // options for section settings
 }
@@ -389,6 +393,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.MediaEnabled {
 		mediaFlag = "1"
 	}
+	unpubFlag := "0"
+	if edit.HasUnpublished {
+		unpubFlag = "1"
+	}
 	stylesJSON, err := json.Marshal(edit.Styles)
 	if err != nil || edit.Styles == nil {
 		stylesJSON = []byte("[]")
@@ -411,6 +419,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-admin-path="` + html.EscapeString(edit.AdminPath) + `"` +
 		` data-csrf="` + html.EscapeString(edit.CSRFToken) + `"` +
 		` data-status="` + html.EscapeString(edit.Status) + `"` +
+		` data-unpublished="` + unpubFlag + `"` +
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"` +

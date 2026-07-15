@@ -169,8 +169,10 @@ places:
 
 - **`Config.Snippets`** — per-customer components, versioned with your
   code. Nil gets a Tailwind-first default library (callout,
-  call-to-action, two columns, quote, button link); an empty slice ships
-  none.
+  call-to-action, two columns, quote, button link, flexible space); an
+  empty slice ships none. The **flexible space** is invisible on the live
+  site but shows as a striped, labelled band while editing — click it to
+  set its height in pixels.
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks created
   after deployment.
 

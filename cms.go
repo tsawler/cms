@@ -359,16 +359,25 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 			return
 		}
+		hasUnpublished := false
+		if page.Status == content.StatusPublished {
+			hasUnpublished, err = c.content.HasUnpublishedChanges(r.Context(), page.ID, locale)
+			if err != nil {
+				c.cfg.Logger.Error("cms: checking unpublished changes", "slug", slug, "err", err)
+				hasUnpublished = false
+			}
+		}
 		edit = &render.EditInfo{
-			PageID:       page.ID,
-			Slug:         page.Slug,
-			AdminPath:    c.cfg.AdminPath,
-			CSRFToken:    csrf,
-			Locale:       locale,
-			Status:       string(page.Status),
-			MediaEnabled: c.media != nil,
-			Styles:       c.cfg.EditorStyles,
-			Sections:     c.cfg.SectionStyles,
+			PageID:         page.ID,
+			Slug:           page.Slug,
+			AdminPath:      c.cfg.AdminPath,
+			CSRFToken:      csrf,
+			Locale:         locale,
+			Status:         string(page.Status),
+			HasUnpublished: hasUnpublished,
+			MediaEnabled:   c.media != nil,
+			Styles:         c.cfg.EditorStyles,
+			Sections:       c.cfg.SectionStyles,
 		}
 	}
 

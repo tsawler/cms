@@ -16,6 +16,8 @@
     var csrf = cfg.csrf;
     var mediaEnabled = cfg.media === "1";
     var pageStatus = cfg.status || "draft";
+    // True when a published page's saved draft differs from what's live.
+    var hasUnpublished = cfg.unpublished === "1";
 
     // The Styles menu: named, on-brand styles configured on the server.
     // Each applies CSS classes, so the site's stylesheet stays in charge.
@@ -91,6 +93,7 @@
         ".brand{font-weight:700;letter-spacing:.04em}" +
         ".chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}" +
         ".chip.published{background:#1e7e4e}" +
+        ".chip.changes{background:#b45309;text-transform:none}" +
         ".msg{opacity:.75;font-size:12px;max-width:16em;overflow:hidden;text-overflow:ellipsis}" +
         ".bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);" +
         "border-radius:999px;padding:5px 12px;cursor:pointer}" +
@@ -290,7 +293,7 @@
 
     var $ = function (id) { return shadow.getElementById(id); };
     $("admin").href = adminPath + "/";
-    setChip(pageStatus);
+    updateChip();
 
     /* ------------------------------------------------------------------ *
      * Dialogs — styled replacements for window.confirm / window.prompt
@@ -308,7 +311,7 @@
             $("dlg-msg").textContent = opts.message;
             var input = $("dlg-input");
             input.hidden = !opts.prompt;
-            input.value = "";
+            input.value = opts.value || "";
             input.placeholder = opts.placeholder || "";
             var fields = $("dlg-fields");
             fields.innerHTML = "";
@@ -355,8 +358,8 @@
     function cmsConfirm(message, okLabel, danger) {
         return openDialog({ message: message, okLabel: okLabel, danger: danger });
     }
-    function cmsPrompt(message, placeholder, okLabel) {
-        return openDialog({ message: message, prompt: true, placeholder: placeholder, okLabel: okLabel });
+    function cmsPrompt(message, placeholder, okLabel, value) {
+        return openDialog({ message: message, prompt: true, placeholder: placeholder, okLabel: okLabel, value: value });
     }
 
     function dialogOK() {
@@ -429,7 +432,16 @@
         ".cms-add-section{padding:14px;text-align:center}" +
         ".cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;" +
         "border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}" +
-        ".cms-add-section button:hover{background:#dbe4fa}";
+        ".cms-add-section button:hover{background:#dbe4fa}" +
+        /* Flexible-space snippet: invisible on the live site, visible and
+         * click-to-adjust while editing. */
+        ".cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;" +
+        "outline:1.5px dashed rgba(217,119,6,.55);outline-offset:-2px;" +
+        "background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.06) 8px,transparent 8px,transparent 16px)}" +
+        ".cms-editing .cms-spacer:hover{outline-style:solid}" +
+        ".cms-editing .cms-spacer::after{content:'↕ Space · ' attr(data-height) ' — click to adjust';" +
+        "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);" +
+        "font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}";
     document.head.appendChild(lightCss);
 
     /* ------------------------------------------------------------------ *
@@ -650,6 +662,7 @@
             closeMenuPanel();
             pendingSection = null;
         }
+        updateBarButtons();
         textRegions().forEach(function (el) {
             if (on) {
                 el.setAttribute("contenteditable", "plaintext-only");
@@ -674,16 +687,29 @@
         dirty[name] = true;
         $("save").disabled = false;
         setMsg("Unsaved changes");
+        updateBarButtons();
     }
 
     function markSectionsDirty(region) {
         sectionsDirty[region] = true;
         $("save").disabled = false;
         setMsg("Unsaved changes");
+        updateBarButtons();
     }
 
     function hasUnsaved() {
         return Object.keys(dirty).length > 0 || Object.keys(sectionsDirty).length > 0;
+    }
+
+    // updateBarButtons keeps the edit bar honest about the page's state:
+    // while just viewing, Save draft and Publish are hidden — except that
+    // Publish stays whenever there is something publishable: a draft page
+    // (making it live is the primary action), saved-but-unpublished
+    // changes, or unsaved work from a minimized session.
+    function updateBarButtons() {
+        var working = editing || hasUnsaved();
+        $("save").hidden = !working;
+        $("publish").hidden = !working && pageStatus === "published" && !hasUnpublished;
     }
 
     document.addEventListener("input", function (e) {
@@ -691,6 +717,37 @@
         var el = e.target.closest ? e.target.closest('[data-cms-region][data-cms-kind="text"]') : null;
         if (el) markDirty(el.dataset.cmsRegion);
     });
+
+    // Flexible-space snippets: click one while editing to set its height.
+    document.addEventListener("click", function (e) {
+        if (!editing) return;
+        var sp = e.target.closest ? e.target.closest(".cms-spacer") : null;
+        if (!sp) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var current = parseInt(sp.style.height, 10) || 48;
+        cmsPrompt("Height of the space, in pixels", "e.g. 60", "Set height", String(current)).then(function (v) {
+            if (v === null || v === "") return;
+            var n = parseInt(v, 10);
+            if (isNaN(n) || n < 4 || n > 800) {
+                setMsg("Enter a height between 4 and 800 pixels.");
+                return;
+            }
+            sp.style.height = n + "px";
+            sp.setAttribute("data-height", n + "px");
+            // TinyMCE restores style attributes from its shadow
+            // data-mce-style at serialization, which would undo a direct
+            // DOM change — keep it in sync so the new height saves.
+            sp.setAttribute("data-mce-style", "height: " + n + "px;");
+            var regionEl = sp.closest("[data-cms-region]");
+            if (regionEl) {
+                markDirty(regionEl.getAttribute("data-cms-region"));
+                return;
+            }
+            var container = sp.closest("[data-cms-sections]");
+            if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
+        });
+    }, true);
 
     document.addEventListener("click", function (e) {
         if (!editing || !mediaEnabled) return;
@@ -719,10 +776,20 @@
      * ------------------------------------------------------------------ */
 
     function setMsg(text) { $("msg").textContent = text || ""; }
-    function setChip(status) {
+
+    // The chip has three states: draft (never/no longer live), published
+    // (live and in sync), and "Unpublished changes" (live, but the saved
+    // draft differs — the state that makes drafts trustworthy).
+    function updateChip() {
         var chip = $("chip");
-        chip.textContent = status;
-        chip.classList.toggle("published", status === "published");
+        chip.classList.remove("published", "changes");
+        if (pageStatus === "published" && hasUnpublished) {
+            chip.textContent = "Unpublished changes";
+            chip.classList.add("changes");
+        } else {
+            chip.textContent = pageStatus;
+            chip.classList.toggle("published", pageStatus === "published");
+        }
     }
 
     function collect() {
@@ -810,7 +877,14 @@
             });
             sectionEditors.forEach(function (s) { s.ed.setDirty(false); });
             $("save").disabled = true;
-            setMsg("Draft saved");
+            if (pageStatus === "published") {
+                hasUnpublished = true;
+                setMsg("Draft saved — publish when you're ready to make it live");
+            } else {
+                setMsg("Draft saved");
+            }
+            updateChip();
+            updateBarButtons();
         });
     }
 
@@ -819,8 +893,11 @@
             setMsg("Publishing…");
             return api("/pages/" + pageId + "/publish", { method: "POST" });
         }).then(function () {
-            setChip("published");
+            pageStatus = "published";
+            hasUnpublished = false;
+            updateChip();
             setMsg("Published ✓");
+            updateBarButtons();
         }).catch(function (err) { setMsg(err.message); });
     }
 
@@ -835,6 +912,7 @@
             imageValues = {};
             $("save").disabled = true;
             setMsg("");
+            updateBarButtons();
         };
         if (hasUnsaved()) {
             cmsConfirm("Discard your unsaved changes? The page will go back to how it was before you started editing.",
@@ -898,6 +976,8 @@
             setBarMinimized(true);
         }
     } catch (e) { /* private mode */ }
+
+    updateBarButtons();
 
     /* ------------------------------------------------------------------ *
      * Snippet drawer

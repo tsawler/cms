@@ -19,6 +19,9 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<a href="https://example.com">link</a>` +
 		`<a href="/cms/media/abc/q3-report.pdf">the report</a>` +
 		`<figure class="not-prose"><blockquote>q</blockquote><figcaption>who</figcaption></figure>` +
+		`<div class="cms-spacer" data-height="120px" style="height: 120px"></div>` +
+		`<div style="height: 50vh">viewport tricks</div>` +
+		`<div data-height="junk">bad badge</div>` +
 		`<img src="/cms/media/abc123/web.jpg" alt="pic" width="800" height="400">` +
 		`<img src="https://bucket.example.com/media/x/web.jpg" alt="ext">` +
 		`<script>alert(1)</script>` +
@@ -39,12 +42,14 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`src="https://bucket.example.com/media/x/web.jpg"`,
 		`href="/cms/media/abc/q3-report.pdf"`,
 		`<figure class="not-prose"><blockquote>q</blockquote><figcaption>who</figcaption></figure>`,
+		`data-height="120px"`,
+		`height: 120px`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)
 		}
 	}
-	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color"} {
+	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color", "50vh", `data-height="junk"`} {
 		if strings.Contains(out, banned) {
 			t.Errorf("sanitized output kept %q:\n%s", banned, out)
 		}
