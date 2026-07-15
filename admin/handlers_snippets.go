@@ -1,0 +1,153 @@
+package admin
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/tsawler/cms/snippets"
+)
+
+func (s *server) snippetsList(w http.ResponseWriter, r *http.Request) {
+	stored, err := s.deps.Snippets.All(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	data := s.newTemplateData(r)
+	data.Snippets = stored
+	data.ConfigSnippets = s.deps.ConfigSnippets
+	s.render(w, http.StatusOK, "snippets", data)
+}
+
+func (s *server) snippetNew(w http.ResponseWriter, r *http.Request) {
+	data := s.newTemplateData(r)
+	data.IsNew = true
+	data.FormSnippet = &snippets.Snippet{}
+	s.render(w, http.StatusOK, "snippet_form", data)
+}
+
+func (s *server) snippetCreate(w http.ResponseWriter, r *http.Request) {
+	form, errs := parseSnippetForm(r)
+	if len(errs) > 0 {
+		s.renderSnippetForm(w, r, form, true, errs)
+		return
+	}
+	if _, err := s.deps.Snippets.Insert(r.Context(), form); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Snippet created — it's now available in the editor's palette.")
+	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
+}
+
+func (s *server) snippetEdit(w http.ResponseWriter, r *http.Request) {
+	sn, ok := s.snippetFromURL(w, r)
+	if !ok {
+		return
+	}
+	s.renderSnippetForm(w, r, sn, false, nil)
+}
+
+func (s *server) snippetUpdate(w http.ResponseWriter, r *http.Request) {
+	existing, ok := s.snippetFromURL(w, r)
+	if !ok {
+		return
+	}
+	form, errs := parseSnippetForm(r)
+	form.ID = existing.ID
+	if len(errs) > 0 {
+		s.renderSnippetForm(w, r, form, false, errs)
+		return
+	}
+	if err := s.deps.Snippets.Update(r.Context(), form); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Snippet saved.")
+	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
+}
+
+func (s *server) snippetDelete(w http.ResponseWriter, r *http.Request) {
+	sn, ok := s.snippetFromURL(w, r)
+	if !ok {
+		return
+	}
+	if err := s.deps.Snippets.Delete(r.Context(), sn.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Snippet deleted. Copies already inserted into pages are unchanged.")
+	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
+}
+
+func parseSnippetForm(r *http.Request) (*snippets.Snippet, map[string]string) {
+	errs := map[string]string{}
+	sn := &snippets.Snippet{
+		Name: strings.TrimSpace(r.PostFormValue("name")),
+		HTML: strings.TrimSpace(r.PostFormValue("html")),
+	}
+	if sn.Name == "" {
+		errs["name"] = "Name is required."
+	}
+	if sn.HTML == "" {
+		errs["html"] = "The snippet needs some HTML."
+	}
+	return sn, errs
+}
+
+func (s *server) renderSnippetForm(w http.ResponseWriter, r *http.Request, sn *snippets.Snippet, isNew bool, errs map[string]string) {
+	status := http.StatusOK
+	if len(errs) > 0 {
+		status = http.StatusUnprocessableEntity
+	}
+	data := s.newTemplateData(r)
+	data.FormSnippet = sn
+	data.IsNew = isNew
+	data.FormErrors = errs
+	s.render(w, status, "snippet_form", data)
+}
+
+func (s *server) snippetFromURL(w http.ResponseWriter, r *http.Request) (*snippets.Snippet, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	sn, err := s.deps.Snippets.GetByID(r.Context(), id)
+	if errors.Is(err, snippets.ErrNotFound) {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return nil, false
+	}
+	return sn, true
+}
+
+// apiSnippetsList returns every snippet — config-registered first, then
+// admin-created — for the editor's palette.
+// GET /api/snippets
+func (s *server) apiSnippetsList(w http.ResponseWriter, r *http.Request) {
+	stored, err := s.deps.Snippets.All(r.Context())
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api listing snippets", "err", err)
+		jsonError(w, http.StatusInternalServerError, "Could not load snippets.")
+		return
+	}
+	type snippetJSON struct {
+		Name string `json:"name"`
+		HTML string `json:"html"`
+	}
+	out := make([]snippetJSON, 0, len(s.deps.ConfigSnippets)+len(stored))
+	for _, sn := range s.deps.ConfigSnippets {
+		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML})
+	}
+	for _, sn := range stored {
+		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"snippets": out})
+}

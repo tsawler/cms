@@ -16,6 +16,12 @@
         <p>Not configured — the host application must set TemplateFS and PageTemplates.</p>
     </div>
     {{end}}
+    {{if and .PagesEnabled (eq .User.Role "admin")}}
+    <a class="cms-card" href="{{.AdminPath}}/snippets">
+        <h2>Snippets</h2>
+        <p>Ready-made blocks editors can drop into pages.</p>
+    </a>
+    {{end}}
     {{if eq .User.Role "admin"}}
     <a class="cms-card" href="{{.AdminPath}}/users">
         <h2>Users</h2>

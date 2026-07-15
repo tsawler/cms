@@ -38,6 +38,7 @@
     var pickerHandler = null; // function(mediaItem) while the picker is open
     var pickerKind = "image"; // "image" or "file" while the picker is open
     var mceEditors = {}; // region name -> TinyMCE editor instance
+    var lastEditorName = null; // region whose editor most recently had focus
     var snapshot = null; // page state captured when Edit was pressed
 
     var DOC_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip";
@@ -124,6 +125,25 @@
         ".items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
         ".items.list .sz{color:#667085;font-size:12px;white-space:nowrap}" +
         ".empty{color:#667085;font-size:13px}" +
+        /* ---- snippet drawer (non-modal, so drag-and-drop can reach the page) ---- */
+        ".drawer{position:fixed;top:0;right:0;bottom:0;width:300px;z-index:2147482997;" +
+        "background:#fff;color:#1c2128;box-shadow:-8px 0 32px rgba(0,0,0,.18);" +
+        "display:flex;flex-direction:column;transform:translateX(105%);transition:transform .25s ease}" +
+        ".drawer.on{transform:translateX(0)}" +
+        ".drawer .dhead{display:flex;align-items:center;justify-content:space-between;" +
+        "padding:14px 16px;border-bottom:1px solid #e3e6ea}" +
+        ".drawer .dhead h2{margin:0;font-size:15px}" +
+        ".drawer .dhead button{border:none;background:none;font-size:20px;line-height:1;" +
+        "padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}" +
+        ".drawer .dhead button:hover{background:#eceef1;color:#1c2128}" +
+        ".drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}" +
+        ".drawer .dlist{flex:1;overflow-y:auto;padding:12px}" +
+        ".snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;" +
+        "cursor:grab;background:#fff}" +
+        ".snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}" +
+        ".snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}" +
+        ".snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;" +
+        "-webkit-line-clamp:2;-webkit-box-orient:vertical}" +
         /* ---- small dialog (replaces window.confirm / window.prompt) ---- */
         ".dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}" +
         ".dlg-overlay.on{display:block}" +
@@ -149,6 +169,7 @@
         '<span class="chip" id="chip"></span>' +
         '<span class="msg" id="msg"></span>' +
         '<button id="edit">Edit page</button>' +
+        '<button id="snippets" hidden>Snippets</button>' +
         '<button id="cancel" hidden>Cancel</button>' +
         '<button id="save" disabled>Save draft</button>' +
         '<button id="publish" class="primary">Publish</button>' +
@@ -175,6 +196,12 @@
         '<div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div>' +
         '<div class="items grid" id="grid"></div>' +
         "</div></div></div>" +
+        '<div class="drawer" id="drawer">' +
+        '<div class="dhead"><h2>Snippets</h2>' +
+        '<button id="drawer-close" title="Close" aria-label="Close">×</button></div>' +
+        '<div class="dhint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
+        '<div class="dlist" id="snip-list"></div>' +
+        "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
@@ -348,6 +375,7 @@
                 contextmenu: false,
                 setup: function (ed) {
                     mceEditors[name] = ed;
+                    ed.on("focus", function () { lastEditorName = name; });
                     // Both media buttons skip TinyMCE's URL dialogs and go
                     // straight to the CMS media picker (library + upload).
                     if (mediaEnabled) {
@@ -453,6 +481,8 @@
         document.body.classList.toggle("cms-editing", on);
         $("edit").textContent = on ? "Done editing" : "Edit page";
         $("cancel").hidden = !on;
+        $("snippets").hidden = !on;
+        if (!on) closeDrawer();
         textRegions().forEach(function (el) {
             if (on) {
                 el.setAttribute("contenteditable", "plaintext-only");
@@ -621,6 +651,87 @@
             setMsg("Unsaved changes");
         }
     });
+
+    /* ------------------------------------------------------------------ *
+     * Snippet drawer
+     * ------------------------------------------------------------------ */
+
+    var snippetsLoaded = false;
+
+    function openDrawer() {
+        $("drawer").classList.add("on");
+        if (!snippetsLoaded) loadSnippets();
+    }
+    function closeDrawer() {
+        $("drawer").classList.remove("on");
+    }
+
+    $("snippets").addEventListener("click", function () {
+        if ($("drawer").classList.contains("on")) closeDrawer();
+        else openDrawer();
+    });
+    $("drawer-close").addEventListener("click", closeDrawer);
+
+    function loadSnippets() {
+        var list = $("snip-list");
+        list.innerHTML = '<span class="empty">Loading…</span>';
+        api("/snippets", { method: "GET" }).then(function (body) {
+            snippetsLoaded = true;
+            list.innerHTML = "";
+            if (!body.snippets || body.snippets.length === 0) {
+                list.innerHTML = '<span class="empty">No snippets available.</span>';
+                return;
+            }
+            body.snippets.forEach(function (sn) {
+                var card = document.createElement("div");
+                card.className = "snip";
+                card.draggable = true;
+                var nm = document.createElement("p");
+                nm.className = "sname";
+                nm.textContent = sn.name;
+                var desc = document.createElement("p");
+                desc.className = "sdesc";
+                var probe = document.createElement("div");
+                probe.innerHTML = sn.html;
+                desc.textContent = (probe.textContent || "").trim().replace(/\s+/g, " ").slice(0, 90);
+                card.appendChild(nm);
+                card.appendChild(desc);
+                // Drag: TinyMCE accepts text/html drops and inserts the
+                // markup at the drop caret inside any rich region.
+                card.addEventListener("dragstart", function (e) {
+                    e.dataTransfer.setData("text/html", sn.html);
+                    e.dataTransfer.setData("text/plain", sn.name);
+                    e.dataTransfer.effectAllowed = "copy";
+                });
+                // Click: insert at the cursor in the most recently focused
+                // rich region (or the first one).
+                card.addEventListener("click", function () { insertSnippet(sn); });
+                list.appendChild(card);
+            });
+        }).catch(function (err) {
+            list.innerHTML = "";
+            var span = document.createElement("span");
+            span.className = "empty";
+            span.textContent = err.message;
+            list.appendChild(span);
+        });
+    }
+
+    function insertSnippet(sn) {
+        var name = lastEditorName;
+        if (!name || !mceEditors[name]) {
+            name = Object.keys(mceEditors)[0];
+        }
+        var ed = name && mceEditors[name];
+        if (!ed) {
+            setMsg("Click into a content area first, then insert the snippet.");
+            return;
+        }
+        ed.focus();
+        ed.insertContent(sn.html);
+        markDirty(name);
+        setMsg("Snippet inserted — click it to edit the text");
+    }
 
     /* ------------------------------------------------------------------ *
      * Media picker

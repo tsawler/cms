@@ -1,0 +1,50 @@
+{{define "title"}}Snippets — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>Snippets</h1>
+    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/snippets/new">New snippet</a>
+</div>
+
+<p class="cms-muted">Snippets are ready-made blocks editors can insert into pages
+from the editor's palette. Deleting one never changes pages that already use it.</p>
+
+<table class="cms-table">
+    <thead>
+    <tr>
+        <th>Name</th>
+        <th>Updated</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    {{range .Snippets}}
+    <tr>
+        <td>{{.Name}}</td>
+        <td>{{.UpdatedAt.Format "Jan 2, 2006"}}</td>
+        <td class="cms-table-actions cms-actions">
+            <a class="cms-btn cms-btn-ghost cms-btn-sm" href="{{$.AdminPath}}/snippets/{{.ID}}">Edit</a>
+            <form method="post" action="{{$.AdminPath}}/snippets/{{.ID}}/delete"
+                  data-confirm="Delete this snippet? Pages already using it keep their copy.">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+            </form>
+        </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="3" class="cms-muted">No custom snippets yet.</td></tr>
+    {{end}}
+    </tbody>
+</table>
+
+{{if .ConfigSnippets}}
+<h2 class="cms-section-head">Built-in snippets</h2>
+<p class="cms-muted">These come from the site's code and can't be edited here.</p>
+<table class="cms-table">
+    <thead><tr><th>Name</th></tr></thead>
+    <tbody>
+    {{range .ConfigSnippets}}<tr><td>{{.Name}}</td></tr>{{end}}
+    </tbody>
+</table>
+{{end}}
+{{end}}

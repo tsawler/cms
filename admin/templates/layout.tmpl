@@ -16,6 +16,7 @@
         <a href="{{.AdminPath}}/">Dashboard</a>
         {{if .PagesEnabled}}<a href="{{.AdminPath}}/pages">Pages</a>{{end}}
         {{if .MediaEnabled}}<a href="{{.AdminPath}}/media">Media</a>{{end}}
+        {{if and .PagesEnabled (eq .User.Role "admin")}}<a href="{{.AdminPath}}/snippets">Snippets</a>{{end}}
         {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">Users</a>{{end}}
     </nav>
     <div class="cms-topbar-right">

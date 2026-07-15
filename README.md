@@ -5,14 +5,14 @@ as a module, hand it a Postgres pool, and mount its handlers — no external
 files, no separate install. See [DESIGN.md](DESIGN.md) for the full
 architecture and build plan.
 
-**Status: phase 4 (in-place editing).** Auth, user management, page CRUD
-with draft/publish, public rendering through the host's own templates, the
-media library (any S3-compatible bucket, automatic resizing), and in-place
-editing are working: log in, browse the site, click Edit, change text and
-images directly on the page, save drafts, publish. Rich regions use
-TinyMCE 6 (the last MIT release, vendored and self-hosted) in inline mode
-with a floating selection toolbar. Snippets, blog/news, and FR/EN
-localization are next.
+**Status: phase 5 (snippets).** Auth, user management, page CRUD with
+draft/publish, public rendering through the host's own templates, the
+media library (any S3-compatible bucket, automatic resizing, folders and
+search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
+self-hosted), the curated Styles menu, and the snippet palette are all
+working: log in, browse the site, click Edit, change text and images
+directly on the page, drop in ready-made blocks, save drafts, publish.
+Blog/news and FR/EN localization are next.
 
 To make an image editable in place, add `data-cms-image` to the tag:
 
@@ -147,6 +147,48 @@ Rules of thumb:
   classes — the mechanism doesn't require Tailwind.
 - `EditorStyles: []cms.EditorStyle{}` (empty, non-nil) removes the Styles
   dropdown altogether.
+
+## Snippets
+
+While editing a page, the **Snippets** button opens a drawer of ready-made
+blocks: drag one onto a rich region (or click to insert at the cursor),
+then edit its text and images in place like any other content. Snippets
+come from two places:
+
+- **`Config.Snippets`** — per-customer components, versioned with your
+  code. Nil gets a Tailwind-first default library (callout,
+  call-to-action, two columns, quote, button link); an empty slice ships
+  none.
+- **The admin UI** (`/admin/snippets`, admins only) — for blocks created
+  after deployment.
+
+```go
+Snippets: []cms.Snippet{
+    {Name: "Pricing card", HTML: `<div class="not-prose rounded-xl border p-6">
+        <p class="text-3xl font-bold">$99</p>
+        <p class="text-slate-600">per month</p></div>`},
+},
+```
+
+Guidelines: wrap components in `not-prose` so Tailwind Typography doesn't
+restyle their internals; avoid `<script>` and SVG (stripped when
+editor-role users save); and **safelist every class that appears only in
+snippets** — the same database-content rule as the Styles menu. For the
+default library add:
+
+```js
+safelist: [
+    "not-prose", "rounded-lg", "rounded-xl", "border", "border-blue-200",
+    "border-slate-200", "bg-blue-50", "bg-blue-600", "bg-slate-50",
+    "bg-slate-900", "p-4", "p-6", "px-5", "py-2.5", "text-blue-900",
+    "text-white", "text-slate-600", "text-slate-700", "text-center",
+    "font-semibold", "font-bold", "mb-1", "mb-3", "mt-3", "my-4", "my-6",
+    "grid", "gap-6", "sm:grid-cols-2", "inline-block",
+],
+```
+
+Deleting a snippet never changes pages that already inserted it — inserted
+snippets are ordinary page content.
 
 ## Running the example
 

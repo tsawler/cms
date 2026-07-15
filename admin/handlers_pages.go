@@ -24,6 +24,8 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class").Globally()
 	p.AllowStyles("text-align").MatchingEnum("left", "right", "center", "justify").Globally()
+	// Used by snippets (e.g. quote cards).
+	p.AllowElements("figure", "figcaption")
 	return p
 }()
 

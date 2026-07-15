@@ -35,6 +35,7 @@ import (
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/migrations"
 	"github.com/tsawler/cms/render"
+	"github.com/tsawler/cms/snippets"
 )
 
 // PageTemplate is one template the host application offers for pages; see
@@ -48,6 +49,10 @@ type S3Config = media.S3Config
 // EditorStyle is one entry in the in-place editor's Styles menu; see
 // render.EditorStyle.
 type EditorStyle = render.EditorStyle
+
+// Snippet is one pre-written HTML block for the editor's palette; see
+// snippets.Snippet.
+type Snippet = snippets.Snippet
 
 // Config holds everything the host application provides to the CMS.
 type Config struct {
@@ -105,6 +110,14 @@ type Config struct {
 	// it.
 	EditorStyles []EditorStyle
 
+	// Snippets are the host application's pre-written HTML blocks for
+	// the editor's palette (per-customer components, versioned with the
+	// code). Admins can add more in the admin UI; the palette shows
+	// both. Nil gets the Tailwind-first defaults
+	// (snippets.DefaultSnippets); an empty non-nil slice ships none.
+	// Snippet classes need safelisting like editor styles do.
+	Snippets []Snippet
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -142,6 +155,9 @@ func New(cfg Config) (*CMS, error) {
 	}
 	if cfg.EditorStyles == nil {
 		cfg.EditorStyles = render.DefaultEditorStyles()
+	}
+	if cfg.Snippets == nil {
+		cfg.Snippets = snippets.DefaultSnippets()
 	}
 
 	sessions := scs.New()
@@ -187,14 +203,16 @@ func New(cfg Config) (*CMS, error) {
 		objects:  objects,
 	}
 	c.admin = admin.New(admin.Deps{
-		Sessions:      sessions,
-		Users:         users,
-		Content:       contentStore,
-		Renderer:      renderer,
-		Media:         mediaManager,
-		Logger:        cfg.Logger,
-		AdminPath:     cfg.AdminPath,
-		DefaultLocale: cfg.Locales[0],
+		Sessions:       sessions,
+		Users:          users,
+		Content:        contentStore,
+		Renderer:       renderer,
+		Media:          mediaManager,
+		Snippets:       snippets.NewStore(cfg.DB),
+		ConfigSnippets: cfg.Snippets,
+		Logger:         cfg.Logger,
+		AdminPath:      cfg.AdminPath,
+		DefaultLocale:  cfg.Locales[0],
 	})
 	return c, nil
 }

@@ -189,13 +189,25 @@ form remains as the fallback/"source view" for the same content.
 
 ### 4. Snippets (drag & drop)
 
-A snippet is a named, pre-written HTML fragment with editable slots,
-registered two ways: by the developer in Go (`c.RegisterSnippet(...)` — this
-is how per-customer custom components ship) or created in the admin UI. The
-editor shows a palette panel; dragging a snippet into a `cmsRegion` inserts an
-instance whose text/images are then edited in place like everything else.
-Regions are internally a list of blocks (snippet instances + free-form rich
-text), which also provides reordering.
+A snippet is a named, pre-written HTML fragment, registered two ways: by
+the developer via `Config.Snippets` (per-customer components, versioned
+with the code) or created by admins in the admin UI. Nil config gets a
+Tailwind-first default library (callout, call-to-action, two columns,
+quote, button); snippet classes need safelisting like editor styles do.
+
+While editing, a **Snippets** button in the bar opens a non-modal side
+drawer. Dragging a card onto a rich region inserts the markup at the drop
+caret (TinyMCE accepts `text/html` drops natively); clicking a card
+inserts at the cursor of the most recently focused region. Once inserted,
+a snippet is ordinary region HTML — edited in place, sanitized on save
+(so default snippets avoid SVG/scripts), and styled by the host CSS.
+Deleting a snippet never affects pages that already used it.
+
+*Scope note:* snippets are fragments within a region's single HTML block,
+not a separate block model — regions are not split into reorderable block
+lists. Reordering inserted sections is manual (cut/paste or drag within
+the editable region). The `cms_blocks` schema still supports multi-block
+regions if a true block model is wanted later.
 
 ### 5. i18n — locale is a column, not a fork
 
@@ -301,7 +313,9 @@ the module self-contained and the surface area small.
    6 (MIT, vendored) inline editing for rich regions, click-to-replace
    images with media picker and upload, JSON save/publish API with
    sanitization
-5. **Snippets** — registry, palette, drag & drop, block reordering
+5. **Snippets** ✅ — config + admin-created registry, Tailwind-first
+   default library, palette drawer with click-to-insert and drag & drop
+   into regions
 6. **Blog & news** — posts, listing/detail helpers, RSS, categories/tags
 7. **i18n** — locale routing, fallback, in-place locale switching, FR admin
    strings

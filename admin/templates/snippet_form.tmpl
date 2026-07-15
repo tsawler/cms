@@ -1,0 +1,31 @@
+{{define "title"}}{{if .IsNew}}New snippet{{else}}Edit snippet{{end}} — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>{{if .IsNew}}New snippet{{else}}Edit snippet{{end}}</h1>
+    <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/snippets">Back to snippets</a>
+</div>
+
+<form class="cms-form cms-form-wide" method="post"
+      action="{{if .IsNew}}{{.AdminPath}}/snippets/new{{else}}{{.AdminPath}}/snippets/{{.FormSnippet.ID}}{{end}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <div class="cms-field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{.FormSnippet.Name}}" required>
+        {{with index .FormErrors "name"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        <p class="cms-hint">Shown in the editor's palette, e.g. "Pricing card".</p>
+    </div>
+
+    <div class="cms-field">
+        <label for="html">HTML</label>
+        <textarea id="html" name="html" rows="14" class="cms-code">{{.FormSnippet.HTML}}</textarea>
+        {{with index .FormErrors "html"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        <p class="cms-hint">Use the site's CSS classes (with Tailwind, remember to safelist any
+        class that appears only in snippets). Avoid scripts and SVG — they are removed when
+        editor-role users save a page.</p>
+    </div>
+
+    <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}Create snippet{{else}}Save changes{{end}}</button>
+</form>
+{{end}}

@@ -18,6 +18,7 @@ import (
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
+	"github.com/tsawler/cms/snippets"
 )
 
 //go:embed templates/*.tmpl
@@ -28,14 +29,16 @@ var staticFS embed.FS
 
 // Deps is everything the admin area needs from the rest of the CMS.
 type Deps struct {
-	Sessions      *scs.SessionManager
-	Users         *auth.Store
-	Content       *content.Store
-	Renderer      *render.Renderer // nil when the host has not configured templates
-	Media         *media.Manager   // nil when the host has not configured an object store
-	Logger        *slog.Logger
-	AdminPath     string
-	DefaultLocale string
+	Sessions       *scs.SessionManager
+	Users          *auth.Store
+	Content        *content.Store
+	Renderer       *render.Renderer // nil when the host has not configured templates
+	Media          *media.Manager   // nil when the host has not configured an object store
+	Snippets       *snippets.Store
+	ConfigSnippets []snippets.Snippet // host-registered palette entries
+	Logger         *slog.Logger
+	AdminPath      string
+	DefaultLocale  string
 }
 
 type server struct {
@@ -85,6 +88,18 @@ func New(d Deps) http.Handler {
 			// JSON API for the in-place editor.
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
+			r.Get("/api/snippets", s.apiSnippetsList)
+
+			// Snippet management (palette entries) is admin-only.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdmin)
+				r.Get("/snippets", s.snippetsList)
+				r.Get("/snippets/new", s.snippetNew)
+				r.Post("/snippets/new", s.snippetCreate)
+				r.Get("/snippets/{id}", s.snippetEdit)
+				r.Post("/snippets/{id}", s.snippetUpdate)
+				r.Post("/snippets/{id}/delete", s.snippetDelete)
+			})
 		}
 
 		if d.Media != nil {
@@ -118,7 +133,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media"}
+	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media", "snippets", "snippet_form"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -161,6 +176,11 @@ type templateData struct {
 	Folders      []media.Folder
 	MediaQuery   string // active search filter
 	MediaFolder  string // active folder filter ("", "root", or an id)
+
+	// Snippet pages.
+	Snippets       []snippets.Snippet // admin-created
+	ConfigSnippets []snippets.Snippet // registered in code
+	FormSnippet    *snippets.Snippet
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
