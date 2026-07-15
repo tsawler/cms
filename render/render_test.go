@@ -12,6 +12,7 @@ import (
 var testFS = fstest.MapFS{
 	"base.tmpl": &fstest.MapFile{Data: []byte(
 		`{{define "base"}}<html><head>{{cmsHead}}</head><body>` +
+			`<nav>{{range cmsMenu "main"}}<a href="{{.URL}}"{{if .Active}} class="act"{{end}}>{{.Label}}</a>{{end}}</nav>` +
 			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
 	"pages/home.tmpl": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
@@ -55,7 +56,7 @@ func TestRenderFillsRegionsAndEscapesText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
+	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -84,7 +85,7 @@ func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, nil, "en", nil); err != nil {
+	if err := r.Render(&buf, page, nil, "en", nil, nil); err != nil {
 		t.Fatalf("Render with no blocks: %v", err)
 	}
 	if !strings.Contains(buf.String(), "<div></div>") {
@@ -101,7 +102,7 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := r.Render(&buf, page, blocks, "en", &EditInfo{
+	err := r.Render(&buf, page, blocks, "en", nil, &EditInfo{
 		PageID: 7, AdminPath: "/admin", CSRFToken: "tok123", Locale: "en",
 		Status: "draft", MediaEnabled: true,
 		Styles: []EditorStyle{{Label: "Red", Class: "text-red-600"}},
@@ -131,7 +132,7 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 
 	// A plain render of the same page must carry no editor artifacts.
 	buf.Reset()
-	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
+	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
 		t.Fatalf("plain Render: %v", err)
 	}
 	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath) {
@@ -143,6 +144,65 @@ func TestNewRejectsUnknownPageTemplate(t *testing.T) {
 	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.tmpl", Label: "X"}}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing page template file")
+	}
+}
+
+func TestBuildMenus(t *testing.T) {
+	pid := func(id int64) *int64 { return &id }
+	slug := func(s string) *string { return &s }
+	status := func(s content.Status) *content.Status { return &s }
+
+	items := []content.MenuItem{
+		{Menu: "main", Label: "Home", PageID: pid(1), PageSlug: slug(""), PageStatus: status(content.StatusPublished)},
+		{Menu: "main", Label: "About", PageID: pid(2), PageSlug: slug("about"), PageStatus: status(content.StatusPublished)},
+		{Menu: "main", Label: "Secret", PageID: pid(3), PageSlug: slug("secret"), PageStatus: status(content.StatusDraft)},
+		{Menu: "main", Label: "Docs", URL: "https://example.com/docs", NewTab: true},
+		{Menu: "main", Label: "Broken", URL: "   "},
+		{Menu: "footer", Label: "Privacy", PageID: pid(4), PageSlug: slug("privacy"), PageStatus: status(content.StatusPublished)},
+	}
+
+	// Public render of /about: draft item dropped, Active on About.
+	menus := BuildMenus(items, "about", false)
+	main := menus["main"]
+	if len(main) != 3 {
+		t.Fatalf("public main menu = %d items %v, want 3", len(main), main)
+	}
+	if main[0].URL != "/" || main[0].Active {
+		t.Errorf("home entry wrong: %+v", main[0])
+	}
+	if main[1].URL != "/about" || !main[1].Active {
+		t.Errorf("about entry should be active: %+v", main[1])
+	}
+	if !main[2].External || !main[2].NewTab || main[2].Active {
+		t.Errorf("external entry wrong: %+v", main[2])
+	}
+	if len(menus["footer"]) != 1 {
+		t.Errorf("footer menu missing: %v", menus["footer"])
+	}
+
+	// Editors see draft-page items.
+	editorMain := BuildMenus(items, "", true)["main"]
+	if len(editorMain) != 4 {
+		t.Fatalf("editor main menu = %d items, want 4 (draft included)", len(editorMain))
+	}
+	if !editorMain[0].Active {
+		t.Error("home entry should be active when rendering the home page")
+	}
+}
+
+func TestRenderMenu(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
+	menus := map[string][]MenuEntry{
+		"main": {{Label: "About <x>", URL: "/about", Active: true}},
+	}
+	var buf bytes.Buffer
+	if err := r.Render(&buf, page, nil, "en", menus, nil); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<a href="/about" class="act">About &lt;x&gt;</a>`) {
+		t.Errorf("menu entry missing or unescaped:\n%s", out)
 	}
 }
 
@@ -159,7 +219,7 @@ func TestRenderSections(t *testing.T) {
 	// Plain render: wrapper + container classes from settings, unknown
 	// keys fall back to the first option, no editor attributes.
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, blocks, "en", nil); err != nil {
+	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -175,7 +235,7 @@ func TestRenderSections(t *testing.T) {
 
 	// Edit render: container plus per-section markers with resolved keys.
 	buf.Reset()
-	if err := r.Render(&buf, page, blocks, "en", &EditInfo{PageID: 1, AdminPath: "/admin", CSRFToken: "t", Locale: "en", Status: "draft"}); err != nil {
+	if err := r.Render(&buf, page, blocks, "en", nil, &EditInfo{PageID: 1, AdminPath: "/admin", CSRFToken: "t", Locale: "en", Status: "draft"}); err != nil {
 		t.Fatalf("edit Render: %v", err)
 	}
 	out = buf.String()

@@ -224,6 +224,26 @@ Each section renders as:
 </section>
 ```
 
+**The sections-only page pattern.** For pages editors should compose
+entirely themselves, offer a page type that is nothing but chrome plus a
+sections area — no fixed regions at all:
+
+```html
+{{template "base" .}}
+
+{{define "content"}}
+{{cmsSections "sections"}}
+{{end}}
+```
+
+Add it to `PageTemplates` (the example ships one as "Blank canvas") and
+the New-page dialog offers it alongside your structured layouts. This is
+deliberately a page *type*, not a per-page "hide region" switch: the CMS
+can only empty a region's hole, never remove the wrapper markup your
+template put around it, so suppressing fixed regions is the template's
+decision. Pages can switch between types later in the admin — content in
+regions both templates share (like the sections area) carries over.
+
 Customize the choices with `Config.SectionStyles` (nil gets the
 Tailwind-first defaults). Only the option *keys* are stored with content;
 classes resolve at render time, so changing an option's classes restyles
@@ -251,6 +271,29 @@ safelist: [
     "px-6", "py-12",
 ],
 ```
+
+## Navigation menus
+
+Templates render menus from CMS data — the CMS never emits nav markup, so
+any design works:
+
+```html
+<nav class="flex gap-6">
+    {{range cmsMenu "main"}}
+    <a href="{{.URL}}"{{if .NewTab}} target="_blank" rel="noopener"{{end}}
+       class="hover:text-slate-900{{if .Active}} font-semibold{{end}}">{{.Label}}</a>
+    {{end}}
+</nav>
+```
+
+Entries carry `Label`, `URL`, `Active` (links to the page being viewed),
+`NewTab`, and `External`; use any menu key you like ("main", "footer", …).
+Editors manage the main menu from the tool rail's **Menu** panel: items
+link to a page (picked from a list; the URL follows slug renames, and the
+item disappears if the page is deleted) or to a custom address. Items
+linking to draft pages show only for logged-in editors until the page is
+published. Menu changes have no draft state — saving applies to the whole
+site immediately.
 
 ## Running the example
 

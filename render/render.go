@@ -27,6 +27,48 @@ type PageTemplate struct {
 	Label string `json:"label"`
 }
 
+// MenuEntry is one rendered navigation item, as templates receive it from
+// {{cmsMenu "main"}}. The CMS supplies data only; templates own the markup.
+type MenuEntry struct {
+	Label    string
+	URL      string
+	NewTab   bool
+	Active   bool // this entry links to the page being rendered
+	External bool // absolute http(s) URL rather than a site page
+	Children []MenuEntry // reserved for nested menus; empty in v1
+}
+
+// BuildMenus turns stored menu items into render-ready entries grouped by
+// menu key. Page-linked items resolve their URL from the page's current
+// slug; items pointing at unpublished pages are dropped unless
+// includeDrafts (editors see draft pages, so they see their menu items).
+func BuildMenus(items []content.MenuItem, currentSlug string, includeDrafts bool) map[string][]MenuEntry {
+	current := "/" + currentSlug
+	menus := map[string][]MenuEntry{}
+	for _, item := range items {
+		e := MenuEntry{Label: item.Label, NewTab: item.NewTab}
+		if item.PageID != nil {
+			if item.PageSlug == nil {
+				continue // page vanished; FK cascade should prevent this
+			}
+			if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
+				continue
+			}
+			e.URL = "/" + *item.PageSlug
+			e.Active = e.URL == current
+		} else {
+			if strings.TrimSpace(item.URL) == "" {
+				continue
+			}
+			e.URL = item.URL
+			e.External = strings.HasPrefix(e.URL, "http://") || strings.HasPrefix(e.URL, "https://")
+			e.Active = !e.External && e.URL == current
+		}
+		menus[item.Menu] = append(menus[item.Menu], e)
+	}
+	return menus
+}
+
 // PageData is the dot value passed to a page template.
 type PageData struct {
 	Title       string
@@ -42,6 +84,7 @@ var stubFuncs = template.FuncMap{
 	"cmsRegion":   func(string) template.HTML { return "" },
 	"cmsImage":    func(string) string { return "" },
 	"cmsSections": func(string) template.HTML { return "" },
+	"cmsMenu":     func(string) []MenuEntry { return nil },
 	"cmsHead":     func() template.HTML { return "" },
 	"cmsScripts":  func() template.HTML { return "" },
 }
@@ -204,11 +247,11 @@ func (r *Renderer) Knows(file string) bool {
 	return ok
 }
 
-// Render executes the page's template with the given blocks and writes the
-// result to w. Output is buffered so a template error never sends a partial
-// page. A non-nil edit produces the editable variant of the page; see
-// EditInfo.
-func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Block, locale string, edit *EditInfo) error {
+// Render executes the page's template with the given blocks and menus and
+// writes the result to w. Output is buffered so a template error never
+// sends a partial page. A non-nil edit produces the editable variant of
+// the page; see EditInfo.
+func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Block, locale string, menus map[string][]MenuEntry, edit *EditInfo) error {
 	set, ok := r.sets[page.TemplateName]
 	if !ok {
 		return fmt.Errorf("render: page %d uses unknown template %q", page.ID, page.TemplateName)
@@ -260,6 +303,7 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 			}
 			return template.HTML(sb.String())
 		},
+		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
 		"cmsHead":    func() template.HTML { return headHTML(page) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
 	}

@@ -12,8 +12,10 @@
     <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
         <a href="/" class="text-lg font-bold tracking-tight">Example&nbsp;Site</a>
         <nav class="flex gap-6 text-sm text-slate-600">
-            <a href="/" class="hover:text-slate-900">Home</a>
-            <a href="/about" class="hover:text-slate-900">About</a>
+            {{range cmsMenu "main"}}
+            <a href="{{.URL}}"{{if .NewTab}} target="_blank" rel="noopener"{{end}}
+               class="hover:text-slate-900{{if .Active}} text-slate-900 font-semibold{{end}}">{{.Label}}</a>
+            {{end}}
         </nav>
     </div>
 </header>

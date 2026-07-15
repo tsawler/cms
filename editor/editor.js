@@ -182,6 +182,22 @@
         "#snip-empty{border-style:dashed}" +
         ".sgroup{font-size:11px;font-weight:600;color:#98a2b3;text-transform:uppercase;" +
         "letter-spacing:.05em;margin:14px 0 8px}" +
+        /* ---- menu panel rows ---- */
+        ".mfoot{display:flex;gap:8px;align-items:center;padding:12px;border-top:1px solid #e3e6ea}" +
+        ".mbtn{font:12px system-ui,sans-serif;color:#1c2128;background:#fff;border:1px solid #d9dce1;" +
+        "border-radius:8px;padding:7px 12px;cursor:pointer}" +
+        ".mbtn:hover{background:#f4f5f7}" +
+        ".mbtn.primary{background:#2f5fe0;border-color:#2f5fe0;color:#fff}" +
+        ".mbtn.primary:hover{background:#2149b8}" +
+        ".mrow{border:1px solid #d9dce1;border-radius:10px;padding:10px;margin-bottom:10px}" +
+        ".mrow input[type=text],.mrow select{width:100%;padding:6px 9px;border:1px solid #d9dce1;" +
+        "border-radius:8px;font:inherit;font-size:12px;margin-bottom:6px;background:#fff}" +
+        ".mrow .mchk{display:flex;gap:6px;align-items:center;font-size:12px;color:#475467;margin-bottom:6px}" +
+        ".mrow .mtools{display:flex;gap:2px;justify-content:flex-end}" +
+        ".mrow .mtools button{border:none;background:none;padding:3px 7px;border-radius:6px;" +
+        "color:#667085;cursor:pointer;font-size:13px}" +
+        ".mrow .mtools button:hover{background:#eceef1;color:#1c2128}" +
+        ".merr{color:#c0392b;font-size:12px;padding:0 14px 10px}" +
         /* ---- small dialog (replaces window.confirm / window.prompt) ---- */
         ".dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}" +
         ".dlg-overlay.on{display:block}" +
@@ -222,6 +238,7 @@
         '<button id="rail-add" title="Add a section">＋<span>Section</span></button>' +
         '<button id="rail-snips" title="Snippets">⧉<span>Snippets</span></button>' +
         '<button id="rail-page" title="New page">⊞<span>Page</span></button>' +
+        '<button id="rail-menu" title="Edit the site menu">☰<span>Menu</span></button>' +
         "</div>" +
         '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
         '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
@@ -249,6 +266,17 @@
         '<div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
         '<div class="dlist" id="snip-list"></div>' +
         "</div>" +
+        '<div class="drawer" id="menu-drawer">' +
+        '<div class="dhead"><h2>Site menu</h2>' +
+        '<button id="menu-close" title="Close" aria-label="Close">×</button></div>' +
+        '<div class="dhint">Items link to a page or a custom address. Saving applies to the whole site immediately.</div>' +
+        '<div class="dlist" id="menu-list"></div>' +
+        '<div class="merr" id="menu-err" hidden></div>' +
+        '<div class="mfoot">' +
+        '<button class="mbtn" id="menu-add">＋ Add item</button>' +
+        '<span style="flex:1"></span>' +
+        '<button class="mbtn primary" id="menu-save">Save menu</button>' +
+        "</div></div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
@@ -391,10 +419,13 @@
         ".cms-editing [data-cms-section]:hover{outline-style:solid}" +
         ".cms-editing [data-cms-section-content]{min-height:2em}" +
         ".cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;" +
-        "background:#1c2128;border-radius:999px;padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.3)}" +
+        "background:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;" +
+        "padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35)}" +
         ".cms-sec-ui button{font:13px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;" +
         "border-radius:999px;padding:5px 8px;cursor:pointer}" +
         ".cms-sec-ui button:hover{background:rgba(255,255,255,.18)}" +
+        ".cms-sec-ui button[data-secact='del']{color:#fca5a5}" +
+        ".cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}" +
         ".cms-add-section{padding:14px;text-align:center}" +
         ".cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;" +
         "border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}" +
@@ -616,6 +647,7 @@
         $("rail").classList.toggle("on", on);
         if (!on) {
             closeDrawer();
+            closeMenuPanel();
             pendingSection = null;
         }
         textRegions().forEach(function (el) {
@@ -834,21 +866,38 @@
     // The × doesn't remove the toolbar — it minimizes it (animated) to a
     // pencil button in the same spot; clicking that brings the bar back.
     // Minimizing exits edit mode for a clean view of the page, but any
-    // unsaved changes stay in the page and Save stays available.
+    // unsaved changes stay in the page and Save stays available. The
+    // choice is remembered across pages.
+    var BAR_MIN_KEY = "cms-bar-min";
+
+    function setBarMinimized(min) {
+        $("bar").classList.toggle("min", min);
+        $("fab").classList.toggle("on", min);
+        try {
+            window.localStorage.setItem(BAR_MIN_KEY, min ? "1" : "0");
+        } catch (e) { /* private mode */ }
+    }
+
     $("close").addEventListener("click", function () {
         closePicker();
         setEditing(false);
-        $("bar").classList.add("min");
-        $("fab").classList.add("on");
+        setBarMinimized(true);
     });
     $("fab").addEventListener("click", function () {
-        $("fab").classList.remove("on");
-        $("bar").classList.remove("min");
+        setBarMinimized(false);
         if (hasUnsaved()) {
             $("save").disabled = false;
             setMsg("Unsaved changes");
         }
     });
+
+    // Restore the remembered state on page load. This runs before first
+    // paint (the script is deferred), so no minimize animation plays.
+    try {
+        if (window.localStorage.getItem(BAR_MIN_KEY) === "1") {
+            setBarMinimized(true);
+        }
+    } catch (e) { /* private mode */ }
 
     /* ------------------------------------------------------------------ *
      * Snippet drawer
@@ -857,6 +906,7 @@
     var snippetsLoaded = false;
 
     function openDrawer() {
+        closeMenuPanel();
         $("drawer").classList.add("on");
         $("drawer-title").textContent = pendingSection ? "Add a section" : "Snippets";
         $("drawer-hint").textContent = pendingSection
@@ -875,12 +925,14 @@
         updateRail();
     }
 
-    // updateRail highlights whichever rail button the open drawer belongs
-    // to (Section when choosing a new section's start, Snippets otherwise).
+    // updateRail highlights whichever rail button the open panel belongs
+    // to (Section when choosing a new section's start, Snippets otherwise,
+    // Menu for the menu panel).
     function updateRail() {
         var open = $("drawer").classList.contains("on");
         $("rail-add").classList.toggle("on", open && !!pendingSection);
         $("rail-snips").classList.toggle("on", open && !pendingSection);
+        $("rail-menu").classList.toggle("on", $("menu-drawer").classList.contains("on"));
     }
 
     // Pages whose template declares no sections region get a visibly
@@ -1084,11 +1136,18 @@
         tb.className = "cms-sec-ui";
         tb.contentEditable = "false";
         [["up", "↑", "Move up"], ["down", "↓", "Move down"], ["add", "＋", "Add section below"],
-            ["set", "⚙", "Section settings"], ["del", "✕", "Delete section"]].forEach(function (b) {
+            ["set", "⚙", "Section settings"], ["del", "", "Delete section"]].forEach(function (b) {
             var btn = document.createElement("button");
             btn.type = "button";
             btn.setAttribute("data-secact", b[0]);
-            btn.textContent = b[1];
+            if (b[0] === "del") {
+                // SVG rather than 🗑: emoji presentation ignores CSS
+                // color, and this button must read as red/destructive.
+                btn.innerHTML = '<svg width="12" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:block">' +
+                    '<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            } else {
+                btn.textContent = b[1];
+            }
             btn.title = b[2];
             tb.appendChild(btn);
         });
@@ -1415,9 +1474,183 @@
     document.addEventListener("keydown", function (e) {
         if (e.key !== "Escape") return;
         if (dlgResolve) {
-            dialogDismiss(); // an open dialog captures Escape before the picker
+            dialogDismiss(); // an open dialog captures Escape first
             return;
         }
         closePicker();
+        closeDrawer();
+        closeMenuPanel();
+    });
+
+    /* ------------------------------------------------------------------ *
+     * Menu panel — edits navigation items (data only; the template owns
+     * the nav markup, so saving reloads the page to re-render it)
+     * ------------------------------------------------------------------ */
+
+    var menuData = null; // [{label, pageId, url, newTab}]
+    var menuPages = null; // [{id, title, slug, status}]
+
+    function openMenuPanel() {
+        closeDrawer();
+        $("menu-drawer").classList.add("on");
+        if (!menuData) loadMenu();
+        updateRail();
+    }
+    function closeMenuPanel() {
+        $("menu-drawer").classList.remove("on");
+        updateRail();
+    }
+
+    $("rail-menu").addEventListener("click", function () {
+        if ($("menu-drawer").classList.contains("on")) closeMenuPanel();
+        else openMenuPanel();
+    });
+    $("menu-close").addEventListener("click", closeMenuPanel);
+
+    function loadMenu() {
+        $("menu-list").innerHTML = '<span class="empty">Loading…</span>';
+        Promise.all([
+            api("/menu?menu=main", { method: "GET" }),
+            api("/pages", { method: "GET" }),
+        ]).then(function (results) {
+            menuData = results[0].items || [];
+            menuPages = results[1].pages || [];
+            renderMenuRows();
+        }).catch(function (err) {
+            $("menu-list").innerHTML = "";
+            var span = document.createElement("span");
+            span.className = "empty";
+            span.textContent = err.message;
+            $("menu-list").appendChild(span);
+        });
+    }
+
+    function menuError(msg) {
+        var el = $("menu-err");
+        el.textContent = msg || "";
+        el.hidden = !msg;
+    }
+
+    function renderMenuRows() {
+        var list = $("menu-list");
+        list.innerHTML = "";
+        menuError("");
+        if (menuData.length === 0) {
+            list.innerHTML = '<span class="empty">No menu items yet — add your first one below.</span>';
+        }
+        menuData.forEach(function (item, i) {
+            var row = document.createElement("div");
+            row.className = "mrow";
+
+            var tools = document.createElement("div");
+            tools.className = "mtools";
+            [["↑", "Move up"], ["↓", "Move down"], ["✕", "Remove"]].forEach(function (b, ti) {
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = b[0];
+                btn.title = b[1];
+                btn.addEventListener("click", function () {
+                    if (ti === 0 && i > 0) {
+                        menuData.splice(i - 1, 0, menuData.splice(i, 1)[0]);
+                    } else if (ti === 1 && i < menuData.length - 1) {
+                        menuData.splice(i + 1, 0, menuData.splice(i, 1)[0]);
+                    } else if (ti === 2) {
+                        menuData.splice(i, 1);
+                    } else {
+                        return;
+                    }
+                    renderMenuRows();
+                });
+                tools.appendChild(btn);
+            });
+            row.appendChild(tools);
+
+            var label = document.createElement("input");
+            label.type = "text";
+            label.placeholder = "Label";
+            label.value = item.label;
+            label.addEventListener("input", function () { item.label = label.value; });
+            row.appendChild(label);
+
+            var sel = document.createElement("select");
+            menuPages.forEach(function (p) {
+                var opt = document.createElement("option");
+                opt.value = String(p.id);
+                opt.textContent = (p.title || "(untitled)") + (p.status === "published" ? "" : " (draft)");
+                if (item.pageId === p.id) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            var custom = document.createElement("option");
+            custom.value = "custom";
+            custom.textContent = "Custom address…";
+            if (!item.pageId) custom.selected = true;
+            sel.appendChild(custom);
+            sel.addEventListener("change", function () {
+                if (sel.value === "custom") {
+                    item.pageId = 0;
+                } else {
+                    item.pageId = parseInt(sel.value, 10);
+                    item.url = "";
+                }
+                renderMenuRows();
+            });
+            row.appendChild(sel);
+
+            if (!item.pageId) {
+                var url = document.createElement("input");
+                url.type = "text";
+                url.placeholder = "https://example.com or /contact";
+                url.value = item.url || "";
+                url.addEventListener("input", function () { item.url = url.value; });
+                row.appendChild(url);
+
+                var chk = document.createElement("label");
+                chk.className = "mchk";
+                var cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = !!item.newTab;
+                cb.addEventListener("change", function () { item.newTab = cb.checked; });
+                chk.appendChild(cb);
+                chk.appendChild(document.createTextNode("Open in a new tab"));
+                row.appendChild(chk);
+            }
+
+            list.appendChild(row);
+        });
+    }
+
+    $("menu-add").addEventListener("click", function () {
+        if (!menuData) return;
+        var first = menuPages && menuPages.length ? menuPages[0].id : 0;
+        menuData.push({ label: "", pageId: first, url: "", newTab: false });
+        renderMenuRows();
+        var inputs = $("menu-list").querySelectorAll(".mrow input[type=text]");
+        if (inputs.length) inputs[inputs.length - (first ? 1 : 2)].focus();
+    });
+
+    $("menu-save").addEventListener("click", function () {
+        if (!menuData) return;
+        for (var i = 0; i < menuData.length; i++) {
+            if (!menuData[i].label.trim()) {
+                menuError("Every menu item needs a label.");
+                return;
+            }
+            if (!menuData[i].pageId && !(menuData[i].url || "").trim()) {
+                menuError("Custom links need a web address.");
+                return;
+            }
+        }
+        menuError("");
+        setMsg("Saving menu…");
+        api("/menu", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ menu: "main", items: menuData }),
+        }).then(function () {
+            // The template renders the nav, so reload to show the result.
+            dirty = {};
+            sectionsDirty = {};
+            window.location.reload();
+        }).catch(function (err) { menuError(err.message); setMsg(""); });
     });
 })();

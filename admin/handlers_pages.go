@@ -12,6 +12,7 @@ import (
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
+	"github.com/tsawler/cms/render"
 )
 
 // editorHTMLPolicy sanitizes region HTML saved by non-admin users.
@@ -225,8 +226,13 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	menuItems, err := s.deps.Content.MenuItems(r.Context(), "")
+	if err != nil {
+		menuItems = nil
+	}
+	menus := render.BuildMenus(menuItems, page.Slug, true)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.deps.Renderer.Render(w, page, blocks, s.deps.DefaultLocale, nil); err != nil {
+	if err := s.deps.Renderer.Render(w, page, blocks, s.deps.DefaultLocale, menus, nil); err != nil {
 		s.serverError(w, err)
 	}
 }

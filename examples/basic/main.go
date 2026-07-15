@@ -108,6 +108,7 @@ func run(logger *slog.Logger) error {
 		PageTemplates: []cms.PageTemplate{
 			{File: "templates/pages/home.tmpl", Label: "Home page"},
 			{File: "templates/pages/standard.tmpl", Label: "Standard page"},
+			{File: "templates/pages/canvas.tmpl", Label: "Blank canvas"},
 		},
 	})
 	if err != nil {

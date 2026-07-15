@@ -249,7 +249,30 @@ a section opens the snippet drawer as a "choose a starting point" picker
 per-paragraph block models fight TinyMCE; one editor per section
 composes cleanly with everything else.
 
-### 5. i18n — locale is a column, not a fork
+### 4.2 Navigation menus — data from the CMS, markup from the template
+
+Menus are the sharpest case of the core principle: nav markup is the most
+design-specific HTML on a site (framework classes, hamburgers,
+dropdowns), so the CMS supplies **data only**. `{{cmsMenu "main"}}`
+returns entries (`Label`, `URL`, `Active`, `NewTab`, `External`,
+`Children`) and the template renders them however it likes; any number of
+menus per site by key ("main", "footer", ...).
+
+Items live in `cms_menu_items` and link **either to a page or to a
+literal URL**. Page links resolve their URL from the slug at render time
+(rename-safe) and vanish when the page is deleted (FK cascade); items
+pointing at draft pages render only for logged-in editors, matching
+draft-page visibility. Literal URLs are validated to a small scheme
+whitelist (`/`, http(s), mailto:, tel:).
+
+Editing happens in the tool rail's **Menu** panel (label, page picker or
+custom URL, new-tab, reorder, delete), saving via `PUT /api/menu` as an
+atomic list replacement — then the page reloads so the real template
+re-renders the nav. Menus deliberately have **no draft state**: they are
+site-wide, so "publish on which page?" has no good answer; changes are
+live on save (the panel says so). `parent_id` and `.Children` exist now
+so nested menus can arrive later without breaking templates; the v1 UI is
+flat. Labels get per-locale variants when phase 7 lands.
 
 - Content tables key on `(page_id, region, locale)` with fallback to `en`
   when a `fr` row doesn't exist.

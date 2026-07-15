@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/internal/pgutil"
 	"github.com/tsawler/cms/media"
 )
 
@@ -114,6 +116,130 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 		"slug": page.Slug,
 		"url":  "/" + page.Slug,
 	})
+}
+
+// apiListPages returns every page for the editor's pickers (menu items,
+// etc.): id, title, slug, and status.
+// GET /api/pages
+func (s *server) apiListPages(w http.ResponseWriter, r *http.Request) {
+	pages, err := s.deps.Content.All(r.Context(), s.deps.DefaultLocale)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api listing pages", "err", err)
+		jsonError(w, http.StatusInternalServerError, "Could not load the pages.")
+		return
+	}
+	type pageJSON struct {
+		ID     int64  `json:"id"`
+		Title  string `json:"title"`
+		Slug   string `json:"slug"`
+		Status string `json:"status"`
+	}
+	out := make([]pageJSON, len(pages))
+	for i, p := range pages {
+		out[i] = pageJSON{ID: p.ID, Title: p.Title, Slug: p.Slug, Status: string(p.Status)}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pages": out})
+}
+
+var menuKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+
+type menuItemJSON struct {
+	Label  string `json:"label"`
+	PageID int64  `json:"pageId"` // 0 = custom URL item
+	URL    string `json:"url"`
+	NewTab bool   `json:"newTab"`
+}
+
+// apiGetMenu returns a menu's items for the editor's menu panel.
+// GET /api/menu?menu=main
+func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
+	menu := r.URL.Query().Get("menu")
+	if menu == "" {
+		menu = "main"
+	}
+	if !menuKeyRe.MatchString(menu) {
+		jsonError(w, http.StatusBadRequest, "Unknown menu.")
+		return
+	}
+	items, err := s.deps.Content.MenuItems(r.Context(), menu)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api loading menu", "err", err)
+		jsonError(w, http.StatusInternalServerError, "Could not load the menu.")
+		return
+	}
+	out := make([]menuItemJSON, len(items))
+	for i, item := range items {
+		out[i] = menuItemJSON{Label: item.Label, URL: item.URL, NewTab: item.NewTab}
+		if item.PageID != nil {
+			out[i].PageID = *item.PageID
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"menu": menu, "items": out})
+}
+
+// validMenuURL accepts site-relative paths and the handful of absolute
+// schemes a menu legitimately links to.
+func validMenuURL(u string) bool {
+	return strings.HasPrefix(u, "/") ||
+		strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") ||
+		strings.HasPrefix(u, "mailto:") || strings.HasPrefix(u, "tel:")
+}
+
+// apiSaveMenu replaces a menu's items with the submitted ordered list.
+// Menus have no draft state: the change is live immediately.
+// PUT /api/menu  body: {"menu": "main", "items": [{label, pageId, url, newTab}]}
+func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Menu  string         `json:"menu"`
+		Items []menuItemJSON `json:"items"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Could not read the menu — try again.")
+		return
+	}
+	if !menuKeyRe.MatchString(body.Menu) {
+		jsonError(w, http.StatusBadRequest, "Unknown menu.")
+		return
+	}
+	if len(body.Items) > 100 {
+		jsonError(w, http.StatusBadRequest, "Too many menu items.")
+		return
+	}
+
+	inputs := make([]content.MenuItemInput, len(body.Items))
+	for i, item := range body.Items {
+		label := strings.TrimSpace(item.Label)
+		if label == "" {
+			jsonError(w, http.StatusUnprocessableEntity, "Every menu item needs a label.")
+			return
+		}
+		in := content.MenuItemInput{Label: label, NewTab: item.NewTab}
+		if item.PageID > 0 {
+			id := item.PageID
+			in.PageID = &id
+		} else {
+			url := strings.TrimSpace(item.URL)
+			if !validMenuURL(url) {
+				jsonError(w, http.StatusUnprocessableEntity,
+					"Custom links need a web address like https://… or a path like /contact.")
+				return
+			}
+			in.URL = url
+		}
+		inputs[i] = in
+	}
+
+	if err := s.deps.Content.ReplaceMenu(r.Context(), body.Menu, inputs); err != nil {
+		if pgutil.IsForeignKeyViolation(err) {
+			jsonError(w, http.StatusUnprocessableEntity, "One of the linked pages no longer exists — reload and try again.")
+			return
+		}
+		s.deps.Logger.Error("cms admin: api saving menu", "err", err)
+		jsonError(w, http.StatusInternalServerError, "Saving the menu failed — try again.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // apiDeletePage removes a page and all of its content. The home page

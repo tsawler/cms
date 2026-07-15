@@ -87,8 +87,11 @@ func New(d Deps) http.Handler {
 			r.Get("/pages/{id}/preview", s.pagePreview)
 
 			// JSON API for the in-place editor.
+			r.Get("/api/pages", s.apiListPages)
 			r.Post("/api/pages", s.apiCreatePage)
 			r.Delete("/api/pages/{id}", s.apiDeletePage)
+			r.Get("/api/menu", s.apiGetMenu)
+			r.Put("/api/menu", s.apiSaveMenu)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)

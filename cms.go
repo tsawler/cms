@@ -343,6 +343,14 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	menuItems, err := c.content.MenuItems(r.Context(), "")
+	if err != nil {
+		// Navigation failing shouldn't take the page down; render without.
+		c.cfg.Logger.Error("cms: loading menus", "err", err)
+		menuItems = nil
+	}
+	menus := render.BuildMenus(menuItems, page.Slug, editing)
+
 	var edit *render.EditInfo
 	if editing {
 		csrf, err := sessiondata.EnsureCSRF(r.Context(), c.sessions)
@@ -365,7 +373,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := c.renderer.Render(w, page, blocks, locale, edit); err != nil {
+	if err := c.renderer.Render(w, page, blocks, locale, menus, edit); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 	}
