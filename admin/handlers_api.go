@@ -345,6 +345,26 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "published"})
 }
 
+// apiDiscard throws away the page's unpublished draft edits, reverting its
+// draft content to match what is currently published.
+// POST /api/pages/{id}/discard
+func (s *server) apiDiscard(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	if page.Status != content.StatusPublished {
+		jsonError(w, http.StatusConflict, "There are no published changes to revert to — this page hasn't been published yet.")
+		return
+	}
+	if err := s.deps.Content.DiscardDraft(r.Context(), page.ID); err != nil {
+		s.deps.Logger.Error("cms admin: api discarding draft", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, "Discarding failed — try again.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 type mediaJSON struct {
 	ID       int64  `json:"id"`
 	Kind     string `json:"kind"`

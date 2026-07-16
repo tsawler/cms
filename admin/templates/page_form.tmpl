@@ -107,6 +107,15 @@
     </div>
 </form>
 
+{{if and (not .IsNew) .HasDraftEdits}}
+<form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/discard" class="cms-discard"
+      data-confirm="Discard your unpublished changes and revert to the published version? This can't be undone.">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p class="cms-hint">This page has unpublished draft changes.</p>
+    <button type="submit" class="cms-btn cms-btn-ghost">Discard draft changes</button>
+</form>
+{{end}}
+
 {{if and (not .IsNew) .FormPage.Slug}}
 <form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/delete" class="cms-danger-zone"
       data-confirm="Delete this page and all of its content? This cannot be undone.">

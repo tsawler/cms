@@ -165,6 +165,8 @@ a.cms-card:hover { border-color: var(--cms-primary); }
     border-color: #eac5c0;
 }
 .cms-btn-danger:hover { background: #fbeae8; }
+.cms-discard { margin-top: 1.5rem; }
+.cms-discard .cms-hint { margin-bottom: .5rem; }
 .cms-danger-zone { margin-top: 1.5rem; }
 
 /* Alerts and flash messages */

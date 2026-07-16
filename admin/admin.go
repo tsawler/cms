@@ -84,6 +84,7 @@ func New(d Deps) http.Handler {
 			r.Get("/pages/{id}", s.pageEdit)
 			r.Post("/pages/{id}", s.pageUpdate)
 			r.Post("/pages/{id}/delete", s.pageDelete)
+			r.Post("/pages/{id}/discard", s.pageDiscard)
 			r.Get("/pages/{id}/preview", s.pagePreview)
 
 			// JSON API for the in-place editor.
@@ -95,6 +96,7 @@ func New(d Deps) http.Handler {
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
+			r.Post("/api/pages/{id}/discard", s.apiDiscard)
 			r.Get("/api/snippets", s.apiSnippetsList)
 
 			// Snippet management (palette entries) is admin-only.
@@ -175,6 +177,7 @@ type templateData struct {
 	PageTemplates []render.PageTemplate
 	Regions       []render.Region
 	BlockContent  map[string]string // draft content keyed by region name
+	HasDraftEdits bool              // draft blocks differ from the published set
 
 	// Media pages.
 	MediaEnabled bool

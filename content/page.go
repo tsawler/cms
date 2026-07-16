@@ -257,6 +257,30 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 	return tx.Commit(ctx)
 }
 
+// DiscardDraft throws away a page's unpublished edits: the draft block set
+// is replaced by a copy of the currently published set, so the editor
+// returns to exactly what is live. The page's publication status is left
+// unchanged. It is the inverse of Publish.
+func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx,
+		"DELETE FROM cms_blocks WHERE page_id = $1 AND status = 'draft'", pageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content, settings)
+		SELECT page_id, region, locale, 'draft', sort, kind, snippet_key, content, settings
+		FROM cms_blocks WHERE page_id = $1 AND status = 'published'`, pageID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // Unpublish takes a page off the public site. Draft and published content
 // are left as they are.
 func (s *Store) Unpublish(ctx context.Context, pageID int64) error {

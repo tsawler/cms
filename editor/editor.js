@@ -233,6 +233,7 @@
         '<button id="cancel" hidden>Cancel</button>' +
         '<button id="del-page" class="dngr" hidden>Delete</button>' +
         '<button id="save" disabled>Save draft</button>' +
+        '<button id="discard" class="dngr" hidden>Discard draft</button>' +
         '<button id="publish" class="primary">Publish</button>' +
         '<a id="admin" href="#">Admin</a>' +
         '<button id="close" class="quiet" title="Minimize editing tools">×</button>' +
@@ -710,6 +711,9 @@
         var working = editing || hasUnsaved();
         $("save").hidden = !working;
         $("publish").hidden = !working && pageStatus === "published" && !hasUnpublished;
+        // Discard is offered whenever there's a saved draft that differs from
+        // what's live — the same condition as the "Unpublished changes" chip.
+        $("discard").hidden = !(pageStatus === "published" && hasUnpublished);
     }
 
     document.addEventListener("input", function (e) {
@@ -901,6 +905,24 @@
         }).catch(function (err) { setMsg(err.message); });
     }
 
+    // discardDraft throws away the saved-but-unpublished draft, reverting it
+    // to what's live. The page is reloaded afterwards so the visible content
+    // matches the restored (published) draft.
+    function discardDraft() {
+        cmsConfirm("Discard your unpublished changes and go back to the published version of this page? This can't be undone.",
+            "Discard draft", true).then(function (yes) {
+            if (!yes) return;
+            setMsg("Discarding…");
+            api("/pages/" + pageId + "/discard", { method: "POST" }).then(function () {
+                // Clear unsaved state so beforeunload doesn't second-guess the
+                // reload, then reload to show the reverted content.
+                dirty = {};
+                sectionsDirty = {};
+                window.location.reload();
+            }).catch(function (err) { setMsg(err.message); });
+        });
+    }
+
     $("edit").addEventListener("click", function () { setEditing(!editing); });
     $("cancel").addEventListener("click", function () {
         var discard = function () {
@@ -941,6 +963,7 @@
         save().catch(function (err) { setMsg(err.message); });
     });
     $("publish").addEventListener("click", publish);
+    $("discard").addEventListener("click", discardDraft);
     // The × doesn't remove the toolbar — it minimizes it (animated) to a
     // pencil button in the same spot; clicking that brings the bar back.
     // Minimizing exits edit mode for a clean view of the page, but any

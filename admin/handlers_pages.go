@@ -220,6 +220,26 @@ func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/pages", http.StatusSeeOther)
 }
 
+// pageDiscard throws away the page's unpublished draft edits, reverting its
+// draft content to match what is currently published.
+func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	if page.Status != content.StatusPublished {
+		s.flash(r, "There are no published changes to revert to — this page hasn't been published yet.")
+		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+		return
+	}
+	if err := s.deps.Content.DiscardDraft(r.Context(), page.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, "Draft changes discarded — the editor now matches the published page.")
+	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+}
+
 // pagePreview renders the page's draft content with the real site
 // templates, so editors can see unpublished work exactly as it will appear.
 func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +310,16 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 		data.BlockContent = make(map[string]string, len(blocks))
 		for _, b := range blocks {
 			data.BlockContent[b.Region] = b.Content
+		}
+
+		// A published page whose draft differs can revert to what's live.
+		if page.Status == content.StatusPublished {
+			changed, err := s.deps.Content.HasUnpublishedChanges(r.Context(), page.ID, s.deps.DefaultLocale)
+			if err != nil {
+				s.serverError(w, err)
+				return
+			}
+			data.HasDraftEdits = changed
 		}
 
 		// Image regions render a picker, which needs the media library.
