@@ -354,7 +354,21 @@ func (s *server) apiGetPageCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"css": page.HeadCSS, "js": page.BodyJS})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"css": page.HeadCSS, "js": page.BodyJS,
+		"cssLinks": page.CSSLinks, "jsLinks": page.JSLinks,
+	})
+}
+
+// cleanResourceLinks keeps only the lines that are valid resource URLs.
+func cleanResourceLinks(raw string) string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		if u := render.ValidResourceURL(strings.TrimSpace(line)); u != "" {
+			out = append(out, u)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // Pasted-in wrappers are a footgun: a nested <style> tag stops the CSS
@@ -382,8 +396,10 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		CSS string `json:"css"`
-		JS  string `json:"js"`
+		CSS      string `json:"css"`
+		JS       string `json:"js"`
+		CSSLinks string `json:"cssLinks"`
+		JSLinks  string `json:"jsLinks"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -392,6 +408,8 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 	}
 	page.HeadCSS = unwrapCodeTag(body.CSS, styleWrapRe)
 	page.BodyJS = unwrapCodeTag(body.JS, scriptWrapRe)
+	page.CSSLinks = cleanResourceLinks(body.CSSLinks)
+	page.JSLinks = cleanResourceLinks(body.JSLinks)
 	if err := s.deps.Content.Update(r.Context(), page, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api saving page code", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")

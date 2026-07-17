@@ -35,6 +35,8 @@ type Page struct {
 	Status       Status
 	HeadCSS      string // extra per-page CSS, injected by cmsHead
 	BodyJS       string // extra per-page JS, injected by cmsScripts
+	CSSLinks     string // external stylesheet URLs, one per line
+	JSLinks      string // external script URLs, one per line
 	Title        string
 	Description  string
 	CreatedAt    time.Time
@@ -93,11 +95,13 @@ func NewStore(db *pgxpool.Pool) *Store {
 }
 
 const pageColumns = `p.id, p.slug, p.template_name, p.status, p.head_css, p.body_js,
+	p.css_links, p.js_links,
 	COALESCE(m.title, ''), COALESCE(m.description, ''), p.created_at, p.updated_at`
 
 func scanPage(row pgx.Row) (*Page, error) {
 	var p Page
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.HeadCSS, &p.BodyJS,
+		&p.CSSLinks, &p.JSLinks,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -161,10 +165,10 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js)
-		VALUES ($1, $2, 'draft', $3, $4)
+		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js, css_links, js_links)
+		VALUES ($1, $2, 'draft', $3, $4, $5, $6)
 		RETURNING id`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS,
+		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks,
 	).Scan(&p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
@@ -192,9 +196,10 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages
-		SET slug = $1, template_name = $2, head_css = $3, body_js = $4, updated_at = now()
-		WHERE id = $5`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.ID)
+		SET slug = $1, template_name = $2, head_css = $3, body_js = $4,
+			css_links = $5, js_links = $6, updated_at = now()
+		WHERE id = $7`,
+		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks, p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}

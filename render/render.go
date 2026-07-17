@@ -202,6 +202,27 @@ func ValidBackgroundURL(s string) string {
 	return s
 }
 
+// ValidResourceURL returns the value if it is safe to use as an external
+// stylesheet or script URL — the same rules as background URLs.
+func ValidResourceURL(s string) string {
+	return ValidBackgroundURL(s)
+}
+
+// resourceLinks splits a newline-separated URL list, dropping empties
+// and anything that fails validation (defense against hand-edited rows).
+func resourceLinks(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		if u := ValidResourceURL(strings.TrimSpace(line)); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 // ValidSectionHeight returns the value if it is one of the fixed
 // viewport-height options ("50", "75", "100"), or "" otherwise ("auto"
 // and anything unknown mean no minimum height).
@@ -559,6 +580,11 @@ const btnCSS = `a.cms-btn{transition:filter .15s ease}` +
 func headHTML(p *content.Page) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<style>" + btnCSS + "</style>\n")
+	// External stylesheets come before the inline CSS so the page's own
+	// rules can override the library's.
+	for _, u := range resourceLinks(p.CSSLinks) {
+		sb.WriteString(`<link rel="stylesheet" href="` + html.EscapeString(u) + "\">\n")
+	}
 	if p.Description != "" {
 		sb.WriteString(`<meta name="description" content="`)
 		sb.WriteString(html.EscapeString(p.Description))
@@ -582,10 +608,16 @@ var (
 )
 
 // scriptsHTML builds what {{cmsScripts}} emits before </body>: the page's
-// per-page JS. Written raw; editing it is restricted to admins.
+// external scripts, then its inline per-page JS (so the inline code can
+// use what the external libraries define). Written raw; editing is
+// restricted to admins.
 func scriptsHTML(p *content.Page) template.HTML {
-	if p.BodyJS == "" {
-		return ""
+	var sb strings.Builder
+	for _, u := range resourceLinks(p.JSLinks) {
+		sb.WriteString(`<script src="` + html.EscapeString(u) + "\"></script>\n")
 	}
-	return template.HTML("<script>\n" + scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`) + "\n</script>\n")
+	if p.BodyJS != "" {
+		sb.WriteString("<script>\n" + scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`) + "\n</script>\n")
+	}
+	return template.HTML(sb.String())
 }

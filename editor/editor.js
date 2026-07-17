@@ -147,10 +147,19 @@
         "#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;" +
         "padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}" +
         "#code-close:hover{background:#eceef1;color:#1c2128}" +
+        ".clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}" +
+        ".clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}" +
+        ".clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;" +
+        "border:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;" +
+        "font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}" +
         ".cbody{flex:1;position:relative;background:#11151c;min-height:0}" +
         "#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;" +
         "font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}" +
         "#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}" +
+        /* The universal reset sets font-family on every element — token
+           spans must stay in the editor's monospace or the visible text
+           drifts out of alignment with the textarea's caret. */
+        "#code-hl span{font:inherit}" +
         "#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;" +
         "overflow:auto}" +
         "#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}" +
@@ -391,6 +400,11 @@
         '<button id="code-tab-js">JavaScript</button>' +
         "</div>" +
         '<button id="code-close" title="Close" aria-label="Close">×</button></div>' +
+        '<div class="clinks">' +
+        '<label for="code-links" id="code-links-label">External stylesheets — one URL per line</label>' +
+        '<textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off"' +
+        ' placeholder="https://cdn.example.com/library.css"></textarea>' +
+        "</div>" +
         '<div class="cbody">' +
         '<pre id="code-hl" aria-hidden="true"></pre>' +
         '<textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>' +
@@ -1557,7 +1571,8 @@
 
     $("code-btn").hidden = !isAdmin;
 
-    var codeState = { css: "", js: "", tab: "css", loaded: false, dirty: false };
+    var codeState = { css: "", js: "", cssLinks: "", jsLinks: "",
+        tab: "css", loaded: false, dirty: false };
 
     function escHTML(s) {
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1595,13 +1610,23 @@
         $("code-hl").innerHTML = highlight($("code-ta").value, codeState.tab);
     }
 
-    function stashCode() { codeState[codeState.tab] = $("code-ta").value; }
+    function stashCode() {
+        codeState[codeState.tab] = $("code-ta").value;
+        codeState[codeState.tab + "Links"] = $("code-links").value;
+    }
 
     function setCodeTab(tab) {
         stashCode();
         codeState.tab = tab;
         $("code-tab-css").classList.toggle("on", tab === "css");
         $("code-tab-js").classList.toggle("on", tab === "js");
+        $("code-links-label").textContent = tab === "css"
+            ? "External stylesheets — one URL per line"
+            : "External scripts — one URL per line";
+        $("code-links").placeholder = tab === "css"
+            ? "https://cdn.example.com/library.css"
+            : "https://cdn.example.com/library.js";
+        $("code-links").value = codeState[tab + "Links"];
         var ta = $("code-ta");
         ta.value = codeState[tab];
         ta.scrollTop = 0;
@@ -1620,17 +1645,22 @@
             return;
         }
         $("code-ta").value = "";
+        $("code-links").value = "";
         renderCode();
         api("/pages/" + pageId + "/code", { method: "GET" }).then(function (body) {
             codeState.css = body.css || "";
             codeState.js = body.js || "";
+            codeState.cssLinks = body.cssLinks || "";
+            codeState.jsLinks = body.jsLinks || "";
             codeState.loaded = true;
             codeState.dirty = false;
             // Show whichever tab has content first; CSS wins a tie.
-            codeState.tab = !codeState.css && codeState.js ? "js" : "css";
-            // Sync the textarea before setCodeTab: its stash of the
-            // still-empty textarea must not wipe the fetched values.
+            codeState.tab = !codeState.css && !codeState.cssLinks &&
+                (codeState.js || codeState.jsLinks) ? "js" : "css";
+            // Sync the inputs before setCodeTab: its stash of the
+            // still-empty fields must not wipe the fetched values.
             $("code-ta").value = codeState[codeState.tab];
+            $("code-links").value = codeState[codeState.tab + "Links"];
             setCodeTab(codeState.tab);
         }).catch(function (err) {
             closeCodePanel();
@@ -1673,6 +1703,10 @@
         stashCode();
         renderCode();
     });
+    $("code-links").addEventListener("input", function () {
+        codeState.dirty = true;
+        stashCode();
+    });
     $("code-ta").addEventListener("scroll", function () {
         $("code-hl").scrollTop = $("code-ta").scrollTop;
         $("code-hl").scrollLeft = $("code-ta").scrollLeft;
@@ -1695,7 +1729,8 @@
         api("/pages/" + pageId + "/code", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ css: codeState.css, js: codeState.js }),
+            body: JSON.stringify({ css: codeState.css, js: codeState.js,
+                cssLinks: codeState.cssLinks, jsLinks: codeState.jsLinks }),
         }).then(function () {
             codeState.dirty = false;
             closeCodePanel();
