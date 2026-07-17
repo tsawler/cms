@@ -94,8 +94,44 @@ func (s *server) pageCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.seedStarterSections(r.Context(), id, form.TemplateName)
+
 	s.flash(r, "Page created — now add your content below.")
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+}
+
+// starterSectionHTML is the content seeded into a brand-new page on a
+// sections-only template: the same simple text snippet as the default
+// "Text" palette entry, so the page opens with something visibly
+// editable instead of an empty void.
+const starterSectionHTML = `<p class="cms-snippet">Write your text here.</p>`
+
+// seedStarterSections gives a newly created page a first section holding
+// a simple text snippet — but only when the template's editable regions
+// are all sections regions (a "blank canvas" shape). Templates with text
+// or rich regions already have visible placeholders, so they're left
+// alone. Seeding failure is logged rather than fatal: the page exists
+// and is fully usable either way.
+func (s *server) seedStarterSections(ctx context.Context, pageID int64, templateName string) {
+	var sectionRegions []string
+	for _, region := range s.deps.Renderer.Regions(templateName) {
+		if region.Kind != "sections" {
+			return
+		}
+		sectionRegions = append(sectionRegions, region.Name)
+	}
+	seed := []content.SectionInput{{
+		Content: starterSectionHTML,
+		Settings: map[string]string{
+			"bg":    s.deps.SectionStyles.Background("").Key,
+			"width": s.deps.SectionStyles.Width("").Key,
+		},
+	}}
+	for _, name := range sectionRegions {
+		if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, name, s.deps.DefaultLocale, seed); err != nil {
+			s.deps.Logger.Error("cms admin: seeding starter section", "page", pageID, "region", name, "err", err)
+		}
+	}
 }
 
 func (s *server) pageEdit(w http.ResponseWriter, r *http.Request) {

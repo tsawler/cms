@@ -261,9 +261,6 @@
         ".snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}" +
         ".snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;" +
         "-webkit-line-clamp:2;-webkit-box-orient:vertical}" +
-        "#snip-empty{border-style:dashed}" +
-        ".sgroup{font-size:11px;font-weight:600;color:#98a2b3;text-transform:uppercase;" +
-        "letter-spacing:.05em;margin:14px 0 8px}" +
         /* ---- menu panel rows ---- */
         ".mfoot{display:flex;gap:8px;align-items:center;padding:12px;border-top:1px solid #e3e6ea}" +
         ".mbtn{font:12px system-ui,sans-serif;color:#1c2128;background:#fff;border:1px solid #d9dce1;" +
@@ -1914,12 +1911,8 @@
         $("drawer").classList.add("on");
         $("drawer-title").textContent = pendingSection ? "Add a section" : "Snippets";
         $("drawer-hint").textContent = pendingSection
-            ? "Start with an empty section, or use a snippet as its starting content."
+            ? "Choose a snippet to be the section's starting content."
             : "Drag a snippet onto the page, or click one to insert it at the cursor.";
-        var emptyCard = $("snip-empty");
-        if (emptyCard) emptyCard.hidden = !pendingSection;
-        var groupLabel = $("snip-group-label");
-        if (groupLabel) groupLabel.hidden = !pendingSection;
         if (!snippetsLoaded) loadSnippets();
         updateRail();
     }
@@ -2006,30 +1999,6 @@
         api("/snippets", { method: "GET" }).then(function (body) {
             snippetsLoaded = true;
             list.innerHTML = "";
-            // "Empty section" appears only when the drawer is choosing a
-            // new section's starting point.
-            var emptyCard = document.createElement("div");
-            emptyCard.className = "snip";
-            emptyCard.id = "snip-empty";
-            emptyCard.hidden = !pendingSection;
-            var enm = document.createElement("p");
-            enm.className = "sname";
-            enm.textContent = "Empty section";
-            var eds = document.createElement("p");
-            eds.className = "sdesc";
-            eds.textContent = "Start from a blank section.";
-            emptyCard.appendChild(enm);
-            emptyCard.appendChild(eds);
-            emptyCard.addEventListener("click", function () {
-                chooseSnippet({ name: "Empty", html: "<p>Start writing…</p>" });
-            });
-            list.appendChild(emptyCard);
-            var groupLabel = document.createElement("p");
-            groupLabel.className = "sgroup";
-            groupLabel.id = "snip-group-label";
-            groupLabel.hidden = !pendingSection;
-            groupLabel.textContent = "Or start from a snippet";
-            list.appendChild(groupLabel);
             if (!body.snippets || body.snippets.length === 0) {
                 list.appendChild(Object.assign(document.createElement("span"),
                     { className: "empty", textContent: "No snippets available." }));

@@ -111,6 +111,9 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, "Too many pages already use that name.")
 		return
 	}
+
+	s.seedStarterSections(r.Context(), page.ID, page.TemplateName)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
 		"id":   page.ID,
