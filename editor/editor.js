@@ -710,6 +710,7 @@
             }).catch(function (err) { setMsg(err.message); });
         } else {
             removeRichEditors();
+            reapplySectionClasses();
         }
     }
 
@@ -1391,7 +1392,25 @@
         wrapper.dataset.cmsWidth = w.key;
         wrapper.className = bg.class || "";
         var contentEl = wrapper.querySelector("[data-cms-section-content]");
-        if (contentEl) contentEl.className = ((w.class || "") + " " + (bg.contentClass || "")).trim();
+        if (!contentEl) return;
+        // Preserve TinyMCE's own classes (mce-content-body etc.) when an
+        // inline editor is attached to the content element.
+        var mce = (contentEl.className || "").split(/\s+/).filter(function (c) {
+            return c.indexOf("mce-") === 0;
+        });
+        contentEl.className = [w.class, bg.contentClass, mce.join(" ")]
+            .filter(Boolean).join(" ");
+    }
+
+    // TinyMCE snapshots its target element's attributes at init and puts
+    // them back on remove(), so section settings applied during the session
+    // would visually revert when editing ends (the saved data is fine —
+    // only the DOM went stale). Re-derive the classes from the settings
+    // keys, which live on the wrapper and survive the teardown.
+    function reapplySectionClasses() {
+        document.querySelectorAll("[data-cms-section]").forEach(function (wrapper) {
+            applySectionSettings(wrapper, wrapper.dataset.cmsBg, wrapper.dataset.cmsWidth);
+        });
     }
 
     function createSection(target, html) {
