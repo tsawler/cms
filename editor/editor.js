@@ -5,7 +5,7 @@
  * CSS cannot restyle it. Rich HTML regions are edited with TinyMCE in
  * inline mode — content keeps the page's own styles while a floating
  * selection toolbar provides formatting. TinyMCE is self-hosted alongside
- * this script and loaded lazily on the first press of "Edit page".
+ * this script and loaded lazily on the first press of "Edit".
  */
 (function () {
     "use strict";
@@ -69,6 +69,13 @@
      * Toolbar and panels (Shadow DOM)
      * ------------------------------------------------------------------ */
 
+    // Small inline icons for the bar (filled with currentColor via CSS).
+    var ICONS = {
+        pencil: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
+        check: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
+        hide: '<svg viewBox="0 0 24 24"><path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z"/></svg>',
+    };
+
     var host = document.createElement("div");
     host.id = "cms-editor-host";
     var shadow = host.attachShadow({ mode: "open" });
@@ -76,6 +83,9 @@
         "<style>" +
         ":host{all:initial}" +
         "*{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}" +
+        /* Author display rules (inline-flex buttons etc.) would otherwise
+           beat the UA's [hidden]{display:none}. */
+        "[hidden]{display:none!important}" +
         /* ---- bottom pill bar (dark) ---- */
         ".bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;" +
         "display:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;" +
@@ -90,21 +100,33 @@
         ".fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}" +
         ".fab:hover{background:#2a3140}" +
         ".fab svg{width:20px;height:20px;fill:currentColor}" +
-        ".brand{font-weight:700;letter-spacing:.04em}" +
         ".chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}" +
         ".chip.published{background:#1e7e4e}" +
         ".chip.changes{background:#b45309;text-transform:none}" +
-        ".msg{opacity:.75;font-size:12px;max-width:16em;overflow:hidden;text-overflow:ellipsis}" +
+        ".msg{opacity:.75;font-size:12px;max-width:14em;overflow:hidden;text-overflow:ellipsis}" +
         ".bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);" +
-        "border-radius:999px;padding:5px 12px;cursor:pointer}" +
+        "border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}" +
+        ".bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}" +
+        ".bar .ic{display:inline-flex}" +
         ".bar button:hover{background:rgba(255,255,255,.1)}" +
         ".bar button:disabled{opacity:.4;cursor:default}" +
         ".bar button.primary{background:#2f5fe0;border-color:#2f5fe0}" +
         ".bar button.primary:hover{background:#2149b8}" +
         ".bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}" +
-        ".bar button.dngr{color:#fca5a5;border-color:rgba(252,165,165,.35)}" +
-        ".bar button.dngr:hover{background:rgba(252,165,165,.15)}" +
-        ".bar a{color:#fff;opacity:.7;text-decoration:none;font-size:12px}.bar a:hover{opacity:1}" +
+        /* Amber ring on Save while there are unsaved changes. */
+        ".bar button.attn{border-color:#f0b429}" +
+        /* ---- overflow (⋯) menu: rare and destructive actions ---- */
+        ".more{position:relative;display:inline-flex}" +
+        "#more{font-size:16px;padding:4px 10px;line-height:1}" +
+        ".menu{position:absolute;bottom:calc(100% + 12px);right:0;display:none;flex-direction:column;" +
+        "background:#242a33;border-radius:12px;padding:6px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4)}" +
+        ".menu.on{display:flex}" +
+        ".menu button,.menu a{font:inherit;font-size:13px;color:#fff;background:none;border:none;border-radius:8px;" +
+        "padding:8px 12px;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}" +
+        ".menu button:hover,.menu a:hover{background:rgba(255,255,255,.1)}" +
+        ".menu button.dngr{color:#fca5a5}" +
+        ".menu button.dngr:hover{background:rgba(252,165,165,.15)}" +
+        ".menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}" +
         /* ---- tool rail (left edge, edit mode only) ---- */
         ".rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;" +
         "background:#1c2128;display:none;flex-direction:column;align-items:center;" +
@@ -226,17 +248,22 @@
         ".dlg button.ok.danger:hover{background:#a03024}" +
         "</style>" +
         '<div class="bar" id="bar">' +
-        '<span class="brand">CMS</span>' +
         '<span class="chip" id="chip"></span>' +
-        '<span class="msg" id="msg"></span>' +
-        '<button id="edit">Edit page</button>' +
-        '<button id="cancel" hidden>Cancel</button>' +
-        '<button id="del-page" class="dngr" hidden>Delete</button>' +
-        '<button id="save" disabled>Save draft</button>' +
-        '<button id="discard" class="dngr" hidden>Discard draft</button>' +
-        '<button id="publish" class="primary">Publish</button>' +
-        '<a id="admin" href="#">Admin</a>' +
-        '<button id="close" class="quiet" title="Minimize editing tools">×</button>' +
+        '<span class="msg" id="msg" hidden></span>' +
+        '<button id="edit" title="Edit this page in place">' +
+        '<span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button>' +
+        '<button id="save" disabled hidden title="Save your changes as a draft">Save</button>' +
+        '<button id="publish" class="primary" title="Make the current draft live">Publish</button>' +
+        '<span class="more">' +
+        '<button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>' +
+        '<div class="menu" id="more-menu">' +
+        '<button id="cancel" hidden>Revert unsaved changes</button>' +
+        '<button id="discard" class="dngr" hidden>Discard draft…</button>' +
+        '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
+        '<hr id="menu-sep">' +
+        '<a id="admin" href="#">Open admin</a>' +
+        "</div></span>" +
+        '<button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + "</button>" +
         "</div>" +
         '<div class="rail" id="rail">' +
         '<button id="rail-add" title="Add a section">＋<span>Section</span></button>' +
@@ -653,7 +680,9 @@
         editing = on;
         if (on) snapshot = takeSnapshot();
         document.body.classList.toggle("cms-editing", on);
-        $("edit").textContent = on ? "Done editing" : "Edit page";
+        $("edit-ic").innerHTML = on ? ICONS.check : ICONS.pencil;
+        $("edit-label").textContent = on ? "Done" : "Edit";
+        $("edit").title = on ? "Finish editing" : "Edit this page in place";
         $("cancel").hidden = !on;
         // The home page (empty slug) is never deletable.
         $("del-page").hidden = !on || (cfg.slug || "") === "";
@@ -687,14 +716,12 @@
     function markDirty(name) {
         dirty[name] = true;
         $("save").disabled = false;
-        setMsg("Unsaved changes");
         updateBarButtons();
     }
 
     function markSectionsDirty(region) {
         sectionsDirty[region] = true;
         $("save").disabled = false;
-        setMsg("Unsaved changes");
         updateBarButtons();
     }
 
@@ -703,17 +730,22 @@
     }
 
     // updateBarButtons keeps the edit bar honest about the page's state:
-    // while just viewing, Save draft and Publish are hidden — except that
+    // while just viewing, Save and Publish are hidden — except that
     // Publish stays whenever there is something publishable: a draft page
     // (making it live is the primary action), saved-but-unpublished
     // changes, or unsaved work from a minimized session.
     function updateBarButtons() {
         var working = editing || hasUnsaved();
         $("save").hidden = !working;
+        // The amber ring on Save is the unsaved-changes signal.
+        $("save").classList.toggle("attn", hasUnsaved());
         $("publish").hidden = !working && pageStatus === "published" && !hasUnpublished;
         // Discard is offered whenever there's a saved draft that differs from
-        // what's live — the same condition as the "Unpublished changes" chip.
+        // what's live — the same condition as the "Unpublished edits" chip.
         $("discard").hidden = !(pageStatus === "published" && hasUnpublished);
+        // The separator only earns its place when the destructive group
+        // above it has at least one visible item.
+        $("menu-sep").hidden = $("cancel").hidden && $("discard").hidden && $("del-page").hidden;
     }
 
     document.addEventListener("input", function (e) {
@@ -779,20 +811,38 @@
      * Saving and publishing
      * ------------------------------------------------------------------ */
 
-    function setMsg(text) { $("msg").textContent = text || ""; }
+    var msgTimer = null;
 
-    // The chip has three states: draft (never/no longer live), published
-    // (live and in sync), and "Unpublished changes" (live, but the saved
+    function setMsg(text) {
+        clearTimeout(msgTimer);
+        $("msg").textContent = text || "";
+        $("msg").hidden = !text;
+    }
+
+    // flash shows a short confirmation that clears itself, so the bar
+    // doesn't hold on to stale status text (and stale width).
+    function flash(text) {
+        setMsg(text);
+        msgTimer = setTimeout(function () { setMsg(""); }, 4000);
+    }
+
+    // The chip has three states: draft (never/no longer live), Live
+    // (published and in sync), and "Unpublished edits" (live, but the saved
     // draft differs — the state that makes drafts trustworthy).
     function updateChip() {
         var chip = $("chip");
         chip.classList.remove("published", "changes");
         if (pageStatus === "published" && hasUnpublished) {
-            chip.textContent = "Unpublished changes";
+            chip.textContent = "Unpublished edits";
+            chip.title = "This page has saved edits that aren't live yet — Publish makes them live";
             chip.classList.add("changes");
+        } else if (pageStatus === "published") {
+            chip.textContent = "Live";
+            chip.title = "This page is published and up to date";
+            chip.classList.add("published");
         } else {
             chip.textContent = pageStatus;
-            chip.classList.toggle("published", pageStatus === "published");
+            chip.title = "Only editors can see this page until it's published";
         }
     }
 
@@ -881,12 +931,8 @@
             });
             sectionEditors.forEach(function (s) { s.ed.setDirty(false); });
             $("save").disabled = true;
-            if (pageStatus === "published") {
-                hasUnpublished = true;
-                setMsg("Draft saved — publish when you're ready to make it live");
-            } else {
-                setMsg("Draft saved");
-            }
+            if (pageStatus === "published") hasUnpublished = true;
+            flash("Draft saved");
             updateChip();
             updateBarButtons();
         });
@@ -900,7 +946,7 @@
             pageStatus = "published";
             hasUnpublished = false;
             updateChip();
-            setMsg("Published ✓");
+            flash("Published ✓");
             updateBarButtons();
         }).catch(function (err) { setMsg(err.message); });
     }
@@ -964,6 +1010,21 @@
     });
     $("publish").addEventListener("click", publish);
     $("discard").addEventListener("click", discardDraft);
+
+    // The ⋯ menu holds rare and destructive actions. Any click elsewhere —
+    // including on a menu item, whose own handler runs first — closes it.
+    function closeMore() {
+        $("more-menu").classList.remove("on");
+        $("more").setAttribute("aria-expanded", "false");
+    }
+    $("more").addEventListener("click", function (e) {
+        e.stopPropagation();
+        var open = !$("more-menu").classList.contains("on");
+        $("more-menu").classList.toggle("on", open);
+        $("more").setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.addEventListener("click", closeMore);
+
     // The × doesn't remove the toolbar — it minimizes it (animated) to a
     // pencil button in the same spot; clicking that brings the bar back.
     // Minimizing exits edit mode for a clean view of the page, but any
@@ -988,7 +1049,7 @@
         setBarMinimized(false);
         if (hasUnsaved()) {
             $("save").disabled = false;
-            setMsg("Unsaved changes");
+            flash("You have unsaved changes");
         }
     });
 
@@ -1200,7 +1261,7 @@
         ed.focus();
         ed.insertContent(sn.html);
         if (onDirty) onDirty();
-        setMsg("Snippet inserted — click it to edit the text");
+        flash("Snippet inserted — click it to edit the text");
     }
 
     /* ------------------------------------------------------------------ *
@@ -1564,7 +1625,7 @@
         if (pickerFolder && pickerFolder !== "root") fd.append("folder", pickerFolder);
         setMsg("Uploading…");
         api("/media", { method: "POST", body: fd }).then(function (body) {
-            setMsg("File uploaded");
+            flash("File uploaded");
             input.value = "";
             if (body.media) pick(body.media);
             else loadMedia();
@@ -1580,6 +1641,7 @@
             dialogDismiss(); // an open dialog captures Escape first
             return;
         }
+        closeMore();
         closePicker();
         closeDrawer();
         closeMenuPanel();
