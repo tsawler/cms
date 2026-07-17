@@ -140,9 +140,11 @@
         ".rail button.on{background:rgba(255,255,255,.2)}" +
         ".rail button:disabled{opacity:.35;cursor:default}" +
         /* ---- media modal (light, centered) ---- */
-        ".overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}" +
+        /* Sits above the small dialog: section settings can open the
+           picker to choose a background image while the dialog stays. */
+        ".overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483003;display:none}" +
         ".overlay.on{display:block}" +
-        ".panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483000;" +
+        ".panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483004;" +
         "width:min(940px,94vw);height:min(640px,88vh);background:#fff;color:#1c2128;" +
         "border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}" +
         ".panel.on{display:flex}" +
@@ -236,6 +238,13 @@
         ".dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}" +
         ".dlg .fld{margin:0 0 12px}" +
         ".dlg .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475467}" +
+        /* color / image field rows in dialogs */
+        ".dlg .crow,.dlg .irow{display:flex;gap:8px;align-items:center}" +
+        ".dlg .crow input[type=color]{width:38px;height:30px;padding:2px;border:1px solid #d9dce1;" +
+        "border-radius:6px;background:#fff;cursor:pointer}" +
+        ".dlg .cval{flex:1;font-size:12px;color:#667085}" +
+        ".dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}" +
+        ".dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}" +
         ".dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;" +
         "font:inherit;font-size:13px;background:#fff}" +
         ".dlg .acts{display:flex;justify-content:flex-end;gap:8px}" +
@@ -329,13 +338,20 @@
 
     var dlgResolve = null;
     var dlgIsPrompt = false;
-    var dlgHasSelects = false;
+    var dlgHasFields = false;
+    var dlgValues = {}; // field id -> current value while a dialog is open
 
     function openDialog(opts) {
         return new Promise(function (resolve) {
             dlgResolve = resolve;
             dlgIsPrompt = !!opts.prompt;
-            dlgHasSelects = !!(opts.selects && opts.selects.length);
+            // opts.selects is the shorthand for select-only field lists;
+            // opts.fields supports typed fields (select, color, image).
+            var defs = opts.fields || (opts.selects || []).map(function (f) {
+                return { id: f.id, label: f.label, type: "select", options: f.options, value: f.value };
+            });
+            dlgHasFields = defs.length > 0;
+            dlgValues = {};
             $("dlg-msg").textContent = opts.message;
             var input = $("dlg-input");
             input.hidden = !opts.prompt;
@@ -343,26 +359,17 @@
             input.placeholder = opts.placeholder || "";
             var fields = $("dlg-fields");
             fields.innerHTML = "";
-            if (dlgHasSelects) {
-                opts.selects.forEach(function (f) {
-                    var wrap = document.createElement("div");
-                    wrap.className = "fld";
-                    var label = document.createElement("label");
-                    label.textContent = f.label;
-                    var sel = document.createElement("select");
-                    sel.dataset.field = f.id;
-                    f.options.forEach(function (o) {
-                        var opt = document.createElement("option");
-                        opt.value = o.value;
-                        opt.textContent = o.label;
-                        if (o.value === f.value) opt.selected = true;
-                        sel.appendChild(opt);
-                    });
-                    wrap.appendChild(label);
-                    wrap.appendChild(sel);
-                    fields.appendChild(wrap);
-                });
-            }
+            defs.forEach(function (f) {
+                var wrap = document.createElement("div");
+                wrap.className = "fld";
+                var label = document.createElement("label");
+                label.textContent = f.label;
+                wrap.appendChild(label);
+                if (f.type === "color") buildColorField(wrap, f);
+                else if (f.type === "image") buildImageField(wrap, f);
+                else buildSelectField(wrap, f);
+                fields.appendChild(wrap);
+            });
             var ok = $("dlg-ok");
             ok.textContent = opts.okLabel || "OK";
             ok.classList.toggle("danger", !!opts.danger);
@@ -370,6 +377,84 @@
             $("dlg").classList.add("on");
             (opts.prompt ? input : ok).focus();
         });
+    }
+
+    function buildSelectField(wrap, f) {
+        var sel = document.createElement("select");
+        f.options.forEach(function (o) {
+            var opt = document.createElement("option");
+            opt.value = o.value;
+            opt.textContent = o.label;
+            if (o.value === f.value) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        sel.addEventListener("change", function () { dlgValues[f.id] = sel.value; });
+        wrap.appendChild(sel);
+        dlgValues[f.id] = sel.value; // reflects the fallback when f.value is unknown
+    }
+
+    function buildColorField(wrap, f) {
+        var row = document.createElement("div");
+        row.className = "crow";
+        var inp = document.createElement("input");
+        inp.type = "color";
+        var current = /^#[0-9a-fA-F]{6}$/.test(f.value || "") ? f.value : "";
+        inp.value = current || "#ffffff";
+        var txt = document.createElement("span");
+        txt.className = "cval";
+        var clear = document.createElement("button");
+        clear.type = "button";
+        clear.textContent = "Clear";
+        dlgValues[f.id] = current;
+        function show() {
+            txt.textContent = dlgValues[f.id] || "None";
+            clear.hidden = !dlgValues[f.id];
+        }
+        inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; show(); });
+        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); });
+        row.appendChild(inp);
+        row.appendChild(txt);
+        row.appendChild(clear);
+        wrap.appendChild(row);
+        show();
+    }
+
+    function buildImageField(wrap, f) {
+        var row = document.createElement("div");
+        row.className = "irow";
+        var thumb = document.createElement("img");
+        var txt = document.createElement("span");
+        txt.className = "cval";
+        var choose = document.createElement("button");
+        choose.type = "button";
+        choose.textContent = "Choose…";
+        var clear = document.createElement("button");
+        clear.type = "button";
+        clear.textContent = "Clear";
+        dlgValues[f.id] = f.value || "";
+        function show() {
+            var v = dlgValues[f.id];
+            thumb.hidden = !v;
+            if (v) thumb.src = v;
+            txt.hidden = !!v;
+            txt.textContent = "None";
+            clear.hidden = !v;
+        }
+        choose.addEventListener("click", function () {
+            // The media picker opens above the dialog; the dialog stays put
+            // and shows the chosen image when the picker closes.
+            openPicker("image", function (item) {
+                dlgValues[f.id] = item.web;
+                show();
+            });
+        });
+        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); });
+        row.appendChild(thumb);
+        row.appendChild(txt);
+        row.appendChild(choose);
+        row.appendChild(clear);
+        wrap.appendChild(row);
+        show();
     }
 
     function settleDialog(value) {
@@ -391,12 +476,10 @@
     }
 
     function dialogOK() {
-        if (dlgHasSelects) {
+        if (dlgHasFields) {
             var values = {};
-            $("dlg-fields").querySelectorAll("select").forEach(function (sel) {
-                values[sel.dataset.field] = sel.value;
-            });
-            // A dialog may combine a text input with selects; the input's
+            Object.keys(dlgValues).forEach(function (k) { values[k] = dlgValues[k]; });
+            // A dialog may combine a text input with fields; the input's
             // value rides along under "input".
             if (dlgIsPrompt) values.input = $("dlg-input").value.trim();
             settleDialog(values);
@@ -404,7 +487,7 @@
         }
         settleDialog(dlgIsPrompt ? $("dlg-input").value.trim() : true);
     }
-    function dialogDismiss() { settleDialog(dlgIsPrompt || dlgHasSelects ? null : false); }
+    function dialogDismiss() { settleDialog(dlgIsPrompt || dlgHasFields ? null : false); }
 
     $("dlg-ok").addEventListener("click", dialogOK);
     $("dlg-cancel").addEventListener("click", dialogDismiss);
@@ -437,6 +520,11 @@
     /* Light-DOM styles for region outlines while editing. */
     var lightCss = document.createElement("style");
     lightCss.textContent =
+        /* The tool rail is fixed to the left edge; push the page content
+           right so the rail sits beside it instead of covering it. The
+           transition matches the rail's appearance. */
+        "body{transition:margin-left .25s ease}" +
+        "body.cms-editing{margin-left:56px}" +
         ".cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}" +
         ".cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}" +
         ".cms-editing [data-cms-region]:empty::before{content:'Click to edit…';opacity:.4}" +
@@ -452,8 +540,9 @@
         ".cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;" +
         "background:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;" +
         "padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35)}" +
-        ".cms-sec-ui button{font:13px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;" +
-        "border-radius:999px;padding:5px 8px;cursor:pointer}" +
+        ".cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;" +
+        "border-radius:999px;padding:6px 9px;cursor:pointer}" +
+        ".cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}" +
         ".cms-sec-ui button:hover{background:rgba(255,255,255,.18)}" +
         ".cms-sec-ui button[data-secact='del']{color:#fca5a5}" +
         ".cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}" +
@@ -895,7 +984,10 @@
                 if (s.el === contentEl) { html = s.ed.getContent(); return true; }
                 return false;
             });
-            out.push({ bg: wrapper.dataset.cmsBg || "", width: wrapper.dataset.cmsWidth || "", html: html });
+            out.push({ bg: wrapper.dataset.cmsBg || "", width: wrapper.dataset.cmsWidth || "",
+                height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
+                bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
+                html: html });
         });
         return out;
     }
@@ -1300,19 +1392,19 @@
         tb.setAttribute("data-cms-ui", "");
         tb.className = "cms-sec-ui";
         tb.contentEditable = "false";
+        // Gear and trash are SVGs (sized by the .cms-sec-ui CSS) so they
+        // hold their own optically against the text glyphs; the trash
+        // emoji is also avoided because emoji presentation ignores CSS
+        // color and that button must read as red/destructive.
+        var gearSVG = '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>';
+        var trashSVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
         [["up", "↑", "Move up"], ["down", "↓", "Move down"], ["add", "＋", "Add section below"],
-            ["set", "⚙", "Section settings"], ["del", "", "Delete section"]].forEach(function (b) {
+            ["set", gearSVG, "Section settings"], ["del", trashSVG, "Delete section"]].forEach(function (b) {
             var btn = document.createElement("button");
             btn.type = "button";
             btn.setAttribute("data-secact", b[0]);
-            if (b[0] === "del") {
-                // SVG rather than 🗑: emoji presentation ignores CSS
-                // color, and this button must read as red/destructive.
-                btn.innerHTML = '<svg width="12" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:block">' +
-                    '<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-            } else {
-                btn.textContent = b[1];
-            }
+            if (b[1].indexOf("<svg") === 0) btn.innerHTML = b[1];
+            else btn.textContent = b[1];
             btn.title = b[2];
             tb.appendChild(btn);
         });
@@ -1368,29 +1460,72 @@
                 markSectionsDirty(region);
             });
         } else if (act === "set") {
+            var setFields = [
+                { id: "bg", label: "Background style", type: "select", value: wrapper.dataset.cmsBg || "",
+                    options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
+                { id: "width", label: "Content width", type: "select", value: wrapper.dataset.cmsWidth || "",
+                    options: sectionStyles.widths.map(function (o) { return { value: o.key, label: o.label }; }) },
+                { id: "height", label: "Section height", type: "select", value: wrapper.dataset.cmsHeight || "auto",
+                    options: [
+                        { value: "auto", label: "Auto (fits the content)" },
+                        { value: "50", label: "50% of the screen" },
+                        { value: "75", label: "75% of the screen" },
+                        { value: "100", label: "Full screen" },
+                    ] },
+                { id: "valign", label: "Vertical alignment", type: "select", value: wrapper.dataset.cmsValign || "top",
+                    options: [
+                        { value: "top", label: "Top" },
+                        { value: "center", label: "Center" },
+                        { value: "bottom", label: "Bottom" },
+                    ] },
+                { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" },
+            ];
+            if (mediaEnabled) {
+                setFields.push({ id: "bgimage", label: "Background image", type: "image",
+                    value: wrapper.dataset.cmsBgimage || "" });
+            }
             openDialog({
                 message: "Section settings",
                 okLabel: "Apply",
-                selects: [
-                    { id: "bg", label: "Background", value: wrapper.dataset.cmsBg || "",
-                        options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
-                    { id: "width", label: "Content width", value: wrapper.dataset.cmsWidth || "",
-                        options: sectionStyles.widths.map(function (o) { return { value: o.key, label: o.label }; }) },
-                ],
+                fields: setFields,
             }).then(function (values) {
                 if (!values) return;
-                applySectionSettings(wrapper, values.bg, values.width);
+                applySectionSettings(wrapper, values);
                 markSectionsDirty(region);
             });
         }
     });
 
-    function applySectionSettings(wrapper, bgKey, widthKey) {
-        var bg = sbOpt(sectionStyles.backgrounds, bgKey);
-        var w = sbOpt(sectionStyles.widths, widthKey);
+    // applySectionSettings takes a settings object {bg, width, bgcolor,
+    // bgimage} and makes the wrapper reflect it: curated options become
+    // classes, the free-form background color/image become inline styles.
+    function applySectionSettings(wrapper, s) {
+        var bg = sbOpt(sectionStyles.backgrounds, s.bg);
+        var w = sbOpt(sectionStyles.widths, s.width);
+        var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
+        var image = s.bgimage || "";
+        // Height is a minimum, in viewport units — content can still grow
+        // a section taller than its chosen height.
+        var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
+        // Where the content sits vertically, which matters once a section
+        // is taller than its content.
+        var valign = { center: 1, bottom: 1 }[s.valign] ? s.valign : "top";
         wrapper.dataset.cmsBg = bg.key;
         wrapper.dataset.cmsWidth = w.key;
+        wrapper.dataset.cmsHeight = height;
+        wrapper.dataset.cmsValign = valign;
+        wrapper.dataset.cmsBgcolor = color;
+        wrapper.dataset.cmsBgimage = image;
         wrapper.className = bg.class || "";
+        wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
+        wrapper.style.display = valign === "top" ? "" : "flex";
+        wrapper.style.flexDirection = valign === "top" ? "" : "column";
+        wrapper.style.justifyContent = valign === "top" ? "" :
+            (valign === "center" ? "center" : "flex-end");
+        wrapper.style.backgroundColor = color;
+        wrapper.style.backgroundImage = image ? "url('" + image.replace(/'/g, "%27") + "')" : "";
+        wrapper.style.backgroundSize = image ? "cover" : "";
+        wrapper.style.backgroundPosition = image ? "center" : "";
         var contentEl = wrapper.querySelector("[data-cms-section-content]");
         if (!contentEl) return;
         // Preserve TinyMCE's own classes (mce-content-body etc.) when an
@@ -1409,7 +1544,14 @@
     // keys, which live on the wrapper and survive the teardown.
     function reapplySectionClasses() {
         document.querySelectorAll("[data-cms-section]").forEach(function (wrapper) {
-            applySectionSettings(wrapper, wrapper.dataset.cmsBg, wrapper.dataset.cmsWidth);
+            applySectionSettings(wrapper, {
+                bg: wrapper.dataset.cmsBg,
+                width: wrapper.dataset.cmsWidth,
+                height: wrapper.dataset.cmsHeight,
+                valign: wrapper.dataset.cmsValign,
+                bgcolor: wrapper.dataset.cmsBgcolor,
+                bgimage: wrapper.dataset.cmsBgimage,
+            });
         });
     }
 
@@ -1656,12 +1798,17 @@
 
     document.addEventListener("keydown", function (e) {
         if (e.key !== "Escape") return;
+        // The picker can sit above an open dialog (background image
+        // choice), so it takes Escape first.
+        if ($("picker").classList.contains("on")) {
+            closePicker();
+            return;
+        }
         if (dlgResolve) {
-            dialogDismiss(); // an open dialog captures Escape first
+            dialogDismiss();
             return;
         }
         closeMore();
-        closePicker();
         closeDrawer();
         closeMenuPanel();
     });

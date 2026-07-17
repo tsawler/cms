@@ -13,6 +13,7 @@ import (
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/pgutil"
 	"github.com/tsawler/cms/media"
+	"github.com/tsawler/cms/render"
 )
 
 // The JSON API backs the in-place editor. It lives under /api on the admin
@@ -275,9 +276,13 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Region   string `json:"region"`
 		Sections []struct {
-			BG    string `json:"bg"`
-			Width string `json:"width"`
-			HTML  string `json:"html"`
+			BG      string `json:"bg"`
+			Width   string `json:"width"`
+			Height  string `json:"height"`
+			VAlign  string `json:"valign"`
+			BGColor string `json:"bgcolor"`
+			BGImage string `json:"bgimage"`
+			HTML    string `json:"html"`
 		} `json:"sections"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
@@ -311,15 +316,27 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		if !isAdmin {
 			html = editorHTMLPolicy.Sanitize(html)
 		}
-		inputs[i] = content.SectionInput{
-			Content: html,
-			// Resolve settings against the configured options so unknown
-			// keys are stored as the fallback rather than junk.
-			Settings: map[string]string{
-				"bg":    s.deps.SectionStyles.Background(sec.BG).Key,
-				"width": s.deps.SectionStyles.Width(sec.Width).Key,
-			},
+		// Resolve settings against the configured options so unknown
+		// keys are stored as the fallback rather than junk.
+		settings := map[string]string{
+			"bg":    s.deps.SectionStyles.Background(sec.BG).Key,
+			"width": s.deps.SectionStyles.Width(sec.Width).Key,
 		}
+		// Custom backgrounds and height are free-form values; invalid
+		// ones are dropped rather than stored.
+		if h := render.ValidSectionHeight(sec.Height); h != "" {
+			settings["height"] = h
+		}
+		if v := render.ValidSectionVAlign(sec.VAlign); v != "" {
+			settings["valign"] = v
+		}
+		if c := render.ValidBackgroundColor(sec.BGColor); c != "" {
+			settings["bgcolor"] = c
+		}
+		if u := render.ValidBackgroundURL(sec.BGImage); u != "" {
+			settings["bgimage"] = u
+		}
+		inputs[i] = content.SectionInput{Content: html, Settings: settings}
 	}
 
 	if err := s.deps.Content.ReplaceDraftSections(r.Context(), page.ID, body.Region, s.deps.DefaultLocale, inputs); err != nil {

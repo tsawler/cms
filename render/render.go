@@ -12,7 +12,9 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"net/url"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -162,6 +164,64 @@ func DefaultSectionStyles() *SectionStyles {
 			{Key: "full", Label: "Full width", Class: "prose prose-slate max-w-none px-6 py-12"},
 		},
 	}
+}
+
+// Custom section backgrounds — a color and/or image picked freely in the
+// editor — are the two section settings that aren't curated classes; they
+// render as inline styles. Values are validated on save and again at
+// render time, in case older or hand-edited rows hold junk.
+var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// ValidBackgroundColor returns the value if it is a safe #rrggbb color,
+// or "" otherwise.
+func ValidBackgroundColor(s string) string {
+	if hexColorRe.MatchString(s) {
+		return s
+	}
+	return ""
+}
+
+// ValidBackgroundURL returns the value if it is safe to embed in a CSS
+// url('…') inside an HTML attribute: an http(s) or site-relative URL
+// containing none of the characters that could break out of either
+// context. Returns "" otherwise.
+func ValidBackgroundURL(s string) string {
+	if s == "" || len(s) > 2048 || strings.ContainsAny(s, "\"'\\<>() \t\r\n") {
+		return ""
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return ""
+	}
+	if u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	if u.Scheme == "" && !strings.HasPrefix(s, "/") {
+		return ""
+	}
+	return s
+}
+
+// ValidSectionHeight returns the value if it is one of the fixed
+// viewport-height options ("50", "75", "100"), or "" otherwise ("auto"
+// and anything unknown mean no minimum height).
+func ValidSectionHeight(s string) string {
+	switch s {
+	case "50", "75", "100":
+		return s
+	}
+	return ""
+}
+
+// ValidSectionVAlign returns the value if it is a non-default vertical
+// alignment ("center" or "bottom"), or "" otherwise ("top" is the
+// default flow and needs no styles).
+func ValidSectionVAlign(s string) string {
+	switch s {
+	case "center", "bottom":
+		return s
+	}
+	return ""
 }
 
 // DefaultEditorStyles is the Tailwind-first default Styles menu, used when
@@ -363,15 +423,52 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	bg := r.sections.Background(b.Settings["bg"])
 	w := r.sections.Width(b.Settings["width"])
+	bgColor := ValidBackgroundColor(b.Settings["bgcolor"])
+	bgImage := ValidBackgroundURL(b.Settings["bgimage"])
+	height := ValidSectionHeight(b.Settings["height"])
+	valign := ValidSectionVAlign(b.Settings["valign"])
 
 	var sb strings.Builder
 	sb.WriteString("<section")
 	if edit {
 		sb.WriteString(` data-cms-section data-cms-bg="` + html.EscapeString(bg.Key) +
 			`" data-cms-width="` + html.EscapeString(w.Key) + `"`)
+		if height != "" {
+			sb.WriteString(` data-cms-height="` + height + `"`)
+		}
+		if valign != "" {
+			sb.WriteString(` data-cms-valign="` + valign + `"`)
+		}
+		if bgColor != "" {
+			sb.WriteString(` data-cms-bgcolor="` + bgColor + `"`)
+		}
+		if bgImage != "" {
+			sb.WriteString(` data-cms-bgimage="` + html.EscapeString(bgImage) + `"`)
+		}
 	}
 	if bg.Class != "" {
 		sb.WriteString(` class="` + html.EscapeString(bg.Class) + `"`)
+	}
+	var style string
+	if height != "" {
+		style = "min-height:" + height + "vh;"
+	}
+	if valign != "" {
+		style += "display:flex;flex-direction:column;justify-content:"
+		if valign == "center" {
+			style += "center;"
+		} else {
+			style += "flex-end;"
+		}
+	}
+	if bgColor != "" {
+		style += "background-color:" + bgColor + ";"
+	}
+	if bgImage != "" {
+		style += "background-image:url('" + bgImage + "');background-size:cover;background-position:center;"
+	}
+	if style != "" {
+		sb.WriteString(` style="` + html.EscapeString(style) + `"`)
 	}
 	sb.WriteString("><div")
 	if edit {
