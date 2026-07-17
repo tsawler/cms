@@ -24,6 +24,13 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<div data-height="junk">bad badge</div>` +
 		`<img src="/cms/media/abc123/web.jpg" alt="pic" width="800" height="400">` +
 		`<img src="https://bucket.example.com/media/x/web.jpg" alt="ext">` +
+		`<a href="/x" class="cms-btn" data-cms-btn-size="l" style="background-color: rgb(17, 34, 51); ` +
+		`color: #ffee88; border: 2px solid #336699; border-radius: 24px; padding: 14px 28px; font-size: 18px;">styled button</a>` +
+		`<a href="/y" style="background-color: url(javascript:alert(4)); border-radius: 50vh;">bad button</a>` +
+		`<div style="background-color: #112233">not a link</div>` +
+		`<a href="/z" data-cms-btn-size="huge">bad size</a>` +
+		`<a href="https://example.com" target="_blank" rel="noopener">new tab</a>` +
+		`<a href="/w" target="_evil" rel="opener stylesheet">bad target</a>` +
 		`<script>alert(1)</script>` +
 		`<img src=x onerror=alert(2)>` +
 		`<a href="javascript:alert(3)">bad</a>`
@@ -44,12 +51,24 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<figure class="not-prose"><blockquote>q</blockquote><figcaption>who</figcaption></figure>`,
 		`data-height="120px"`,
 		`height: 120px`,
+		// Button-editor styles must survive on links (rgb and hex forms).
+		`background-color: rgb(17, 34, 51)`,
+		`color: #ffee88`,
+		`border: 2px solid #336699`,
+		`border-radius: 24px`,
+		`padding: 14px 28px`,
+		`font-size: 18px`,
+		`data-cms-btn-size="l"`,
+		`target="_blank"`,
+		// UGCPolicy appends nofollow to every link's rel.
+		`rel="noopener nofollow"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)
 		}
 	}
-	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color", "50vh", `data-height="junk"`} {
+	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color: red", "50vh",
+		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, `<div style`, "_evil", "opener stylesheet"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("sanitized output kept %q:\n%s", banned, out)
 		}

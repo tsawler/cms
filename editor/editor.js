@@ -74,6 +74,8 @@
         pencil: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
         check: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
         hide: '<svg viewBox="0 0 24 24"><path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z"/></svg>',
+        gear: '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
+        trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
     };
 
     var host = document.createElement("div");
@@ -127,6 +129,17 @@
         ".menu button.dngr{color:#fca5a5}" +
         ".menu button.dngr:hover{background:rgba(252,165,165,.15)}" +
         ".menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}" +
+        /* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
+        ".btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;" +
+        "border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;" +
+        "box-shadow:0 4px 12px rgba(0,0,0,.35)}" +
+        ".btnui.on{display:flex}" +
+        ".btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;" +
+        "border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}" +
+        ".btnui button:hover{background:rgba(255,255,255,.18)}" +
+        ".btnui button svg{display:block;width:15px;height:15px;fill:currentColor}" +
+        "#btn-del{color:#fca5a5}" +
+        "#btn-del:hover{background:rgba(252,165,165,.2)}" +
         /* ---- tool rail (left edge, edit mode only) ---- */
         ".rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;" +
         "background:#1c2128;display:none;flex-direction:column;align-items:center;" +
@@ -245,6 +258,26 @@
         ".dlg .cval{flex:1;font-size:12px;color:#667085}" +
         ".dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}" +
         ".dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}" +
+        ".dlg .crow input,.dlg .irow input{margin:0}" +
+        /* range field (slider + numeric input) */
+        ".dlg .rrow{display:flex;gap:10px;align-items:center}" +
+        ".dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}" +
+        ".dlg .rnum{width:64px;margin:0;padding:5px 8px}" +
+        /* live preview pane */
+        "#dlg-preview{margin:0 0 14px;padding:20px;border:1px solid #e3e6ea;border-radius:8px;" +
+        "background:#f8f9fb;display:flex;justify-content:center;align-items:center;min-height:72px}" +
+        /* plain text + checkbox fields (label.chk must out-rank the
+           .dlg .fld label heading rule, which sets display:block) */
+        ".dlg .tinput{margin:0}" +
+        ".dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;" +
+        "font-weight:400;margin:0}" +
+        ".dlg .chk input{width:auto;margin:0}" +
+        /* tab bar */
+        ".dlg .tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #e3e6ea}" +
+        ".dlg .tabs button{border:none;background:none;border-radius:0;padding:8px 14px;font-size:13px;" +
+        "color:#667085;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}" +
+        ".dlg .tabs button:hover{background:none;color:#1c2128}" +
+        ".dlg .tabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}" +
         ".dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;" +
         "font:inherit;font-size:13px;background:#fff}" +
         ".dlg .acts{display:flex;justify-content:flex-end;gap:8px}" +
@@ -317,11 +350,17 @@
         '<span style="flex:1"></span>' +
         '<button class="mbtn primary" id="menu-save">Save menu</button>' +
         "</div></div>" +
+        '<div class="btnui" id="btn-ui">' +
+        '<button id="btn-set" title="Button settings">' + ICONS.gear + "</button>" +
+        '<button id="btn-del" title="Delete button">' + ICONS.trash + "</button>" +
+        "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
+        '<div class="tabs" id="dlg-tabs" hidden></div>' +
         '<input type="text" id="dlg-input" hidden>' +
         '<div id="dlg-fields"></div>' +
+        '<div id="dlg-preview" hidden></div>' +
         '<div class="acts">' +
         '<button id="dlg-cancel">Cancel</button>' +
         '<button id="dlg-ok" class="ok">OK</button>' +
@@ -340,6 +379,13 @@
     var dlgIsPrompt = false;
     var dlgHasFields = false;
     var dlgValues = {}; // field id -> current value while a dialog is open
+    var dlgPreview = null; // optional live-preview renderer (values, container)
+
+    // dlgChanged re-renders the dialog's preview pane; every field
+    // builder calls it after updating dlgValues.
+    function dlgChanged() {
+        if (dlgPreview) dlgPreview(dlgValues, $("dlg-preview"));
+    }
 
     function openDialog(opts) {
         return new Promise(function (resolve) {
@@ -362,14 +408,46 @@
             defs.forEach(function (f) {
                 var wrap = document.createElement("div");
                 wrap.className = "fld";
+                if (f.tab) wrap.dataset.tab = f.tab;
                 var label = document.createElement("label");
                 label.textContent = f.label;
                 wrap.appendChild(label);
                 if (f.type === "color") buildColorField(wrap, f);
                 else if (f.type === "image") buildImageField(wrap, f);
+                else if (f.type === "range") buildRangeField(wrap, f);
+                else if (f.type === "text") buildTextField(wrap, f);
+                else if (f.type === "check") buildCheckField(wrap, f);
                 else buildSelectField(wrap, f);
                 fields.appendChild(wrap);
             });
+            dlgPreview = opts.preview || null;
+            $("dlg-preview").hidden = !dlgPreview;
+            // Tabs: fields carrying a `tab` name show only on that tab;
+            // the preview can be pinned to one tab via opts.previewTab.
+            var tabBar = $("dlg-tabs");
+            tabBar.innerHTML = "";
+            tabBar.hidden = !(opts.tabs && opts.tabs.length);
+            if (opts.tabs && opts.tabs.length) {
+                var switchTab = function (name) {
+                    tabBar.querySelectorAll("button").forEach(function (b) {
+                        b.classList.toggle("on", b.textContent === name);
+                    });
+                    fields.querySelectorAll(".fld").forEach(function (w) {
+                        w.hidden = !!(w.dataset.tab && w.dataset.tab !== name);
+                    });
+                    $("dlg-preview").hidden = !dlgPreview ||
+                        (!!opts.previewTab && opts.previewTab !== name);
+                };
+                opts.tabs.forEach(function (name) {
+                    var b = document.createElement("button");
+                    b.type = "button";
+                    b.textContent = name;
+                    b.addEventListener("click", function () { switchTab(name); });
+                    tabBar.appendChild(b);
+                });
+                switchTab(opts.tabs[0]);
+            }
+            dlgChanged(); // initial preview render
             var ok = $("dlg-ok");
             ok.textContent = opts.okLabel || "OK";
             ok.classList.toggle("danger", !!opts.danger);
@@ -388,7 +466,7 @@
             if (o.value === f.value) opt.selected = true;
             sel.appendChild(opt);
         });
-        sel.addEventListener("change", function () { dlgValues[f.id] = sel.value; });
+        sel.addEventListener("change", function () { dlgValues[f.id] = sel.value; dlgChanged(); });
         wrap.appendChild(sel);
         dlgValues[f.id] = sel.value; // reflects the fallback when f.value is unknown
     }
@@ -410,13 +488,79 @@
             txt.textContent = dlgValues[f.id] || "None";
             clear.hidden = !dlgValues[f.id];
         }
-        inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; show(); });
-        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); });
+        inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; show(); dlgChanged(); });
+        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); dlgChanged(); });
         row.appendChild(inp);
         row.appendChild(txt);
         row.appendChild(clear);
         wrap.appendChild(row);
         show();
+    }
+
+    function buildTextField(wrap, f) {
+        var inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "tinput";
+        inp.placeholder = f.placeholder || "";
+        inp.value = f.value || "";
+        dlgValues[f.id] = inp.value;
+        inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; dlgChanged(); });
+        wrap.appendChild(inp);
+    }
+
+    function buildCheckField(wrap, f) {
+        // The field's own label is the clickable text, so suppress the
+        // heading label openDialog already added.
+        var heading = wrap.querySelector("label");
+        if (heading) heading.remove();
+        var lab = document.createElement("label");
+        lab.className = "chk";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!f.value;
+        dlgValues[f.id] = cb.checked ? "1" : "";
+        cb.addEventListener("change", function () {
+            dlgValues[f.id] = cb.checked ? "1" : "";
+            dlgChanged();
+        });
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(f.label));
+        wrap.appendChild(lab);
+    }
+
+    function buildRangeField(wrap, f) {
+        var row = document.createElement("div");
+        row.className = "rrow";
+        var range = document.createElement("input");
+        range.type = "range";
+        range.min = f.min || 0;
+        range.max = f.max || 100;
+        range.step = 1;
+        var num = document.createElement("input");
+        num.type = "number";
+        num.min = range.min;
+        num.max = range.max;
+        num.className = "rnum";
+        var v = parseInt(f.value, 10);
+        if (isNaN(v)) v = 0;
+        range.value = num.value = v;
+        dlgValues[f.id] = String(v);
+        range.addEventListener("input", function () {
+            num.value = range.value;
+            dlgValues[f.id] = range.value;
+            dlgChanged();
+        });
+        num.addEventListener("input", function () {
+            var n = parseInt(num.value, 10);
+            if (isNaN(n)) return;
+            n = Math.max(+range.min, Math.min(+range.max, n));
+            range.value = n;
+            dlgValues[f.id] = String(n);
+            dlgChanged();
+        });
+        row.appendChild(range);
+        row.appendChild(num);
+        wrap.appendChild(row);
     }
 
     function buildImageField(wrap, f) {
@@ -446,9 +590,10 @@
             openPicker("image", function (item) {
                 dlgValues[f.id] = item.web;
                 show();
+                dlgChanged();
             });
         });
-        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); });
+        clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); dlgChanged(); });
         row.appendChild(thumb);
         row.appendChild(txt);
         row.appendChild(choose);
@@ -459,6 +604,7 @@
 
     function settleDialog(value) {
         if (!dlgResolve) return;
+        dlgPreview = null;
         $("dlg-overlay").classList.remove("on");
         $("dlg").classList.remove("on");
         var resolve = dlgResolve;
@@ -550,6 +696,9 @@
         ".cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;" +
         "border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}" +
         ".cms-add-section button:hover{background:#dbe4fa}" +
+        /* Buttons (a.cms-btn): click while editing for gear/trash chrome. */
+        ".cms-editing a.cms-btn{cursor:pointer}" +
+        ".cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}" +
         /* Flexible-space snippet: invisible on the live site, visible and
          * click-to-adjust while editing. */
         ".cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;" +
@@ -798,6 +947,7 @@
                 setMsg("");
             }).catch(function (err) { setMsg(err.message); });
         } else {
+            hideButtonUI();
             removeRichEditors();
             reapplySectionClasses();
         }
@@ -874,6 +1024,199 @@
             if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
         });
     }, true);
+
+    /* ------------------------------------------------------------------ *
+     * Button editor — clicking an a.cms-btn while editing shows floating
+     * gear/trash chrome; the gear opens a settings dialog whose choices
+     * are stored as inline styles on the link (sanitizer-approved).
+     * ------------------------------------------------------------------ */
+
+    var BTN_SIZES = {
+        s: { padding: "6px 14px", fontSize: "13px" },
+        m: { padding: "10px 20px", fontSize: "15px" },
+        l: { padding: "14px 28px", fontSize: "18px" },
+    };
+    var activeBtn = null; // the a.cms-btn the chrome is attached to
+
+    function rgbToHex(v) {
+        var m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(v || "");
+        if (!m) return /^#[0-9a-fA-F]{6}$/.test(v || "") ? v : "";
+        var h = function (n) { return ("0" + (+n).toString(16)).slice(-2); };
+        return "#" + h(m[1]) + h(m[2]) + h(m[3]);
+    }
+
+    function showButtonUI(btn) {
+        activeBtn = btn;
+        var ui = $("btn-ui");
+        ui.classList.add("on");
+        var r = btn.getBoundingClientRect();
+        // Above the button; below it when that would collide with the
+        // TinyMCE toolbar pinned to the top of the viewport.
+        var top = r.top - 44;
+        if (top < 64) top = r.bottom + 6;
+        ui.style.top = top + "px";
+        ui.style.left = Math.max(8, r.left) + "px";
+    }
+
+    function hideButtonUI() {
+        activeBtn = null;
+        $("btn-ui").classList.remove("on");
+    }
+
+    document.addEventListener("click", function (e) {
+        if (!editing) return;
+        if (e.target === host) return; // clicks on editor chrome keep the state
+        var btn = e.target.closest ? e.target.closest("a.cms-btn") : null;
+        if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
+        if (btn) {
+            e.preventDefault(); // never navigate while editing
+            showButtonUI(btn);
+        } else {
+            hideButtonUI();
+        }
+    }, true);
+
+    // Keep the chrome glued to its button through scrolls and resizes.
+    window.addEventListener("scroll", function () { if (activeBtn) showButtonUI(activeBtn); }, true);
+    window.addEventListener("resize", function () { if (activeBtn) showButtonUI(activeBtn); });
+
+    // findOwningEditor returns the TinyMCE instance managing the content
+    // that contains el, so button changes join that editor's undo stack.
+    function findOwningEditor(el) {
+        var all = [];
+        Object.keys(mceEditors).forEach(function (k) { all.push(mceEditors[k]); });
+        sectionEditors.forEach(function (s) { all.push(s.ed); });
+        for (var i = 0; i < all.length; i++) {
+            var target = all[i].getElement && all[i].getElement();
+            if (target && target.contains(el)) return all[i];
+        }
+        return null;
+    }
+
+    function applyButtonSettings(btn, v) {
+        var size = BTN_SIZES[v.size] ? v.size : "m";
+        var url = (v.href || "").trim() || "#";
+        btn.setAttribute("href", url);
+        // TinyMCE shadows URI attributes like it shadows style; keep it
+        // in sync or serialization restores the old address.
+        btn.setAttribute("data-mce-href", url);
+        if (v.newtab) {
+            btn.setAttribute("target", "_blank");
+            btn.setAttribute("rel", "noopener");
+        } else {
+            btn.removeAttribute("target");
+            btn.removeAttribute("rel");
+        }
+        btn.style.backgroundColor = v.bgcolor || "";
+        btn.style.color = v.textcolor || "";
+        btn.style.border = v.outline ? "2px solid " + v.outline : "";
+        btn.style.borderRadius = v.radius + "px";
+        btn.style.padding = BTN_SIZES[size].padding;
+        btn.style.fontSize = BTN_SIZES[size].fontSize;
+        btn.setAttribute("data-cms-btn-size", size);
+        // Keep TinyMCE's style shadow in sync or serialization reverts
+        // this (same dance as the flexible-space snippet).
+        btn.setAttribute("data-mce-style", btn.style.cssText);
+    }
+
+    $("btn-set").addEventListener("click", function () {
+        if (!activeBtn) return;
+        var btn = activeBtn;
+        var cs = window.getComputedStyle(btn);
+        // Class-derived looks the preview falls back to when a color
+        // field reads "None" (cleared).
+        var baseBg = rgbToHex(cs.backgroundColor) || "#2563eb";
+        var baseText = rgbToHex(cs.color) || "#ffffff";
+        openDialog({
+            message: "Button settings",
+            okLabel: "Apply",
+            tabs: ["Link", "Style"],
+            previewTab: "Style",
+            fields: [
+                { id: "href", label: "Link address", type: "text", tab: "Link",
+                    placeholder: "https://example.com or /contact",
+                    value: btn.getAttribute("href") === "#" ? "" : (btn.getAttribute("href") || "") },
+                { id: "newtab", label: "Open in a new tab", type: "check", tab: "Link",
+                    value: btn.getAttribute("target") === "_blank" },
+                { id: "bgcolor", label: "Background color", type: "color", tab: "Style",
+                    value: rgbToHex(btn.style.backgroundColor) || baseBg },
+                { id: "textcolor", label: "Text color", type: "color", tab: "Style",
+                    value: rgbToHex(btn.style.color) || baseText },
+                { id: "outline", label: "Outline color", type: "color", tab: "Style",
+                    value: rgbToHex(btn.style.borderColor) },
+                { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40, tab: "Style",
+                    value: String(Math.min(40, parseInt(cs.borderRadius, 10) || 0)) },
+                { id: "size", label: "Size", type: "select", tab: "Style",
+                    value: btn.getAttribute("data-cms-btn-size") || "m",
+                    options: [
+                        { value: "s", label: "Small" },
+                        { value: "m", label: "Medium" },
+                        { value: "l", label: "Large" },
+                    ] },
+            ],
+            // Live sample rendered with the current field values.
+            preview: function (v, el) {
+                el.innerHTML = "";
+                var sample = document.createElement("span");
+                sample.textContent = (btn.textContent || "Button text").trim() || "Button text";
+                var sz = BTN_SIZES[v.size] || BTN_SIZES.m;
+                sample.style.display = "inline-block";
+                sample.style.fontWeight = "600";
+                sample.style.lineHeight = "1.4";
+                sample.style.padding = sz.padding;
+                sample.style.fontSize = sz.fontSize;
+                sample.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
+                sample.style.backgroundColor = v.bgcolor || baseBg;
+                sample.style.color = v.textcolor || baseText;
+                sample.style.border = v.outline ? "2px solid " + v.outline : "none";
+                el.appendChild(sample);
+            },
+        }).then(function (v) {
+            if (!v) return;
+            var ed = findOwningEditor(btn);
+            var run = function () { applyButtonSettings(btn, v); };
+            if (ed) ed.undoManager.transact(run); else run();
+            markContainerDirty(btn);
+            if (activeBtn === btn) showButtonUI(btn); // re-anchor around the new size
+        });
+    });
+
+    $("btn-del").addEventListener("click", function () {
+        if (!activeBtn) return;
+        var btn = activeBtn;
+        cmsConfirm("Delete this button?", "Delete button", true).then(function (yes) {
+            if (!yes) return;
+            hideButtonUI();
+            // Resolve the dirty target before the button leaves the DOM.
+            var regionEl = btn.closest("[data-cms-region]");
+            var sectionsEl = btn.closest("[data-cms-sections]");
+            var ed = findOwningEditor(btn);
+            // Run through the owning editor's undo stack so Cmd+Z can
+            // still bring the button back after the confirm.
+            var run = function () {
+                var parent = btn.parentElement;
+                btn.remove();
+                // A button snippet's wrapper paragraph is scaffolding;
+                // drop it once it holds nothing else.
+                if (parent && parent.textContent.trim() === "" && !parent.querySelector("img,a")) {
+                    parent.remove();
+                }
+            };
+            if (ed) ed.undoManager.transact(run); else run();
+            if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+            else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+        });
+    });
+
+    function markContainerDirty(el) {
+        var regionEl = el.closest("[data-cms-region]");
+        if (regionEl) {
+            markDirty(regionEl.getAttribute("data-cms-region"));
+            return;
+        }
+        var container = el.closest("[data-cms-sections]");
+        if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
+    }
 
     document.addEventListener("click", function (e) {
         if (!editing || !mediaEnabled) return;
@@ -1396,10 +1739,8 @@
         // hold their own optically against the text glyphs; the trash
         // emoji is also avoided because emoji presentation ignores CSS
         // color and that button must read as red/destructive.
-        var gearSVG = '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>';
-        var trashSVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
         [["up", "↑", "Move up"], ["down", "↓", "Move down"], ["add", "＋", "Add section below"],
-            ["set", gearSVG, "Section settings"], ["del", trashSVG, "Delete section"]].forEach(function (b) {
+            ["set", ICONS.gear, "Section settings"], ["del", ICONS.trash, "Delete section"]].forEach(function (b) {
             var btn = document.createElement("button");
             btn.type = "button";
             btn.setAttribute("data-secact", b[0]);

@@ -42,7 +42,7 @@ func DefaultSnippets() []Snippet {
 </div>`},
 		{Name: "Call to action", HTML: `<div class="not-prose my-6 rounded-xl bg-slate-900 p-6 text-center">
 <p class="text-lg font-semibold text-white mb-3">Ready to get started?</p>
-<a href="#" class="inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Get in touch</a>
+<a href="#" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Get in touch</a>
 </div>`},
 		{Name: "Two columns", HTML: `<div class="not-prose my-6 grid gap-6 sm:grid-cols-2">
 <div><h3 class="font-semibold mb-1">First column</h3><p class="text-slate-600">Write something here.</p></div>
@@ -52,8 +52,12 @@ func DefaultSnippets() []Snippet {
 <blockquote class="text-lg text-slate-700">&ldquo;A quote worth repeating.&rdquo;</blockquote>
 <figcaption class="mt-3 text-sm font-semibold text-slate-500">&mdash; Name, Title</figcaption>
 </figure>`},
+		// The cms-btn marker class makes the link a "button" to the
+		// in-place editor: clicking it while editing shows gear/trash
+		// controls (colors, roundness, size, delete). It has no CSS of
+		// its own.
 		{Name: "Button link", HTML: `<p class="not-prose my-4">
-<a href="#" class="inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
+<a href="#" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
 </p>`},
 		// Invisible on the live site; in edit mode the editor script makes
 		// it visible and click-to-adjust (see editor.js and the height

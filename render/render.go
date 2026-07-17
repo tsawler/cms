@@ -234,6 +234,7 @@ func DefaultEditorStyles() []EditorStyle {
 		{Label: "Red", Class: "text-red-600"},
 		{Label: "Green", Class: "text-emerald-600"},
 		{Label: "Blue", Class: "text-blue-600"},
+		{Label: "White", Class: "text-white"},
 		{Label: "Highlight", Class: "bg-yellow-200"},
 		{Label: "Serif", Class: "font-serif"},
 		{Label: "Monospace", Class: "font-mono"},
@@ -535,11 +536,21 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	return out.Bytes()
 }
 
-// headHTML builds what {{cmsHead}} emits inside <head>: the page's meta
-// description and its per-page CSS. HeadCSS is written raw; editing it is
-// restricted to admins.
+// btnCSS gives button-snippet links (a.cms-btn) a uniform hover and
+// press effect with no per-button configuration. Brightness shifts work
+// over any background the button editor sets, unlike hardcoded hover
+// colors.
+const btnCSS = `a.cms-btn{transition:filter .15s ease}` +
+	`a.cms-btn:hover{filter:brightness(.9)}` +
+	`a.cms-btn:active{filter:brightness(.8)}`
+
+// headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
+// small stylesheet (button hover), the page's meta description, and its
+// per-page CSS. HeadCSS is written raw; editing it is restricted to
+// admins.
 func headHTML(p *content.Page) template.HTML {
 	var sb strings.Builder
+	sb.WriteString("<style>" + btnCSS + "</style>\n")
 	if p.Description != "" {
 		sb.WriteString(`<meta name="description" content="`)
 		sb.WriteString(html.EscapeString(p.Description))

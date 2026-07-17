@@ -24,6 +24,17 @@ import (
 // the editor's alignment buttons work.
 var pixelHeightRe = regexp.MustCompile(`^[0-9]{1,4}px$`)
 
+// The button editor (editor.js) stores its settings as inline styles on
+// <a class="cms-btn"> elements. Browsers serialize colors as rgb(...) in
+// cssText, so both hex and rgb forms must pass.
+var (
+	cssColorRe   = regexp.MustCompile(`^(#[0-9a-fA-F]{6}|rgb\([0-9]{1,3}, [0-9]{1,3}, [0-9]{1,3}\))$`)
+	cssBorderRe  = regexp.MustCompile(`^[0-9]px solid (#[0-9a-fA-F]{6}|rgb\([0-9]{1,3}, [0-9]{1,3}, [0-9]{1,3}\))$`)
+	cssPxRe      = regexp.MustCompile(`^[0-9]{1,3}px$`)
+	cssPaddingRe = regexp.MustCompile(`^[0-9]{1,3}px [0-9]{1,3}px$`)
+	btnSizeRe    = regexp.MustCompile(`^[sml]$`)
+)
+
 var editorHTMLPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class").Globally()
@@ -33,6 +44,16 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	// The "Flexible space" snippet stores its height on the element.
 	p.AllowStyles("height").Matching(pixelHeightRe).Globally()
 	p.AllowAttrs("data-height").Matching(pixelHeightRe).OnElements("div")
+	// Button-editor styles, on links only.
+	p.AllowStyles("background-color", "border-color", "color").Matching(cssColorRe).OnElements("a")
+	p.AllowStyles("border").Matching(cssBorderRe).OnElements("a")
+	p.AllowStyles("border-width", "border-radius", "font-size").Matching(cssPxRe).OnElements("a")
+	p.AllowStyles("border-style").MatchingEnum("solid").OnElements("a")
+	p.AllowStyles("padding").Matching(cssPaddingRe).OnElements("a")
+	p.AllowAttrs("data-cms-btn-size").Matching(btnSizeRe).OnElements("a")
+	// Open-in-new-tab from the button editor.
+	p.AllowAttrs("target").Matching(regexp.MustCompile(`^_blank$`)).OnElements("a")
+	p.AllowAttrs("rel").Matching(regexp.MustCompile(`^noopener( noreferrer)?$`)).OnElements("a")
 	return p
 }()
 

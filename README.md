@@ -83,6 +83,7 @@ With no configuration, the menu ships a Tailwind-flavored default set:
 | Red            | `text-red-600`           | selection  |
 | Green          | `text-emerald-600`       | selection  |
 | Blue           | `text-blue-600`          | selection  |
+| White          | `text-white`             | selection  |
 | Highlight      | `bg-yellow-200`          | selection  |
 | Serif          | `font-serif`             | selection  |
 | Monospace      | `font-mono`              | selection  |
@@ -100,14 +101,14 @@ will silently not render in production. For the default menu:
 // tailwind.config.js (Tailwind v3)
 safelist: [
     "text-slate-500", "text-red-600", "text-emerald-600",
-    "text-blue-600", "bg-yellow-200", "font-serif", "font-mono",
-    "text-lg", "text-slate-600", "text-sm",
+    "text-blue-600", "text-white", "bg-yellow-200", "font-serif",
+    "font-mono", "text-lg", "text-slate-600", "text-sm",
 ],
 ```
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm");
 ```
 
 (The example site uses the Tailwind Play CDN, which generates CSS in the
