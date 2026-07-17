@@ -376,6 +376,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			Status:         string(page.Status),
 			HasUnpublished: hasUnpublished,
 			MediaEnabled:   c.media != nil,
+			IsAdmin:        user.Role == auth.RoleAdmin,
 			Styles:         c.cfg.EditorStyles,
 			Sections:       c.cfg.SectionStyles,
 		}

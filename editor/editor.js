@@ -16,6 +16,7 @@
     var csrf = cfg.csrf;
     var mediaEnabled = cfg.media === "1";
     var pageStatus = cfg.status || "draft";
+    var isAdmin = cfg.isAdmin === "1";
     // True when a published page's saved draft differs from what's live.
     var hasUnpublished = cfg.unpublished === "1";
 
@@ -129,6 +130,37 @@
         ".menu button.dngr{color:#fca5a5}" +
         ".menu button.dngr:hover{background:rgba(252,165,165,.15)}" +
         ".menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}" +
+        /* ---- page CSS & JS panel (wide, admin-only) ---- */
+        ".code-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}" +
+        ".code-overlay.on{display:block}" +
+        ".codepanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147482999;" +
+        "width:min(1000px,94vw);height:min(680px,88vh);background:#fff;color:#1c2128;border-radius:12px;" +
+        "box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}" +
+        ".codepanel.on{display:flex}" +
+        ".chead{display:flex;align-items:center;gap:18px;padding:10px 16px;border-bottom:1px solid #e3e6ea}" +
+        ".chead h2{margin:0;font-size:15px;white-space:nowrap}" +
+        ".ctabs{display:flex;gap:4px}" +
+        ".ctabs button{border:none;background:none;padding:8px 14px;font-size:13px;color:#667085;" +
+        "cursor:pointer;border-bottom:2px solid transparent;border-radius:0}" +
+        ".ctabs button:hover{color:#1c2128}" +
+        ".ctabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}" +
+        "#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;" +
+        "padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}" +
+        "#code-close:hover{background:#eceef1;color:#1c2128}" +
+        ".cbody{flex:1;position:relative;background:#11151c;min-height:0}" +
+        "#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;" +
+        "font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}" +
+        "#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}" +
+        "#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;" +
+        "overflow:auto}" +
+        "#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}" +
+        ".tok-c{color:#7d8799}" +      // comments
+        ".tok-s{color:#9ecbff}" +      // strings
+        ".tok-k{color:#ff7b8a}" +      // keywords / at-rules
+        ".tok-p{color:#b392f0}" +      // CSS properties
+        ".tok-n{color:#f2cc60}" +      // numbers / colors
+        ".cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}" +
+        ".chint{flex:1;font-size:12px;color:#667085}" +
         /* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
         ".btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;" +
         "border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;" +
@@ -303,6 +335,7 @@
         '<button id="discard" class="dngr" hidden>Discard draft…</button>' +
         '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
         '<hr id="menu-sep">' +
+        '<button id="code-btn" hidden>Page CSS &amp; JS…</button>' +
         '<a id="admin" href="#">Open admin</a>' +
         "</div></span>" +
         '<button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + "</button>" +
@@ -349,6 +382,24 @@
         '<button class="mbtn" id="menu-add">＋ Add item</button>' +
         '<span style="flex:1"></span>' +
         '<button class="mbtn primary" id="menu-save">Save menu</button>' +
+        "</div></div>" +
+        '<div class="code-overlay" id="code-overlay"></div>' +
+        '<div class="codepanel" id="code-panel">' +
+        '<div class="chead"><h2>Page CSS &amp; JS</h2>' +
+        '<div class="ctabs">' +
+        '<button id="code-tab-css" class="on">CSS</button>' +
+        '<button id="code-tab-js">JavaScript</button>' +
+        "</div>" +
+        '<button id="code-close" title="Close" aria-label="Close">×</button></div>' +
+        '<div class="cbody">' +
+        '<pre id="code-hl" aria-hidden="true"></pre>' +
+        '<textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>' +
+        "</div>" +
+        '<div class="cfoot">' +
+        '<span class="chint">This page only. Enter plain code — no &lt;style&gt; or &lt;script&gt; tags; ' +
+        "CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span>" +
+        '<button class="mbtn" id="code-cancel">Cancel</button>' +
+        '<button class="mbtn primary" id="code-save">Save</button>' +
         "</div></div>" +
         '<div class="btnui" id="btn-ui">' +
         '<button id="btn-set" title="Button settings">' + ICONS.gear + "</button>" +
@@ -1498,6 +1549,166 @@
     });
     document.addEventListener("click", closeMore);
 
+    /* ------------------------------------------------------------------ *
+     * Page CSS & JS panel (admin-only): a wide two-tab code editor.
+     * Highlighting uses the classic trick of a transparent-text textarea
+     * stacked over a <pre> that holds the colored tokens.
+     * ------------------------------------------------------------------ */
+
+    $("code-btn").hidden = !isAdmin;
+
+    var codeState = { css: "", js: "", tab: "css", loaded: false, dirty: false };
+
+    function escHTML(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // highlight tokenizes src with one alternation regex per language;
+    // unmatched stretches pass through unstyled. Cosmetic only — nothing
+    // downstream depends on it being a real parser.
+    function highlight(src, lang) {
+        var re, cls;
+        if (lang === "css") {
+            re = /(\/\*[\s\S]*?\*\/)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(@[\w-]+)|([-\w]+(?=\s*:))|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw|fr|s|ms|deg)?\b)/g;
+            cls = ["tok-c", "tok-s", "tok-k", "tok-p", "tok-n"];
+        } else {
+            re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b(?:async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|function|if|import|in|instanceof|let|new|of|return|static|super|switch|this|throw|try|typeof|var|void|while|with|yield|true|false|null|undefined)\b)|(\b\d+(?:\.\d+)?\b)/g;
+            cls = ["tok-c", "tok-s", "tok-k", "tok-n"];
+        }
+        var out = "";
+        var last = 0;
+        var m;
+        while ((m = re.exec(src)) !== null) {
+            out += escHTML(src.slice(last, m.index));
+            var cl = "";
+            for (var i = 1; i < m.length; i++) {
+                if (m[i] !== undefined) { cl = cls[i - 1]; break; }
+            }
+            out += '<span class="' + cl + '">' + escHTML(m[0]) + "</span>";
+            last = m.index + m[0].length;
+        }
+        // Trailing newline keeps the pre as tall as the textarea's last line.
+        return out + escHTML(src.slice(last)) + "\n";
+    }
+
+    function renderCode() {
+        $("code-hl").innerHTML = highlight($("code-ta").value, codeState.tab);
+    }
+
+    function stashCode() { codeState[codeState.tab] = $("code-ta").value; }
+
+    function setCodeTab(tab) {
+        stashCode();
+        codeState.tab = tab;
+        $("code-tab-css").classList.toggle("on", tab === "css");
+        $("code-tab-js").classList.toggle("on", tab === "js");
+        var ta = $("code-ta");
+        ta.value = codeState[tab];
+        ta.scrollTop = 0;
+        ta.scrollLeft = 0;
+        renderCode();
+        $("code-hl").scrollTop = 0;
+        $("code-hl").scrollLeft = 0;
+        ta.focus();
+    }
+
+    function openCodePanel() {
+        $("code-overlay").classList.add("on");
+        $("code-panel").classList.add("on");
+        if (codeState.loaded) {
+            setCodeTab(codeState.tab);
+            return;
+        }
+        $("code-ta").value = "";
+        renderCode();
+        api("/pages/" + pageId + "/code", { method: "GET" }).then(function (body) {
+            codeState.css = body.css || "";
+            codeState.js = body.js || "";
+            codeState.loaded = true;
+            codeState.dirty = false;
+            // Show whichever tab has content first; CSS wins a tie.
+            codeState.tab = !codeState.css && codeState.js ? "js" : "css";
+            // Sync the textarea before setCodeTab: its stash of the
+            // still-empty textarea must not wipe the fetched values.
+            $("code-ta").value = codeState[codeState.tab];
+            setCodeTab(codeState.tab);
+        }).catch(function (err) {
+            closeCodePanel();
+            setMsg(err.message);
+        });
+    }
+
+    function closeCodePanel() {
+        $("code-overlay").classList.remove("on");
+        $("code-panel").classList.remove("on");
+    }
+
+    // dismissCodePanel is the "close without saving" path: confirm when
+    // there are unsaved code edits, and drop them so the next open
+    // refetches clean state.
+    function dismissCodePanel() {
+        stashCode();
+        if (!codeState.dirty) {
+            closeCodePanel();
+            return;
+        }
+        cmsConfirm("Discard your unsaved CSS and JavaScript changes?", "Discard changes", true)
+            .then(function (yes) {
+                if (!yes) return;
+                codeState.loaded = false;
+                codeState.dirty = false;
+                closeCodePanel();
+            });
+    }
+
+    $("code-btn").addEventListener("click", openCodePanel);
+    $("code-tab-css").addEventListener("click", function () { setCodeTab("css"); });
+    $("code-tab-js").addEventListener("click", function () { setCodeTab("js"); });
+    $("code-close").addEventListener("click", dismissCodePanel);
+    $("code-cancel").addEventListener("click", dismissCodePanel);
+    $("code-overlay").addEventListener("click", dismissCodePanel);
+
+    $("code-ta").addEventListener("input", function () {
+        codeState.dirty = true;
+        stashCode();
+        renderCode();
+    });
+    $("code-ta").addEventListener("scroll", function () {
+        $("code-hl").scrollTop = $("code-ta").scrollTop;
+        $("code-hl").scrollLeft = $("code-ta").scrollLeft;
+    });
+    // Tab indents instead of leaving the field.
+    $("code-ta").addEventListener("keydown", function (e) {
+        if (e.key !== "Tab") return;
+        e.preventDefault();
+        var ta = $("code-ta");
+        var start = ta.selectionStart;
+        ta.setRangeText("  ", start, ta.selectionEnd, "end");
+        codeState.dirty = true;
+        stashCode();
+        renderCode();
+    });
+
+    $("code-save").addEventListener("click", function () {
+        stashCode();
+        setMsg("Saving…");
+        api("/pages/" + pageId + "/code", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ css: codeState.css, js: codeState.js }),
+        }).then(function () {
+            codeState.dirty = false;
+            closeCodePanel();
+            // The CSS/JS only take effect on a fresh render. Reload for
+            // it unless that would throw away unsaved content edits.
+            if (hasUnsaved()) {
+                flash("Saved — the CSS/JS will apply on the next page load");
+            } else {
+                window.location.reload();
+            }
+        }).catch(function (err) { setMsg(err.message); });
+    });
+
     // The × doesn't remove the toolbar — it minimizes it (animated) to a
     // pencil button in the same spot; clicking that brings the bar back.
     // Minimizing exits edit mode for a clean view of the page, but any
@@ -1756,6 +1967,105 @@
         return list[0];
     }
 
+    // classBackground resolves what background a curated class actually
+    // paints, by probing it against the host page's stylesheets (shadow
+    // DOM styles can't see site CSS, so the preview can't just use the
+    // class). The probe element persists off-screen: JIT CSS setups
+    // (Tailwind Play CDN) generate rules asynchronously for classes they
+    // observe in the DOM, so the class has to stay attached for the
+    // delayed re-probe to find its rule.
+    var bgProbe = null;
+    function classBackground(cls) {
+        if (!cls) return "";
+        if (!bgProbe) {
+            bgProbe = document.createElement("div");
+            bgProbe.style.cssText = "position:absolute;left:-9999px;top:-9999px";
+            bgProbe.setAttribute("aria-hidden", "true");
+            document.body.appendChild(bgProbe);
+        }
+        bgProbe.className = cls;
+        var bg = getComputedStyle(bgProbe).backgroundColor;
+        return bg === "rgba(0, 0, 0, 0)" || bg === "transparent" ? "" : bg;
+    }
+
+    function isDarkColor(c) {
+        var r, g, b;
+        var m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || "");
+        if (m) {
+            r = +m[1]; g = +m[2]; b = +m[3];
+        } else if (/^#[0-9a-fA-F]{6}$/.test(c || "")) {
+            r = parseInt(c.slice(1, 3), 16);
+            g = parseInt(c.slice(3, 5), 16);
+            b = parseInt(c.slice(5, 7), 16);
+        } else {
+            return false;
+        }
+        return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+    }
+
+    // sectionPreview renders a miniature section from the dialog's
+    // current values: real background color/image, proportional content
+    // width, live vertical alignment, and a taller box for taller
+    // sections. The "content" is three placeholder text lines tinted
+    // for contrast against the background.
+    function sectionPreview(v, el) {
+        var bgOpt = sbOpt(sectionStyles.backgrounds, v.bg);
+        var probed = v.bgcolor || classBackground(bgOpt.class);
+        var box = buildSectionPreview(v, el, probed || "#ffffff");
+        if (!probed && bgOpt.class) {
+            // Dev setups on the Tailwind Play CDN generate class CSS
+            // asynchronously — the probe itself triggers generation, so
+            // one delayed re-probe finds the color.
+            setTimeout(function () {
+                if (el.firstElementChild !== box) return; // stale render
+                var late = classBackground(bgOpt.class);
+                if (late) buildSectionPreview(v, el, late);
+            }, 250);
+        }
+    }
+
+    function buildSectionPreview(v, el, resolved) {
+        el.innerHTML = "";
+        var box = document.createElement("div");
+        var hMap = { auto: 96, 50: 112, 75: 128, 100: 144 };
+        box.style.cssText = "width:100%;position:relative;display:flex;flex-direction:column;" +
+            "overflow:hidden;border-radius:8px;border:1px solid #e3e6ea;transition:height .15s ease";
+        box.style.height = (hMap[v.height] || 96) + "px";
+        box.style.backgroundColor = resolved;
+        if (v.bgimage) {
+            box.style.backgroundImage = "url('" + v.bgimage.replace(/'/g, "%27") + "')";
+            box.style.backgroundSize = "cover";
+            box.style.backgroundPosition = "center";
+        }
+        box.style.justifyContent = v.valign === "center" ? "center"
+            : (v.valign === "bottom" ? "flex-end" : "flex-start");
+        var widths = sectionStyles.widths;
+        var idx = 0;
+        for (var i = 0; i < widths.length; i++) {
+            if (widths[i].key === v.width) idx = i;
+        }
+        var pct = widths.length > 1 ? 50 + (idx / (widths.length - 1)) * 45 : 70;
+        var content = document.createElement("div");
+        content.style.cssText = "margin:12px auto;flex:0 0 auto;display:flex;flex-direction:column;gap:6px";
+        content.style.width = pct + "%";
+        var dark = !!v.bgimage || isDarkColor(resolved);
+        for (var j = 0; j < 3; j++) {
+            var line = document.createElement("div");
+            line.style.cssText = "height:8px;border-radius:4px";
+            line.style.background = dark ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)";
+            if (j === 0) {
+                line.style.height = "12px";
+                line.style.width = "40%";
+            } else {
+                line.style.width = j === 2 ? "85%" : "100%";
+            }
+            content.appendChild(line);
+        }
+        box.appendChild(content);
+        el.appendChild(box);
+        return box;
+    }
+
     function injectSectionUI() {
         document.querySelectorAll("[data-cms-sections]").forEach(function (container) {
             container.querySelectorAll("[data-cms-section]").forEach(injectSectionToolbar);
@@ -1874,6 +2184,7 @@
                 message: "Section settings",
                 okLabel: "Apply",
                 fields: setFields,
+                preview: sectionPreview,
             }).then(function (values) {
                 if (!values) return;
                 applySectionSettings(wrapper, values);
@@ -2193,6 +2504,10 @@
         }
         if (dlgResolve) {
             dialogDismiss();
+            return;
+        }
+        if ($("code-panel").classList.contains("on")) {
+            dismissCodePanel();
             return;
         }
         closeMore();

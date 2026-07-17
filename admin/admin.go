@@ -99,6 +99,13 @@ func New(d Deps) http.Handler {
 			r.Post("/api/pages/{id}/discard", s.apiDiscard)
 			r.Get("/api/snippets", s.apiSnippetsList)
 
+			// Per-page CSS/JS is written raw into pages: admin-only.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAdmin)
+				r.Get("/api/pages/{id}/code", s.apiGetPageCode)
+				r.Put("/api/pages/{id}/code", s.apiSavePageCode)
+			})
+
 			// Snippet management (palette entries) is admin-only.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)

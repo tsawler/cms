@@ -258,6 +258,9 @@ type EditInfo struct {
 	// and keeps Publish available.
 	HasUnpublished bool
 	MediaEnabled   bool
+	// IsAdmin unlocks admin-only editor chrome (the page CSS & JS
+	// panel); the server enforces the restriction regardless.
+	IsAdmin bool
 	Styles       []EditorStyle  // entries for the editor's Styles menu
 	Sections     *SectionStyles // options for section settings
 }
@@ -495,6 +498,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.HasUnpublished {
 		unpubFlag = "1"
 	}
+	adminFlag := "0"
+	if edit.IsAdmin {
+		adminFlag = "1"
+	}
 	stylesJSON, err := json.Marshal(edit.Styles)
 	if err != nil || edit.Styles == nil {
 		stylesJSON = []byte("[]")
@@ -520,6 +527,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-unpublished="` + unpubFlag + `"` +
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
 		` data-media="` + mediaFlag + `"` +
+		` data-is-admin="` + adminFlag + `"` +
 		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"` +
 		` data-section-styles="` + html.EscapeString(string(sectionsJSON)) + `"` +
 		` data-page-templates="` + html.EscapeString(string(templatesJSON)) + `"></script>`
@@ -558,11 +566,20 @@ func headHTML(p *content.Page) template.HTML {
 	}
 	if p.HeadCSS != "" {
 		sb.WriteString("<style>\n")
-		sb.WriteString(p.HeadCSS)
+		sb.WriteString(styleCloseRe.ReplaceAllString(p.HeadCSS, `<\/style`))
 		sb.WriteString("\n</style>\n")
 	}
 	return template.HTML(sb.String())
 }
+
+// A literal closing tag inside the embedded code would end the wrapper
+// element early and dump the rest onto the page. `<\/` is an equivalent
+// escape inside JS strings, and the sequence has no legitimate use
+// outside one — same for CSS.
+var (
+	styleCloseRe  = regexp.MustCompile(`(?i)</style`)
+	scriptCloseRe = regexp.MustCompile(`(?i)</script`)
+)
 
 // scriptsHTML builds what {{cmsScripts}} emits before </body>: the page's
 // per-page JS. Written raw; editing it is restricted to admins.
@@ -570,5 +587,5 @@ func scriptsHTML(p *content.Page) template.HTML {
 	if p.BodyJS == "" {
 		return ""
 	}
-	return template.HTML("<script>\n" + p.BodyJS + "\n</script>\n")
+	return template.HTML("<script>\n" + scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`) + "\n</script>\n")
 }

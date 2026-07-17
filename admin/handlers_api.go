@@ -347,6 +347,59 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// apiGetPageCode returns the page's custom head CSS and body JS.
+// GET /api/pages/{id}/code  (admin only; routed behind requireAdmin)
+func (s *server) apiGetPageCode(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"css": page.HeadCSS, "js": page.BodyJS})
+}
+
+// Pasted-in wrappers are a footgun: a nested <style> tag stops the CSS
+// from applying, and a </script> closer breaks the page. When the whole
+// value is one wrapped block, store just its contents.
+var (
+	styleWrapRe  = regexp.MustCompile(`(?is)^\s*<style[^>]*>(.*?)</style>\s*$`)
+	scriptWrapRe = regexp.MustCompile(`(?is)^\s*<script[^>]*>(.*?)</script>\s*$`)
+)
+
+func unwrapCodeTag(s string, re *regexp.Regexp) string {
+	if m := re.FindStringSubmatch(s); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return s
+}
+
+// apiSavePageCode replaces the page's custom head CSS and body JS. Both
+// are written raw into rendered pages, which is why the route is
+// admin-only.
+// PUT /api/pages/{id}/code  body: {"css": "...", "js": "..."}
+func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		CSS string `json:"css"`
+		JS  string `json:"js"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "Could not read the edit — try again.")
+		return
+	}
+	page.HeadCSS = unwrapCodeTag(body.CSS, styleWrapRe)
+	page.BodyJS = unwrapCodeTag(body.JS, scriptWrapRe)
+	if err := s.deps.Content.Update(r.Context(), page, s.deps.DefaultLocale); err != nil {
+		s.deps.Logger.Error("cms admin: api saving page code", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // apiPublish makes the page's draft content live.
 // POST /api/pages/{id}/publish
 func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
