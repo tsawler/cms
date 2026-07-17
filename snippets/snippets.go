@@ -34,29 +34,32 @@ var ErrNotFound = errors.New("snippets: not found")
 // Typography doesn't restyle component internals. Like the editor styles,
 // every class here must be safelisted in the site's Tailwind build (see
 // the README).
+// The cms-snippet marker class on each snippet's root makes the block
+// manageable in the in-place editor: a dotted outline while editing, and
+// a floating drag-handle/trash chrome when clicked. Like cms-btn (which
+// marks a link as an editable button), it carries no CSS of its own.
 func DefaultSnippets() []Snippet {
 	return []Snippet{
-		{Name: "Callout", HTML: `<div class="not-prose my-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900">
+		// A plain paragraph: the workhorse block. Deliberately unstyled,
+		// so it picks up the section's own prose styles.
+		{Name: "Text", HTML: `<p class="cms-snippet">Write your text here.</p>`},
+		{Name: "Callout", HTML: `<div class="cms-snippet not-prose my-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900">
 <p class="font-semibold mb-1">Heads up</p>
 <p>Something worth knowing goes here.</p>
 </div>`},
-		{Name: "Call to action", HTML: `<div class="not-prose my-6 rounded-xl bg-slate-900 p-6 text-center">
+		{Name: "Call to action", HTML: `<div class="cms-snippet not-prose my-6 rounded-xl bg-slate-900 p-6 text-center">
 <p class="text-lg font-semibold text-white mb-3">Ready to get started?</p>
 <a href="#" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Get in touch</a>
 </div>`},
-		{Name: "Two columns", HTML: `<div class="not-prose my-6 grid gap-6 sm:grid-cols-2">
+		{Name: "Two columns", HTML: `<div class="cms-snippet not-prose my-6 grid gap-6 sm:grid-cols-2">
 <div><h3 class="font-semibold mb-1">First column</h3><p class="text-slate-600">Write something here.</p></div>
 <div><h3 class="font-semibold mb-1">Second column</h3><p class="text-slate-600">And something here.</p></div>
 </div>`},
-		{Name: "Quote", HTML: `<figure class="not-prose my-6 rounded-xl border border-slate-200 bg-slate-50 p-6">
+		{Name: "Quote", HTML: `<figure class="cms-snippet not-prose my-6 rounded-xl border border-slate-200 bg-slate-50 p-6">
 <blockquote class="text-lg text-slate-700">&ldquo;A quote worth repeating.&rdquo;</blockquote>
 <figcaption class="mt-3 text-sm font-semibold text-slate-500">&mdash; Name, Title</figcaption>
 </figure>`},
-		// The cms-btn marker class makes the link a "button" to the
-		// in-place editor: clicking it while editing shows gear/trash
-		// controls (colors, roundness, size, delete). It has no CSS of
-		// its own.
-		{Name: "Button link", HTML: `<p class="not-prose my-4">
+		{Name: "Button link", HTML: `<p class="cms-snippet not-prose my-4">
 <a href="#" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
 </p>`},
 		// Invisible on the live site; in edit mode the editor script makes

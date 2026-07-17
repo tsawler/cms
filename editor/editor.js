@@ -179,8 +179,9 @@
         "border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}" +
         ".btnui button:hover{background:rgba(255,255,255,.18)}" +
         ".btnui button svg{display:block;width:15px;height:15px;fill:currentColor}" +
-        "#btn-del{color:#fca5a5}" +
-        "#btn-del:hover{background:rgba(252,165,165,.2)}" +
+        "#btn-del,#snip-del{color:#fca5a5}" +
+        "#btn-del:hover,#snip-del:hover{background:rgba(252,165,165,.2)}" +
+        "#snip-move{cursor:grab;font-size:13px;letter-spacing:1px}" +
         /* ---- tool rail (left edge, edit mode only) ---- */
         ".rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;" +
         "background:#1c2128;display:none;flex-direction:column;align-items:center;" +
@@ -418,6 +419,10 @@
         '<div class="btnui" id="btn-ui">' +
         '<button id="btn-set" title="Button settings">' + ICONS.gear + "</button>" +
         '<button id="btn-del" title="Delete button">' + ICONS.trash + "</button>" +
+        "</div>" +
+        '<div class="btnui" id="snip-ui">' +
+        '<button id="snip-move" title="Drag to move this block" draggable="true">⠿</button>' +
+        '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
@@ -764,6 +769,11 @@
         /* Buttons (a.cms-btn): click while editing for gear/trash chrome. */
         ".cms-editing a.cms-btn{cursor:pointer}" +
         ".cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}" +
+        /* Snippet blocks (.cms-snippet): dotted outline while editing;
+         * click for drag-handle/trash chrome. !important beats host CSS
+         * (e.g. Tailwind preflight/utilities) that also sets outlines. */
+        ".cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}" +
+        ".cms-editing .cms-snippet:hover{outline-style:solid!important}" +
         /* Flexible-space snippet: invisible on the live site, visible and
          * click-to-adjust while editing. */
         ".cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;" +
@@ -1028,6 +1038,7 @@
             }).catch(function (err) { setMsg(err.message); });
         } else {
             hideButtonUI();
+            hideSnipUI();
             removeRichEditors();
             reapplySectionClasses();
         }
@@ -1154,23 +1165,63 @@
         $("btn-ui").classList.remove("on");
     }
 
+    /* Snippet blocks get their own floating chrome: a drag handle to
+     * move the block and a trash can to delete it. */
+    var activeSnip = null;
+    var dragSnip = null; // the block being moved while its handle is dragged
+
+    function showSnipUI(el) {
+        activeSnip = el;
+        var ui = $("snip-ui");
+        ui.classList.add("on");
+        var r = el.getBoundingClientRect();
+        var top = r.top - 44;
+        if (top < 64) top = r.top + 8;
+        ui.style.top = top + "px";
+        ui.style.left = Math.max(8, r.left) + "px";
+    }
+
+    function hideSnipUI() {
+        activeSnip = null;
+        $("snip-ui").classList.remove("on");
+    }
+
     document.addEventListener("click", function (e) {
         if (!editing) return;
         if (e.target === host) return; // clicks on editor chrome keep the state
-        var btn = e.target.closest ? e.target.closest("a.cms-btn") : null;
+        var t = e.target;
+        var btn = t.closest ? t.closest("a.cms-btn") : null;
         if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
+        var snip = null;
+        if (!btn && t.closest) {
+            snip = t.closest(".cms-snippet");
+            if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
+        }
         if (btn) {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
+            hideSnipUI();
             showButtonUI(btn);
+        } else if (snip) {
+            // No preventDefault: the click still places the caret for
+            // editing the snippet's text.
+            hideButtonUI();
+            showSnipUI(snip);
         } else {
             hideButtonUI();
+            hideSnipUI();
         }
     }, true);
 
-    // Keep the chrome glued to its button through scrolls and resizes.
-    window.addEventListener("scroll", function () { if (activeBtn) showButtonUI(activeBtn); }, true);
-    window.addEventListener("resize", function () { if (activeBtn) showButtonUI(activeBtn); });
+    // Keep the chrome glued to its element through scrolls and resizes.
+    window.addEventListener("scroll", function () {
+        if (activeBtn) showButtonUI(activeBtn);
+        if (activeSnip) showSnipUI(activeSnip);
+    }, true);
+    window.addEventListener("resize", function () {
+        if (activeBtn) showButtonUI(activeBtn);
+        if (activeSnip) showSnipUI(activeSnip);
+    });
 
     // findOwningEditor returns the TinyMCE instance managing the content
     // that contains el, so button changes join that editor's undo stack.
@@ -1315,6 +1366,76 @@
         var container = el.closest("[data-cms-sections]");
         if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
     }
+
+    /* ---- snippet chrome actions: delete and drag-to-move ---- */
+
+    $("snip-del").addEventListener("click", function () {
+        if (!activeSnip) return;
+        var el = activeSnip;
+        cmsConfirm("Delete this block and its content?", "Delete block", true).then(function (yes) {
+            if (!yes) return;
+            hideSnipUI();
+            var regionEl = el.closest("[data-cms-region]");
+            var sectionsEl = el.closest("[data-cms-sections]");
+            var ed = findOwningEditor(el);
+            var run = function () { el.remove(); };
+            if (ed) ed.undoManager.transact(run); else run();
+            if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+            else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+        });
+    });
+
+    // snipTwins counts blocks matching el's shape, so a move only removes
+    // the original when the dropped copy verifiably exists somewhere.
+    function snipTwins(el) {
+        var sig = el.className + "|" + (el.textContent || "").replace(/\s+/g, " ").trim();
+        var count = 0;
+        document.querySelectorAll(".cms-snippet").forEach(function (s) {
+            if (el.className === s.className &&
+                sig === s.className + "|" + (s.textContent || "").replace(/\s+/g, " ").trim()) {
+                count++;
+            }
+        });
+        return count;
+    }
+
+    $("snip-move").addEventListener("dragstart", function (e) {
+        if (!activeSnip) return;
+        var el = activeSnip;
+        dragSnip = el;
+        e.dataTransfer.setData("text/html", el.outerHTML);
+        e.dataTransfer.effectAllowed = "copyMove";
+        try {
+            e.dataTransfer.setDragImage(el, 20, 20);
+        } catch (err) { /* not available outside a real drag session */ }
+        // Hide the original once the drag image is captured, so the drop
+        // caret can't land inside the block being moved. Guarded: if the
+        // drag already ended, the element must not end up hidden forever.
+        setTimeout(function () {
+            if (dragSnip === el) el.style.display = "none";
+        }, 0);
+    });
+
+    $("snip-move").addEventListener("dragend", function (e) {
+        var el = dragSnip;
+        dragSnip = null;
+        if (!el) return;
+        el.style.display = "";
+        hideSnipUI();
+        if (e.dataTransfer.dropEffect === "none") return; // cancelled drag
+        // TinyMCE inserted a copy at the drop caret; remove the original
+        // only if that copy is really there.
+        if (snipTwins(el) < 2) return;
+        var regionEl = el.closest("[data-cms-region]");
+        var sectionsEl = el.closest("[data-cms-sections]");
+        var ed = findOwningEditor(el);
+        var run = function () { el.remove(); };
+        if (ed) ed.undoManager.transact(run); else run();
+        if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+        else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+        unnestSnippets(); // a drop inside another snippet lifts back out
+        lockButtons(); // the moved copy may contain a button
+    });
 
     document.addEventListener("click", function (e) {
         if (!editing || !mediaEnabled) return;
@@ -1939,7 +2060,10 @@
                 // dropped somewhere that refused it — keep the drawer
                 // open in that case.
                 card.addEventListener("dragend", function (e) {
-                    if (e.dataTransfer.dropEffect !== "none") closeDrawer();
+                    if (e.dataTransfer.dropEffect !== "none") {
+                        unnestSnippets();
+                        closeDrawer();
+                    }
                 });
                 // Click: new-section starting point when one is pending,
                 // otherwise insert at the cursor.
@@ -1953,6 +2077,22 @@
             span.textContent = err.message;
             list.appendChild(span);
         });
+    }
+
+    // Snippets are sibling blocks by design, but an insert while the
+    // caret sits inside another snippet nests them. Lift any nested
+    // snippet out to sit right after the block it landed in.
+    function unnestSnippets() {
+        for (var guard = 0; guard < 4; guard++) {
+            var nested = document.querySelectorAll(
+                "[data-cms-region] .cms-snippet .cms-snippet," +
+                "[data-cms-sections] .cms-snippet .cms-snippet");
+            if (!nested.length) return;
+            nested.forEach(function (inner) {
+                var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
+                if (anc) anc.insertAdjacentElement("afterend", inner);
+            });
+        }
     }
 
     function chooseSnippet(sn) {
@@ -1985,6 +2125,7 @@
         }
         ed.focus();
         ed.insertContent(sn.html);
+        unnestSnippets();
         if (onDirty) onDirty();
         lockButtons(); // the snippet may have brought a button with it
         closeDrawer(); // the insert worked; get out of the way
