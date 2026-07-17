@@ -1061,16 +1061,16 @@
     }
 
     // updateBarButtons keeps the edit bar honest about the page's state:
-    // while just viewing, Save and Publish are hidden — except that
-    // Publish stays whenever there is something publishable: a draft page
-    // (making it live is the primary action), saved-but-unpublished
-    // changes, or unsaved work from a minimized session.
+    // while just viewing, Save is hidden, and Publish shows only when
+    // there is actually something publishable: a draft page (making it
+    // live is the primary action), saved-but-unpublished changes, or
+    // unsaved edits (Publish saves them first).
     function updateBarButtons() {
         var working = editing || hasUnsaved();
         $("save").hidden = !working;
         // The amber ring on Save is the unsaved-changes signal.
         $("save").classList.toggle("attn", hasUnsaved());
-        $("publish").hidden = !working && pageStatus === "published" && !hasUnpublished;
+        $("publish").hidden = pageStatus === "published" && !hasUnpublished && !hasUnsaved();
         // Discard is offered whenever there's a saved draft that differs from
         // what's live — the same condition as the "Unpublished edits" chip.
         $("discard").hidden = !(pageStatus === "published" && hasUnpublished);
