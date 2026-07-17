@@ -805,6 +805,20 @@
                 setup: function (ed) {
                     register(ed);
                     ed.on("focus", function () { lastEditor = ed; lastEditorDirty = onDirty; });
+                    // Buttons are atomic while editing (contenteditable=
+                    // false, see lockButtons): their text is edited via
+                    // the gear dialog only. Strip the lock attribute at
+                    // serialization so it never reaches saved content.
+                    ed.on("PreInit", function () {
+                        ed.serializer.addAttributeFilter("contenteditable", function (nodes) {
+                            for (var i = 0; i < nodes.length; i++) {
+                                var n = nodes[i];
+                                if ((n.attr("class") || "").indexOf("cms-btn") !== -1) {
+                                    n.attr("contenteditable", null);
+                                }
+                            }
+                        });
+                    });
                     // Both media buttons skip TinyMCE's URL dialogs and go
                     // straight to the CMS media picker (library + upload).
                     if (mediaEnabled) {
@@ -940,6 +954,7 @@
             }
         });
         if (on) {
+            lockButtons(); // after the snapshot, so Cancel restores clean HTML
             setMsg("Loading editor…");
             loadTinyMCE().then(function () {
                 initRichEditors();
@@ -1045,6 +1060,17 @@
         return "#" + h(m[1]) + h(m[2]) + h(m[3]);
     }
 
+    // lockButtons makes every button atomic inside the editors: no caret
+    // inside, no backspacing the label into plain text. Button text is
+    // edited through the gear dialog instead. The attribute is stripped
+    // again at serialization (see the contenteditable filter above).
+    function lockButtons() {
+        document.querySelectorAll(
+            "[data-cms-region] a.cms-btn, [data-cms-sections] a.cms-btn").forEach(function (b) {
+            b.setAttribute("contenteditable", "false");
+        });
+    }
+
     function showButtonUI(btn) {
         activeBtn = btn;
         var ui = $("btn-ui");
@@ -1070,6 +1096,7 @@
         if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
         if (btn) {
             e.preventDefault(); // never navigate while editing
+            btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
             showButtonUI(btn);
         } else {
             hideButtonUI();
@@ -1095,6 +1122,10 @@
 
     function applyButtonSettings(btn, v) {
         var size = BTN_SIZES[v.size] ? v.size : "m";
+        // An emptied text field keeps the current label rather than
+        // producing an invisible button.
+        var label = (v.label || "").trim();
+        if (label && label !== (btn.textContent || "").trim()) btn.textContent = label;
         var url = (v.href || "").trim() || "#";
         btn.setAttribute("href", url);
         // TinyMCE shadows URI attributes like it shadows style; keep it
@@ -1133,6 +1164,8 @@
             tabs: ["Link", "Style"],
             previewTab: "Style",
             fields: [
+                { id: "label", label: "Button text", type: "text", tab: "Link",
+                    placeholder: "Button text", value: (btn.textContent || "").trim() },
                 { id: "href", label: "Link address", type: "text", tab: "Link",
                     placeholder: "https://example.com or /contact",
                     value: btn.getAttribute("href") === "#" ? "" : (btn.getAttribute("href") || "") },
@@ -1158,7 +1191,7 @@
             preview: function (v, el) {
                 el.innerHTML = "";
                 var sample = document.createElement("span");
-                sample.textContent = (btn.textContent || "Button text").trim() || "Button text";
+                sample.textContent = (v.label || "").trim() || "Button text";
                 var sz = BTN_SIZES[v.size] || BTN_SIZES.m;
                 sample.style.display = "inline-block";
                 sample.style.fontWeight = "600";
@@ -1382,6 +1415,10 @@
             pageStatus = "published";
             hasUnpublished = false;
             updateChip();
+            // Publishing ends the session: leave edit mode so the page
+            // reads the way visitors now see it. On failure (the catch
+            // below) editing stays active with the work intact.
+            if (editing) setEditing(false);
             flash("Published ✓");
             updateBarButtons();
         }).catch(function (err) { setMsg(err.message); });
@@ -1652,6 +1689,12 @@
                     e.dataTransfer.setData("text/plain", sn.name);
                     e.dataTransfer.effectAllowed = "copy";
                 });
+                // dropEffect is "none" when the drag was cancelled or
+                // dropped somewhere that refused it — keep the drawer
+                // open in that case.
+                card.addEventListener("dragend", function (e) {
+                    if (e.dataTransfer.dropEffect !== "none") closeDrawer();
+                });
                 // Click: new-section starting point when one is pending,
                 // otherwise insert at the cursor.
                 card.addEventListener("click", function () { chooseSnippet(sn); });
@@ -1697,6 +1740,8 @@
         ed.focus();
         ed.insertContent(sn.html);
         if (onDirty) onDirty();
+        lockButtons(); // the snippet may have brought a button with it
+        closeDrawer(); // the insert worked; get out of the way
         flash("Snippet inserted — click it to edit the text");
     }
 
@@ -1923,6 +1968,7 @@
         initInlineEditor(inner, function () { markSectionsDirty(target.region); }, function (ed) {
             sectionEditors.push({ el: inner, ed: ed, region: target.region });
         });
+        lockButtons(); // the starting snippet may contain a button
         markSectionsDirty(target.region);
         wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
     }
