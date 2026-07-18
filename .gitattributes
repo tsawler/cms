@@ -1,0 +1,3 @@
+# editor.js is built from editor/src by `go generate ./editor` — collapse
+# it in diffs; review the source modules instead.
+editor/editor.js linguist-generated=true

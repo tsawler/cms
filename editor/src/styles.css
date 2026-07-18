@@ -1,0 +1,260 @@
+/* Shadow-DOM styles for the editor chrome. Imported as text by shell.js
+ * and injected into the shadow root, so host-page CSS can't reach it —
+ * and these rules can't leak out. */
+
+:host{all:initial}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+/* Author display rules (inline-flex buttons etc.) would otherwise
+   beat the UA's [hidden]{display:none}. */
+[hidden]{display:none!important}
+
+/* ---- bottom pill bar (dark) ---- */
+.bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;
+display:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;
+padding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap;
+transition:transform .25s ease,opacity .25s ease}
+.bar.min{transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none}
+.fab{position:fixed;bottom:20px;left:50%;z-index:2147483000;width:48px;height:48px;
+border-radius:50%;background:#1c2128;color:#fff;border:none;cursor:pointer;
+box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:0;
+transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none;
+transition:transform .25s ease,opacity .25s ease}
+.fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}
+.fab:hover{background:#2a3140}
+.fab svg{width:20px;height:20px;fill:currentColor}
+.chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}
+.chip.published{background:#1e7e4e}
+.chip.changes{background:#b45309;text-transform:none}
+.msg{opacity:.75;font-size:12px;max-width:14em;overflow:hidden;text-overflow:ellipsis}
+.bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);
+border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}
+.bar .ic{display:inline-flex}
+.bar button:hover{background:rgba(255,255,255,.1)}
+.bar button:disabled{opacity:.4;cursor:default}
+.bar button.primary{background:#2f5fe0;border-color:#2f5fe0}
+.bar button.primary:hover{background:#2149b8}
+.bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}
+/* Amber ring on Save while there are unsaved changes. */
+.bar button.attn{border-color:#f0b429}
+
+/* ---- overflow (⋯) menu: rare and destructive actions ---- */
+.more{position:relative;display:inline-flex}
+#more{font-size:16px;padding:4px 10px;line-height:1}
+.menu{position:absolute;bottom:calc(100% + 12px);right:0;display:none;flex-direction:column;
+background:#242a33;border-radius:12px;padding:6px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.menu.on{display:flex}
+.menu button,.menu a{font:inherit;font-size:13px;color:#fff;background:none;border:none;border-radius:8px;
+padding:8px 12px;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
+.menu button:hover,.menu a:hover{background:rgba(255,255,255,.1)}
+.menu button.dngr{color:#fca5a5}
+.menu button.dngr:hover{background:rgba(252,165,165,.15)}
+.menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}
+
+/* ---- page CSS & JS panel (wide, admin-only) ---- */
+.code-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}
+.code-overlay.on{display:block}
+.codepanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147482999;
+width:min(1000px,94vw);height:min(680px,88vh);background:#fff;color:#1c2128;border-radius:12px;
+box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}
+.codepanel.on{display:flex}
+.chead{display:flex;align-items:center;gap:18px;padding:10px 16px;border-bottom:1px solid #e3e6ea}
+.chead h2{margin:0;font-size:15px;white-space:nowrap}
+.ctabs{display:flex;gap:4px}
+.ctabs button{border:none;background:none;padding:8px 14px;font-size:13px;color:#667085;
+cursor:pointer;border-bottom:2px solid transparent;border-radius:0}
+.ctabs button:hover{color:#1c2128}
+.ctabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
+#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;
+padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
+#code-close:hover{background:#eceef1;color:#1c2128}
+.clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}
+.clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}
+.clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;
+border:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;
+font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}
+.cbody{flex:1;position:relative;background:#11151c;min-height:0}
+#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;
+font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}
+#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}
+/* The universal reset sets font-family on every element — token
+   spans must stay in the editor's monospace or the visible text
+   drifts out of alignment with the textarea's caret. */
+#code-hl span{font:inherit}
+#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;
+overflow:auto}
+#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}
+.tok-c{color:#7d8799} /* comments */
+.tok-s{color:#9ecbff} /* strings */
+.tok-k{color:#ff7b8a} /* keywords / at-rules */
+.tok-p{color:#b392f0} /* CSS properties */
+.tok-n{color:#f2cc60} /* numbers / colors */
+.cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}
+.chint{flex:1;font-size:12px;color:#667085}
+
+/* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
+.btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;
+border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;
+box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.btnui.on{display:flex}
+.btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
+border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
+.btnui button:hover{background:rgba(255,255,255,.18)}
+.btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
+#btn-del,#snip-del{color:#fca5a5}
+#btn-del:hover,#snip-del:hover{background:rgba(252,165,165,.2)}
+#snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
+
+/* ---- tool rail (left edge, edit mode only) ---- */
+.rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
+background:#1c2128;display:none;flex-direction:column;align-items:center;
+padding-top:14px;gap:6px;box-shadow:2px 0 12px rgba(0,0,0,.25)}
+.rail.on{display:flex}
+.rail button{width:46px;height:46px;border-radius:10px;border:none;background:transparent;
+color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;
+justify-content:center;gap:3px;font-size:17px;line-height:1;padding:0}
+.rail button span{font-size:9px;opacity:.75;letter-spacing:.02em}
+.rail button:hover:not(:disabled){background:rgba(255,255,255,.14)}
+.rail button.on{background:rgba(255,255,255,.2)}
+.rail button:disabled{opacity:.35;cursor:default}
+
+/* ---- media modal (light, centered) ---- */
+/* Sits above the small dialog: section settings can open the
+   picker to choose a background image while the dialog stays. */
+.overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483003;display:none}
+.overlay.on{display:block}
+.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483004;
+width:min(940px,94vw);height:min(640px,88vh);background:#fff;color:#1c2128;
+border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}
+.panel.on{display:flex}
+.panel button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+.panel button:hover{background:#f4f5f7}
+.head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e3e6ea}
+.head h2{margin:0;font-size:15px;white-space:nowrap}
+#search{flex:1;min-width:0;padding:7px 12px;border:1px solid #d9dce1;border-radius:8px;font:inherit;font-size:13px}
+.views{display:flex;gap:2px}
+.views button{padding:6px 10px}
+.views button.on{background:#e8edfb;border-color:#2f5fe0;color:#2149b8}
+#picker-close{border:none;font-size:20px;line-height:1;padding:4px 9px;color:#667085}
+#picker-close:hover{background:#eceef1;color:#1c2128}
+.pbody{flex:1;display:flex;min-height:0}
+.side{width:200px;flex-shrink:0;border-right:1px solid #e3e6ea;overflow-y:auto;padding:10px}
+.side button{display:block;width:100%;text-align:left;border:none;background:none;
+padding:8px 10px;border-radius:8px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side button.on{background:#e8edfb;color:#2149b8;font-weight:600}
+.side button .n{color:#98a2b3;font-size:11px;margin-left:4px}
+.side .newf{color:#667085;margin-top:8px;border-top:1px solid #eceef1;border-radius:0;padding-top:12px}
+.side .newf:hover{color:#2149b8;background:none}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.up{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e6ea}
+.up input[type=file]{font-size:12px;min-width:0;flex:1}
+.items{flex:1;overflow-y:auto;padding:14px}
+.items.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;align-content:start}
+.items.grid figure{margin:0;cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden}
+.items.grid figure:hover{border-color:#2f5fe0}
+.items.grid img{display:block;width:100%;height:92px;object-fit:cover}
+.items.grid .doc{display:flex;align-items:center;justify-content:center;height:92px;background:#f4f5f7;font-size:30px}
+.items.grid .doc span{font-size:11px;font-weight:700;color:#667085;margin-left:4px;text-transform:uppercase}
+.items.grid figcaption{font-size:11px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.items.list .row{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.items.list .row:hover{background:#f4f5f7}
+.items.list img{width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0}
+.items.list .doc{width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+background:#f4f5f7;border-radius:6px;font-size:20px;flex-shrink:0}
+.items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.items.list .sz{color:#667085;font-size:12px;white-space:nowrap}
+.empty{color:#667085;font-size:13px}
+
+/* ---- snippet drawer: slides out leftward from beside the tool
+   rail (non-modal, so drag-and-drop can reach the page) ---- */
+.drawer{position:fixed;top:0;left:56px;bottom:0;width:300px;z-index:2147482997;
+background:#fff;color:#1c2128;box-shadow:8px 0 32px rgba(0,0,0,.18);
+display:flex;flex-direction:column;transform:translateX(-130%);transition:transform .25s ease}
+.drawer.on{transform:translateX(0)}
+.drawer .dhead{display:flex;align-items:center;justify-content:space-between;
+padding:14px 16px;border-bottom:1px solid #e3e6ea}
+.drawer .dhead h2{margin:0;font-size:15px}
+.drawer .dhead button{border:none;background:none;font-size:20px;line-height:1;
+padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
+.drawer .dhead button:hover{background:#eceef1;color:#1c2128}
+.drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
+.drawer .dlist{flex:1;overflow-y:auto;padding:12px}
+.snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;
+cursor:grab;background:#fff}
+.snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}
+.snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}
+.snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
+-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+/* ---- menu panel rows ---- */
+.mfoot{display:flex;gap:8px;align-items:center;padding:12px;border-top:1px solid #e3e6ea}
+.mbtn{font:12px system-ui,sans-serif;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:7px 12px;cursor:pointer}
+.mbtn:hover{background:#f4f5f7}
+.mbtn.primary{background:#2f5fe0;border-color:#2f5fe0;color:#fff}
+.mbtn.primary:hover{background:#2149b8}
+.mrow{border:1px solid #d9dce1;border-radius:10px;padding:10px;margin-bottom:10px}
+.mrow input[type=text],.mrow select{width:100%;padding:6px 9px;border:1px solid #d9dce1;
+border-radius:8px;font:inherit;font-size:12px;margin-bottom:6px;background:#fff}
+.mrow .mchk{display:flex;gap:6px;align-items:center;font-size:12px;color:#475467;margin-bottom:6px}
+.mrow .mtools{display:flex;gap:2px;justify-content:flex-end}
+.mrow .mtools button{border:none;background:none;padding:3px 7px;border-radius:6px;
+color:#667085;cursor:pointer;font-size:13px}
+.mrow .mtools button:hover{background:#eceef1;color:#1c2128}
+.merr{color:#c0392b;font-size:12px;padding:0 14px 10px}
+
+/* ---- small dialog (replaces window.confirm / window.prompt) ---- */
+.dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}
+.dlg-overlay.on{display:block}
+.dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
+width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
+box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}
+.dlg.on{display:block}
+.dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}
+.dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
+font:inherit;font-size:13px;margin-bottom:14px}
+.dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}
+/* inline validation error under the prompt input */
+.dlg input.invalid{border-color:#c0392b}
+.dlg input.invalid:focus{outline-color:#c0392b}
+.dlg p.derr{color:#c0392b;font-size:12px;margin:-8px 0 12px}
+.dlg .fld{margin:0 0 12px}
+.dlg .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475467}
+/* color / image field rows in dialogs */
+.dlg .crow,.dlg .irow{display:flex;gap:8px;align-items:center}
+.dlg .crow input[type=color]{width:38px;height:30px;padding:2px;border:1px solid #d9dce1;
+border-radius:6px;background:#fff;cursor:pointer}
+.dlg .cval{flex:1;font-size:12px;color:#667085}
+.dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}
+.dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}
+.dlg .crow input,.dlg .irow input{margin:0}
+/* range field (slider + numeric input) */
+.dlg .rrow{display:flex;gap:10px;align-items:center}
+.dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}
+.dlg .rnum{width:64px;margin:0;padding:5px 8px}
+/* live preview pane */
+#dlg-preview{margin:0 0 14px;padding:20px;border:1px solid #e3e6ea;border-radius:8px;
+background:#f8f9fb;display:flex;justify-content:center;align-items:center;min-height:72px}
+/* plain text + checkbox fields (label.chk must out-rank the
+   .dlg .fld label heading rule, which sets display:block) */
+.dlg .tinput{margin:0}
+.dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;
+font-weight:400;margin:0}
+.dlg .chk input{width:auto;margin:0}
+/* tab bar */
+.dlg .tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #e3e6ea}
+.dlg .tabs button{border:none;background:none;border-radius:0;padding:8px 14px;font-size:13px;
+color:#667085;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.dlg .tabs button:hover{background:none;color:#1c2128}
+.dlg .tabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
+.dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;
+font:inherit;font-size:13px;background:#fff}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+.dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
+.dlg button:hover{background:#f4f5f7}
+.dlg button.ok{background:#2f5fe0;border-color:#2f5fe0;color:#fff}
+.dlg button.ok:hover{background:#2149b8}
+.dlg button.ok.danger{background:#c0392b;border-color:#c0392b}
+.dlg button.ok.danger:hover{background:#a03024}

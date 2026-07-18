@@ -314,6 +314,60 @@ Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with
 `CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
 
+## Working on the in-place editor
+
+The editor script served to logged-in editors is a generated bundle:
+`editor/editor.js` is built from the ES modules in `editor/src/` (plus
+`styles.css`/`light.css`) and committed, so consumers of the module never
+need Node or a bundler — `go get` and `go:embed` keep working as before.
+
+Think of `editor/src/` as source code and `editor/editor.js` as its
+compiled output, like `.go` files and a binary. `go generate ./editor`
+is the compile step — Go never runs it for you, so it's part of the
+edit-build-run loop whenever the editor's source changes.
+
+**When to run `go generate ./editor`:** after editing any file under
+`editor/src/` — and only then. Changes to Go code, templates, or admin
+files don't involve the bundle. Consumers of the module never run it at
+all; the committed `editor.js` ships ready-made.
+
+The full contributor loop, from the repo root:
+
+```sh
+# 1. change something in the editor's source
+$EDITOR editor/src/dialogs.js
+
+# 2. regenerate the committed bundle
+go generate ./editor
+
+# 3. restart the dev server — the bundle is embedded at compile
+#    time, so a running server keeps serving the old one
+cd examples/basic && go run .
+
+# 4. commit the source change and the regenerated bundle together
+git add editor/src/dialogs.js editor/editor.js
+```
+
+When iterating, skip the repeated step 2 and leave a watcher running in
+a spare terminal instead (you still restart the server to embed the
+result):
+
+```sh
+go run -C editor/build . -watch       # rebuild on every save
+```
+
+The trap to know about: forgetting to regenerate is silent. Everything
+still compiles and runs — it just serves the stale bundle, and your
+`src/` change doesn't appear in the browser. If the editor is ignoring
+an edit you're sure you made, a missed `go generate ./editor` (or a
+missed server restart) is the likely cause.
+
+The build tool is a nested Go module (`editor/build`) wrapping
+[esbuild's Go API](https://pkg.go.dev/github.com/evanw/esbuild/pkg/api),
+so it needs only the Go toolchain and stays out of the cms module's
+dependency graph. Don't edit `editor/editor.js` by hand; it is
+overwritten by the next build (and marked `linguist-generated`).
+
 ## Notes for host applications
 
 - **Style your rich regions.** The CMS never injects styles into your

@@ -3,7 +3,15 @@
 // final MIT-licensed release; see tinymce/license.txt) that provides the
 // WYSIWYG behavior for rich HTML regions. TinyMCE runs in inline mode, so
 // content is edited directly in the page using the page's own styles, and
-// everything is self-hosted from the module — no CDN, no build step.
+// everything is self-hosted from the module — no CDN, and no build step
+// for consumers.
+//
+// editor.js is generated: the source lives in src/ as ES modules and is
+// bundled by the build tool in build/ (a nested Go module wrapping
+// esbuild, so it never enters consumers' dependency graphs). After
+// editing anything under src/, regenerate the committed artifact with
+// `go generate ./editor` — or `go run -C editor/build . -watch` for a
+// rebuild-on-save loop while developing.
 //
 // The glue script's own chrome (toolbar, media picker) lives in Shadow DOM,
 // isolated from host-page CSS. TinyMCE's floating UI uses tox- prefixed
@@ -19,6 +27,8 @@ import (
 
 // PathPrefix is the public route the editor assets are served under.
 const PathPrefix = "/cms/editor/"
+
+//go:generate go run -C build .
 
 //go:embed editor.js tinymce
 var assets embed.FS
