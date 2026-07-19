@@ -10,18 +10,18 @@ import (
 )
 
 var testFS = fstest.MapFS{
-	"base.tmpl": &fstest.MapFile{Data: []byte(
+	"base.gohtml": &fstest.MapFile{Data: []byte(
 		`{{define "base"}}<html><head>{{cmsHead}}</head><body>` +
 			`<nav>{{range cmsMenu "main"}}<a href="{{.URL}}"{{if .Active}} class="act"{{end}}>{{.Label}}</a>{{end}}</nav>` +
 			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
-	"pages/home.tmpl": &fstest.MapFile{Data: []byte(
+	"pages/home.gohtml": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
 			`<div>{{cmsRegion "main"}}</div>{{cmsSections "extra"}}{{end}}`)},
 }
 
 func newTestRenderer(t *testing.T) *Renderer {
 	t.Helper()
-	r, err := New(testFS, []string{"base.tmpl"}, []PageTemplate{{File: "pages/home.tmpl", Label: "Home"}}, nil)
+	r, err := New(testFS, []string{"base.gohtml"}, []PageTemplate{{File: "pages/home.gohtml", Label: "Home"}}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -30,7 +30,7 @@ func newTestRenderer(t *testing.T) *Renderer {
 
 func TestRegionsWalksIncludedTemplatesAndBranches(t *testing.T) {
 	r := newTestRenderer(t)
-	regions := r.Regions("pages/home.tmpl")
+	regions := r.Regions("pages/home.gohtml")
 
 	want := map[string]string{"site-name": "text", "tagline": "text", "main": "html", "extra": "sections"}
 	if len(regions) != len(want) {
@@ -46,7 +46,7 @@ func TestRegionsWalksIncludedTemplatesAndBranches(t *testing.T) {
 func TestRenderFillsRegionsAndEscapesText(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{
-		ID: 1, TemplateName: "pages/home.tmpl", Title: "Home",
+		ID: 1, TemplateName: "pages/home.gohtml", Title: "Home",
 		Description: `He said "hi" & left`, HeadCSS: "body{color:red}", BodyJS: "console.log(1)",
 	}
 	blocks := []content.Block{
@@ -83,7 +83,7 @@ func TestRenderFillsRegionsAndEscapesText(t *testing.T) {
 
 func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 	r := newTestRenderer(t)
-	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
 	var buf bytes.Buffer
 	if err := r.Render(&buf, page, nil, "en", nil, nil); err != nil {
 		t.Fatalf("Render with no blocks: %v", err)
@@ -95,7 +95,7 @@ func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 
 func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	r := newTestRenderer(t)
-	page := &content.Page{ID: 7, TemplateName: "pages/home.tmpl", Title: "Home"}
+	page := &content.Page{ID: 7, TemplateName: "pages/home.gohtml", Title: "Home"}
 	blocks := []content.Block{
 		{Region: "site-name", Kind: content.KindText, Content: "Acme <sneaky>"},
 		{Region: "main", Kind: content.KindHTML, Content: "<p>Hello</p>"},
@@ -141,7 +141,7 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 }
 
 func TestNewRejectsUnknownPageTemplate(t *testing.T) {
-	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.tmpl", Label: "X"}}, nil)
+	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.gohtml", Label: "X"}}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing page template file")
 	}
@@ -192,7 +192,7 @@ func TestBuildMenus(t *testing.T) {
 
 func TestRenderMenu(t *testing.T) {
 	r := newTestRenderer(t)
-	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
 	menus := map[string][]MenuEntry{
 		"main": {{Label: "About <x>", URL: "/about", Active: true}},
 	}
@@ -208,7 +208,7 @@ func TestRenderMenu(t *testing.T) {
 
 func TestRenderSections(t *testing.T) {
 	r := newTestRenderer(t)
-	page := &content.Page{ID: 1, TemplateName: "pages/home.tmpl", Title: "Home"}
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
 	blocks := []content.Block{
 		{Region: "extra", Kind: content.KindHTML, Sort: 0, Content: "<p>First</p>",
 			Settings: map[string]string{"bg": "dark", "width": "full"}},

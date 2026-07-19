@@ -13,13 +13,18 @@ import (
 	"bufio"
 	"context"
 	"embed"
+	"fmt"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms"
+	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/media"
 )
 
@@ -98,17 +103,44 @@ func run(logger *slog.Logger) error {
 		logger.Warn("S3_ENDPOINT not set — media library disabled")
 	}
 
+	// Login CAPTCHA against the Cap container from docker-compose.yml.
+	// Create a site key in the Cap dashboard (http://localhost:3000) and
+	// set CAP_URL, CAP_SITE_KEY, and CAP_SECRET; unset means no CAPTCHA.
+	var capCfg *cms.CaptchaConfig
+	if os.Getenv("CAP_URL") != "" {
+		capCfg = &cms.CaptchaConfig{
+			URL:         os.Getenv("CAP_URL"),
+			InternalURL: os.Getenv("CAP_INTERNAL_URL"), // optional
+			SiteKey:     os.Getenv("CAP_SITE_KEY"),
+			Secret:      os.Getenv("CAP_SECRET"),
+		}
+	} else {
+		logger.Warn("CAP_URL not set — login CAPTCHA disabled")
+	}
+
+	// "Remember me" duration in hours; unset or invalid falls back to
+	// the CMS default (24h).
+	var rememberFor time.Duration
+	if h, err := strconv.Atoi(os.Getenv("CMS_REMEMBER_HOURS")); err == nil && h > 0 {
+		rememberFor = time.Duration(h) * time.Hour
+	}
+
 	c, err := cms.New(cms.Config{
 		DB:              db,
 		Locales:         []string{"en", "fr"},
 		Logger:          logger,
 		ObjectStore:     objects,
+		Captcha:         capCfg,
+		RememberFor:     rememberFor,
 		TemplateFS:      templateFS,
-		SharedTemplates: []string{"templates/base.tmpl"},
+		SharedTemplates: []string{"templates/base.gohtml"},
 		PageTemplates: []cms.PageTemplate{
-			{File: "templates/pages/home.tmpl", Label: "Home page"},
-			{File: "templates/pages/standard.tmpl", Label: "Standard page"},
-			{File: "templates/pages/canvas.tmpl", Label: "Blank canvas"},
+			{File: "templates/pages/home.gohtml", Label: "Home page"},
+			{File: "templates/pages/standard.gohtml", Label: "Standard page"},
+			{File: "templates/pages/canvas.gohtml", Label: "Blank canvas"},
+		},
+		AdminSections: []cms.AdminSection{
+			{Path: "reports", NavLabel: "Reports", Handler: reportsSection(db)},
 		},
 	})
 	if err != nil {
@@ -138,6 +170,49 @@ func run(logger *slog.Logger) error {
 	addr := envOr("ADDR", ":4000")
 	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
 	return http.ListenAndServe(addr, mux)
+}
+
+// reportsSection is a deployment-specific admin page, registered through
+// Config.AdminSections. It serves {AdminPath}/x/reports/ behind the CMS's
+// login, session, and CSRF middleware, and uses the admin package helpers
+// to render inside the standard admin chrome.
+func reportsSection(db *pgxpool.Pool) http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		var pages, users int
+		if err := db.QueryRow(r.Context(), "select count(*) from cms_pages").Scan(&pages); err != nil {
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			return
+		}
+		if err := db.QueryRow(r.Context(), "select count(*) from cms_users").Scan(&users); err != nil {
+			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			return
+		}
+
+		body := fmt.Sprintf(`<h1>Reports</h1>
+<p class="cms-muted">A custom admin page registered by the host application.</p>
+<p>Hello %s — this site has %d pages and %d CMS users.</p>
+<form method="post" action="ping">
+    <input type="hidden" name="csrf_token" value="%s">
+    <button type="submit" class="cms-btn">Ping</button>
+</form>`,
+			template.HTMLEscapeString(admin.UserFrom(r).Name), pages, users,
+			template.HTMLEscapeString(admin.CSRFToken(r)))
+
+		admin.RenderPage(w, r, "Reports", template.HTML(body))
+	})
+
+	// The relative form action resolves to {AdminPath}/x/reports/ping.
+	// CSRF has already been validated by the time this runs. Redirects
+	// need the full browser-facing URL: the handler sees stripped paths,
+	// so a relative redirect would resolve against the wrong base.
+	mux.HandleFunc("POST /ping", func(w http.ResponseWriter, r *http.Request) {
+		admin.SetFlash(r, "Pong — handled by the host application.")
+		http.Redirect(w, r, "/admin/x/reports/", http.StatusSeeOther)
+	})
+
+	return mux
 }
 
 func envOr(key, fallback string) string {

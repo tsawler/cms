@@ -1,6 +1,12 @@
 {{define "title"}}Log in — CMS{{end}}
 
 {{define "content"}}
+{{if .Captcha}}
+{{/* Must load before the widget: points the WASM solver at our own Cap
+     server instead of a CDN the CSP blocks. */}}
+<script src="{{.AdminPath}}/captcha.js"></script>
+<script type="module" src="{{.Captcha.ScriptURL}}"></script>
+{{end}}
 <div class="cms-login-card">
     <h1>Log in</h1>
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
@@ -14,6 +20,22 @@
             <label for="password">Password</label>
             <input type="password" id="password" name="password" autocomplete="current-password" required>
         </div>
+        {{/* Honeypot: hidden from people, filled in by bots. */}}
+        <div class="cms-hp" aria-hidden="true">
+            <label for="website">Website</label>
+            <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+        </div>
+        <div class="cms-field cms-remember">
+            <label>
+                <input type="checkbox" name="remember" value="1">
+                Remember me{{if gt .RememberHours 0}} for {{.RememberHours}} hours{{end}}
+            </label>
+        </div>
+        {{with .Captcha}}
+        <div class="cms-field">
+            <cap-widget data-cap-api-endpoint="{{.Endpoint}}"></cap-widget>
+        </div>
+        {{end}}
         <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">Log in</button>
     </form>
 </div>

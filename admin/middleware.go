@@ -89,17 +89,34 @@ func (s *server) csrf(next http.Handler) http.Handler {
 // secureHeaders sets conservative security headers on every admin response.
 // Page previews are exempt from the CSP: they render the host site's own
 // templates, which may legitimately load framework CSS/JS from CDNs.
-func secureHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "same-origin")
-		if !strings.HasSuffix(r.URL.Path, "/preview") {
-			// img-src allows https so the media library can show images
-			// served from the site's bucket/CDN.
-			h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' https: data:; frame-ancestors 'none'")
-		}
-		next.ServeHTTP(w, r)
-	})
+// capOrigin, when non-empty, is the Cap CAPTCHA server's origin; the login
+// page loads the widget script from it, the widget calls its challenge API
+// and runs a WASM solver in blob workers, so the CSP must admit all of that.
+func secureHeaders(capOrigin string) func(http.Handler) http.Handler {
+	// img-src allows https so the media library can show images served
+	// from the site's bucket/CDN.
+	csp := "default-src 'self'; img-src 'self' https: data:; frame-ancestors 'none'"
+	if capOrigin != "" {
+		// style-src needs 'unsafe-inline' because the widget injects an
+		// inline <style> block; styles can't run code, so this is a far
+		// smaller concession than it would be for scripts.
+		csp = "default-src 'self'; " +
+			"script-src 'self' 'wasm-unsafe-eval' " + capOrigin + "; " +
+			"style-src 'self' 'unsafe-inline'; " +
+			"connect-src 'self' " + capOrigin + "; " +
+			"worker-src 'self' blob:; " +
+			"img-src 'self' https: data:; frame-ancestors 'none'"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("X-Frame-Options", "DENY")
+			h.Set("Referrer-Policy", "same-origin")
+			if !strings.HasSuffix(r.URL.Path, "/preview") {
+				h.Set("Content-Security-Policy", csp)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

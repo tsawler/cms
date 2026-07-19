@@ -15,13 +15,14 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/captcha"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 	"github.com/tsawler/cms/snippets"
 )
 
-//go:embed templates/*.tmpl
+//go:embed templates/*.gohtml
 var templateFS embed.FS
 
 //go:embed static
@@ -35,11 +36,18 @@ type Deps struct {
 	Renderer       *render.Renderer // nil when the host has not configured templates
 	Media          *media.Manager   // nil when the host has not configured an object store
 	Snippets       *snippets.Store
+	Captcha        *captcha.Client       // nil when login CAPTCHA is not configured
 	ConfigSnippets []snippets.Snippet    // host-registered palette entries
 	SectionStyles  *render.SectionStyles // curated section settings
+	Sections       []Section             // host-registered admin pages, already validated
 	Logger         *slog.Logger
 	AdminPath      string
 	DefaultLocale  string
+
+	// RememberFor is how long a "Remember me" login persists. The zero
+	// value falls back to 24h so a partially-populated Deps (tests,
+	// direct package use) behaves sensibly.
+	RememberFor time.Duration
 }
 
 type server struct {
@@ -51,6 +59,9 @@ type server struct {
 // New returns the admin http.Handler. The host mounts it under
 // Deps.AdminPath with the prefix stripped.
 func New(d Deps) http.Handler {
+	if d.RememberFor <= 0 {
+		d.RememberFor = 24 * time.Hour
+	}
 	s := &server{
 		deps:     d,
 		throttle: auth.NewThrottle(5, 15*time.Minute),
@@ -62,15 +73,21 @@ func New(d Deps) http.Handler {
 		panic(fmt.Sprintf("cms admin: embedded static assets missing: %v", err))
 	}
 
+	capOrigin := ""
+	if d.Captcha != nil {
+		capOrigin = d.Captcha.Origin()
+	}
+
 	r := chi.NewRouter()
 	r.Use(d.Sessions.LoadAndSave)
 	r.Use(s.csrf)
-	r.Use(secureHeaders)
+	r.Use(secureHeaders(capOrigin))
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(static)))
 
 	r.Get("/login", s.loginForm)
 	r.Post("/login", s.login)
+	r.Get("/captcha.js", s.captchaConfigJS)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireUser)
@@ -133,6 +150,12 @@ func New(d Deps) http.Handler {
 			r.Post("/api/media/folders", s.apiFolderCreate)
 		}
 
+		// Host-registered sections, behind the same session, CSRF, and
+		// login middleware as everything else in this group.
+		for _, sec := range d.Sections {
+			r.Mount(SectionPathPrefix+"/"+sec.Path, s.sectionHandler(sec))
+		}
+
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/users", s.usersList)
@@ -149,11 +172,11 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media", "snippets", "snippet_form"}
+	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media", "snippets", "snippet_form", "custom"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
-			"templates/layout.tmpl", "templates/"+page+".tmpl")
+			"templates/layout.gohtml", "templates/"+page+".gohtml")
 		if err != nil {
 			panic(fmt.Sprintf("cms admin: parsing template %s: %v", page, err))
 		}
@@ -170,6 +193,13 @@ type templateData struct {
 	CSRFToken string
 	Flash     string
 	Error     string // form-level error message
+
+	// Captcha is set when login CAPTCHA is configured; the login page
+	// embeds the Cap widget with it.
+	Captcha *captchaInfo
+
+	// RememberHours labels the login page's "Remember me" checkbox.
+	RememberHours int
 
 	// User management pages.
 	Users      []auth.User
@@ -198,17 +228,61 @@ type templateData struct {
 	Snippets       []snippets.Snippet // admin-created
 	ConfigSnippets []snippets.Snippet // registered in code
 	FormSnippet    *snippets.Snippet
+
+	// Host-registered sections: nav links visible to this user, and the
+	// page content when rendering a custom page through RenderPage.
+	NavSections []navLink
+	Title       string
+	Body        template.HTML
+}
+
+// navLink is one host-registered section's entry in the admin top bar.
+type navLink struct {
+	URL   string
+	Label string
+}
+
+// captchaInfo is what the login template needs to embed the Cap widget.
+type captchaInfo struct {
+	ScriptURL string // widget script, served by the Cap server
+	Endpoint  string // data-cap-api-endpoint value
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
-	return templateData{
+	td := templateData{
 		AdminPath:    s.deps.AdminPath,
 		User:         s.currentUser(r),
 		CSRFToken:    s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
 		Flash:        s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
 		PagesEnabled: s.deps.Renderer != nil,
 		MediaEnabled: s.deps.Media != nil,
+
+		RememberHours: int(s.deps.RememberFor.Round(time.Hour) / time.Hour),
 	}
+	if s.deps.Captcha != nil {
+		td.Captcha = &captchaInfo{
+			ScriptURL: s.deps.Captcha.ScriptURL(),
+			Endpoint:  s.deps.Captcha.WidgetEndpoint(),
+		}
+	}
+	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin())
+	return td
+}
+
+// navSectionsFor returns the top-bar links for the host-registered sections
+// a user with the given role may see.
+func navSectionsFor(sections []Section, adminPath string, isAdmin bool) []navLink {
+	var links []navLink
+	for _, sec := range sections {
+		if sec.NavLabel == "" || (sec.AdminOnly && !isAdmin) {
+			continue
+		}
+		links = append(links, navLink{
+			URL:   adminPath + SectionPathPrefix + "/" + sec.Path + "/",
+			Label: sec.NavLabel,
+		})
+	}
+	return links
 }
 
 // IsAdmin reports whether the logged-in user has the admin role; used by

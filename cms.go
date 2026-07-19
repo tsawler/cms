@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/captcha"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/editor"
 	"github.com/tsawler/cms/internal/sessiondata"
@@ -61,6 +62,16 @@ type SectionStyles = render.SectionStyles
 // SectionOption is one background or width choice; see render.SectionOption.
 type SectionOption = render.SectionOption
 
+// CaptchaConfig locates a self-hosted Cap CAPTCHA server for the admin
+// login form; see captcha.Config.
+type CaptchaConfig = captcha.Config
+
+// AdminSection is one host-registered admin page, mounted inside the admin
+// area's login, session, and CSRF middleware; see admin.Section. Handlers
+// use admin.UserFrom, admin.CSRFToken, admin.SetFlash, and admin.RenderPage
+// to integrate with the admin chrome.
+type AdminSection = admin.Section
+
 // Config holds everything the host application provides to the CMS.
 type Config struct {
 	// DB is the Postgres connection pool. Required. All CMS tables are
@@ -80,6 +91,13 @@ type Config struct {
 	// SessionLifetime is how long a login session lasts. Defaults to 24h.
 	SessionLifetime time.Duration
 
+	// RememberFor is how long a session lasts when the user ticks
+	// "Remember me" at login: the cookie survives browser restarts and
+	// the session deadline is extended to this duration. Without the
+	// tick, the cookie dies when the browser closes (SessionLifetime
+	// still bounds it server-side). Defaults to 24h.
+	RememberFor time.Duration
+
 	// SecureCookies marks the session cookie Secure so it is only sent
 	// over HTTPS. Enable in production; leave off for local development
 	// over plain HTTP.
@@ -91,7 +109,7 @@ type Config struct {
 
 	// SharedTemplates are glob patterns within TemplateFS for layouts and
 	// partials parsed into every page's template set, e.g.
-	// []string{"templates/base.tmpl", "templates/partials/*.tmpl"}.
+	// []string{"templates/base.gohtml", "templates/partials/*.gohtml"}.
 	SharedTemplates []string
 
 	// PageTemplates lists the templates editors may choose for a page.
@@ -131,6 +149,19 @@ type Config struct {
 	// need safelisting like editor styles do.
 	SectionStyles *SectionStyles
 
+	// Captcha, when set, protects the admin login form with a
+	// proof-of-work CAPTCHA verified against a self-hosted Cap server
+	// (docker image tiago2/cap). Nil disables the CAPTCHA; the built-in
+	// login throttle and honeypot still apply.
+	Captcha *CaptchaConfig
+
+	// AdminSections are deployment-specific admin pages: each is an
+	// http.Handler mounted at {AdminPath}/x/{Path}, behind the admin's
+	// login, session, and CSRF middleware, with an optional link in the
+	// admin nav. The /x/ namespace guarantees no collision with built-in
+	// admin routes, now or after upgrades.
+	AdminSections []AdminSection
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -163,6 +194,9 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.SessionLifetime <= 0 {
 		cfg.SessionLifetime = 24 * time.Hour
 	}
+	if cfg.RememberFor <= 0 {
+		cfg.RememberFor = 24 * time.Hour
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -175,11 +209,26 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.SectionStyles == nil {
 		cfg.SectionStyles = render.DefaultSectionStyles()
 	}
+	if err := admin.ValidateSections(cfg.AdminSections); err != nil {
+		return nil, err
+	}
+
+	var capClient *captcha.Client
+	if cfg.Captcha != nil {
+		var err error
+		capClient, err = captcha.New(*cfg.Captcha)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	sessions := scs.New()
 	sessions.Store = sessionstore.New(cfg.DB)
 	sessions.Lifetime = cfg.SessionLifetime
 	sessions.Cookie.Name = "cms_session"
+	// Session cookies by default; ticking "Remember me" at login makes
+	// that session's cookie persistent (scs's RememberMe mechanism).
+	sessions.Cookie.Persist = false
 	sessions.Cookie.HttpOnly = true
 	sessions.Cookie.SameSite = http.SameSiteLaxMode
 	sessions.Cookie.Secure = cfg.SecureCookies
@@ -225,11 +274,14 @@ func New(cfg Config) (*CMS, error) {
 		Renderer:       renderer,
 		Media:          mediaManager,
 		Snippets:       snippets.NewStore(cfg.DB),
+		Captcha:        capClient,
 		ConfigSnippets: cfg.Snippets,
 		SectionStyles:  cfg.SectionStyles,
+		Sections:       cfg.AdminSections,
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
 		DefaultLocale:  cfg.Locales[0],
+		RememberFor:    cfg.RememberFor,
 	})
 	return c, nil
 }

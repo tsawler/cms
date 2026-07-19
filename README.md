@@ -38,10 +38,10 @@ c, err := cms.New(cms.Config{
         // embed direct bucket/CDN URLs instead.
     },
     TemplateFS:      templateFS,
-    SharedTemplates: []string{"templates/base.tmpl"},
+    SharedTemplates: []string{"templates/base.gohtml"},
     PageTemplates: []cms.PageTemplate{
-        {File: "templates/pages/home.tmpl", Label: "Home page"},
-        {File: "templates/pages/standard.tmpl", Label: "Standard page"},
+        {File: "templates/pages/home.gohtml", Label: "Home page"},
+        {File: "templates/pages/standard.gohtml", Label: "Standard page"},
     },
 })
 if err != nil { ... }
@@ -298,13 +298,137 @@ linking to draft pages show only for logged-in editors until the page is
 published. Menu changes have no draft state — saving applies to the whole
 site immediately.
 
+## Custom admin pages
+
+Deployments often need admin pages the CMS doesn't ship — reports,
+imports, integration settings. Register them with `Config.AdminSections`:
+each section is a plain `http.Handler` the CMS mounts at
+`{AdminPath}/x/{Path}/` **inside** the admin's middleware chain, so
+login enforcement, sessions, CSRF validation, and security headers are
+guaranteed — a custom page can't accidentally ship without them.
+
+```go
+AdminSections: []cms.AdminSection{
+    {Path: "reports", NavLabel: "Reports", Handler: reportsHandler},
+    {Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: billingHandler},
+},
+```
+
+- **`Path`** — one URL segment; the section root is served at
+  `{AdminPath}/x/reports/` (the `/x/` namespace guarantees host sections
+  never collide with built-in admin routes, now or after upgrades).
+- **`NavLabel`** — adds a link to the admin top bar; leave empty for
+  routable-but-unlisted pages.
+- **`AdminOnly`** — editors get 403 and no nav link.
+- **`Handler`** — sees section-relative paths (`/` at the root), so it can
+  serve sub-routes and its own static assets beneath it.
+
+Inside a handler, four helpers from `github.com/tsawler/cms/admin`
+integrate with the admin UI:
+
+```go
+func reportsPage(w http.ResponseWriter, r *http.Request) {
+    user := admin.UserFrom(r)   // logged-in *auth.User, never nil here
+    body := fmt.Sprintf(`<h1>Reports</h1>
+        <p>Hello %s.</p>
+        <form method="post" action="refresh">
+            <input type="hidden" name="csrf_token" value="%s">
+            <button type="submit" class="cms-btn">Refresh</button>
+        </form>`,
+        template.HTMLEscapeString(user.Name),
+        template.HTMLEscapeString(admin.CSRFToken(r)))
+
+    // Wraps body (trusted host HTML) in the admin chrome: top bar,
+    // nav, flash messages, stylesheet.
+    admin.RenderPage(w, r, "Reports", template.HTML(body))
+}
+
+func refresh(w http.ResponseWriter, r *http.Request) {
+    // CSRF was already validated before this ran.
+    admin.SetFlash(r, "Refreshed.") // shown on the next admin page load
+    http.Redirect(w, r, "/admin/x/reports/", http.StatusSeeOther)
+}
+```
+
+Things to know:
+
+- **POST forms need the CSRF token.** The admin middleware rejects unsafe
+  methods without it; include `admin.CSRFToken(r)` as the `csrf_token`
+  field (or an `X-CSRF-Token` header from JS).
+- **No inline scripts or styles.** The admin serves a strict
+  Content-Security-Policy without `unsafe-inline`; serve JS/CSS as files
+  from the section's own handler (e.g. `GET /assets/app.js` inside it).
+- **Redirect with full paths.** The handler sees stripped paths, so
+  `http.Redirect` with a relative URL resolves against the wrong base;
+  use the browser-facing URL (`/admin/x/reports/`).
+- `admin.RenderPage` always writes 200 and inserts `body` unescaped —
+  it's your code's HTML, escape any user data you interpolate into it.
+  For other status codes or a fully custom look, write the response
+  directly; the CSS classes in `admin.css` (`cms-btn`, `cms-card`,
+  `cms-muted`, ...) are available either way.
+
+The example app registers a working section — see `reportsSection` in
+`examples/basic/main.go`.
+
+For *modifying* built-in admin pages there is deliberately no template
+override mechanism (it would couple deployments to internal template
+data and break silently on upgrades). The supported paths are the
+existing configuration knobs (`Snippets`, `EditorStyles`,
+`SectionStyles`, ...) — and when those don't cover a need, a config
+option added to the CMS itself.
+
+## Bot protection
+
+The public site is read-only (GET/HEAD only), so the bot-facing surface
+is the admin login form. Three layers protect it:
+
+- **Login throttling** (always on): five failed attempts per email+IP in
+  fifteen minutes, then 429 responses until the window passes.
+- **Honeypot** (always on): a visually hidden form field; anything that
+  fills it gets the ordinary wrong-password error and a throttle strike.
+- **CAPTCHA** (opt-in): a proof-of-work challenge verified against a
+  self-hosted [Cap](https://capjs.js.org) server — no third-party
+  service, no tracking, and the widget script is served by your own Cap
+  instance rather than a CDN.
+
+To enable the CAPTCHA, run Cap (docker image `tiago2/cap`, see
+`examples/basic/docker-compose.yml`), open its dashboard, log in with
+the container's `ADMIN_KEY`, create a site key, and configure:
+
+```go
+c, err := cms.New(cms.Config{
+    // ...
+    Captcha: &cms.CaptchaConfig{
+        URL:     "https://cap.example.com", // browser-facing Cap server
+        SiteKey: "your-site-key",
+        Secret:  "your-secret",
+        // InternalURL: "http://cap:3000", // optional: server-to-server
+        //                                 // address, e.g. inside Docker
+    },
+})
+```
+
+With `Captcha` set, the login page renders the Cap widget (the admin CSP
+is extended to admit exactly that origin), and the login handler
+verifies the submitted token server-side before checking credentials. If
+the Cap server rejects the token, the login fails; if the Cap server is
+*unreachable*, the login proceeds with a logged warning — an outage of
+the CAPTCHA backend shouldn't lock admins out, and the throttle still
+applies. Host applications can reuse the verification client
+(`captcha.New`, `Client.Verify`) for their own forms.
+
 ## Running the example
 
 ```sh
 cd examples/basic
-docker compose up -d      # Postgres on localhost:5433
+docker compose up -d      # Postgres on localhost:5433, Cap on localhost:3300
 go run .
 ```
+
+To try the login CAPTCHA: open <http://localhost:3300>, log in with the
+`ADMIN_KEY` from `docker-compose.yml`, create a site key, and set
+`CAP_URL=http://localhost:3300`, `CAP_SITE_KEY`, and `CAP_SECRET` in the
+environment or `.env`. Without them the example runs without CAPTCHA.
 
 The example reads S3 credentials from a `.env` file at the repo root
 (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET`, optional
@@ -313,6 +437,10 @@ The example reads S3 credentials from a `.env` file at the repo root
 Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with
 `CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
+
+Login sessions end when the browser closes unless "Remember me" is
+ticked, which keeps the login for `cms.Config.RememberFor` (default 24h;
+the example maps `CMS_REMEMBER_HOURS` onto it).
 
 ## Working on the in-place editor
 
@@ -379,6 +507,11 @@ overwritten by the next build (and marked `linguist-generated`).
 - **Safelist the editor's style classes** — see
   [The Styles menu](#the-styles-menu-tailwind-first) above; skipping this
   makes applied styles silently invisible in production Tailwind builds.
+- Template file extensions are the host's choice (`.gohtml` plays best
+  with editor tooling) — the CMS loads whatever paths you configure. But
+  pages store their template's path, so renaming template files under an
+  existing database needs a one-time fixup, e.g.
+  `UPDATE cms_pages SET template_name = replace(template_name, '.tmpl', '.gohtml');`
 - All tables are prefixed `cms_`, so the CMS can share a database with the
   host app.
 - `Migrate` is safe to run on every startup and from multiple instances

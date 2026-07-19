@@ -28,9 +28,9 @@ const (
 // Media is one uploaded image or document. Alt is the alt text for the
 // locale it was loaded with (images only).
 type Media struct {
-	ID    int64
-	Kind  Kind
-	S3Key string // images: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
+	ID         int64
+	Kind       Kind
+	S3Key      string // images: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
 	Filename   string
 	Mime       string
 	Ext        string
@@ -180,10 +180,10 @@ func (m *Manager) GetByID(ctx context.Context, id int64, locale string) (*Media,
 
 // ListOptions filters All. The zero value lists everything.
 type ListOptions struct {
-	Kind     Kind    // "" = both images and files
-	Query    string  // case-insensitive substring match on filename
-	FolderID *int64  // only items in this folder
-	Unfiled  bool    // only items in no folder (ignored when FolderID set)
+	Kind     Kind   // "" = both images and files
+	Query    string // case-insensitive substring match on filename
+	FolderID *int64 // only items in this folder
+	Unfiled  bool   // only items in no folder (ignored when FolderID set)
 }
 
 var ilikeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)

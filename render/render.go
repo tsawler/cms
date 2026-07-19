@@ -22,7 +22,7 @@ import (
 )
 
 // PageTemplate is one template the host application offers for pages. File
-// is a path within the host's TemplateFS (e.g. "templates/pages/home.tmpl");
+// is a path within the host's TemplateFS (e.g. "templates/pages/home.gohtml");
 // Label is what content editors see when choosing a page type.
 type PageTemplate struct {
 	File  string `json:"file"`
@@ -35,8 +35,8 @@ type MenuEntry struct {
 	Label    string
 	URL      string
 	NewTab   bool
-	Active   bool // this entry links to the page being rendered
-	External bool // absolute http(s) URL rather than a site page
+	Active   bool        // this entry links to the page being rendered
+	External bool        // absolute http(s) URL rather than a site page
 	Children []MenuEntry // reserved for nested menus; empty in v1
 }
 
@@ -268,12 +268,12 @@ func DefaultEditorStyles() []EditorStyle {
 // marker elements and the in-place editor script is injected before
 // </body>. Pass nil for a plain public render.
 type EditInfo struct {
-	PageID       int64
-	Slug         string // "" identifies the home page (not deletable)
-	AdminPath    string
-	CSRFToken    string
-	Locale       string
-	Status       string // "draft" or "published"
+	PageID    int64
+	Slug      string // "" identifies the home page (not deletable)
+	AdminPath string
+	CSRFToken string
+	Locale    string
+	Status    string // "draft" or "published"
 	// HasUnpublished is true when a published page's draft content
 	// differs from what is live — the editor shows "Unpublished changes"
 	// and keeps Publish available.
@@ -281,9 +281,9 @@ type EditInfo struct {
 	MediaEnabled   bool
 	// IsAdmin unlocks admin-only editor chrome (the page CSS & JS
 	// panel); the server enforces the restriction regardless.
-	IsAdmin bool
-	Styles       []EditorStyle  // entries for the editor's Styles menu
-	Sections     *SectionStyles // options for section settings
+	IsAdmin  bool
+	Styles   []EditorStyle  // entries for the editor's Styles menu
+	Sections *SectionStyles // options for section settings
 }
 
 // Renderer holds one parsed template set per page template: the shared

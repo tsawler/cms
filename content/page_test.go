@@ -18,13 +18,13 @@ func TestNormalizeSlug(t *testing.T) {
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"About Us":        "about-us",
-		"Café & Bar!":     "cafe-bar",
-		"  Über uns  ":    "uber-uns",
-		"FAQ":             "faq",
-		"Prix / Tarifs":   "prix-tarifs",
-		"!!!":             "",
-		"Services—2026":   "services-2026",
+		"About Us":      "about-us",
+		"Café & Bar!":   "cafe-bar",
+		"  Über uns  ":  "uber-uns",
+		"FAQ":           "faq",
+		"Prix / Tarifs": "prix-tarifs",
+		"!!!":           "",
+		"Services—2026": "services-2026",
 	}
 	for in, want := range cases {
 		if got := Slugify(in); got != want {

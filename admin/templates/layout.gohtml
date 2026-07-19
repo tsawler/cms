@@ -18,6 +18,7 @@
         {{if .MediaEnabled}}<a href="{{.AdminPath}}/media">Media</a>{{end}}
         {{if and .PagesEnabled (eq .User.Role "admin")}}<a href="{{.AdminPath}}/snippets">Snippets</a>{{end}}
         {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">Users</a>{{end}}
+        {{range .NavSections}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
     </nav>
     <div class="cms-topbar-right">
         <span class="cms-whoami">{{.User.Name}}</span>

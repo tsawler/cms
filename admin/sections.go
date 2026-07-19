@@ -1,0 +1,170 @@
+// Host-registered admin sections: custom pages a deployment mounts inside
+// the admin area. Sections run behind the admin's session, CSRF, and
+// login middleware, and their handlers use the package-level helpers
+// (UserFrom, CSRFToken, SetFlash, RenderPage) to integrate with the
+// admin chrome.
+
+package admin
+
+import (
+	"context"
+	"fmt"
+	"html/template"
+	"net/http"
+	"regexp"
+
+	"github.com/tsawler/cms/auth"
+)
+
+// SectionPathPrefix is the URL segment custom sections are mounted under,
+// between the admin path and the section's own path: a section with Path
+// "reports" serves {AdminPath}/x/reports. The namespace keeps host
+// sections from ever colliding with built-in admin routes, present or
+// future.
+const SectionPathPrefix = "/x"
+
+// Section is one host-registered admin extension: an http.Handler mounted
+// inside the admin's middleware chain (session, CSRF validation, security
+// headers, and login requirement), with an optional link in the admin's
+// top navigation bar.
+type Section struct {
+	// Path is the URL segment the section is mounted under: the section
+	// root is served at {AdminPath}/x/{Path}/ (the bare URL without the
+	// trailing slash redirects there, so relative links inside the
+	// section resolve under it). One path segment of RFC 3986 unreserved
+	// characters (letters, digits, "-", ".", "_", "~").
+	Path string
+
+	// NavLabel is the section's link text in the admin top bar. Empty
+	// means no nav link; the section is still routable.
+	NavLabel string
+
+	// AdminOnly restricts the section to users with the admin role.
+	// Editors receive 403 and don't see the nav link.
+	AdminOnly bool
+
+	// Handler serves the section's requests. The mount prefix is
+	// stripped: it sees "/" at the section root and may serve its own
+	// sub-routes and static assets beneath it. Requests only reach the
+	// handler with a logged-in user, and unsafe methods (POST, PUT, ...)
+	// have already passed CSRF validation — forms need only include
+	// CSRFToken(r) as the csrf_token field.
+	Handler http.Handler
+}
+
+var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
+
+// sectionHandler wraps a host-registered section for mounting: it enforces
+// the admin role when asked, exposes the server to the package helpers,
+// strips the mount prefix so the handler sees section-relative paths, and
+// canonicalizes the bare section URL to its trailing-slash form so the
+// handler's relative links resolve under the section.
+func (s *server) sectionHandler(sec Section) http.Handler {
+	prefix := SectionPathPrefix + "/" + sec.Path
+	inner := http.StripPrefix(prefix, sec.Handler)
+
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == prefix {
+			url := s.deps.AdminPath + prefix + "/"
+			if r.URL.RawQuery != "" {
+				url += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, url, http.StatusMovedPermanently)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+
+	h = s.withServer(h)
+	if sec.AdminOnly {
+		h = s.requireAdmin(h)
+	}
+	return h
+}
+
+// ValidateSections checks host-registered sections for empty, malformed,
+// or duplicate paths and nil handlers. cms.New calls it; it is exported
+// for hosts that want to fail earlier.
+func ValidateSections(sections []Section) error {
+	seen := make(map[string]bool, len(sections))
+	for _, sec := range sections {
+		if !sectionPathRE.MatchString(sec.Path) {
+			return fmt.Errorf("cms: admin section path %q must be one path segment of letters, digits, or - . _ ~", sec.Path)
+		}
+		if seen[sec.Path] {
+			return fmt.Errorf("cms: duplicate admin section path %q", sec.Path)
+		}
+		seen[sec.Path] = true
+		if sec.Handler == nil {
+			return fmt.Errorf("cms: admin section %q has a nil Handler", sec.Path)
+		}
+	}
+	return nil
+}
+
+// serverCtxKey carries the admin server into section handlers so the
+// package-level helpers below can reach sessions and templates.
+type serverCtxKey struct{}
+
+// withServer makes the admin server available to the helpers from inside
+// a section handler.
+func (s *server) withServer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), serverCtxKey{}, s)))
+	})
+}
+
+func serverFrom(r *http.Request) *server {
+	s, _ := r.Context().Value(serverCtxKey{}).(*server)
+	return s
+}
+
+// UserFrom returns the logged-in CMS user for a request served by a
+// custom admin section. Inside a section handler it is never nil — the
+// admin middleware has already required a login. Outside one it is nil.
+func UserFrom(r *http.Request) *auth.User {
+	if s := serverFrom(r); s != nil {
+		return s.currentUser(r)
+	}
+	return nil
+}
+
+// CSRFToken returns the session's CSRF token for a request served by a
+// custom admin section. Forms that POST back to the section must send it
+// in a hidden csrf_token field (or an X-CSRF-Token header); the admin
+// middleware rejects unsafe requests without it.
+func CSRFToken(r *http.Request) string {
+	if s := serverFrom(r); s != nil {
+		return s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF)
+	}
+	return ""
+}
+
+// SetFlash queues a one-time message shown at the top of the next admin
+// page the user loads — the usual post/redirect/get confirmation. It is a
+// no-op outside a section handler.
+func SetFlash(r *http.Request, msg string) {
+	if s := serverFrom(r); s != nil {
+		s.flash(r, msg)
+	}
+}
+
+// RenderPage writes a 200 response wrapping body in the standard admin
+// chrome (top bar, navigation, flash messages, admin stylesheet). Body is
+// trusted host HTML, inserted unescaped. For any other status code or a
+// fully custom look, write the response directly instead.
+//
+// The admin serves a strict Content-Security-Policy with no unsafe-inline,
+// so inline <script> and <style> in body are blocked by browsers; serve
+// scripts and stylesheets as files from the section's own handler.
+func RenderPage(w http.ResponseWriter, r *http.Request, title string, body template.HTML) {
+	s := serverFrom(r)
+	if s == nil {
+		http.Error(w, "admin.RenderPage: not inside an admin section handler", http.StatusInternalServerError)
+		return
+	}
+	data := s.newTemplateData(r)
+	data.Title = title
+	data.Body = body
+	s.render(w, http.StatusOK, "custom", data)
+}
