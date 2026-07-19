@@ -314,17 +314,31 @@ AdminSections: []cms.AdminSection{
 },
 ```
 
-- **`Path`** — one URL segment; the section root is served at
-  `{AdminPath}/x/reports/` (the `/x/` namespace guarantees host sections
-  never collide with built-in admin routes, now or after upgrades).
+- **`Path`** — one URL segment of letters, digits, or `- . _ ~`; the
+  section root is served at `{AdminPath}/x/reports/` (the `/x/` namespace
+  guarantees host sections never collide with built-in admin routes, now
+  or after upgrades). The bare URL without the trailing slash redirects
+  to the slashed form, so relative links inside the section resolve
+  correctly.
 - **`NavLabel`** — adds a link to the admin top bar; leave empty for
   routable-but-unlisted pages.
 - **`AdminOnly`** — editors get 403 and no nav link.
 - **`Handler`** — sees section-relative paths (`/` at the root), so it can
   serve sub-routes and its own static assets beneath it.
 
+`cms.New` rejects a config with malformed, duplicate, or handler-less
+sections; call `admin.ValidateSections` yourself to fail even earlier
+(e.g. in a test).
+
 Inside a handler, four helpers from `github.com/tsawler/cms/admin`
 integrate with the admin UI:
+
+| Helper | Purpose |
+|---|---|
+| `admin.UserFrom(r)` | the logged-in `*auth.User` (never nil in a section) |
+| `admin.CSRFToken(r)` | token for the `csrf_token` field in POST forms |
+| `admin.SetFlash(r, msg)` | one-time message on the next admin page load |
+| `admin.RenderPage(w, r, title, body)` | wrap trusted HTML in the admin chrome |
 
 ```go
 func reportsPage(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +371,16 @@ Things to know:
   field (or an `X-CSRF-Token` header from JS).
 - **No inline scripts or styles.** The admin serves a strict
   Content-Security-Policy without `unsafe-inline`; serve JS/CSS as files
-  from the section's own handler (e.g. `GET /assets/app.js` inside it).
+  from the section's own handler. With an embedded FS that's one route:
+
+  ```go
+  //go:embed assets
+  var assetsFS embed.FS
+
+  mux := http.NewServeMux()
+  mux.Handle("GET /assets/", http.FileServerFS(assetsFS))
+  // referenced from the page as <script src="assets/app.js" defer></script>
+  ```
 - **Redirect with full paths.** The handler sees stripped paths, so
   `http.Redirect` with a relative URL resolves against the wrong base;
   use the browser-facing URL (`/admin/x/reports/`).
