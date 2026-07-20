@@ -466,7 +466,9 @@ environment or `.env`. Without them the example runs without CAPTCHA.
 The example reads S3 credentials from a `.env` file at the repo root
 (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET`, optional
 `S3_REGION` and `S3_KEY_PREFIX`); without one, the media library is
-simply disabled.
+simply disabled. `CMS_MEDIA_WEBP_QUALITY` (a value in (0, 1], e.g.
+`0.5`) overrides the WebP quality used for image variants; unset uses
+the default 0.3.
 
 Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with

@@ -126,15 +126,28 @@ func run(logger *slog.Logger) error {
 		rememberFor = time.Duration(h) * time.Hour
 	}
 
+	// Lossy WebP quality for image variants, in (0, 1]; unset falls back
+	// to the CMS default (0.3). An invalid value is a config mistake —
+	// fail loudly rather than silently serving the wrong quality.
+	var webpQuality float64
+	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {
+		q, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("CMS_MEDIA_WEBP_QUALITY %q is not a number: %w", v, err)
+		}
+		webpQuality = q
+	}
+
 	c, err := cms.New(cms.Config{
-		DB:              db,
-		Locales:         []string{"en", "fr"},
-		Logger:          logger,
-		ObjectStore:     objects,
-		Captcha:         capCfg,
-		RememberFor:     rememberFor,
-		TemplateFS:      templateFS,
-		SharedTemplates: []string{"templates/base.gohtml"},
+		DB:               db,
+		Locales:          []string{"en", "fr"},
+		Logger:           logger,
+		ObjectStore:      objects,
+		Captcha:          capCfg,
+		RememberFor:      rememberFor,
+		MediaWebPQuality: webpQuality,
+		TemplateFS:       templateFS,
+		SharedTemplates:  []string{"templates/base.gohtml"},
 		PageTemplates: []cms.PageTemplate{
 			{File: "templates/pages/home.gohtml", Label: "Home page"},
 			{File: "templates/pages/standard.gohtml", Label: "Standard page"},
