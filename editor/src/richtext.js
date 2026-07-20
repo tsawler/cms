@@ -37,6 +37,10 @@ function uploadImage(blobInfo) {
     });
 }
 
+// alignBlocks are the elements the alignment buttons act on when the
+// selection is not an image (mirrors TinyMCE's default list, minus img).
+var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
+
 function escapeAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
@@ -88,6 +92,27 @@ export function initInlineEditor(el, onDirty, register) {
         images_upload_handler: uploadImage,
         automatic_uploads: true,
         paste_data_images: mediaEnabled,
+        // Tailwind-first alignment: replace TinyMCE's default align
+        // formats, which write inline styles (text-align on blocks;
+        // display/margin on images), with utility classes. Classes
+        // survive the server-side sanitizer for non-admin editors and
+        // keep saved content styleable by the host's CSS. Images need
+        // their own rules: under Tailwind's preflight an <img> is a
+        // block element, so text-align on its parent can never move it.
+        formats: {
+            alignleft: [
+                { selector: alignBlocks, classes: "text-left" },
+                { selector: "img", classes: "float-left mr-6" },
+            ],
+            aligncenter: [
+                { selector: alignBlocks, classes: "text-center" },
+                { selector: "img", classes: "block mx-auto" },
+            ],
+            alignright: [
+                { selector: alignBlocks, classes: "text-right" },
+                { selector: "img", classes: "float-right ml-6" },
+            ],
+        },
         // Never rewrite URLs relative to the current page — media
         // lives at absolute paths like /cms/media/… and relative
         // forms would break on nested pages.

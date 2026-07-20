@@ -99,7 +99,11 @@ With no configuration, the menu ships a Tailwind-flavored default set:
 Editor content lives in the database, and production Tailwind only
 generates CSS for classes it finds while scanning your **source files** —
 so every class the menu can apply must be safelisted, or applied styles
-will silently not render in production. For the default menu:
+will silently not render in production. The toolbar's alignment buttons
+also apply utility classes — `text-left/center/right` on blocks, and
+`float-left mr-6`, `block mx-auto`, or `float-right ml-6` on images — so
+safelist those regardless of which Styles menu you ship. For the default
+menu plus alignment:
 
 ```js
 // tailwind.config.js (Tailwind v3)
@@ -107,12 +111,14 @@ safelist: [
     "text-slate-500", "text-red-600", "text-emerald-600",
     "text-blue-600", "text-white", "bg-yellow-200", "font-serif",
     "font-mono", "text-lg", "text-slate-600", "text-sm",
+    "text-left", "text-center", "text-right",
+    "float-left", "float-right", "mr-6", "ml-6", "block", "mx-auto",
 ],
 ```
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto");
 ```
 
 (The example site uses the Tailwind Play CDN, which generates CSS in the
