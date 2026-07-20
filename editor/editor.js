@@ -986,6 +986,68 @@
     activeSnip = null;
     $("snip-ui").classList.remove("on");
   }
+  var activeImg = null;
+  var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
+  function showImgUI(img) {
+    activeImg = img;
+    var ui = $("img-ui");
+    ui.classList.add("on");
+    var r = img.getBoundingClientRect();
+    var top = r.top - 44;
+    if (top < 64) top = r.top + 8;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.left) + "px";
+  }
+  function hideImgUI() {
+    activeImg = null;
+    $("img-ui").classList.remove("on");
+  }
+  function imageLink(img) {
+    var a = img.parentElement;
+    if (!a || a.tagName !== "A" || a.classList.contains("cms-btn")) return null;
+    return (a.textContent || "").trim() === "" ? a : null;
+  }
+  function imgSizeValue(img) {
+    for (var i = 0; i < IMG_SIZES.length; i++) {
+      if (img.classList.contains(IMG_SIZES[i].split(" ")[0])) return IMG_SIZES[i];
+    }
+    return "";
+  }
+  function applyImageSettings(img, v) {
+    img.setAttribute("alt", (v.alt || "").trim());
+    IMG_SIZES.forEach(function(s) {
+      s.split(" ").forEach(function(c) {
+        img.classList.remove(c);
+      });
+    });
+    if (v.size) {
+      v.size.split(" ").forEach(function(c) {
+        img.classList.add(c);
+      });
+    }
+    if (!img.getAttribute("class")) img.removeAttribute("class");
+    var url = (v.href || "").trim();
+    var link = imageLink(img);
+    if (url) {
+      if (!link) {
+        link = document.createElement("a");
+        img.parentNode.insertBefore(link, img);
+        link.appendChild(img);
+      }
+      link.setAttribute("href", url);
+      link.setAttribute("data-mce-href", url);
+      if (v.newtab) {
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener");
+      } else {
+        link.removeAttribute("target");
+        link.removeAttribute("rel");
+      }
+    } else if (link) {
+      link.parentNode.insertBefore(img, link);
+      link.remove();
+    }
+  }
   function findOwningEditor(el) {
     var all = [];
     Object.keys(state.mceEditors).forEach(function(k) {
@@ -1049,8 +1111,12 @@
       var t = e.target;
       var btn = t.closest ? t.closest("a.cms-btn") : null;
       if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
+      var img = null;
+      if (!btn && t.tagName === "IMG" && !t.closest("[data-cms-image]") && t.closest("[data-cms-region],[data-cms-sections]")) {
+        img = t;
+      }
       var snip = null;
-      if (!btn && t.closest) {
+      if (!btn && !img && t.closest) {
         snip = t.closest(".cms-snippet");
         if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
       }
@@ -1058,22 +1124,31 @@
         e.preventDefault();
         btn.setAttribute("contenteditable", "false");
         hideSnipUI();
+        hideImgUI();
         showButtonUI(btn);
+      } else if (img) {
+        hideButtonUI();
+        hideSnipUI();
+        showImgUI(img);
       } else if (snip) {
         hideButtonUI();
+        hideImgUI();
         showSnipUI(snip);
       } else {
         hideButtonUI();
         hideSnipUI();
+        hideImgUI();
       }
     }, true);
     window.addEventListener("scroll", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
+      if (activeImg) showImgUI(activeImg);
     }, true);
     window.addEventListener("resize", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
+      if (activeImg) showImgUI(activeImg);
     });
     $("btn-set").addEventListener("click", function() {
       if (!activeBtn) return;
@@ -1180,6 +1255,60 @@
         else run();
         markContainerDirty(btn);
         if (activeBtn === btn) showButtonUI(btn);
+      });
+    });
+    $("img-set").addEventListener("click", function() {
+      if (!activeImg) return;
+      var img = activeImg;
+      var link = imageLink(img);
+      openDialog({
+        message: "Image settings",
+        okLabel: "Apply",
+        fields: [
+          {
+            id: "alt",
+            label: "Alternative text (screen readers, SEO)",
+            type: "text",
+            placeholder: "Describe the image",
+            value: img.getAttribute("alt") || ""
+          },
+          {
+            id: "href",
+            label: "Link address (optional)",
+            type: "text",
+            placeholder: "https://example.com or /contact",
+            value: link ? link.getAttribute("href") || "" : ""
+          },
+          {
+            id: "newtab",
+            label: "Open in a new tab",
+            type: "check",
+            value: !!link && link.getAttribute("target") === "_blank"
+          },
+          {
+            id: "size",
+            label: "Display width",
+            type: "select",
+            value: imgSizeValue(img),
+            options: [
+              { value: "", label: "Natural" },
+              { value: IMG_SIZES[0], label: "Full width" },
+              { value: IMG_SIZES[1], label: "Two thirds" },
+              { value: IMG_SIZES[2], label: "Half" },
+              { value: IMG_SIZES[3], label: "One third" }
+            ]
+          }
+        ]
+      }).then(function(v) {
+        if (!v) return;
+        var ed = findOwningEditor(img);
+        var run = function() {
+          applyImageSettings(img, v);
+        };
+        if (ed) ed.undoManager.transact(run);
+        else run();
+        markContainerDirty(img);
+        if (activeImg === img) showImgUI(img);
       });
     });
     $("btn-del").addEventListener("click", function() {
@@ -2323,7 +2452,7 @@
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-menu" title="Edit the site menu">\u2630<span>Menu</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="drawer" id="menu-drawer"><div class="dhead"><h2>Site menu</h2><button id="menu-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint">Items link to a page or a custom address. Saving applies to the whole site immediately.</div><div class="dlist" id="menu-list"></div><div class="merr" id="menu-err" hidden></div><div class="mfoot"><button class="mbtn" id="menu-add">\uFF0B Add item</button><span style="flex:1"></span><button class="mbtn primary" id="menu-save">Save menu</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-menu" title="Edit the site menu">\u2630<span>Menu</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="drawer" id="menu-drawer"><div class="dhead"><h2>Site menu</h2><button id="menu-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint">Items link to a page or a custom address. Saving applies to the whole site immediately.</div><div class="dlist" id="menu-list"></div><div class="merr" id="menu-err" hidden></div><div class="mfoot"><button class="mbtn" id="menu-add">\uFF0B Add item</button><span style="flex:1"></span><button class="mbtn primary" id="menu-save">Save menu</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();

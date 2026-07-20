@@ -24,6 +24,10 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<div data-height="junk">bad badge</div>` +
 		`<img src="/cms/media/abc123/web.jpg" alt="pic" width="800" height="400">` +
 		`<img src="https://bucket.example.com/media/x/web.jpg" alt="ext">` +
+		// Image gear output: alignment/width classes on the img, and a
+		// wrapping link with optional new-tab attributes.
+		`<a href="/contact" target="_blank" rel="noopener">` +
+		`<img src="/cms/media/def456/web.webp" alt="Our office" class="block mx-auto w-1/2 h-auto" width="552" height="368"></a>` +
 		`<a href="/x" class="cms-btn" data-cms-btn-size="l" style="background-color: rgb(17, 34, 51); ` +
 		`color: #ffee88; border: 2px solid #336699; border-radius: 24px; padding: 14px 28px; font-size: 18px;">styled button</a>` +
 		`<a href="/y" style="background-color: url(javascript:alert(4)); border-radius: 50vh;">bad button</a>` +
@@ -62,6 +66,11 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`target="_blank"`,
 		// UGCPolicy appends nofollow to every link's rel.
 		`rel="noopener nofollow"`,
+		// Image gear: linked image with alt, width classes, dimensions.
+		`href="/contact"`,
+		`alt="Our office"`,
+		`class="block mx-auto w-1/2 h-auto"`,
+		`width="552"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)

@@ -3,6 +3,9 @@
  * gear/trash chrome; the gear opens a settings dialog whose choices
  * are stored as inline styles on the link (sanitizer-approved).
  * Snippet blocks get similar chrome: a drag handle and a trash can.
+ * Images embedded in rich-text content get a gear too: alt text,
+ * an optional link, and a display width, stored as attributes and
+ * classes (sanitizer-approved).
  * ------------------------------------------------------------------ */
 
 import { state, mediaEnabled } from "./state.js";
@@ -74,6 +77,83 @@ function showSnipUI(el) {
 export function hideSnipUI() {
     activeSnip = null;
     $("snip-ui").classList.remove("on");
+}
+
+/* Embedded images get a gear for alt text, link, and display width. */
+var activeImg = null;
+
+// IMG_SIZES are the gear's display-width presets. Width classes need
+// h-auto alongside them: TinyMCE stamps width/height attributes on
+// resize, and a CSS width with an attribute height would distort.
+var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
+
+function showImgUI(img) {
+    activeImg = img;
+    var ui = $("img-ui");
+    ui.classList.add("on");
+    var r = img.getBoundingClientRect();
+    var top = r.top - 44;
+    if (top < 64) top = r.top + 8;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.left) + "px";
+}
+
+export function hideImgUI() {
+    activeImg = null;
+    $("img-ui").classList.remove("on");
+}
+
+// imageLink returns the <a> wrapping img when that anchor exists purely
+// for the image (no text of its own), else null.
+function imageLink(img) {
+    var a = img.parentElement;
+    if (!a || a.tagName !== "A" || a.classList.contains("cms-btn")) return null;
+    return (a.textContent || "").trim() === "" ? a : null;
+}
+
+function imgSizeValue(img) {
+    for (var i = 0; i < IMG_SIZES.length; i++) {
+        if (img.classList.contains(IMG_SIZES[i].split(" ")[0])) return IMG_SIZES[i];
+    }
+    return "";
+}
+
+function applyImageSettings(img, v) {
+    // Empty alt is valid (it marks the image decorative), so the
+    // attribute is always written rather than removed.
+    img.setAttribute("alt", (v.alt || "").trim());
+
+    IMG_SIZES.forEach(function (s) {
+        s.split(" ").forEach(function (c) { img.classList.remove(c); });
+    });
+    if (v.size) {
+        v.size.split(" ").forEach(function (c) { img.classList.add(c); });
+    }
+    if (!img.getAttribute("class")) img.removeAttribute("class");
+
+    var url = (v.href || "").trim();
+    var link = imageLink(img);
+    if (url) {
+        if (!link) {
+            link = document.createElement("a");
+            img.parentNode.insertBefore(link, img);
+            link.appendChild(img);
+        }
+        link.setAttribute("href", url);
+        // TinyMCE shadows URI attributes; keep the shadow in sync or
+        // serialization restores the old address.
+        link.setAttribute("data-mce-href", url);
+        if (v.newtab) {
+            link.setAttribute("target", "_blank");
+            link.setAttribute("rel", "noopener");
+        } else {
+            link.removeAttribute("target");
+            link.removeAttribute("rel");
+        }
+    } else if (link) {
+        link.parentNode.insertBefore(img, link);
+        link.remove();
+    }
 }
 
 // findOwningEditor returns the TinyMCE instance managing the content
@@ -150,8 +230,15 @@ export function initButtons() {
         var t = e.target;
         var btn = t.closest ? t.closest("a.cms-btn") : null;
         if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
+        // Direct clicks on a rich-text image get the image gear; images
+        // in template slots ([data-cms-image]) keep their picker click.
+        var img = null;
+        if (!btn && t.tagName === "IMG" && !t.closest("[data-cms-image]") &&
+            t.closest("[data-cms-region],[data-cms-sections]")) {
+            img = t;
+        }
         var snip = null;
-        if (!btn && t.closest) {
+        if (!btn && !img && t.closest) {
             snip = t.closest(".cms-snippet");
             if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
         }
@@ -159,15 +246,24 @@ export function initButtons() {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
             hideSnipUI();
+            hideImgUI();
             showButtonUI(btn);
+        } else if (img) {
+            // No preventDefault: the click still gives TinyMCE the
+            // selection (and its resize handles).
+            hideButtonUI();
+            hideSnipUI();
+            showImgUI(img);
         } else if (snip) {
             // No preventDefault: the click still places the caret for
             // editing the snippet's text.
             hideButtonUI();
+            hideImgUI();
             showSnipUI(snip);
         } else {
             hideButtonUI();
             hideSnipUI();
+            hideImgUI();
         }
     }, true);
 
@@ -175,10 +271,12 @@ export function initButtons() {
     window.addEventListener("scroll", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
+        if (activeImg) showImgUI(activeImg);
     }, true);
     window.addEventListener("resize", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
+        if (activeImg) showImgUI(activeImg);
     });
 
     $("btn-set").addEventListener("click", function () {
@@ -242,6 +340,41 @@ export function initButtons() {
             if (ed) ed.undoManager.transact(run); else run();
             markContainerDirty(btn);
             if (activeBtn === btn) showButtonUI(btn); // re-anchor around the new size
+        });
+    });
+
+    $("img-set").addEventListener("click", function () {
+        if (!activeImg) return;
+        var img = activeImg;
+        var link = imageLink(img);
+        openDialog({
+            message: "Image settings",
+            okLabel: "Apply",
+            fields: [
+                { id: "alt", label: "Alternative text (screen readers, SEO)", type: "text",
+                    placeholder: "Describe the image", value: img.getAttribute("alt") || "" },
+                { id: "href", label: "Link address (optional)", type: "text",
+                    placeholder: "https://example.com or /contact",
+                    value: link ? (link.getAttribute("href") || "") : "" },
+                { id: "newtab", label: "Open in a new tab", type: "check",
+                    value: !!link && link.getAttribute("target") === "_blank" },
+                { id: "size", label: "Display width", type: "select",
+                    value: imgSizeValue(img),
+                    options: [
+                        { value: "", label: "Natural" },
+                        { value: IMG_SIZES[0], label: "Full width" },
+                        { value: IMG_SIZES[1], label: "Two thirds" },
+                        { value: IMG_SIZES[2], label: "Half" },
+                        { value: IMG_SIZES[3], label: "One third" },
+                    ] },
+            ],
+        }).then(function (v) {
+            if (!v) return;
+            var ed = findOwningEditor(img);
+            var run = function () { applyImageSettings(img, v); };
+            if (ed) ed.undoManager.transact(run); else run();
+            markContainerDirty(img);
+            if (activeImg === img) showImgUI(img); // re-anchor around the new size
         });
     });
 

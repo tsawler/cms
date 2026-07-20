@@ -130,6 +130,9 @@ export function initShell() {
         '<button id="snip-move" title="Drag to move this block" draggable="true">⠿</button>' +
         '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
         "</div>" +
+        '<div class="btnui" id="img-ui">' +
+        '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
+        "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
