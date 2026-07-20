@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -33,7 +34,7 @@ func testImage(t *testing.T, width, height int, encodeAs string) []byte {
 
 func TestProcessJPEGProducesVariants(t *testing.T) {
 	data := testImage(t, 2000, 1000, "jpeg")
-	p, err := process(data, "image/jpeg")
+	p, err := process(data, "image/jpeg", DefaultWebPQuality)
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestProcessJPEGProducesVariants(t *testing.T) {
 
 func TestProcessSmallImageNotUpscaled(t *testing.T) {
 	data := testImage(t, 800, 600, "png")
-	p, err := process(data, "image/png")
+	p, err := process(data, "image/png", DefaultWebPQuality)
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
@@ -77,22 +78,41 @@ func TestProcessSmallImageNotUpscaled(t *testing.T) {
 	if web.Bounds().Dx() != 800 {
 		t.Errorf("web width = %d, want original 800 (no upscaling)", web.Bounds().Dx())
 	}
-	if p.Variants[0].Ext != ".png" {
-		t.Errorf("png variant ext = %q, want .png", p.Variants[0].Ext)
+	if p.Variants[0].Ext != ".webp" {
+		t.Errorf("png variant ext = %q, want .webp", p.Variants[0].Ext)
 	}
 }
 
 func TestProcessRejectsNonImages(t *testing.T) {
-	if _, err := process([]byte("just some text, definitely not an image"), "text/plain"); err == nil {
+	if _, err := process([]byte("just some text, definitely not an image"), "text/plain", DefaultWebPQuality); err == nil {
 		t.Fatal("expected error for non-image upload")
 	}
 	// Right mime, corrupt body.
-	if _, err := process([]byte("\xff\xd8\xffgarbage"), "image/jpeg"); err == nil {
+	if _, err := process([]byte("\xff\xd8\xffgarbage"), "image/jpeg", DefaultWebPQuality); err == nil {
 		t.Fatal("expected error for corrupt image data")
 	}
 }
 
 func decodeVariant(data []byte) (image.Image, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err == nil && format != "webp" {
+		return nil, errors.New("variant is " + format + ", want webp")
+	}
 	return img, err
+}
+
+func TestProcessQualityAffectsSize(t *testing.T) {
+	data := testImage(t, 1200, 900, "jpeg")
+	low, err := process(data, "image/jpeg", 0.1)
+	if err != nil {
+		t.Fatalf("process q=0.1: %v", err)
+	}
+	high, err := process(data, "image/jpeg", 0.9)
+	if err != nil {
+		t.Fatalf("process q=0.9: %v", err)
+	}
+	if len(low.Variants[0].Data) >= len(high.Variants[0].Data) {
+		t.Errorf("web variant at q=0.1 (%d bytes) not smaller than q=0.9 (%d bytes)",
+			len(low.Variants[0].Data), len(high.Variants[0].Data))
+	}
 }

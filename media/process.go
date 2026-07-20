@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
-	"image/jpeg"
-	"image/png"
+	_ "image/jpeg"
+	_ "image/png"
 
 	"github.com/disintegration/imaging"
+	"github.com/gen2brain/webp"
 	_ "golang.org/x/image/webp" // decode-only
 )
 
@@ -25,7 +26,11 @@ const (
 	// thumbSize bounds the admin media-library thumbnail.
 	thumbSize = 320
 
-	jpegQuality = 85
+	// DefaultWebPQuality is the lossy WebP quality, on a 0–1 scale, used
+	// for the web and thumb variants unless the host configures another
+	// (cms.Config.MediaWebPQuality). Deliberately low: variants exist for
+	// fast page loads, and the untouched original is always kept.
+	DefaultWebPQuality = 0.3
 )
 
 var allowedMimes = map[string]string{
@@ -47,16 +52,17 @@ type variant struct {
 // bytes are stored untouched (preserving GIF animation, EXIF, etc.); only
 // the variants are re-encoded.
 type processed struct {
-	Width    int
-	Height   int
-	Ext      string // original's extension, with dot
-	Variants []variant
+	Width      int
+	Height     int
+	Ext        string // original's extension, with dot
+	VariantExt string // extension shared by all variants, with dot
+	Variants   []variant
 }
 
 // process validates and decodes an uploaded image and produces its resized
-// variants. PNG variants stay PNG (preserving transparency); JPEG, GIF, and
-// WebP variants are encoded as JPEG.
-func process(data []byte, mime string) (*processed, error) {
+// variants, encoded as lossy WebP at the given 0–1 quality (alpha
+// survives, so PNG sources keep their transparency).
+func process(data []byte, mime string, quality float64) (*processed, error) {
 	ext, ok := allowedMimes[mime]
 	if !ok {
 		return nil, ErrUnsupportedType
@@ -67,43 +73,35 @@ func process(data []byte, mime string) (*processed, error) {
 		return nil, fmt.Errorf("media: decoding image: %w", err)
 	}
 	bounds := img.Bounds()
-	p := &processed{Width: bounds.Dx(), Height: bounds.Dy(), Ext: ext}
-
-	variantExt, variantMime := ".jpg", "image/jpeg"
-	if mime == "image/png" {
-		variantExt, variantMime = ".png", "image/png"
-	}
+	p := &processed{Width: bounds.Dx(), Height: bounds.Dy(), Ext: ext, VariantExt: ".webp"}
 
 	web := img
 	if p.Width > webMaxWidth {
 		web = imaging.Resize(img, webMaxWidth, 0, imaging.Lanczos)
 	}
-	webData, err := encode(web, variantMime)
+	webData, err := encodeWebP(web, quality)
 	if err != nil {
 		return nil, err
 	}
-	p.Variants = append(p.Variants, variant{Name: "web", Ext: variantExt, Mime: variantMime, Data: webData})
+	p.Variants = append(p.Variants, variant{Name: "web", Ext: p.VariantExt, Mime: "image/webp", Data: webData})
 
 	thumb := imaging.Fit(img, thumbSize, thumbSize, imaging.Lanczos)
-	thumbData, err := encode(thumb, variantMime)
+	thumbData, err := encodeWebP(thumb, quality)
 	if err != nil {
 		return nil, err
 	}
-	p.Variants = append(p.Variants, variant{Name: "thumb", Ext: variantExt, Mime: variantMime, Data: thumbData})
+	p.Variants = append(p.Variants, variant{Name: "thumb", Ext: p.VariantExt, Mime: "image/webp", Data: thumbData})
 
 	return p, nil
 }
 
-func encode(img image.Image, mime string) ([]byte, error) {
-	var buf bytes.Buffer
-	var err error
-	switch mime {
-	case "image/png":
-		err = png.Encode(&buf, img)
-	default:
-		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality})
+func encodeWebP(img image.Image, quality float64) ([]byte, error) {
+	if quality <= 0 || quality > 1 {
+		quality = DefaultWebPQuality
 	}
-	if err != nil {
+	var buf bytes.Buffer
+	// The encoder's scale is 0–100.
+	if err := webp.Encode(&buf, img, webp.Options{Quality: int(quality*100 + 0.5)}); err != nil {
 		return nil, fmt.Errorf("media: encoding variant: %w", err)
 	}
 	return buf.Bytes(), nil

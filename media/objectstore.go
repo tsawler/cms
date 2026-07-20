@@ -1,7 +1,8 @@
 // Package media stores uploaded images: the binary objects on any
 // S3-compatible bucket (AWS, Linode, DigitalOcean, MinIO, R2, ...) and their
 // metadata in Postgres. Each upload produces the untouched original plus
-// resized "web" and "thumb" variants, all served directly from the bucket.
+// resized "web" and "thumb" variants encoded as lossy WebP, all served
+// directly from the bucket.
 package media
 
 import (

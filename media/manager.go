@@ -34,8 +34,9 @@ type Media struct {
 	Filename   string
 	Mime       string
 	Ext        string
-	Width      int // zero for files
-	Height     int // zero for files
+	VariantExt string // images: extension of the web/thumb objects (".webp"; legacy rows ".jpg"/".png")
+	Width      int    // zero for files
+	Height     int    // zero for files
 	Size       int64
 	FolderID   *int64 // nil = unfiled
 	UploadedBy *int64
@@ -57,10 +58,11 @@ var ErrNotFound = errors.New("media: not found")
 
 // Manager coordinates the object store and the Postgres metadata.
 type Manager struct {
-	db      *pgxpool.Pool
-	objects ObjectStore
-	keyRoot string
-	logger  *slog.Logger
+	db          *pgxpool.Pool
+	objects     ObjectStore
+	keyRoot     string
+	webpQuality float64
+	logger      *slog.Logger
 }
 
 // NewManager returns a Manager storing binaries in objects and metadata in
@@ -71,7 +73,16 @@ func NewManager(db *pgxpool.Pool, objects ObjectStore, logger *slog.Logger) *Man
 	if kp, ok := objects.(KeyPrefixer); ok {
 		prefix = kp.KeyPrefix()
 	}
-	return &Manager{db: db, objects: objects, keyRoot: keyRoot(prefix), logger: logger}
+	return &Manager{db: db, objects: objects, keyRoot: keyRoot(prefix),
+		webpQuality: DefaultWebPQuality, logger: logger}
+}
+
+// SetWebPQuality overrides the lossy WebP quality used for image variants.
+// Values outside (0, 1] are ignored.
+func (m *Manager) SetWebPQuality(q float64) {
+	if q > 0 && q <= 1 {
+		m.webpQuality = q
+	}
 }
 
 // KeyRoot returns the bucket prefix every object this manager stores lives
@@ -82,7 +93,7 @@ func (m *Manager) KeyRoot() string {
 }
 
 // Upload validates and stores an upload, returning its record. Images are
-// stored untouched alongside resized web and thumb variants; whitelisted
+// stored untouched alongside resized WebP web and thumb variants; whitelisted
 // documents (PDF, office formats, text/CSV, ZIP) are stored as-is. A
 // non-nil folderID files the upload into that folder.
 func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uploadedBy int64, folderID *int64) (*Media, error) {
@@ -119,7 +130,7 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 
 	sniffed := http.DetectContentType(data)
 	if strings.HasPrefix(sniffed, "image/") {
-		p, err := process(data, sniffed)
+		p, err := process(data, sniffed, m.webpQuality)
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +138,7 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 		md.S3Key = prefix
 		md.Mime = sniffed
 		md.Ext = p.Ext
+		md.VariantExt = p.VariantExt
 		md.Width, md.Height = p.Width, p.Height
 
 		if err := put(prefix+"/original"+p.Ext, sniffed, data); err != nil {
@@ -154,10 +166,10 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 	}
 
 	err := m.db.QueryRow(ctx, `
-		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, width, height, size, folder_id, uploaded_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at`,
-		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy,
+		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.VariantExt, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy,
 	).Scan(&md.ID, &md.CreatedAt)
 	if err != nil {
 		cleanup()
@@ -166,12 +178,12 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 	return md, nil
 }
 
-const mediaColumns = `m.id, m.kind, m.s3_key, m.filename, m.mime, m.ext, m.width, m.height, m.size,
+const mediaColumns = `m.id, m.kind, m.s3_key, m.filename, m.mime, m.ext, m.variant_ext, m.width, m.height, m.size,
 	m.folder_id, m.uploaded_by, m.created_at, COALESCE(t.alt_text, '')`
 
 func scanMedia(row pgx.Row) (*Media, error) {
 	var md Media
-	err := row.Scan(&md.ID, &md.Kind, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.Width, &md.Height,
+	err := row.Scan(&md.ID, &md.Kind, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.VariantExt, &md.Width, &md.Height,
 		&md.Size, &md.FolderID, &md.UploadedBy, &md.CreatedAt, &md.Alt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -274,14 +286,10 @@ func (m *Manager) objectKeys(md *Media) []string {
 	if md.Kind == KindFile {
 		return []string{md.S3Key}
 	}
-	variantExt := ".jpg"
-	if md.Mime == "image/png" {
-		variantExt = ".png"
-	}
 	return []string{
 		md.S3Key + "/original" + md.Ext,
-		md.S3Key + "/web" + variantExt,
-		md.S3Key + "/thumb" + variantExt,
+		md.S3Key + "/web" + md.VariantExt,
+		md.S3Key + "/thumb" + md.VariantExt,
 	}
 }
 
@@ -291,15 +299,11 @@ func (m *Manager) URL(md *Media, rendition string) string {
 	if md.Kind == KindFile {
 		return m.objects.PublicURL(md.S3Key)
 	}
-	variantExt := ".jpg"
-	if md.Mime == "image/png" {
-		variantExt = ".png"
-	}
 	switch rendition {
 	case "web":
-		return m.objects.PublicURL(md.S3Key + "/web" + variantExt)
+		return m.objects.PublicURL(md.S3Key + "/web" + md.VariantExt)
 	case "thumb":
-		return m.objects.PublicURL(md.S3Key + "/thumb" + variantExt)
+		return m.objects.PublicURL(md.S3Key + "/thumb" + md.VariantExt)
 	default:
 		return m.objects.PublicURL(md.S3Key + "/original" + md.Ext)
 	}

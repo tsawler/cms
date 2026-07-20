@@ -17,6 +17,7 @@ package cms
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -125,6 +126,12 @@ type Config struct {
 	// implementation (e.g. local disk for development). When set, S3 is
 	// ignored.
 	ObjectStore media.ObjectStore
+
+	// MediaWebPQuality is the lossy WebP quality, in (0, 1], for the web
+	// and thumbnail variants of uploaded images. Zero — the default —
+	// uses 0.3, tuned for fast page loads; the untouched original is
+	// always stored alongside. Other values are invalid.
+	MediaWebPQuality float64
 
 	// EditorStyles populates the in-place editor's Styles menu — named,
 	// on-brand text styles that apply CSS classes. Nil gets the
@@ -255,7 +262,13 @@ func New(cfg Config) (*CMS, error) {
 	}
 	var mediaManager *media.Manager
 	if objects != nil {
+		if cfg.MediaWebPQuality < 0 || cfg.MediaWebPQuality > 1 {
+			return nil, fmt.Errorf("cms: MediaWebPQuality must be in (0, 1], got %g", cfg.MediaWebPQuality)
+		}
 		mediaManager = media.NewManager(cfg.DB, objects, cfg.Logger)
+		if cfg.MediaWebPQuality != 0 {
+			mediaManager.SetWebPQuality(cfg.MediaWebPQuality)
+		}
 	}
 
 	c := &CMS{
