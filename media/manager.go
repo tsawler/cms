@@ -59,13 +59,26 @@ var ErrNotFound = errors.New("media: not found")
 type Manager struct {
 	db      *pgxpool.Pool
 	objects ObjectStore
+	keyRoot string
 	logger  *slog.Logger
 }
 
 // NewManager returns a Manager storing binaries in objects and metadata in
-// db.
+// db. If objects implements KeyPrefixer, its prefix namespaces every key,
+// letting several deployments share one bucket.
 func NewManager(db *pgxpool.Pool, objects ObjectStore, logger *slog.Logger) *Manager {
-	return &Manager{db: db, objects: objects, logger: logger}
+	var prefix string
+	if kp, ok := objects.(KeyPrefixer); ok {
+		prefix = kp.KeyPrefix()
+	}
+	return &Manager{db: db, objects: objects, keyRoot: keyRoot(prefix), logger: logger}
+}
+
+// KeyRoot returns the bucket prefix every object this manager stores lives
+// under: "media/", or "<prefix>/media/" for a store with a deployment
+// prefix.
+func (m *Manager) KeyRoot() string {
+	return m.keyRoot
 }
 
 // Upload validates and stores an upload, returning its record. Images are
@@ -77,7 +90,7 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 	if _, err := rand.Read(buf); err != nil {
 		return nil, err
 	}
-	prefix := "media/" + hex.EncodeToString(buf)
+	prefix := m.keyRoot + hex.EncodeToString(buf)
 
 	stored := []string{}
 	cleanup := func() {

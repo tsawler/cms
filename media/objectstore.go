@@ -38,6 +38,24 @@ type ObjectStore interface {
 // ErrObjectNotFound is returned by Get for missing keys.
 var ErrObjectNotFound = errors.New("media: object not found")
 
+// KeyPrefixer is an optional interface an ObjectStore may implement to
+// namespace one deployment's objects inside a bucket shared by several
+// sites: when present, the Manager stores objects under
+// "<KeyPrefix()>/media/..." instead of "media/...". S3Store implements it
+// from S3Config.KeyPrefix.
+type KeyPrefixer interface {
+	KeyPrefix() string
+}
+
+// keyRoot is the bucket prefix all of a deployment's media objects live
+// under: "media/", or "<prefix>/media/" when a deployment prefix is set.
+func keyRoot(prefix string) string {
+	if prefix == "" {
+		return "media/"
+	}
+	return prefix + "/media/"
+}
+
 // S3Config configures the S3-compatible object store.
 type S3Config struct {
 	// Endpoint is the S3 API host, without scheme, e.g.
@@ -51,6 +69,16 @@ type S3Config struct {
 	// AccessKey and Secret are the credentials.
 	AccessKey string
 	Secret    string
+	// KeyPrefix namespaces this deployment's uploads inside a bucket
+	// shared by several sites: objects are stored under
+	// "<KeyPrefix>/media/..." instead of "media/...". Use a short slug
+	// unique to the deployment — letters, digits, '.', '-', '_' — e.g.
+	// "acme-hotel". Once media has been uploaded it must never change:
+	// stored object keys embed it. Proxied media URLs (the default) do
+	// not expose it; direct bucket and CDN URLs include it. A shared
+	// bucket pairs well with per-deployment credentials restricted to
+	// this prefix. Empty — the default — keeps keys under "media/".
+	KeyPrefix string
 	// PublicRead marks the bucket as publicly readable, so pages embed
 	// direct bucket URLs. Leave false — the default — to serve media
 	// through the CMS itself (the /cms/media/ route on the public
@@ -87,6 +115,9 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKey == "" || cfg.Secret == "" {
 		return nil, fmt.Errorf("media: S3 Endpoint, Bucket, AccessKey, and Secret are all required")
 	}
+	if !validKeyPrefix(cfg.KeyPrefix) {
+		return nil, fmt.Errorf("media: S3 KeyPrefix %q may only contain letters, digits, '.', '-', and '_'", cfg.KeyPrefix)
+	}
 	if cfg.Region == "" {
 		cfg.Region = regionFromEndpoint(cfg.Endpoint)
 	}
@@ -111,6 +142,24 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 		o.UsePathStyle = cfg.UsePathStyle
 	})
 	return &S3Store{client: client, cfg: cfg}, nil
+}
+
+// validKeyPrefix reports whether p is safe to embed in object keys and
+// URLs: letters, digits, '.', '-', '_', with no ".." runs. Empty is valid
+// (prefixing disabled).
+func validKeyPrefix(p string) bool {
+	if strings.Contains(p, "..") {
+		return false
+	}
+	for _, r := range p {
+		switch {
+		case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9',
+			r == '.', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // regionFromEndpoint guesses a signing region from endpoints like
@@ -197,14 +246,21 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 // ProxyPathPrefix is the public route the CMS serves proxied media under.
 const ProxyPathPrefix = "/cms/media/"
 
+// KeyPrefix returns the configured deployment prefix, implementing
+// KeyPrefixer.
+func (s *S3Store) KeyPrefix() string {
+	return s.cfg.KeyPrefix
+}
+
 func (s *S3Store) PublicURL(key string) string {
 	switch {
 	case s.cfg.PublicBaseURL != "":
 		return s.cfg.PublicBaseURL + "/" + key
 	case !s.cfg.PublicRead:
 		// Served by the CMS's own media route; relative so it works on
-		// any host.
-		return ProxyPathPrefix + strings.TrimPrefix(key, "media/")
+		// any host. The proxy re-adds the key root, so a deployment
+		// prefix never shows in page URLs.
+		return ProxyPathPrefix + strings.TrimPrefix(key, keyRoot(s.cfg.KeyPrefix))
 	case s.cfg.UsePathStyle:
 		return "https://" + s.cfg.Endpoint + "/" + s.cfg.Bucket + "/" + key
 	default:

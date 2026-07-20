@@ -86,6 +86,7 @@ func run(logger *slog.Logger) error {
 			Bucket:    os.Getenv("S3_BUCKET"),
 			AccessKey: os.Getenv("S3_ACCESS_KEY"),
 			Secret:    os.Getenv("S3_SECRET"),
+			KeyPrefix: os.Getenv("S3_KEY_PREFIX"), // optional; namespaces keys in a shared bucket
 		})
 		if err != nil {
 			return err

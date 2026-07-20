@@ -36,6 +36,10 @@ c, err := cms.New(cms.Config{
         // Default: media is proxied through the CMS (/cms/media/…), so a
         // private bucket just works. Set PublicRead or PublicBaseURL to
         // embed direct bucket/CDN URLs instead.
+        // KeyPrefix: "my-site", // share one bucket across deployments:
+        // each stores its objects under <KeyPrefix>/media/…. Pick a
+        // stable slug per deployment and never change it once media
+        // exists.
     },
     TemplateFS:      templateFS,
     SharedTemplates: []string{"templates/base.gohtml"},
@@ -455,7 +459,8 @@ environment or `.env`. Without them the example runs without CAPTCHA.
 
 The example reads S3 credentials from a `.env` file at the repo root
 (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET`, optional
-`S3_REGION`); without one, the media library is simply disabled.
+`S3_REGION` and `S3_KEY_PREFIX`); without one, the media library is
+simply disabled.
 
 Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with

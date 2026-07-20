@@ -475,7 +475,7 @@ func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	key := "media/" + rest
+	key := c.media.KeyRoot() + rest
 
 	body, contentType, err := c.objects.Get(r.Context(), key)
 	if errors.Is(err, media.ErrObjectNotFound) {
