@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tsawler/cms/render"
 	"github.com/tsawler/cms/snippets"
 )
 
@@ -23,14 +24,11 @@ func (s *server) snippetsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) snippetNew(w http.ResponseWriter, r *http.Request) {
-	data := s.newTemplateData(r)
-	data.IsNew = true
-	data.FormSnippet = &snippets.Snippet{}
-	s.render(w, http.StatusOK, "snippet_form", data)
+	s.renderSnippetForm(w, r, &snippets.Snippet{}, true, nil)
 }
 
 func (s *server) snippetCreate(w http.ResponseWriter, r *http.Request) {
-	form, errs := parseSnippetForm(r)
+	form, errs := s.parseSnippetForm(r)
 	if len(errs) > 0 {
 		s.renderSnippetForm(w, r, form, true, errs)
 		return
@@ -56,7 +54,7 @@ func (s *server) snippetUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	form, errs := parseSnippetForm(r)
+	form, errs := s.parseSnippetForm(r)
 	form.ID = existing.ID
 	if len(errs) > 0 {
 		s.renderSnippetForm(w, r, form, false, errs)
@@ -83,7 +81,11 @@ func (s *server) snippetDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
 
-func parseSnippetForm(r *http.Request) (*snippets.Snippet, map[string]string) {
+// parseSnippetForm reads the shared new/edit form. A "Section preset"
+// type gives the snippet a settings map — keys resolved against the
+// configured section styles exactly like the editor's ⚙ dialog, so
+// unknown or tampered values become the defaults rather than junk.
+func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[string]string) {
 	errs := map[string]string{}
 	sn := &snippets.Snippet{
 		Name: strings.TrimSpace(r.PostFormValue("name")),
@@ -94,6 +96,21 @@ func parseSnippetForm(r *http.Request) (*snippets.Snippet, map[string]string) {
 	}
 	if sn.HTML == "" {
 		errs["html"] = "The snippet needs some HTML."
+	}
+	if r.PostFormValue("kind") == "preset" {
+		// bg and width are always stored so the map is never empty (an
+		// empty map would read as a plain block downstream); height and
+		// valign only when they differ from the natural defaults.
+		sn.Settings = map[string]string{
+			"bg":    s.deps.SectionStyles.Background(r.PostFormValue("set_bg")).Key,
+			"width": s.deps.SectionStyles.Width(r.PostFormValue("set_width")).Key,
+		}
+		if h := render.ValidSectionHeight(r.PostFormValue("set_height")); h != "" {
+			sn.Settings["height"] = h
+		}
+		if v := render.ValidSectionVAlign(r.PostFormValue("set_valign")); v != "" {
+			sn.Settings["valign"] = v
+		}
 	}
 	return sn, errs
 }
@@ -107,6 +124,7 @@ func (s *server) renderSnippetForm(w http.ResponseWriter, r *http.Request, sn *s
 	data.FormSnippet = sn
 	data.IsNew = isNew
 	data.FormErrors = errs
+	data.SectionStyles = s.deps.SectionStyles
 	s.render(w, status, "snippet_form", data)
 }
 
@@ -141,13 +159,16 @@ func (s *server) apiSnippetsList(w http.ResponseWriter, r *http.Request) {
 	type snippetJSON struct {
 		Name string `json:"name"`
 		HTML string `json:"html"`
+		// Non-nil for section presets: the section settings the editor
+		// applies when this snippet starts a new section.
+		Settings map[string]string `json:"settings,omitempty"`
 	}
 	out := make([]snippetJSON, 0, len(s.deps.ConfigSnippets)+len(stored))
 	for _, sn := range s.deps.ConfigSnippets {
-		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML})
+		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML, Settings: sn.Settings})
 	}
 	for _, sn := range stored {
-		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML})
+		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML, Settings: sn.Settings})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"snippets": out})
 }

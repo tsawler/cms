@@ -552,22 +552,16 @@
       });
     });
   }
-  function createSection(target, html) {
+  function createSection(target, html, settings) {
     var container = document.querySelector('[data-cms-sections="' + target.region + '"]');
     if (!container) return;
-    var bg = sectionStyles.backgrounds[0];
-    var w = sectionStyles.widths[0];
     var wrapper = document.createElement("section");
     wrapper.setAttribute("data-cms-section", "");
-    wrapper.dataset.cmsBg = bg.key;
-    wrapper.dataset.cmsWidth = w.key;
-    if (bg.class) wrapper.className = bg.class;
     var inner = document.createElement("div");
     inner.setAttribute("data-cms-section-content", "");
-    var innerClass = ((w.class || "") + " " + (bg.contentClass || "")).trim();
-    if (innerClass) inner.className = innerClass;
     inner.innerHTML = html;
     wrapper.appendChild(inner);
+    applySectionSettings(wrapper, settings || {});
     if (target.after) {
       target.after.insertAdjacentElement("afterend", wrapper);
     } else {
@@ -591,7 +585,8 @@
   function openDrawer() {
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
-    $("drawer-hint").textContent = state.pendingSection ? "Choose a snippet to be the section's starting content." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
+    $("drawer-hint").textContent = state.pendingSection ? "Choose a starting point for the section." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
+    $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
     updateRail();
   }
@@ -620,11 +615,16 @@
       }
       body.snippets.forEach(function(sn) {
         var card = document.createElement("div");
-        card.className = "snip";
-        card.draggable = true;
+        card.className = sn.settings ? "snip preset" : "snip";
         var nm = document.createElement("p");
         nm.className = "sname";
         nm.textContent = sn.name;
+        if (sn.settings) {
+          var tag = document.createElement("span");
+          tag.className = "stag";
+          tag.textContent = "Section";
+          nm.appendChild(tag);
+        }
         var desc = document.createElement("p");
         desc.className = "sdesc";
         var probe = document.createElement("div");
@@ -632,6 +632,7 @@
         desc.textContent = (probe.textContent || "").trim().replace(/\s+/g, " ").slice(0, 90);
         card.appendChild(nm);
         card.appendChild(desc);
+        card.draggable = !sn.settings;
         card.addEventListener("dragstart", function(e) {
           e.dataTransfer.setData("text/html", sn.html);
           e.dataTransfer.setData("text/plain", sn.name);
@@ -672,7 +673,7 @@
     if (state.pendingSection) {
       var target = state.pendingSection;
       closeDrawer();
-      createSection(target, sn.html);
+      createSection(target, sn.html, sn.settings);
       return;
     }
     insertSnippet(sn);
@@ -3257,11 +3258,18 @@ padding:14px 16px;border-bottom:1px solid #e3e6ea}
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
 .drawer .dhead button:hover{background:#eceef1;color:#1c2128}
 .drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
-.drawer .dlist{flex:1;overflow-y:auto;padding:12px}
+.drawer .dlist{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column}
 .snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;
 cursor:grab;background:#fff}
 .snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}
 .snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}
+/* Section presets: inline-insert mode hides them; add-a-section mode
+   lists them first, clickable rather than draggable. */
+.snip.preset{cursor:pointer}
+.dlist:not(.sections-mode) .snip.preset{display:none}
+.dlist.sections-mode .snip.preset{order:-1}
+.snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;
+color:#2f5fe0;font-size:10px;font-weight:600;vertical-align:1px}
 .snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
 -webkit-line-clamp:2;-webkit-box-orient:vertical}
 

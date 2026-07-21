@@ -18,6 +18,56 @@
     </div>
 
     <div class="cms-field">
+        <label for="kind">Type</label>
+        <select id="kind" name="kind" data-preset-toggle>
+            <option value="block" {{if not .FormSnippet.Settings}}selected{{end}}>Inline block — inserted into existing content</option>
+            <option value="preset" {{if .FormSnippet.Settings}}selected{{end}}>Section preset — starting point for a whole section</option>
+        </select>
+        <p class="cms-hint">A section preset appears only in the editor's "Add a section"
+        chooser and creates the section with the settings below already applied.</p>
+    </div>
+
+    {{$set := .FormSnippet.Settings}}
+    <fieldset class="cms-field" id="preset-settings" {{if not .FormSnippet.Settings}}hidden{{end}}>
+        <legend>Section settings</legend>
+        <div class="cms-field">
+            <label for="set_bg">Background style</label>
+            <select id="set_bg" name="set_bg">
+                {{range .SectionStyles.Backgrounds}}
+                <option value="{{.Key}}" {{if eq .Key (index $set "bg")}}selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+        </div>
+        <div class="cms-field">
+            <label for="set_width">Content width</label>
+            <select id="set_width" name="set_width">
+                {{range .SectionStyles.Widths}}
+                <option value="{{.Key}}" {{if eq .Key (index $set "width")}}selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+        </div>
+        <div class="cms-field">
+            <label for="set_height">Section height</label>
+            <select id="set_height" name="set_height">
+                <option value="auto">Auto (fits the content)</option>
+                <option value="50" {{if eq (index $set "height") "50"}}selected{{end}}>50% of the screen</option>
+                <option value="75" {{if eq (index $set "height") "75"}}selected{{end}}>75% of the screen</option>
+                <option value="100" {{if eq (index $set "height") "100"}}selected{{end}}>Full screen</option>
+            </select>
+        </div>
+        <div class="cms-field">
+            <label for="set_valign">Vertical alignment</label>
+            <select id="set_valign" name="set_valign">
+                <option value="top">Top</option>
+                <option value="center" {{if eq (index $set "valign") "center"}}selected{{end}}>Center</option>
+                <option value="bottom" {{if eq (index $set "valign") "bottom"}}selected{{end}}>Bottom</option>
+            </select>
+        </div>
+        <p class="cms-hint">The editor's per-section ⚙ dialog can still change all of these
+        after the section is created.</p>
+    </fieldset>
+
+    <div class="cms-field">
         <label for="html">HTML</label>
         <textarea id="html" name="html" rows="14" class="cms-code">{{.FormSnippet.HTML}}</textarea>
         {{with index .FormErrors "html"}}<p class="cms-field-error">{{.}}</p>{{end}}

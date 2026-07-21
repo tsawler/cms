@@ -304,22 +304,18 @@ export function reapplySectionClasses() {
     });
 }
 
-export function createSection(target, html) {
+export function createSection(target, html, settings) {
     var container = document.querySelector('[data-cms-sections="' + target.region + '"]');
     if (!container) return;
-    var bg = sectionStyles.backgrounds[0];
-    var w = sectionStyles.widths[0];
     var wrapper = document.createElement("section");
     wrapper.setAttribute("data-cms-section", "");
-    wrapper.dataset.cmsBg = bg.key;
-    wrapper.dataset.cmsWidth = w.key;
-    if (bg.class) wrapper.className = bg.class;
     var inner = document.createElement("div");
     inner.setAttribute("data-cms-section-content", "");
-    var innerClass = ((w.class || "") + " " + (bg.contentClass || "")).trim();
-    if (innerClass) inner.className = innerClass;
     inner.innerHTML = html;
     wrapper.appendChild(inner);
+    // Section presets carry starting settings; a plain snippet start
+    // gets the defaults (applySectionSettings falls back per key).
+    applySectionSettings(wrapper, settings || {});
     if (target.after) {
         target.after.insertAdjacentElement("afterend", wrapper);
     } else {

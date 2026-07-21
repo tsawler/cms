@@ -19,6 +19,15 @@
         }
     });
 
+    // Snippet form: the "Section preset" type reveals the section
+    // settings fieldset (#preset-settings).
+    document.addEventListener("change", function (e) {
+        if (e.target.matches && e.target.matches("select[data-preset-toggle]")) {
+            var settings = document.getElementById("preset-settings");
+            if (settings) settings.hidden = e.target.value !== "preset";
+        }
+    });
+
     // Copy-to-clipboard: <button data-copy="https://...">
     document.addEventListener("click", function (e) {
         var btn = e.target.closest ? e.target.closest("[data-copy]") : null;

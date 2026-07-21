@@ -186,13 +186,15 @@ text and images in place like any other content. Snippets come from two
 places:
 
 - **`Config.Snippets`** — per-customer components, versioned with your
-  code. Nil gets a Tailwind-first default library (callout,
-  call-to-action, two columns, quote, button link, flexible space); an
+  code. Nil gets a Tailwind-first default library: inline blocks
+  (callout, call-to-action, two columns, quote, button link, flexible
+  space) plus the section presets described under Sections below (hero,
+  feature grid, stats, testimonials, FAQ, call-to-action banner); an
   empty slice ships none. The **flexible space** is invisible on the live
   site but shows as a striped, labelled band while editing — click it to
   set its height in pixels.
-- **The admin UI** (`/admin/snippets`, admins only) — for blocks created
-  after deployment.
+- **The admin UI** (`/admin/snippets`, admins only) — for blocks and
+  section presets created after deployment.
 
 ```go
 Snippets: []cms.Snippet{
@@ -212,10 +214,14 @@ default library add:
 safelist: [
     "not-prose", "rounded-lg", "rounded-xl", "border", "border-blue-200",
     "border-slate-200", "bg-blue-50", "bg-blue-600", "bg-slate-50",
-    "bg-slate-900", "p-4", "p-6", "px-5", "py-2.5", "text-blue-900",
-    "text-white", "text-slate-600", "text-slate-700", "text-center",
-    "font-semibold", "font-bold", "mb-1", "mb-3", "mt-3", "my-4", "my-6",
-    "grid", "gap-6", "sm:grid-cols-2", "inline-block",
+    "bg-slate-900", "bg-white", "p-4", "p-6", "px-5", "px-6", "py-2.5",
+    "py-3", "text-blue-700", "text-blue-900", "text-white",
+    "text-slate-500", "text-slate-600", "text-slate-700", "text-center",
+    "text-sm", "text-lg", "text-xl", "text-3xl", "text-4xl",
+    "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
+    "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
+    "grid", "gap-6", "gap-8", "sm:grid-cols-2", "sm:grid-cols-3",
+    "inline-block",
 ],
 ```
 
@@ -233,8 +239,45 @@ start from a snippet or empty, and the ⚙ settings offer curated choices
 only — background (Default / Light gray / Dark / Accent) and content
 width (Normal / Wide / Full width) by default. The ＋ buttons — on each
 section, at the bottom of the sections area, and on the tool rail — open
-an "Add a section" chooser: start empty, or seed the section from any
-snippet.
+an "Add a section" chooser: start empty, seed the section from any
+snippet, or pick a **section preset** (below).
+
+### Section presets
+
+A config snippet that carries `Settings` is a section preset: a
+one-click starting point for a whole section, not an inline block. The
+editor lists presets first in the "Add a section" chooser (tagged
+"Section") and hides them from the inline-insert drawer; choosing one
+creates the section with the settings already applied along with the
+starting HTML. The default library ships six — **Hero** (dark, 75%
+screen height, centered), **Feature grid**, **Stats**, **Testimonials**,
+**FAQ**, and **Call-to-action banner** — so a blank-canvas page can be
+composed into a landing page without touching the settings dialog.
+
+Settings use the section-settings vocabulary: `bg` and `width` name
+`SectionStyles` option keys, `height` is `"50"`/`"75"`/`"100"` (percent
+of the screen), `valign` is `"center"`/`"bottom"`, and the free-form
+`bgcolor` (`#rrggbb`) and `bgimage` (URL) work too. Unknown keys and
+invalid values fall back to the defaults. Register your own next to
+ordinary snippets:
+
+```go
+Snippets: append(
+    append(snippets.DefaultSnippets(), snippets.DefaultSectionPresets()...),
+    cms.Snippet{
+        Name:     "Brand hero",
+        Settings: map[string]string{"bg": "brand", "height": "100", "valign": "center"},
+        HTML:     `<div class="cms-snippet text-center"><h1>Big claim</h1></div>`,
+    },
+),
+```
+
+Admins can create presets after deployment too: the snippet form at
+`/admin/snippets` has a "Section preset" type with the curated settings
+(background, width, height, vertical alignment); the free-form `bgcolor`
+and `bgimage` settings are config-only. Everything after creation is
+ordinary: the preset's settings land in the section's ⚙ dialog, its HTML
+is normal editable content, and neither remembers where it came from.
 
 Each section renders as:
 

@@ -205,8 +205,9 @@ form remains as the fallback/"source view" for the same content.
 A snippet is a named, pre-written HTML fragment, registered two ways: by
 the developer via `Config.Snippets` (per-customer components, versioned
 with the code) or created by admins in the admin UI. Nil config gets a
-Tailwind-first default library (callout, call-to-action, two columns,
-quote, button); snippet classes need safelisting like editor styles do.
+Tailwind-first default library — inline blocks (callout, call-to-action,
+two columns, quote, button) plus the section presets described in 4.1;
+snippet classes need safelisting like editor styles do.
 
 While editing, a **Snippets** button in the bar opens a non-modal side
 drawer. Dragging a card onto a rich region inserts the markup at the drop
@@ -248,6 +249,26 @@ a section opens the snippet drawer as a "choose a starting point" picker
 (any snippet, or an empty section). Section granularity is deliberate:
 per-paragraph block models fight TinyMCE; one editor per section
 composes cleanly with everything else.
+
+**Section presets** extend snippets into that picker without a new
+concept: a snippet carrying a `Settings` map (the same
+background/width/height/valign keys the ⚙ dialog stores) is offered
+only when adding a section, listed first, and creates the section with
+both the starting HTML and the settings applied. This is what makes a
+sections-only "blank canvas" page type genuinely composable — hero, CTA
+band, and similar full-bleed patterns are one click instead of
+markup-plus-settings assembly — while staying inside the existing
+model: there is no section "type" stored anywhere; a preset-created
+section is indistinguishable from one assembled by hand. Presets come
+from config or from the admin snippets UI (a "Section preset" type on
+the snippet form, curated settings only — the free-form bgcolor/bgimage
+stay config-side); stored presets keep their settings in a nullable
+JSONB column, NULL meaning plain block. The defaults ship
+hero, feature grid, stats, testimonials, FAQ, and a call-to-action
+banner. Presets whose look should survive background changes lean on
+prose/prose-invert instead of `not-prose` (colors follow the section);
+grid layouts Typography would mangle stay `not-prose` with explicit
+colors.
 
 ### 4.2 Navigation menus — a CMS partial, edited in place
 

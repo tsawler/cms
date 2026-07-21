@@ -145,9 +145,12 @@ type Config struct {
 	// Snippets are the host application's pre-written HTML blocks for
 	// the editor's palette (per-customer components, versioned with the
 	// code). Admins can add more in the admin UI; the palette shows
-	// both. Nil gets the Tailwind-first defaults
-	// (snippets.DefaultSnippets); an empty non-nil slice ships none.
-	// Snippet classes need safelisting like editor styles do.
+	// both. A snippet with Settings is a section preset — a one-click
+	// starting point in the "Add a section" chooser (see
+	// snippets.Snippet). Nil gets the Tailwind-first defaults
+	// (snippets.DefaultSnippets plus snippets.DefaultSectionPresets); an
+	// empty non-nil slice ships none. Snippet classes need safelisting
+	// like editor styles do.
 	Snippets []Snippet
 
 	// SectionStyles are the curated background and width options for
@@ -211,7 +214,7 @@ func New(cfg Config) (*CMS, error) {
 		cfg.EditorStyles = render.DefaultEditorStyles()
 	}
 	if cfg.Snippets == nil {
-		cfg.Snippets = snippets.DefaultSnippets()
+		cfg.Snippets = append(snippets.DefaultSnippets(), snippets.DefaultSectionPresets()...)
 	}
 	if cfg.SectionStyles == nil {
 		cfg.SectionStyles = render.DefaultSectionStyles()

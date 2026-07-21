@@ -37,7 +37,7 @@ type PageTemplate struct {
 type MenuEntry struct {
 	ID       int64 // menu item id; the editor's edit-mode marker
 	Label    string
-	URL      string      // empty for a dropdown parent (label-only)
+	URL      string // empty for a dropdown parent (label-only)
 	NewTab   bool
 	Active   bool        // this entry links to the page being rendered
 	External bool        // absolute http(s) URL rather than a site page
@@ -78,7 +78,10 @@ func BuildMenus(items []content.MenuItem, currentSlug string, includeDrafts bool
 	menus := map[string][]MenuEntry{}
 	// Rows arrive ordered by sort with children stored after their
 	// parent, so parents are placed before their children attach.
-	type parentPos struct{ menu string; idx int }
+	type parentPos struct {
+		menu string
+		idx  int
+	}
 	parents := map[int64]parentPos{}
 	for _, item := range items {
 		e, ok := buildEntry(item, current, includeDrafts)
@@ -457,7 +460,9 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		}
 		funcs["cmsSections"] = func(key string) template.HTML {
 			var sb strings.Builder
-			sb.WriteString(`<div data-cms-sections="` + html.EscapeString(key) + `">`)
+			sb.WriteString(`<div data-cms-sections="`)
+			sb.WriteString(html.EscapeString(key))
+			sb.WriteString(`">`)
 			for _, b := range byRegion[key] {
 				if b.Kind != content.KindHTML {
 					continue
@@ -503,10 +508,15 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	var sb strings.Builder
 	sb.WriteString("<section")
 	if edit {
-		sb.WriteString(` data-cms-section data-cms-bg="` + html.EscapeString(bg.Key) +
-			`" data-cms-width="` + html.EscapeString(w.Key) + `"`)
+		sb.WriteString(` data-cms-section data-cms-bg="`)
+		sb.WriteString(html.EscapeString(bg.Key))
+		sb.WriteString(`" data-cms-width="`)
+		sb.WriteString(html.EscapeString(w.Key))
+		sb.WriteString(`"`)
 		if height != "" {
-			sb.WriteString(` data-cms-height="` + height + `"`)
+			sb.WriteString(` data-cms-height="`)
+			sb.WriteString(height)
+			sb.WriteString(`"`)
 		}
 		if valign != "" {
 			sb.WriteString(` data-cms-valign="` + valign + `"`)
@@ -621,7 +631,9 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 // sync.
 func navHTML(key string, entries []MenuEntry, edit bool) template.HTML {
 	var sb strings.Builder
-	sb.WriteString(`<nav class="cms-nav" data-cms-menu="` + html.EscapeString(key) + `"><ul class="cms-nav-list">`)
+	sb.WriteString(`<nav class="cms-nav" data-cms-menu="`)
+	sb.WriteString(html.EscapeString(key))
+	sb.WriteString(`"><ul class="cms-nav-list">`)
 	for _, e := range entries {
 		writeNavItem(&sb, e, edit)
 	}
@@ -635,10 +647,13 @@ func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
 		marker = ` data-cms-menu-item="` + strconv.FormatInt(e.ID, 10) + `"`
 	}
 	if e.URL == "" { // label-only dropdown parent
-		sb.WriteString(`<li class="cms-nav-item cms-nav-drop"` + marker + `>` +
-			`<button type="button" class="cms-nav-link cms-nav-toggle" aria-expanded="false" aria-haspopup="true">` +
-			html.EscapeString(e.Label) + `<span class="cms-nav-caret" aria-hidden="true"></span></button>` +
-			`<ul class="cms-nav-sub">`)
+		sb.WriteString(`<li class="cms-nav-item cms-nav-drop"`)
+		sb.WriteString(marker)
+		sb.WriteString(`>`)
+		sb.WriteString(`<button type="button" class="cms-nav-link cms-nav-toggle" aria-expanded="false" aria-haspopup="true">`)
+		sb.WriteString(html.EscapeString(e.Label))
+		sb.WriteString(`<span class="cms-nav-caret" aria-hidden="true"></span></button>`)
+		sb.WriteString(`<ul class="cms-nav-sub">`)
 		for _, c := range e.Children {
 			writeNavItem(sb, c, edit)
 		}
@@ -694,8 +709,11 @@ const navJS = `(function(){` +
 // btnCSS gives button-snippet links (a.cms-btn) a uniform hover and
 // press effect with no per-button configuration. Brightness shifts work
 // over any background the button editor sets, unlike hardcoded hover
-// colors.
-const btnCSS = `a.cms-btn{transition:filter .15s ease}` +
+// colors. It also strips the link underline: buttons living in prose
+// scope (the Hero/CTA presets, or a prose link the button editor
+// converted) would otherwise inherit Tailwind Typography's `.prose a`
+// underline, and a button should never read as an underlined link.
+const btnCSS = `a.cms-btn{transition:filter .15s ease;text-decoration:none}` +
 	`a.cms-btn:hover{filter:brightness(.9)}` +
 	`a.cms-btn:active{filter:brightness(.8)}`
 
@@ -725,7 +743,7 @@ func headHTML(p *content.Page) template.HTML {
 	// External stylesheets come before the inline CSS so the page's own
 	// rules can override the library's.
 	for _, u := range resourceLinks(p.CSSLinks) {
-		sb.WriteString(`<link rel="stylesheet" href="` + html.EscapeString(u) + "\">\n")
+		sb.WriteString(`<link rel="stylesheet" href="`);sb.WriteString(html.EscapeString(u));sb.WriteString("\">\n")
 	}
 	if p.Description != "" {
 		sb.WriteString(`<meta name="description" content="`)
@@ -757,10 +775,14 @@ func scriptsHTML(p *content.Page) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
 	for _, u := range resourceLinks(p.JSLinks) {
-		sb.WriteString(`<script src="` + html.EscapeString(u) + "\"></script>\n")
+		sb.WriteString(`<script src="`)
+		sb.WriteString(html.EscapeString(u))
+		sb.WriteString("\"></script>\n")
 	}
 	if p.BodyJS != "" {
-		sb.WriteString("<script>\n" + scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`) + "\n</script>\n")
+		sb.WriteString("<script>\n")
+		sb.WriteString(scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`))
+		sb.WriteString("\n</script>\n")
 	}
 	return template.HTML(sb.String())
 }

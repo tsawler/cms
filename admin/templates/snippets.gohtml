@@ -13,6 +13,7 @@ from the editor's palette. Deleting one never changes pages that already use it.
     <thead>
     <tr>
         <th>Name</th>
+        <th>Type</th>
         <th>Updated</th>
         <th></th>
     </tr>
@@ -21,6 +22,7 @@ from the editor's palette. Deleting one never changes pages that already use it.
     {{range .Snippets}}
     <tr>
         <td>{{.Name}}</td>
+        <td>{{if .Settings}}Section preset{{else}}Inline block{{end}}</td>
         <td>{{.UpdatedAt.Format "Jan 2, 2006"}}</td>
         <td class="cms-table-actions cms-actions">
             <a class="cms-btn cms-btn-ghost cms-btn-sm" href="{{$.AdminPath}}/snippets/{{.ID}}">Edit</a>
@@ -32,7 +34,7 @@ from the editor's palette. Deleting one never changes pages that already use it.
         </td>
     </tr>
     {{else}}
-    <tr><td colspan="3" class="cms-muted">No custom snippets yet.</td></tr>
+    <tr><td colspan="4" class="cms-muted">No custom snippets yet.</td></tr>
     {{end}}
     </tbody>
 </table>
@@ -41,9 +43,10 @@ from the editor's palette. Deleting one never changes pages that already use it.
 <h2 class="cms-section-head">Built-in snippets</h2>
 <p class="cms-muted">These come from the site's code and can't be edited here.</p>
 <table class="cms-table">
-    <thead><tr><th>Name</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type</th></tr></thead>
     <tbody>
-    {{range .ConfigSnippets}}<tr><td>{{.Name}}</td></tr>{{end}}
+    {{range .ConfigSnippets}}<tr><td>{{.Name}}</td>
+        <td>{{if .Settings}}Section preset{{else}}Inline block{{end}}</td></tr>{{end}}
     </tbody>
 </table>
 {{end}}

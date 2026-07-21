@@ -179,11 +179,18 @@ padding:14px 16px;border-bottom:1px solid #e3e6ea}
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
 .drawer .dhead button:hover{background:#eceef1;color:#1c2128}
 .drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
-.drawer .dlist{flex:1;overflow-y:auto;padding:12px}
+.drawer .dlist{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column}
 .snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;
 cursor:grab;background:#fff}
 .snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}
 .snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}
+/* Section presets: inline-insert mode hides them; add-a-section mode
+   lists them first, clickable rather than draggable. */
+.snip.preset{cursor:pointer}
+.dlist:not(.sections-mode) .snip.preset{display:none}
+.dlist.sections-mode .snip.preset{order:-1}
+.snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;
+color:#2f5fe0;font-size:10px;font-weight:600;vertical-align:1px}
 .snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
 -webkit-line-clamp:2;-webkit-box-orient:vertical}
 

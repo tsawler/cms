@@ -228,6 +228,7 @@ type templateData struct {
 	Snippets       []snippets.Snippet // admin-created
 	ConfigSnippets []snippets.Snippet // registered in code
 	FormSnippet    *snippets.Snippet
+	SectionStyles  *render.SectionStyles // preset options on the snippet form
 
 	// Host-registered sections: nav links visible to this user, and the
 	// page content when rendering a custom page through RenderPage.

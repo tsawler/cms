@@ -17,8 +17,11 @@ export function openDrawer() {
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
     $("drawer-hint").textContent = state.pendingSection
-        ? "Choose a snippet to be the section's starting content."
+        ? "Choose a starting point for the section."
         : "Drag a snippet onto the page, or click one to insert it at the cursor.";
+    // Section presets are whole-section starting points, not inline
+    // blocks — the list shows them (first) only when adding a section.
+    $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
     updateRail();
 }
@@ -49,11 +52,16 @@ function loadSnippets() {
         }
         body.snippets.forEach(function (sn) {
             var card = document.createElement("div");
-            card.className = "snip";
-            card.draggable = true;
+            card.className = sn.settings ? "snip preset" : "snip";
             var nm = document.createElement("p");
             nm.className = "sname";
             nm.textContent = sn.name;
+            if (sn.settings) {
+                var tag = document.createElement("span");
+                tag.className = "stag";
+                tag.textContent = "Section";
+                nm.appendChild(tag);
+            }
             var desc = document.createElement("p");
             desc.className = "sdesc";
             var probe = document.createElement("div");
@@ -62,7 +70,10 @@ function loadSnippets() {
             card.appendChild(nm);
             card.appendChild(desc);
             // Drag: TinyMCE accepts text/html drops and inserts the
-            // markup at the drop caret inside any rich region.
+            // markup at the drop caret inside any rich region. Presets
+            // aren't draggable — their settings only mean something on
+            // a section wrapper, which a drop can't create.
+            card.draggable = !sn.settings;
             card.addEventListener("dragstart", function (e) {
                 e.dataTransfer.setData("text/html", sn.html);
                 e.dataTransfer.setData("text/plain", sn.name);
@@ -111,7 +122,7 @@ function chooseSnippet(sn) {
     if (state.pendingSection) {
         var target = state.pendingSection;
         closeDrawer();
-        createSection(target, sn.html);
+        createSection(target, sn.html, sn.settings);
         return;
     }
     insertSnippet(sn);
