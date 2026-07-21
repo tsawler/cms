@@ -296,13 +296,47 @@ function applyImageSettings(img, v) {
             fig.appendChild(fc);
         }
         fc.textContent = caption;
+        syncFigureAlignment(fig, img);
     } else if (fig) {
         // Back into a paragraph of its own where the figure stood.
+        // Float classes the figure took over go back onto the image.
+        FLOAT_CLASSES.forEach(function (c) {
+            if (fig.classList.contains(c)) img.classList.add(c);
+        });
+        if (!img.getAttribute("class")) img.removeAttribute("class");
         var host = document.createElement("p");
         fig.parentNode.insertBefore(host, fig);
         host.appendChild(node);
         fig.remove();
     }
+}
+
+// The toolbar's image-alignment classes (richtext.js formats).
+var FLOAT_CLASSES = ["float-left", "mr-6", "float-right", "ml-6"];
+
+// syncFigureAlignment makes a caption figure follow its image's
+// alignment: float classes move from the image to the figure (so the
+// caption travels with a floated image), and a centered image
+// (block mx-auto) mirrors as text-center so the caption centers too.
+// Alignment is normalized back onto the image first, so re-applying
+// after an alignment change stays correct.
+function syncFigureAlignment(fig, img) {
+    FLOAT_CLASSES.forEach(function (c) {
+        if (fig.classList.contains(c)) {
+            fig.classList.remove(c);
+            img.classList.add(c);
+        }
+    });
+    fig.classList.remove("text-center");
+    FLOAT_CLASSES.forEach(function (c) {
+        if (img.classList.contains(c)) {
+            img.classList.remove(c);
+            fig.classList.add(c);
+        }
+    });
+    if (img.classList.contains("mx-auto")) fig.classList.add("text-center");
+    if (!fig.getAttribute("class")) fig.removeAttribute("class");
+    if (!img.getAttribute("class")) img.removeAttribute("class");
 }
 
 // findOwningEditor returns the TinyMCE instance managing the content

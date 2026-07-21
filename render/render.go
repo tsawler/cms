@@ -33,7 +33,7 @@ type PageTemplate struct {
 // {{cmsMenu "main"}} and as {{cmsNav "main"}} renders it. The data-only
 // cmsMenu form supplies entries and the template owns the markup; cmsNav
 // emits the CMS's own nav markup (which is what the in-place editor can
-// edit by right-click).
+// edit in place).
 type MenuEntry struct {
 	ID       int64 // menu item id; the editor's edit-mode marker
 	Label    string
@@ -615,7 +615,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 // navHTML renders {{cmsNav "main"}}: complete nav markup with stable
 // cms-nav-* classes the host site styles, one dropdown level, and — on
 // edit renders — the data-cms-menu-item markers the in-place editor uses
-// for right-click editing. The functional CSS and the dropdown-toggle
+// for click-to-edit. The functional CSS and the dropdown-toggle
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
 // client-side after a menu save (editor/src/menu.js) — keep the two in
 // sync.
@@ -704,7 +704,16 @@ const btnCSS = `a.cms-btn{transition:filter .15s ease}` +
 // 10–25% black — nearly invisible next to a photo on a bright display —
 // and every utility class would need safelisting in the host's build.
 const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.14)}` +
-	`.cms-shadow-strong{box-shadow:0 16px 40px rgba(0,0,0,.34),0 4px 12px rgba(0,0,0,.22)}`
+	`.cms-shadow-strong{box-shadow:0 16px 40px rgba(0,0,0,.34),0 4px 12px rgba(0,0,0,.22)}` +
+	// A captioned linked image nests as figure > a > img, one level
+	// deeper than Tailwind typography's figure>* margin reset reaches —
+	// without this the image keeps its 2em prose margins inside the
+	// figure, stranding the caption far below. The :not() lifts
+	// specificity above typography's .prose :where(img) (and names an
+	// opt-out class for hosts that want the margins back).
+	// Vertical only: margin:0 would also beat .mx-auto and undo
+	// horizontal centering.
+	`figure>a>img:not(.cms-keep-margins){margin-top:0;margin-bottom:0}`
 
 // headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
 // small stylesheet (button hover), the page's meta description, and its

@@ -973,12 +973,36 @@
         fig.appendChild(fc);
       }
       fc.textContent = caption;
+      syncFigureAlignment(fig, img);
     } else if (fig) {
+      FLOAT_CLASSES.forEach(function(c) {
+        if (fig.classList.contains(c)) img.classList.add(c);
+      });
+      if (!img.getAttribute("class")) img.removeAttribute("class");
       var host2 = document.createElement("p");
       fig.parentNode.insertBefore(host2, fig);
       host2.appendChild(node);
       fig.remove();
     }
+  }
+  var FLOAT_CLASSES = ["float-left", "mr-6", "float-right", "ml-6"];
+  function syncFigureAlignment(fig, img) {
+    FLOAT_CLASSES.forEach(function(c) {
+      if (fig.classList.contains(c)) {
+        fig.classList.remove(c);
+        img.classList.add(c);
+      }
+    });
+    fig.classList.remove("text-center");
+    FLOAT_CLASSES.forEach(function(c) {
+      if (img.classList.contains(c)) {
+        img.classList.remove(c);
+        fig.classList.add(c);
+      }
+    });
+    if (img.classList.contains("mx-auto")) fig.classList.add("text-center");
+    if (!fig.getAttribute("class")) fig.removeAttribute("class");
+    if (!img.getAttribute("class")) img.removeAttribute("class");
   }
   function findOwningEditor(el) {
     var all = [];
@@ -1748,6 +1772,43 @@
   function hideIndicator() {
     if (indEl) indEl.style.display = "none";
   }
+  function makeGhost(li, item) {
+    var g = document.createElement("div");
+    g.id = "cms-nav-ghost";
+    var label = document.createElement("span");
+    label.textContent = item ? item.label : (li.textContent || "").trim();
+    g.appendChild(label);
+    if (item && item.dropdown) {
+      var sub = document.createElement("span");
+      sub.className = "sub";
+      sub.textContent = "\u25BE " + item.children.length + (item.children.length === 1 ? " item" : " items");
+      g.appendChild(sub);
+    }
+    document.body.appendChild(g);
+    return g;
+  }
+  function positionGhost(d, e) {
+    d.ghost.style.transform = "translate(" + (e.clientX - d.offX) + "px," + (e.clientY - d.offY) + "px) rotate(2deg)";
+  }
+  function settleGhost(d, target) {
+    var g = d.ghost;
+    if (!g) return;
+    if (!target) {
+      var r = d.li.getBoundingClientRect();
+      target = { x: r.left, y: r.top };
+    }
+    g.style.transition = "transform .16s ease, opacity .16s ease";
+    g.style.opacity = "0";
+    g.style.transform = "translate(" + target.x + "px," + target.y + "px)";
+    setTimeout(function() {
+      g.remove();
+    }, 180);
+  }
+  function endDragVisuals(d) {
+    d.li.classList.remove("cms-nav-dragli");
+    document.body.classList.remove("cms-nav-dragging");
+    hideIndicator();
+  }
   function listItems(list) {
     var out = [];
     for (var i = 0; i < list.children.length; i++) {
@@ -1851,26 +1912,32 @@
     if (menus) renderAll();
   }
   var pressTimer = null;
+  var lastPointerType = "mouse";
+  var suppressClick = false;
   function initMenu() {
-    document.addEventListener("contextmenu", function(e) {
-      if (!state.editing || !e.target.closest) return;
-      var nav = e.target.closest("nav[data-cms-menu]");
-      if (!nav) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (modal) return;
-      var li = e.target.closest("li.cms-nav-item");
-      whenLoaded(function() {
-        openModal(nav.getAttribute("data-cms-menu"), li ? pathOf(li) : null, null);
-      });
+    document.addEventListener("pointerdown", function(e) {
+      lastPointerType = e.pointerType || "mouse";
+      suppressClick = false;
     }, true);
     document.addEventListener("click", function(e) {
       if (!state.editing || !e.target.closest) return;
-      if (e.target.closest("nav[data-cms-menu] a.cms-nav-link")) {
-        e.preventDefault();
-        e.stopPropagation();
-        flash("Right-click a menu item to edit it; drag to rearrange");
+      var nav = e.target.closest("nav[data-cms-menu]");
+      if (!nav || e.target.closest(".cms-nav-addli")) return;
+      var toggle = e.target.closest(".cms-nav-toggle");
+      if (toggle && lastPointerType !== "mouse") return;
+      if (!toggle && !e.target.closest("a.cms-nav-link")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (suppressClick) {
+        suppressClick = false;
+        return;
       }
+      if (modal) return;
+      var li = e.target.closest("li.cms-nav-item");
+      if (!li) return;
+      whenLoaded(function() {
+        openModal(nav.getAttribute("data-cms-menu"), pathOf(li), null);
+      });
     }, true);
     document.addEventListener("dragstart", function(e) {
       if (state.editing && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
@@ -1905,7 +1972,16 @@
       if (!state.editing || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
       var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
       if (!li || !menus) return;
-      drag = { key: menuKeyOf(li), li, startX: e.clientX, startY: e.clientY, active: false };
+      var r = li.getBoundingClientRect();
+      drag = {
+        key: menuKeyOf(li),
+        li,
+        startX: e.clientX,
+        startY: e.clientY,
+        offX: e.clientX - r.left,
+        offY: e.clientY - r.top,
+        active: false
+      };
     }, true);
     document.addEventListener("pointermove", function(e) {
       if (!drag) return;
@@ -1913,22 +1989,41 @@
         if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 8) return;
         drag.active = true;
         drag.path = pathOf(drag.li);
+        drag.ghost = makeGhost(drag.li, itemAt(drag.key, drag.path));
+        drag.offX = Math.max(12, Math.min(drag.offX, drag.ghost.offsetWidth - 12));
+        drag.offY = Math.max(6, Math.min(drag.offY, drag.ghost.offsetHeight - 6));
         drag.li.classList.add("cms-nav-dragli");
         document.body.classList.add("cms-nav-dragging");
         indicator().style.display = "block";
       }
       e.preventDefault();
+      positionGhost(drag, e);
       updateDrop(e);
+      drag.ghost.classList.toggle("nodrop", !drag.drop);
     }, true);
     document.addEventListener("pointerup", function() {
       if (!drag) return;
       var d = drag;
       drag = null;
       if (!d.active) return;
-      d.li.classList.remove("cms-nav-dragli");
-      document.body.classList.remove("cms-nav-dragging");
-      hideIndicator();
+      suppressClick = true;
+      var target = null;
+      if (d.drop && indEl && indEl.style.display !== "none") {
+        var r = indEl.getBoundingClientRect();
+        target = { x: r.left, y: r.top };
+      }
+      endDragVisuals(d);
+      settleGhost(d, target);
       if (d.drop) applyDrop(d);
+    }, true);
+    document.addEventListener("keydown", function(e) {
+      if (e.key !== "Escape" || !drag) return;
+      var d = drag;
+      drag = null;
+      if (!d.active) return;
+      suppressClick = true;
+      endDragVisuals(d);
+      settleGhost(d, null);
     }, true);
     $("mm-ok").addEventListener("click", modalOK);
     $("mm-cancel").addEventListener("click", closeMenuModal);
@@ -3296,28 +3391,46 @@ border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
 .cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
 .cms-editing .cms-snippet:hover{outline-style:solid!important}
 
-/* Site menus ({{cmsNav}}): while editing, items are right-clickable
- * (long-press on touch) and drag to rearrange; "\uFF0B" chips add items. */
+/* Site menus ({{cmsNav}}): while editing, clicking an item (long-press
+ * on touch) opens its settings and drag rearranges; "\uFF0B" chips add
+ * items. A mouse click on a dropdown toggle edits the dropdown itself,
+ * so hovering opens its panel to keep the items inside reachable. */
 .cms-editing nav[data-cms-menu]{outline:1.5px dashed rgba(47,95,224,.45);outline-offset:6px;
 border-radius:2px;position:relative}
 /* Hovering the nav explains the interaction; the delay keeps it from
  * flashing on every pass-over, and it gets out of the way mid-drag. */
-.cms-editing nav[data-cms-menu]::after{content:'Right-click a menu item to edit it \u2014 drag to rearrange';
+.cms-editing nav[data-cms-menu]::after{content:'Click a menu item to edit it \u2014 drag to rearrange';
 position:absolute;top:calc(100% + 10px);left:0;z-index:2147482995;
 font:11px/1.4 system-ui,sans-serif;color:#fff;background:#1c2128;padding:5px 10px;
 border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.25);white-space:nowrap;
 pointer-events:none;opacity:0;transition:opacity .15s ease .4s}
 .cms-editing nav[data-cms-menu]:hover::after{opacity:1}
 body.cms-nav-dragging nav[data-cms-menu]::after{display:none}
-.cms-editing nav[data-cms-menu] .cms-nav-item{cursor:context-menu}
+/* An open (or hover-opened) dropdown panel occupies the same spot as
+ * the hint \u2014 the panel wins. */
+.cms-editing nav[data-cms-menu]:has(.cms-nav-drop.cms-open)::after,
+.cms-editing nav[data-cms-menu]:has(.cms-nav-drop:hover)::after{display:none}
+.cms-editing nav[data-cms-menu] .cms-nav-item{cursor:pointer}
+.cms-editing nav[data-cms-menu] .cms-nav-drop:hover>.cms-nav-sub{display:block}
 .cms-nav-addli button{font:13px/1 system-ui,sans-serif;color:#2149b8;background:#e8edfb;
 border:1.5px dashed #2f5fe0;border-radius:8px;width:24px;height:24px;cursor:pointer;padding:0}
 .cms-nav-addli button:hover{background:#dbe4fa}
 .cms-nav-sub .cms-nav-addli{padding:.25em .9em}
-.cms-nav-dragli{opacity:.35}
+/* The vacated slot reads as a placeholder while its item is airborne. */
+.cms-nav-dragli{opacity:.3;outline:1.5px dashed rgba(47,95,224,.5);outline-offset:2px;border-radius:4px}
 body.cms-nav-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
+body.cms-nav-dragging .cms-nav-addli{opacity:.25}
 #cms-nav-ind{position:fixed;z-index:2147482996;background:#2f5fe0;border-radius:2px;
-pointer-events:none;display:none}
+pointer-events:none;display:none;transition:left .07s ease,top .07s ease,width .07s ease,height .07s ease}
+/* The drag ghost: a pill with the dragged item's label that follows the
+ * pointer, dims when there's nowhere to drop, and settles into place on
+ * release (transition set inline by settleGhost). */
+#cms-nav-ghost{position:fixed;left:0;top:0;z-index:2147482997;pointer-events:none;
+display:flex;align-items:center;gap:7px;white-space:nowrap;will-change:transform;opacity:.5;
+font:13px/1.3 system-ui,sans-serif;color:#1c2128;background:#fff;padding:7px 13px;
+border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.28)}
+#cms-nav-ghost .sub{color:#6b7280;font-size:11px}
+#cms-nav-ghost.nodrop{opacity:.25}
 
 /* Flexible-space snippet: invisible on the live site, visible and
  * click-to-adjust while editing. */

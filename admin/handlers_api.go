@@ -148,7 +148,7 @@ func (s *server) apiListPages(w http.ResponseWriter, r *http.Request) {
 var menuKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 type menuItemJSON struct {
-	ID     int64  `json:"id,omitempty"` // stable handle for the editor's right-click UI
+	ID     int64  `json:"id,omitempty"` // stable handle for the editor's menu UI
 	Label  string `json:"label"`
 	PageID int64  `json:"pageId"` // 0 = custom URL item or dropdown parent
 	URL    string `json:"url"`
@@ -160,7 +160,7 @@ type menuItemJSON struct {
 }
 
 // apiGetMenu returns a menu's items, as a one-level tree, for the
-// editor's right-click menu UI.
+// editor's in-place menu UI.
 // GET /api/menu?menu=main
 func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 	menu := r.URL.Query().Get("menu")

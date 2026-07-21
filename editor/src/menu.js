@@ -1,8 +1,8 @@
 /* ------------------------------------------------------------------ *
  * Menu editing — in place, on navs rendered by {{cmsNav "key"}}.
  *
- * While editing, menu items are right-clickable (long-press on touch)
- * to open a settings modal, "＋" chips add items, and items drag to
+ * While editing, clicking a menu item (long-press on touch) opens a
+ * settings modal, "＋" chips add items, and items drag to
  * rearrange — including into or out of a dropdown (one level only,
  * and only with a mouse; touch gets the modal, not drag). Menus have
  * no draft state: every change saves immediately and the nav is
@@ -370,9 +370,16 @@ function modalRemove() {
         });
 }
 
-/* ---- drag to rearrange (mouse only; touch edits via long-press) ---- */
+/* ---- drag to rearrange (mouse only; touch edits via long-press) ----
+ *
+ * While a drag is live, a floating "ghost" pill showing the dragged
+ * item follows the pointer (dimmed when there's nowhere to drop), the
+ * item's old slot stays behind as a faded placeholder, and a line (or
+ * box, when nesting) marks where it would land. On release the ghost
+ * settles onto that mark — or springs back if the drag came to
+ * nothing. Escape abandons the drag. */
 
-var drag = null; // {key, li, startX, startY, active, path, drop}
+var drag = null; // {key, li, startX, startY, offX, offY, active, path, drop, ghost}
 var indEl = null;
 
 function indicator() {
@@ -386,6 +393,49 @@ function indicator() {
 
 function hideIndicator() {
     if (indEl) indEl.style.display = "none";
+}
+
+function makeGhost(li, item) {
+    var g = document.createElement("div");
+    g.id = "cms-nav-ghost";
+    var label = document.createElement("span");
+    label.textContent = item ? item.label : (li.textContent || "").trim();
+    g.appendChild(label);
+    if (item && item.dropdown) {
+        var sub = document.createElement("span");
+        sub.className = "sub";
+        sub.textContent = "▾ " + item.children.length +
+            (item.children.length === 1 ? " item" : " items");
+        g.appendChild(sub);
+    }
+    document.body.appendChild(g);
+    return g;
+}
+
+function positionGhost(d, e) {
+    d.ghost.style.transform = "translate(" + (e.clientX - d.offX) + "px," +
+        (e.clientY - d.offY) + "px) rotate(2deg)";
+}
+
+// settleGhost eases the ghost onto target ({x,y}) — or back onto the
+// item it came from — while fading, then removes it.
+function settleGhost(d, target) {
+    var g = d.ghost;
+    if (!g) return;
+    if (!target) {
+        var r = d.li.getBoundingClientRect();
+        target = { x: r.left, y: r.top };
+    }
+    g.style.transition = "transform .16s ease, opacity .16s ease";
+    g.style.opacity = "0";
+    g.style.transform = "translate(" + target.x + "px," + target.y + "px)";
+    setTimeout(function () { g.remove(); }, 180);
+}
+
+function endDragVisuals(d) {
+    d.li.classList.remove("cms-nav-dragli");
+    document.body.classList.remove("cms-nav-dragging");
+    hideIndicator();
 }
 
 function listItems(list) {
@@ -520,34 +570,41 @@ export function setMenuEditing(on) {
 }
 
 var pressTimer = null;
+var lastPointerType = "mouse";
+var suppressClick = false; // a drag just ended; swallow the click it produces
 
 export function initMenu() {
-    // Right-click while editing: the item's settings, or "add an item"
-    // from the nav's empty parts. Capture, so host handlers can't
-    // swallow it.
-    document.addEventListener("contextmenu", function (e) {
-        if (!state.editing || !e.target.closest) return;
-        var nav = e.target.closest("nav[data-cms-menu]");
-        if (!nav) return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (modal) return;
-        var li = e.target.closest("li.cms-nav-item");
-        whenLoaded(function () {
-            openModal(nav.getAttribute("data-cms-menu"), li ? pathOf(li) : null, null);
-        });
+    // Click events don't reliably carry a pointerType, so remember the
+    // last press. Each new press also clears any stale drag suppression.
+    document.addEventListener("pointerdown", function (e) {
+        lastPointerType = e.pointerType || "mouse";
+        suppressClick = false;
     }, true);
 
-    // While editing, menu links must not navigate away — clicking one
-    // explains the right-click flow instead. Dropdown toggles keep
-    // working so items inside stay reachable.
+    // Click while editing opens the item's settings (links never
+    // navigate). Dropdown toggles: a mouse click edits the dropdown
+    // itself — hovering opens its panel (light.css), so items inside
+    // stay reachable — while on touch the tap still toggles the panel
+    // and long-press edits. Capture, so host handlers can't swallow it.
     document.addEventListener("click", function (e) {
         if (!state.editing || !e.target.closest) return;
-        if (e.target.closest("nav[data-cms-menu] a.cms-nav-link")) {
-            e.preventDefault();
-            e.stopPropagation();
-            flash("Right-click a menu item to edit it; drag to rearrange");
+        var nav = e.target.closest("nav[data-cms-menu]");
+        if (!nav || e.target.closest(".cms-nav-addli")) return;
+        var toggle = e.target.closest(".cms-nav-toggle");
+        if (toggle && lastPointerType !== "mouse") return;
+        if (!toggle && !e.target.closest("a.cms-nav-link")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (suppressClick) {
+            suppressClick = false;
+            return;
         }
+        if (modal) return;
+        var li = e.target.closest("li.cms-nav-item");
+        if (!li) return;
+        whenLoaded(function () {
+            openModal(nav.getAttribute("data-cms-menu"), pathOf(li), null);
+        });
     }, true);
 
     // Native link dragging would swallow our pointer-based drag.
@@ -557,7 +614,8 @@ export function initMenu() {
         }
     }, true);
 
-    // Long-press opens the same modal on touch (no right-click there).
+    // Long-press opens the same modal on touch — the only way to edit
+    // a dropdown parent there, since tapping its toggle opens the panel.
     document.addEventListener("pointerdown", function (e) {
         if (!state.editing || e.pointerType === "mouse" || !e.target.closest) return;
         var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
@@ -586,7 +644,11 @@ export function initMenu() {
         if (!state.editing || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
         var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
         if (!li || !menus) return;
-        drag = { key: menuKeyOf(li), li: li, startX: e.clientX, startY: e.clientY, active: false };
+        var r = li.getBoundingClientRect();
+        drag = {
+            key: menuKeyOf(li), li: li, startX: e.clientX, startY: e.clientY,
+            offX: e.clientX - r.left, offY: e.clientY - r.top, active: false,
+        };
     }, true);
     document.addEventListener("pointermove", function (e) {
         if (!drag) return;
@@ -594,22 +656,48 @@ export function initMenu() {
             if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 8) return;
             drag.active = true;
             drag.path = pathOf(drag.li);
+            drag.ghost = makeGhost(drag.li, itemAt(drag.key, drag.path));
+            // The grab point carries over from the real item, clamped
+            // into the ghost so it stays under the pointer even when
+            // the two differ in size.
+            drag.offX = Math.max(12, Math.min(drag.offX, drag.ghost.offsetWidth - 12));
+            drag.offY = Math.max(6, Math.min(drag.offY, drag.ghost.offsetHeight - 6));
             drag.li.classList.add("cms-nav-dragli");
             document.body.classList.add("cms-nav-dragging");
             indicator().style.display = "block";
         }
         e.preventDefault(); // no text selection while dragging
+        positionGhost(drag, e);
         updateDrop(e);
+        drag.ghost.classList.toggle("nodrop", !drag.drop);
     }, true);
     document.addEventListener("pointerup", function () {
         if (!drag) return;
         var d = drag;
         drag = null;
         if (!d.active) return;
-        d.li.classList.remove("cms-nav-dragli");
-        document.body.classList.remove("cms-nav-dragging");
-        hideIndicator();
+        suppressClick = true;
+        // Capture where the drop mark is before it hides, so the ghost
+        // can settle onto it.
+        var target = null;
+        if (d.drop && indEl && indEl.style.display !== "none") {
+            var r = indEl.getBoundingClientRect();
+            target = { x: r.left, y: r.top };
+        }
+        endDragVisuals(d);
+        settleGhost(d, target);
         if (d.drop) applyDrop(d);
+    }, true);
+    // Escape abandons a drag in progress: nothing moves, the ghost
+    // springs back, and the click on release is swallowed.
+    document.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape" || !drag) return;
+        var d = drag;
+        drag = null;
+        if (!d.active) return;
+        suppressClick = true;
+        endDragVisuals(d);
+        settleGhost(d, null);
     }, true);
 
     $("mm-ok").addEventListener("click", modalOK);
