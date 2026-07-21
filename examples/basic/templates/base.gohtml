@@ -11,12 +11,16 @@
 <header class="border-b border-slate-200">
     <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
         <a href="/" class="text-lg font-bold tracking-tight">Example&nbsp;Site</a>
-        <nav class="flex gap-6 text-sm text-slate-600">
-            {{range cmsMenu "main"}}
-            <a href="{{.URL}}"{{if .NewTab}} target="_blank" rel="noopener"{{end}}
-               class="hover:text-slate-900{{if .Active}} text-slate-900 font-semibold{{end}}">{{.Label}}</a>
-            {{end}}
-        </nav>
+        {{cmsNav "main"}}
+        <style>
+            /* Style the CMS-rendered nav via its stable classes. */
+            .cms-nav{font-size:.875rem;color:#475569}
+            .cms-nav-list{gap:1.5rem}
+            .cms-nav-link{text-decoration:none;color:inherit}
+            .cms-nav-link:hover{color:#0f172a}
+            .cms-nav-link.cms-active{color:#0f172a;font-weight:600}
+            .cms-nav-sub .cms-nav-link:hover{background:#f1f5f9}
+        </style>
     </div>
 </header>
 

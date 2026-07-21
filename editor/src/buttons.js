@@ -79,23 +79,93 @@ export function hideSnipUI() {
     $("snip-ui").classList.remove("on");
 }
 
-/* Embedded images get a gear for alt text, link, and display width. */
+/* Embedded images get a gear (alt text, caption, link, rendition, and
+ * style presets) and a trash can, anchored to the image's top-right
+ * corner like the section toolbar. */
 var activeImg = null;
 
 // IMG_SIZES are the gear's display-width presets. Width classes need
 // h-auto alongside them: TinyMCE stamps width/height attributes on
 // resize, and a CSS width with an attribute height would distort.
 var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
+var IMG_ROUND = ["rounded-lg", "rounded-2xl", "rounded-full"];
+// CMS-owned shadow classes (styled by imgShadowCSS in render.go, shipped
+// via cmsHead). Tailwind's own shadow scale is 10–25% black — too faint
+// to read as a shadow next to a photo — and its classes would need
+// safelisting in every host build.
+var IMG_SHADOW = ["cms-shadow-subtle", "cms-shadow-strong"];
+// Every shadow class the gear has ever applied, so changing the preset
+// list above can't strand an old class on saved content.
+var IMG_SHADOW_ALL = ["shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl",
+    "cms-shadow-subtle", "cms-shadow-strong"];
+
+// Inline-style equivalents of the presets, for the settings dialog's
+// live preview: the dialog lives in the editor's shadow DOM, where the
+// host page's stylesheet (and Tailwind) can't reach, so the preview
+// can't just apply the classes. Shadow values mirror imgShadowCSS in
+// render.go; rounded-full is 9999px to match Tailwind (pill, not
+// ellipse, on non-square images).
+var IMG_PREVIEW_SHADOW = {
+    "cms-shadow-subtle": "0 4px 12px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.14)",
+    "cms-shadow-strong": "0 16px 40px rgba(0,0,0,.34),0 4px 12px rgba(0,0,0,.22)",
+};
+var IMG_PREVIEW_ROUND = { "rounded-lg": "8px", "rounded-2xl": "16px", "rounded-full": "9999px" };
+var IMG_PREVIEW_FRACTION = {};
+IMG_PREVIEW_FRACTION[IMG_SIZES[0]] = 1;
+IMG_PREVIEW_FRACTION[IMG_SIZES[1]] = 2 / 3;
+IMG_PREVIEW_FRACTION[IMG_SIZES[2]] = 1 / 2;
+IMG_PREVIEW_FRACTION[IMG_SIZES[3]] = 1 / 3;
+
+// renderImgPreview draws the dialog's live preview: the image at its
+// chosen width on a white stand-in "page", with roundness, shadow,
+// rendition, and caption applied. Scaled down as needed so a tall
+// image can't blow up the dialog.
+function renderImgPreview(img, v, el) {
+    el.innerHTML = "";
+    var ar = img.naturalWidth && img.naturalHeight
+        ? img.naturalWidth / img.naturalHeight : 4 / 3;
+    var pagePad = 16;
+    var avail = (el.clientWidth || 320) - 2 * pagePad;
+    var f = IMG_PREVIEW_FRACTION[v.size] || 0;
+    var w = f ? f * avail : Math.min(img.naturalWidth || avail, avail);
+    // Cap the preview's height by shrinking the whole stand-in page,
+    // so the chosen width fraction stays visually truthful.
+    var scale = Math.min(1, 170 / (w / ar));
+    var page = document.createElement("div");
+    page.style.cssText = "background:#fff;border:1px solid #e3e6ea;border-radius:4px;" +
+        "display:inline-block;width:" + Math.round(avail * scale + 2 * pagePad) + "px;" +
+        "padding:" + pagePad + "px;text-align:center";
+    var pimg = document.createElement("img");
+    pimg.src = v.orig === "1"
+        ? (img.getAttribute("data-cms-orig") || img.getAttribute("src"))
+        : (img.getAttribute("data-cms-web") || img.getAttribute("src"));
+    pimg.style.cssText = "width:" + Math.round(w * scale) + "px;height:auto;" +
+        "display:inline-block;vertical-align:top;" +
+        "border-radius:" + (IMG_PREVIEW_ROUND[v.round] || "0") + ";" +
+        (IMG_PREVIEW_SHADOW[v.shadow] ? "box-shadow:" + IMG_PREVIEW_SHADOW[v.shadow] + ";" : "");
+    page.appendChild(pimg);
+    var caption = (v.caption || "").trim();
+    if (caption) {
+        var cap = document.createElement("div");
+        cap.textContent = caption;
+        cap.style.cssText = "font:italic 11px system-ui,sans-serif;color:#667085;margin-top:8px";
+        page.appendChild(cap);
+    }
+    el.appendChild(page);
+}
 
 function showImgUI(img) {
     activeImg = img;
     var ui = $("img-ui");
     ui.classList.add("on");
     var r = img.getBoundingClientRect();
-    var top = r.top - 44;
-    if (top < 64) top = r.top + 8;
+    // Top-right corner of the image, mirroring the section toolbar;
+    // above it when the image is too small to hold the chrome.
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
     ui.style.top = top + "px";
-    ui.style.left = Math.max(8, r.left) + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
 }
 
 export function hideImgUI() {
@@ -111,25 +181,71 @@ function imageLink(img) {
     return (a.textContent || "").trim() === "" ? a : null;
 }
 
-function imgSizeValue(img) {
-    for (var i = 0; i < IMG_SIZES.length; i++) {
-        if (img.classList.contains(IMG_SIZES[i].split(" ")[0])) return IMG_SIZES[i];
+// imageFigure returns the <figure> wrapping img when that figure exists
+// purely for the image — nothing but the (possibly linked) image and an
+// optional figcaption. Snippet figures with their own text don't count.
+function imageFigure(img) {
+    var fig = img.closest ? img.closest("figure") : null;
+    if (!fig || fig.querySelector("img") !== img) return null;
+    var fc = fig.querySelector("figcaption");
+    var text = fig.textContent || "";
+    if (fc) text = text.replace(fc.textContent || "", "");
+    return text.trim() === "" ? fig : null;
+}
+
+function imgClassValue(img, presets) {
+    for (var i = 0; i < presets.length; i++) {
+        if (img.classList.contains(presets[i].split(" ")[0])) return presets[i];
     }
     return "";
+}
+
+// imgShadowValue maps legacy Tailwind shadow classes to the nearest
+// current preset, so re-opening older content shows Subtle/Strong, not
+// None (and Apply upgrades the class).
+function imgShadowValue(img) {
+    var v = imgClassValue(img, IMG_SHADOW_ALL);
+    if (v === "shadow-md" || v === "shadow-lg") return IMG_SHADOW[0];
+    if (v === "shadow-xl" || v === "shadow-2xl") return IMG_SHADOW[1];
+    return v;
+}
+
+// swapClasses clears every class the preset list can apply, then adds
+// the chosen preset's classes.
+function swapClasses(el, presets, chosen) {
+    presets.forEach(function (s) {
+        s.split(" ").forEach(function (c) { el.classList.remove(c); });
+    });
+    if (chosen) {
+        chosen.split(" ").forEach(function (c) { el.classList.add(c); });
+    }
 }
 
 function applyImageSettings(img, v) {
     // Empty alt is valid (it marks the image decorative), so the
     // attribute is always written rather than removed.
     img.setAttribute("alt", (v.alt || "").trim());
+    // Everything below the fold loads lazily; applying settings also
+    // upgrades images inserted before this attribute existed.
+    img.setAttribute("loading", "lazy");
 
-    IMG_SIZES.forEach(function (s) {
-        s.split(" ").forEach(function (c) { img.classList.remove(c); });
-    });
-    if (v.size) {
-        v.size.split(" ").forEach(function (c) { img.classList.add(c); });
-    }
+    swapClasses(img, IMG_SIZES, v.size);
+    swapClasses(img, IMG_ROUND, v.round);
+    swapClasses(img, IMG_SHADOW_ALL, v.shadow);
     if (!img.getAttribute("class")) img.removeAttribute("class");
+
+    // Rendition: swap between the compressed web variant and the
+    // full-quality original when both URLs are known (stored on the
+    // image at insert time).
+    var origURL = img.getAttribute("data-cms-orig");
+    var webURL = img.getAttribute("data-cms-web");
+    if (origURL && webURL) {
+        var src = v.orig === "1" ? origURL : webURL;
+        img.setAttribute("src", src);
+        // TinyMCE shadows URI attributes; keep the shadow in sync or
+        // serialization restores the old address.
+        img.setAttribute("data-mce-src", src);
+    }
 
     var url = (v.href || "").trim();
     var link = imageLink(img);
@@ -140,8 +256,6 @@ function applyImageSettings(img, v) {
             link.appendChild(img);
         }
         link.setAttribute("href", url);
-        // TinyMCE shadows URI attributes; keep the shadow in sync or
-        // serialization restores the old address.
         link.setAttribute("data-mce-href", url);
         if (v.newtab) {
             link.setAttribute("target", "_blank");
@@ -153,6 +267,41 @@ function applyImageSettings(img, v) {
     } else if (link) {
         link.parentNode.insertBefore(img, link);
         link.remove();
+    }
+
+    // Caption: a <figure> around the (possibly linked) image with a
+    // <figcaption>. Recomputed after the link work so the figure wraps
+    // whatever the outermost image node now is.
+    var node = imageLink(img) || img;
+    var fig = imageFigure(img);
+    var caption = (v.caption || "").trim();
+    if (caption) {
+        if (!fig) {
+            fig = document.createElement("figure");
+            var p = node.parentElement;
+            if (p && p.tagName === "P") {
+                // A figure may not live inside a paragraph — the
+                // browser's parser would split it on the next load.
+                p.parentNode.insertBefore(fig, p.nextSibling);
+                fig.appendChild(node);
+                if ((p.textContent || "").trim() === "" && !p.querySelector("img,a,br")) p.remove();
+            } else {
+                node.parentNode.insertBefore(fig, node);
+                fig.appendChild(node);
+            }
+        }
+        var fc = fig.querySelector("figcaption");
+        if (!fc) {
+            fc = document.createElement("figcaption");
+            fig.appendChild(fc);
+        }
+        fc.textContent = caption;
+    } else if (fig) {
+        // Back into a paragraph of its own where the figure stood.
+        var host = document.createElement("p");
+        fig.parentNode.insertBefore(host, fig);
+        host.appendChild(node);
+        fig.remove();
     }
 }
 
@@ -347,27 +496,55 @@ export function initButtons() {
         if (!activeImg) return;
         var img = activeImg;
         var link = imageLink(img);
+        var fig = imageFigure(img);
+        var fc = fig ? fig.querySelector("figcaption") : null;
+        var fields = [
+            { id: "alt", label: "Alternative text (screen readers, SEO)", type: "text", tab: "Content",
+                placeholder: "Describe the image", value: img.getAttribute("alt") || "" },
+            { id: "caption", label: "Caption (optional)", type: "text", tab: "Content",
+                placeholder: "Shown under the image", value: fc ? fc.textContent : "" },
+            { id: "href", label: "Link address (optional)", type: "text", tab: "Content",
+                placeholder: "https://example.com or /contact",
+                value: link ? (link.getAttribute("href") || "") : "" },
+            { id: "newtab", label: "Open in a new tab", type: "check", tab: "Content",
+                value: !!link && link.getAttribute("target") === "_blank" },
+            { id: "size", label: "Display width", type: "select", tab: "Style",
+                value: imgClassValue(img, IMG_SIZES),
+                options: [
+                    { value: "", label: "Natural" },
+                    { value: IMG_SIZES[0], label: "Full width" },
+                    { value: IMG_SIZES[1], label: "Two thirds" },
+                    { value: IMG_SIZES[2], label: "Half" },
+                    { value: IMG_SIZES[3], label: "One third" },
+                ] },
+            { id: "round", label: "Corner roundness", type: "select", tab: "Style",
+                value: imgClassValue(img, IMG_ROUND),
+                options: [
+                    { value: "", label: "Square" },
+                    { value: IMG_ROUND[0], label: "Rounded" },
+                    { value: IMG_ROUND[1], label: "Extra rounded" },
+                    { value: IMG_ROUND[2], label: "Circle" },
+                ] },
+            { id: "shadow", label: "Shadow", type: "select", tab: "Style",
+                value: imgShadowValue(img),
+                options: [
+                    { value: "", label: "None" },
+                    { value: IMG_SHADOW[0], label: "Subtle" },
+                    { value: IMG_SHADOW[1], label: "Strong" },
+                ] },
+        ];
+        // The rendition choice only exists for images that recorded
+        // both URLs at insert time.
+        if (img.getAttribute("data-cms-orig") && img.getAttribute("data-cms-web")) {
+            fields.splice(4, 0, { id: "orig", label: "Use full-quality original", type: "check", tab: "Style",
+                value: img.getAttribute("src") === img.getAttribute("data-cms-orig") });
+        }
         openDialog({
             message: "Image settings",
             okLabel: "Apply",
-            fields: [
-                { id: "alt", label: "Alternative text (screen readers, SEO)", type: "text",
-                    placeholder: "Describe the image", value: img.getAttribute("alt") || "" },
-                { id: "href", label: "Link address (optional)", type: "text",
-                    placeholder: "https://example.com or /contact",
-                    value: link ? (link.getAttribute("href") || "") : "" },
-                { id: "newtab", label: "Open in a new tab", type: "check",
-                    value: !!link && link.getAttribute("target") === "_blank" },
-                { id: "size", label: "Display width", type: "select",
-                    value: imgSizeValue(img),
-                    options: [
-                        { value: "", label: "Natural" },
-                        { value: IMG_SIZES[0], label: "Full width" },
-                        { value: IMG_SIZES[1], label: "Two thirds" },
-                        { value: IMG_SIZES[2], label: "Half" },
-                        { value: IMG_SIZES[3], label: "One third" },
-                    ] },
-            ],
+            tabs: ["Content", "Style"],
+            fields: fields,
+            preview: function (v, el) { renderImgPreview(img, v, el); },
         }).then(function (v) {
             if (!v) return;
             var ed = findOwningEditor(img);
@@ -375,6 +552,33 @@ export function initButtons() {
             if (ed) ed.undoManager.transact(run); else run();
             markContainerDirty(img);
             if (activeImg === img) showImgUI(img); // re-anchor around the new size
+        });
+    });
+
+    $("img-del").addEventListener("click", function () {
+        if (!activeImg) return;
+        var img = activeImg;
+        cmsConfirm("Delete this image?", "Delete image", true).then(function (yes) {
+            if (!yes) return;
+            hideImgUI();
+            // Resolve the dirty target before the image leaves the DOM.
+            var regionEl = img.closest("[data-cms-region]");
+            var sectionsEl = img.closest("[data-cms-sections]");
+            var ed = findOwningEditor(img);
+            var run = function () {
+                // Take the image's scaffolding with it: caption figure,
+                // link wrapper, and a paragraph left holding nothing.
+                var outer = imageFigure(img) || imageLink(img) || img;
+                var parent = outer.parentElement;
+                outer.remove();
+                if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" &&
+                    !parent.querySelector("img,a,br")) {
+                    parent.remove();
+                }
+            };
+            if (ed) ed.undoManager.transact(run); else run();
+            if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+            else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         });
     });
 

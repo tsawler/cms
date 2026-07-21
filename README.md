@@ -102,9 +102,13 @@ so every class the menu can apply must be safelisted, or applied styles
 will silently not render in production. The toolbar's alignment buttons
 also apply utility classes — `text-left/center/right` on blocks, and
 `float-left mr-6`, `block mx-auto`, or `float-right ml-6` on images — as
-does the image gear's display-width setting (`w-full`, `w-2/3`, `w-1/2`,
-`w-1/3`, `h-auto`) — so safelist those regardless of which Styles menu
-you ship. For the default menu plus alignment and image widths:
+does the image gear's display-width and roundness settings (`w-full`,
+`w-2/3`, `w-1/2`, `w-1/3`, `h-auto`, `rounded-lg`, `rounded-2xl`,
+`rounded-full`) — so safelist those regardless of which Styles menu you
+ship. (The gear's Shadow presets apply the CMS's own
+`cms-shadow-subtle`/`cms-shadow-strong` classes, styled by CSS that
+`{{cmsHead}}` ships — no safelisting needed, and overridable by your
+stylesheet.) For the default menu plus alignment and the image gear:
 
 ```js
 // tailwind.config.js (Tailwind v3)
@@ -115,12 +119,13 @@ safelist: [
     "text-left", "text-center", "text-right",
     "float-left", "float-right", "mr-6", "ml-6", "block", "mx-auto",
     "w-full", "w-2/3", "w-1/2", "w-1/3", "h-auto",
+    "rounded-lg", "rounded-2xl", "rounded-full",
 ],
 ```
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full");
 ```
 
 (The example site uses the Tailwind Play CDN, which generates CSS in the
@@ -289,8 +294,44 @@ safelist: [
 
 ## Navigation menus
 
-Templates render menus from CMS data — the CMS never emits nav markup, so
-any design works:
+Drop `{{cmsNav "main"}}` into a template and the CMS renders the whole
+nav — including one level of dropdown submenus, with the toggle behavior
+built in. Use any menu key you like ("main", "footer", …). The markup
+carries stable classes your stylesheet targets:
+
+```html
+<nav class="cms-nav">
+  <ul class="cms-nav-list">                <!-- horizontal flex list -->
+    <li class="cms-nav-item">
+      <a class="cms-nav-link cms-active" aria-current="page" href="/">Home</a>
+    </li>
+    <li class="cms-nav-item cms-nav-drop"> <!-- dropdown parent; .cms-open while open -->
+      <button class="cms-nav-link cms-nav-toggle">Services<span class="cms-nav-caret"></span></button>
+      <ul class="cms-nav-sub">…</ul>       <!-- the dropdown panel -->
+    </li>
+  </ul>
+</nav>
+```
+
+The CMS injects only the functional minimum (layout of the list, hiding
+and positioning of dropdown panels, a neutral panel look) — colors,
+spacing, and typography come from your CSS, and every injected rule can
+be overridden by class.
+
+**Editing happens right on the nav.** While in edit mode, editors
+right-click any menu item (long-press on touch) to set its text, link it
+to a page (searchable picker; the URL follows slug renames, and the item
+disappears if the page is deleted) or a web address, open it in a new
+tab, or turn a top-level item into a dropdown — a label-only item that
+holds other items, one level deep. "＋" chips add items, and dragging
+rearranges them, including into and out of a dropdown. Items linking to
+draft pages show only for logged-in editors until the page is published.
+Menu changes have no draft state — every change applies to the whole
+site immediately.
+
+Prefer to own the markup completely? `cmsMenu` returns the raw entries —
+`Label`, `URL`, `Active`, `NewTab`, `External`, and `Children` for
+dropdown parents (whose own `URL` is empty):
 
 ```html
 <nav class="flex gap-6">
@@ -301,14 +342,8 @@ any design works:
 </nav>
 ```
 
-Entries carry `Label`, `URL`, `Active` (links to the page being viewed),
-`NewTab`, and `External`; use any menu key you like ("main", "footer", …).
-Editors manage the main menu from the tool rail's **Menu** panel: items
-link to a page (picked from a list; the URL follows slug renames, and the
-item disappears if the page is deleted) or to a custom address. Items
-linking to draft pages show only for logged-in editors until the page is
-published. Menu changes have no draft state — saving applies to the whole
-site immediately.
+Hand-rolled navs render the same data but aren't right-click editable —
+the in-place menu editor only attaches to `cmsNav` markup.
 
 ## Custom admin pages
 

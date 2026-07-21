@@ -30,43 +30,88 @@ type PageTemplate struct {
 }
 
 // MenuEntry is one rendered navigation item, as templates receive it from
-// {{cmsMenu "main"}}. The CMS supplies data only; templates own the markup.
+// {{cmsMenu "main"}} and as {{cmsNav "main"}} renders it. The data-only
+// cmsMenu form supplies entries and the template owns the markup; cmsNav
+// emits the CMS's own nav markup (which is what the in-place editor can
+// edit by right-click).
 type MenuEntry struct {
+	ID       int64 // menu item id; the editor's edit-mode marker
 	Label    string
-	URL      string
+	URL      string      // empty for a dropdown parent (label-only)
 	NewTab   bool
 	Active   bool        // this entry links to the page being rendered
 	External bool        // absolute http(s) URL rather than a site page
-	Children []MenuEntry // reserved for nested menus; empty in v1
+	Children []MenuEntry // one level of dropdown items
+}
+
+// buildEntry converts one stored item, resolving page links from the
+// current slug. ok is false when the item should not render (vanished
+// page, or draft page on a public render).
+func buildEntry(item content.MenuItem, current string, includeDrafts bool) (MenuEntry, bool) {
+	e := MenuEntry{ID: item.ID, Label: item.Label, NewTab: item.NewTab}
+	if item.PageID != nil {
+		if item.PageSlug == nil {
+			return e, false // page vanished; FK cascade should prevent this
+		}
+		if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
+			return e, false
+		}
+		e.URL = "/" + *item.PageSlug
+		e.Active = e.URL == current
+		return e, true
+	}
+	e.URL = strings.TrimSpace(item.URL)
+	e.External = strings.HasPrefix(e.URL, "http://") || strings.HasPrefix(e.URL, "https://")
+	e.Active = !e.External && e.URL != "" && e.URL == current
+	return e, true
 }
 
 // BuildMenus turns stored menu items into render-ready entries grouped by
 // menu key. Page-linked items resolve their URL from the page's current
 // slug; items pointing at unpublished pages are dropped unless
 // includeDrafts (editors see draft pages, so they see their menu items).
+// Label-only top-level items are dropdown parents holding their Children;
+// on public renders a dropdown with nothing visible in it is dropped,
+// while editors keep it so they can fill it.
 func BuildMenus(items []content.MenuItem, currentSlug string, includeDrafts bool) map[string][]MenuEntry {
 	current := "/" + currentSlug
 	menus := map[string][]MenuEntry{}
+	// Rows arrive ordered by sort with children stored after their
+	// parent, so parents are placed before their children attach.
+	type parentPos struct{ menu string; idx int }
+	parents := map[int64]parentPos{}
 	for _, item := range items {
-		e := MenuEntry{Label: item.Label, NewTab: item.NewTab}
-		if item.PageID != nil {
-			if item.PageSlug == nil {
-				continue // page vanished; FK cascade should prevent this
+		e, ok := buildEntry(item, current, includeDrafts)
+		if !ok {
+			continue
+		}
+		if item.ParentID != nil {
+			if e.URL == "" {
+				continue // label-only rows are only meaningful at top level
 			}
-			if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
-				continue
+			if p, found := parents[*item.ParentID]; found {
+				list := menus[p.menu]
+				list[p.idx].Children = append(list[p.idx].Children, e)
 			}
-			e.URL = "/" + *item.PageSlug
-			e.Active = e.URL == current
-		} else {
-			if strings.TrimSpace(item.URL) == "" {
-				continue
-			}
-			e.URL = item.URL
-			e.External = strings.HasPrefix(e.URL, "http://") || strings.HasPrefix(e.URL, "https://")
-			e.Active = !e.External && e.URL == current
+			continue
+		}
+		if e.URL == "" {
+			// Dropdown parent; remember where it lands for its children.
+			parents[item.ID] = parentPos{menu: item.Menu, idx: len(menus[item.Menu])}
 		}
 		menus[item.Menu] = append(menus[item.Menu], e)
+	}
+	if !includeDrafts {
+		for key, list := range menus {
+			kept := list[:0]
+			for _, e := range list {
+				if e.URL == "" && len(e.Children) == 0 {
+					continue // empty dropdown on a public render
+				}
+				kept = append(kept, e)
+			}
+			menus[key] = kept
+		}
 	}
 	return menus
 }
@@ -87,6 +132,7 @@ var stubFuncs = template.FuncMap{
 	"cmsImage":    func(string) string { return "" },
 	"cmsSections": func(string) template.HTML { return "" },
 	"cmsMenu":     func(string) []MenuEntry { return nil },
+	"cmsNav":      func(string) template.HTML { return "" },
 	"cmsHead":     func() template.HTML { return "" },
 	"cmsScripts":  func() template.HTML { return "" },
 }
@@ -393,6 +439,7 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 			return template.HTML(sb.String())
 		},
 		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
+		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], edit != nil) },
 		"cmsHead":    func() template.HTML { return headHTML(page) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
 	}
@@ -565,6 +612,85 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	return out.Bytes()
 }
 
+// navHTML renders {{cmsNav "main"}}: complete nav markup with stable
+// cms-nav-* classes the host site styles, one dropdown level, and — on
+// edit renders — the data-cms-menu-item markers the in-place editor uses
+// for right-click editing. The functional CSS and the dropdown-toggle
+// script ship via cmsHead/cmsScripts. The editor re-renders this markup
+// client-side after a menu save (editor/src/menu.js) — keep the two in
+// sync.
+func navHTML(key string, entries []MenuEntry, edit bool) template.HTML {
+	var sb strings.Builder
+	sb.WriteString(`<nav class="cms-nav" data-cms-menu="` + html.EscapeString(key) + `"><ul class="cms-nav-list">`)
+	for _, e := range entries {
+		writeNavItem(&sb, e, edit)
+	}
+	sb.WriteString(`</ul></nav>`)
+	return template.HTML(sb.String())
+}
+
+func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
+	marker := ""
+	if edit {
+		marker = ` data-cms-menu-item="` + strconv.FormatInt(e.ID, 10) + `"`
+	}
+	if e.URL == "" { // label-only dropdown parent
+		sb.WriteString(`<li class="cms-nav-item cms-nav-drop"` + marker + `>` +
+			`<button type="button" class="cms-nav-link cms-nav-toggle" aria-expanded="false" aria-haspopup="true">` +
+			html.EscapeString(e.Label) + `<span class="cms-nav-caret" aria-hidden="true"></span></button>` +
+			`<ul class="cms-nav-sub">`)
+		for _, c := range e.Children {
+			writeNavItem(sb, c, edit)
+		}
+		sb.WriteString(`</ul></li>`)
+		return
+	}
+	sb.WriteString(`<li class="cms-nav-item"` + marker + `><a class="cms-nav-link`)
+	if e.Active {
+		sb.WriteString(` cms-active`)
+	}
+	sb.WriteString(`" href="` + html.EscapeString(e.URL) + `"`)
+	if e.Active {
+		sb.WriteString(` aria-current="page"`)
+	}
+	if e.NewTab {
+		sb.WriteString(` target="_blank" rel="noopener"`)
+	}
+	sb.WriteString(`>` + html.EscapeString(e.Label) + `</a></li>`)
+}
+
+// navCSS is the functional minimum for cmsNav markup: horizontal list,
+// hidden dropdown panels shown on .cms-open, and a neutral panel look.
+// Everything is plain classes the host stylesheet can override.
+const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
+	`.cms-nav-list{display:flex;flex-wrap:wrap;align-items:center;gap:.25em 1.25em}` +
+	`.cms-nav-item{position:relative}` +
+	`button.cms-nav-toggle{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}` +
+	`.cms-nav-caret::before{content:'';display:inline-block;margin-left:.4em;vertical-align:.15em;` +
+	`border:.32em solid transparent;border-top-color:currentColor;border-bottom:none}` +
+	`.cms-nav-sub{display:none;position:absolute;top:100%;left:0;z-index:40;min-width:11em;` +
+	`margin-top:.4em;padding:.35em 0;background:#fff;color:#1a1a1a;` +
+	`border:1px solid rgba(0,0,0,.12);border-radius:.5em;box-shadow:0 8px 24px rgba(0,0,0,.14)}` +
+	`.cms-nav-drop.cms-open>.cms-nav-sub{display:block}` +
+	`.cms-nav-sub .cms-nav-link{display:block;padding:.35em 1em;white-space:nowrap}`
+
+// navJS toggles cmsNav dropdowns: click opens/closes (one at a time),
+// clicking elsewhere or Escape closes. Delegated on document, so the
+// editor's client-side nav re-renders keep working.
+const navJS = `(function(){` +
+	`function closeAll(except){document.querySelectorAll('.cms-nav-drop.cms-open').forEach(function(li){` +
+	`if(li===except)return;li.classList.remove('cms-open');` +
+	`var b=li.querySelector('.cms-nav-toggle');if(b)b.setAttribute('aria-expanded','false');});}` +
+	`document.addEventListener('click',function(e){` +
+	`if(e.target&&e.target.id==='cms-editor-host')return;` +
+	`var t=e.target.closest?e.target.closest('.cms-nav-toggle'):null;` +
+	`if(!t){closeAll(null);return;}` +
+	`var li=t.closest('.cms-nav-drop');var open=!li.classList.contains('cms-open');` +
+	`closeAll(li);li.classList.toggle('cms-open',open);` +
+	`t.setAttribute('aria-expanded',open?'true':'false');});` +
+	`document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAll(null);});` +
+	`})();`
+
 // btnCSS gives button-snippet links (a.cms-btn) a uniform hover and
 // press effect with no per-button configuration. Brightness shifts work
 // over any background the button editor sets, unlike hardcoded hover
@@ -573,13 +699,20 @@ const btnCSS = `a.cms-btn{transition:filter .15s ease}` +
 	`a.cms-btn:hover{filter:brightness(.9)}` +
 	`a.cms-btn:active{filter:brightness(.8)}`
 
+// imgShadowCSS backs the image gear's Shadow presets. CMS-owned classes
+// rather than Tailwind's shadow scale: Tailwind's stock shadows are
+// 10–25% black — nearly invisible next to a photo on a bright display —
+// and every utility class would need safelisting in the host's build.
+const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.14)}` +
+	`.cms-shadow-strong{box-shadow:0 16px 40px rgba(0,0,0,.34),0 4px 12px rgba(0,0,0,.22)}`
+
 // headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
 // small stylesheet (button hover), the page's meta description, and its
 // per-page CSS. HeadCSS is written raw; editing it is restricted to
 // admins.
 func headHTML(p *content.Page) template.HTML {
 	var sb strings.Builder
-	sb.WriteString("<style>" + btnCSS + "</style>\n")
+	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + "</style>\n")
 	// External stylesheets come before the inline CSS so the page's own
 	// rules can override the library's.
 	for _, u := range resourceLinks(p.CSSLinks) {
@@ -613,6 +746,7 @@ var (
 // restricted to admins.
 func scriptsHTML(p *content.Page) template.HTML {
 	var sb strings.Builder
+	sb.WriteString("<script>" + navJS + "</script>\n")
 	for _, u := range resourceLinks(p.JSLinks) {
 		sb.WriteString(`<script src="` + html.EscapeString(u) + "\"></script>\n")
 	}

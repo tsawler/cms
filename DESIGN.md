@@ -249,30 +249,45 @@ a section opens the snippet drawer as a "choose a starting point" picker
 per-paragraph block models fight TinyMCE; one editor per section
 composes cleanly with everything else.
 
-### 4.2 Navigation menus — data from the CMS, markup from the template
+### 4.2 Navigation menus — a CMS partial, edited in place
 
-Menus are the sharpest case of the core principle: nav markup is the most
-design-specific HTML on a site (framework classes, hamburgers,
-dropdowns), so the CMS supplies **data only**. `{{cmsMenu "main"}}`
-returns entries (`Label`, `URL`, `Active`, `NewTab`, `External`,
-`Children`) and the template renders them however it likes; any number of
-menus per site by key ("main", "footer", ...).
+Menus bend the core principle, deliberately. Nav markup is
+design-specific HTML, but hand-rolled markup is invisible to the
+in-place editor — right-click editing needs markup the CMS understands.
+So `{{cmsNav "main"}}` renders the complete nav (list, links, one level
+of dropdown submenus, toggle behavior) with stable `cms-nav-*` classes
+the host styles; the CMS injects only the functional CSS (layout,
+dropdown hide/show/position) via `cmsHead` and the toggle script via
+`cmsScripts`, all overridable by class. `{{cmsMenu "main"}}` remains the
+data-only escape hatch (`Label`, `URL`, `Active`, `NewTab`, `External`,
+`Children`) for bespoke navs, which simply aren't editable in place.
+Any number of menus per site by key ("main", "footer", ...).
 
 Items live in `cms_menu_items` and link **either to a page or to a
-literal URL**. Page links resolve their URL from the slug at render time
-(rename-safe) and vanish when the page is deleted (FK cascade); items
-pointing at draft pages render only for logged-in editors, matching
-draft-page visibility. Literal URLs are validated to a small scheme
-whitelist (`/`, http(s), mailto:, tel:).
+literal URL** — or, for a top-level item, to nothing: a label-only row
+(no page, no URL) is a **dropdown parent**, and its children hang off
+`parent_id`, one level deep by design (the API rejects deeper nesting).
+Label-only parents avoid the classic tap ambiguity on touch — a parent
+never both links and opens. Page links resolve their URL from the slug
+at render time (rename-safe) and vanish when the page is deleted (FK
+cascade); items pointing at draft pages render only for logged-in
+editors, matching draft-page visibility. An empty dropdown renders for
+editors (so it can be filled) but is dropped from public renders.
+Literal URLs are validated to a small scheme whitelist (`/`, http(s),
+mailto:, tel:).
 
-Editing happens in the tool rail's **Menu** panel (label, page picker or
-custom URL, new-tab, reorder, delete), saving via `PUT /api/menu` as an
-atomic list replacement — then the page reloads so the real template
-re-renders the nav. Menus deliberately have **no draft state**: they are
-site-wide, so "publish on which page?" has no good answer; changes are
-live on save (the panel says so). `parent_id` and `.Children` exist now
-so nested menus can arrive later without breaking templates; the v1 UI is
-flat. Labels get per-locale variants when phase 7 lands.
+Editing happens **on the nav itself** while in edit mode: right-click an
+item (long-press on touch) for its settings modal — label, searchable
+page picker or custom URL, new-tab, make-it-a-dropdown, remove; "＋"
+chips append items; drag rearranges, including into/out of a dropdown.
+Every change saves immediately via `PUT /api/menu` as an atomic
+tree replacement, and the editor re-renders the nav client-side
+(editor/src/menu.js mirrors navHTML's markup — keep them in sync).
+Because ReplaceMenu reassigns row ids on every save, the editor
+addresses items by tree position, not id. Menus deliberately have **no
+draft state**: they are site-wide, so "publish on which page?" has no
+good answer; changes are live at once. Labels get per-locale variants
+when phase 7 lands.
 
 - Content tables key on `(page_id, region, locale)` with fallback to `en`
   when a `fr` row doesn't exist.

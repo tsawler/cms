@@ -148,13 +148,19 @@ func (s *server) apiListPages(w http.ResponseWriter, r *http.Request) {
 var menuKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 type menuItemJSON struct {
+	ID     int64  `json:"id,omitempty"` // stable handle for the editor's right-click UI
 	Label  string `json:"label"`
-	PageID int64  `json:"pageId"` // 0 = custom URL item
+	PageID int64  `json:"pageId"` // 0 = custom URL item or dropdown parent
 	URL    string `json:"url"`
 	NewTab bool   `json:"newTab"`
+	// Dropdown marks a label-only parent whose Children render as a
+	// one-level submenu. Stored as a row with no page and no URL.
+	Dropdown bool           `json:"dropdown,omitempty"`
+	Children []menuItemJSON `json:"children,omitempty"`
 }
 
-// apiGetMenu returns a menu's items for the editor's menu panel.
+// apiGetMenu returns a menu's items, as a one-level tree, for the
+// editor's right-click menu UI.
 // GET /api/menu?menu=main
 func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 	menu := r.URL.Query().Get("menu")
@@ -171,12 +177,24 @@ func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Could not load the menu.")
 		return
 	}
-	out := make([]menuItemJSON, len(items))
-	for i, item := range items {
-		out[i] = menuItemJSON{Label: item.Label, URL: item.URL, NewTab: item.NewTab}
+	out := []menuItemJSON{}
+	byID := map[int64]int{} // item id -> index in out, for attaching children
+	for _, item := range items {
+		j := menuItemJSON{ID: item.ID, Label: item.Label, URL: item.URL, NewTab: item.NewTab}
 		if item.PageID != nil {
-			out[i].PageID = *item.PageID
+			j.PageID = *item.PageID
 		}
+		if item.ParentID != nil {
+			// Rows are ordered by sort and children are stored after
+			// their parent, so the parent is always already in out.
+			if pi, ok := byID[*item.ParentID]; ok {
+				out[pi].Children = append(out[pi].Children, j)
+			}
+			continue
+		}
+		j.Dropdown = j.PageID == 0 && j.URL == ""
+		byID[item.ID] = len(out)
+		out = append(out, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"menu": menu, "items": out})
 }
@@ -189,9 +207,37 @@ func validMenuURL(u string) bool {
 		strings.HasPrefix(u, "mailto:") || strings.HasPrefix(u, "tel:")
 }
 
-// apiSaveMenu replaces a menu's items with the submitted ordered list.
-// Menus have no draft state: the change is live immediately.
-// PUT /api/menu  body: {"menu": "main", "items": [{label, pageId, url, newTab}]}
+// menuItemInput validates one submitted menu item and converts it for
+// the store. Dropdown parents are label-only; everything else needs a
+// page or a valid URL. Returns a user-facing error message, or "".
+func menuItemInput(item menuItemJSON) (content.MenuItemInput, string) {
+	label := strings.TrimSpace(item.Label)
+	if label == "" {
+		return content.MenuItemInput{}, "Every menu item needs a label."
+	}
+	in := content.MenuItemInput{Label: label, NewTab: item.NewTab}
+	if item.Dropdown {
+		return in, ""
+	}
+	if item.PageID > 0 {
+		id := item.PageID
+		in.PageID = &id
+		return in, ""
+	}
+	url := strings.TrimSpace(item.URL)
+	if !validMenuURL(url) {
+		return content.MenuItemInput{},
+			"Custom links need a web address like https://… or a path like /contact."
+	}
+	in.URL = url
+	return in, ""
+}
+
+// apiSaveMenu replaces a menu's items with the submitted ordered tree
+// (one level of nesting under dropdown parents). Menus have no draft
+// state: the change is live immediately.
+// PUT /api/menu  body: {"menu": "main", "items": [{label, pageId, url,
+// newTab, dropdown, children: […]}]}
 func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Menu  string         `json:"menu"`
@@ -206,30 +252,37 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "Unknown menu.")
 		return
 	}
-	if len(body.Items) > 100 {
+	total := 0
+	for _, item := range body.Items {
+		total += 1 + len(item.Children)
+	}
+	if total > 100 {
 		jsonError(w, http.StatusBadRequest, "Too many menu items.")
 		return
 	}
 
 	inputs := make([]content.MenuItemInput, len(body.Items))
 	for i, item := range body.Items {
-		label := strings.TrimSpace(item.Label)
-		if label == "" {
-			jsonError(w, http.StatusUnprocessableEntity, "Every menu item needs a label.")
+		in, msg := menuItemInput(item)
+		if msg != "" {
+			jsonError(w, http.StatusUnprocessableEntity, msg)
 			return
 		}
-		in := content.MenuItemInput{Label: label, NewTab: item.NewTab}
-		if item.PageID > 0 {
-			id := item.PageID
-			in.PageID = &id
-		} else {
-			url := strings.TrimSpace(item.URL)
-			if !validMenuURL(url) {
-				jsonError(w, http.StatusUnprocessableEntity,
-					"Custom links need a web address like https://… or a path like /contact.")
+		if len(item.Children) > 0 && !item.Dropdown {
+			jsonError(w, http.StatusBadRequest, "Only dropdown items can hold other items.")
+			return
+		}
+		for _, child := range item.Children {
+			if child.Dropdown || len(child.Children) > 0 {
+				jsonError(w, http.StatusBadRequest, "Dropdown menus can only go one level deep.")
 				return
 			}
-			in.URL = url
+			cin, msg := menuItemInput(child)
+			if msg != "" {
+				jsonError(w, http.StatusUnprocessableEntity, msg)
+				return
+			}
+			in.Children = append(in.Children, cin)
 		}
 		inputs[i] = in
 	}

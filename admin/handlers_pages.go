@@ -24,6 +24,10 @@ import (
 // the editor's alignment buttons work.
 var pixelHeightRe = regexp.MustCompile(`^[0-9]{1,4}px$`)
 
+// mediaURLRe bounds the image gear's rendition-URL data attributes:
+// absolute http(s) or app-relative paths only.
+var mediaURLRe = regexp.MustCompile(`^(?:https?://|/)[^\s"'<>\\]+$`)
+
 // The button editor (editor.js) stores its settings as inline styles on
 // <a class="cms-btn"> elements. Browsers serialize colors as rgb(...) in
 // cssText, so both hex and rgb forms must pass.
@@ -41,6 +45,12 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	p.AllowStyles("text-align").MatchingEnum("left", "right", "center", "justify").Globally()
 	// Used by snippets (e.g. quote cards).
 	p.AllowElements("figure", "figcaption")
+	// The image gear stores both rendition URLs on the image (so the
+	// compressed/original choice survives re-editing) and lazy-loads
+	// embedded images. URLs must look like http(s) or app-relative —
+	// no javascript: or data: schemes.
+	p.AllowAttrs("data-cms-web", "data-cms-orig").Matching(mediaURLRe).OnElements("img")
+	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(?:lazy|eager)$`)).OnElements("img")
 	// The "Flexible space" snippet stores its height on the element.
 	p.AllowStyles("height").Matching(pixelHeightRe).Globally()
 	p.AllowAttrs("data-height").Matching(pixelHeightRe).OnElements("div")

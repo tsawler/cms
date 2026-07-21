@@ -24,10 +24,15 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<div data-height="junk">bad badge</div>` +
 		`<img src="/cms/media/abc123/web.jpg" alt="pic" width="800" height="400">` +
 		`<img src="https://bucket.example.com/media/x/web.jpg" alt="ext">` +
-		// Image gear output: alignment/width classes on the img, and a
-		// wrapping link with optional new-tab attributes.
-		`<a href="/contact" target="_blank" rel="noopener">` +
-		`<img src="/cms/media/def456/web.webp" alt="Our office" class="block mx-auto w-1/2 h-auto" width="552" height="368"></a>` +
+		// Image gear output: alignment/width/style classes on the img,
+		// a wrapping link, rendition data attributes, lazy loading, and
+		// a caption figure.
+		`<figure><a href="/contact" target="_blank" rel="noopener">` +
+		`<img src="/cms/media/def456/web.webp" alt="Our office" class="block mx-auto w-1/2 h-auto rounded-lg shadow-md" ` +
+		`width="552" height="368" loading="lazy" ` +
+		`data-cms-web="/cms/media/def456/web.webp" data-cms-orig="/cms/media/def456/original.jpg"></a>` +
+		`<figcaption>Our office in winter</figcaption></figure>` +
+		`<img src=y loading="onload=alert(5)" data-cms-orig="javascript:alert(6)" data-cms-web="data:text/html,x">` +
 		`<a href="/x" class="cms-btn" data-cms-btn-size="l" style="background-color: rgb(17, 34, 51); ` +
 		`color: #ffee88; border: 2px solid #336699; border-radius: 24px; padding: 14px 28px; font-size: 18px;">styled button</a>` +
 		`<a href="/y" style="background-color: url(javascript:alert(4)); border-radius: 50vh;">bad button</a>` +
@@ -66,18 +71,24 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`target="_blank"`,
 		// UGCPolicy appends nofollow to every link's rel.
 		`rel="noopener nofollow"`,
-		// Image gear: linked image with alt, width classes, dimensions.
+		// Image gear: linked, captioned image with alt, style classes,
+		// dimensions, lazy loading, and rendition data attributes.
 		`href="/contact"`,
 		`alt="Our office"`,
-		`class="block mx-auto w-1/2 h-auto"`,
+		`class="block mx-auto w-1/2 h-auto rounded-lg shadow-md"`,
 		`width="552"`,
+		`loading="lazy"`,
+		`data-cms-web="/cms/media/def456/web.webp"`,
+		`data-cms-orig="/cms/media/def456/original.jpg"`,
+		`<figcaption>Our office in winter</figcaption>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)
 		}
 	}
 	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color: red", "50vh",
-		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, `<div style`, "_evil", "opener stylesheet"} {
+		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, `<div style`, "_evil", "opener stylesheet",
+		"onload", "data:text/html"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("sanitized output kept %q:\n%s", banned, out)
 		}

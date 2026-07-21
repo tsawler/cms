@@ -13,6 +13,7 @@ var testFS = fstest.MapFS{
 	"base.gohtml": &fstest.MapFile{Data: []byte(
 		`{{define "base"}}<html><head>{{cmsHead}}</head><body>` +
 			`<nav>{{range cmsMenu "main"}}<a href="{{.URL}}"{{if .Active}} class="act"{{end}}>{{.Label}}</a>{{end}}</nav>` +
+			`{{cmsNav "main"}}` +
 			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
 	"pages/home.gohtml": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
@@ -153,19 +154,24 @@ func TestBuildMenus(t *testing.T) {
 	status := func(s content.Status) *content.Status { return &s }
 
 	items := []content.MenuItem{
-		{Menu: "main", Label: "Home", PageID: pid(1), PageSlug: slug(""), PageStatus: status(content.StatusPublished)},
-		{Menu: "main", Label: "About", PageID: pid(2), PageSlug: slug("about"), PageStatus: status(content.StatusPublished)},
-		{Menu: "main", Label: "Secret", PageID: pid(3), PageSlug: slug("secret"), PageStatus: status(content.StatusDraft)},
-		{Menu: "main", Label: "Docs", URL: "https://example.com/docs", NewTab: true},
-		{Menu: "main", Label: "Broken", URL: "   "},
-		{Menu: "footer", Label: "Privacy", PageID: pid(4), PageSlug: slug("privacy"), PageStatus: status(content.StatusPublished)},
+		{ID: 1, Menu: "main", Label: "Home", PageID: pid(1), PageSlug: slug(""), PageStatus: status(content.StatusPublished)},
+		{ID: 2, Menu: "main", Label: "About", PageID: pid(2), PageSlug: slug("about"), PageStatus: status(content.StatusPublished)},
+		{ID: 3, Menu: "main", Label: "Secret", PageID: pid(3), PageSlug: slug("secret"), PageStatus: status(content.StatusDraft)},
+		{ID: 4, Menu: "main", Label: "Docs", URL: "https://example.com/docs", NewTab: true},
+		// A label-only item is a dropdown parent; children hang off ParentID.
+		{ID: 5, Menu: "main", Label: "More"},
+		{ID: 6, Menu: "main", ParentID: pid(5), Label: "Contact", URL: "/contact"},
+		{ID: 7, Menu: "main", ParentID: pid(5), Label: "Hidden", PageID: pid(3), PageSlug: slug("secret"), PageStatus: status(content.StatusDraft)},
+		{ID: 8, Menu: "main", Label: "Empty"},
+		{ID: 9, Menu: "footer", Label: "Privacy", PageID: pid(4), PageSlug: slug("privacy"), PageStatus: status(content.StatusPublished)},
 	}
 
-	// Public render of /about: draft item dropped, Active on About.
+	// Public render of /about: draft items dropped (top-level and inside
+	// the dropdown), the empty dropdown dropped, Active on About.
 	menus := BuildMenus(items, "about", false)
 	main := menus["main"]
-	if len(main) != 3 {
-		t.Fatalf("public main menu = %d items %v, want 3", len(main), main)
+	if len(main) != 4 {
+		t.Fatalf("public main menu = %d items %v, want 4", len(main), main)
 	}
 	if main[0].URL != "/" || main[0].Active {
 		t.Errorf("home entry wrong: %+v", main[0])
@@ -176,17 +182,82 @@ func TestBuildMenus(t *testing.T) {
 	if !main[2].External || !main[2].NewTab || main[2].Active {
 		t.Errorf("external entry wrong: %+v", main[2])
 	}
+	if main[3].Label != "More" || main[3].URL != "" || len(main[3].Children) != 1 ||
+		main[3].Children[0].URL != "/contact" {
+		t.Errorf("dropdown entry wrong: %+v", main[3])
+	}
 	if len(menus["footer"]) != 1 {
 		t.Errorf("footer menu missing: %v", menus["footer"])
 	}
 
-	// Editors see draft-page items.
+	// Editors see draft-page items and empty dropdowns (to fill them).
 	editorMain := BuildMenus(items, "", true)["main"]
-	if len(editorMain) != 4 {
-		t.Fatalf("editor main menu = %d items, want 4 (draft included)", len(editorMain))
+	if len(editorMain) != 6 {
+		t.Fatalf("editor main menu = %d items %v, want 6", len(editorMain), editorMain)
 	}
 	if !editorMain[0].Active {
 		t.Error("home entry should be active when rendering the home page")
+	}
+	if len(editorMain[4].Children) != 2 {
+		t.Errorf("editor dropdown should keep its draft child: %+v", editorMain[4])
+	}
+	if editorMain[5].Label != "Empty" || len(editorMain[5].Children) != 0 {
+		t.Errorf("editor should keep the empty dropdown: %+v", editorMain[5])
+	}
+}
+
+func TestRenderNav(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+	menus := map[string][]MenuEntry{
+		"main": {
+			{ID: 1, Label: "About <x>", URL: "/about", Active: true},
+			{ID: 2, Label: "More", Children: []MenuEntry{
+				{ID: 3, Label: "Docs", URL: "https://example.com", NewTab: true, External: true},
+			}},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := r.Render(&buf, page, nil, "en", menus, nil); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`<nav class="cms-nav" data-cms-menu="main"><ul class="cms-nav-list">`,
+		`<a class="cms-nav-link cms-active" href="/about" aria-current="page">About &lt;x&gt;</a>`,
+		`<button type="button" class="cms-nav-link cms-nav-toggle" aria-expanded="false" aria-haspopup="true">` +
+			`More<span class="cms-nav-caret" aria-hidden="true"></span></button>`,
+		`<ul class="cms-nav-sub"><li class="cms-nav-item">` +
+			`<a class="cms-nav-link" href="https://example.com" target="_blank" rel="noopener">Docs</a></li></ul>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cmsNav output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "data-cms-menu-item") {
+		t.Error("public render leaked menu edit markers")
+	}
+	// The functional nav CSS and toggle script ride along with
+	// cmsHead/cmsScripts.
+	if !strings.Contains(out, ".cms-nav-sub{display:none") || !strings.Contains(out, ".cms-nav-toggle") {
+		t.Error("nav CSS or toggle script missing from output")
+	}
+
+	// Edit renders mark each item with its id for the in-place editor.
+	buf.Reset()
+	if err := r.Render(&buf, page, nil, "en", menus, &EditInfo{PageID: 1, AdminPath: "/admin"}); err != nil {
+		t.Fatalf("edit Render: %v", err)
+	}
+	out = buf.String()
+	for _, want := range []string{
+		`<li class="cms-nav-item" data-cms-menu-item="1">`,
+		`<li class="cms-nav-item cms-nav-drop" data-cms-menu-item="2">`,
+		`<li class="cms-nav-item" data-cms-menu-item="3">`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("edit render missing %q:\n%s", want, out)
+		}
 	}
 }
 

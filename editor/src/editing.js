@@ -8,9 +8,9 @@ import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
 import { loadTinyMCE, initRichEditors, removeRichEditors } from "./richtext.js";
-import { lockButtons, hideButtonUI, hideSnipUI } from "./buttons.js";
+import { lockButtons, hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
 import { closeDrawer } from "./snippets.js";
-import { closeMenuPanel } from "./menu.js";
+import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
 
 export function textRegions() {
@@ -63,9 +63,9 @@ export function setEditing(on) {
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     $("rail").classList.toggle("on", on);
+    setMenuEditing(on);
     if (!on) {
         closeDrawer();
-        closeMenuPanel();
         state.pendingSection = null;
     }
     updateBarButtons();
@@ -88,6 +88,7 @@ export function setEditing(on) {
     } else {
         hideButtonUI();
         hideSnipUI();
+        hideImgUI();
         removeRichEditors();
         reapplySectionClasses();
     }

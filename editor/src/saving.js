@@ -7,6 +7,7 @@ import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
+import { hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
 
 // The chip has three states: draft (never/no longer live), Live
 // (published and in sync), and "Unpublished edits" (live, but the saved
@@ -100,6 +101,12 @@ export function save() {
         state.sectionEditors.forEach(function (s) { s.ed.setDirty(false); });
         $("save").disabled = true;
         if (state.pageStatus === "published") state.hasUnpublished = true;
+        // Saving reads as "done with that element" — clear any floating
+        // gear/trash chrome (clicks on the bar deliberately keep it, so
+        // it would otherwise linger).
+        hideButtonUI();
+        hideSnipUI();
+        hideImgUI();
         flash("Draft saved");
         updateChip();
         updateBarButtons();

@@ -60,7 +60,6 @@ export function initShell() {
         '<button id="rail-add" title="Add a section">＋<span>Section</span></button>' +
         '<button id="rail-snips" title="Snippets">⧉<span>Snippets</span></button>' +
         '<button id="rail-page" title="New page">⊞<span>Page</span></button>' +
-        '<button id="rail-menu" title="Edit the site menu">☰<span>Menu</span></button>' +
         "</div>" +
         '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
         '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
@@ -88,16 +87,27 @@ export function initShell() {
         '<div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
         '<div class="dlist" id="snip-list"></div>' +
         "</div>" +
-        '<div class="drawer" id="menu-drawer">' +
-        '<div class="dhead"><h2>Site menu</h2>' +
-        '<button id="menu-close" title="Close" aria-label="Close">×</button></div>' +
-        '<div class="dhint">Items link to a page or a custom address. Saving applies to the whole site immediately.</div>' +
-        '<div class="dlist" id="menu-list"></div>' +
-        '<div class="merr" id="menu-err" hidden></div>' +
-        '<div class="mfoot">' +
-        '<button class="mbtn" id="menu-add">＋ Add item</button>' +
-        '<span style="flex:1"></span>' +
-        '<button class="mbtn primary" id="menu-save">Save menu</button>' +
+        '<div class="dlg-overlay" id="mm-overlay"></div>' +
+        '<div class="dlg" id="mm" role="dialog" aria-modal="true">' +
+        '<p id="mm-title">Menu item</p>' +
+        '<div class="fld"><label>Menu text</label>' +
+        '<input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div>' +
+        '<div class="fld"><label>Links to</label>' +
+        '<label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label>' +
+        '<label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label>' +
+        '<label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">' +
+        "Nothing — it opens a dropdown menu</label></div>" +
+        '<div class="fld" id="mm-page-fld"><label>Page</label>' +
+        '<div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages…"' +
+        ' autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div>' +
+        '<div class="fld" id="mm-url-fld"><label>Web address</label>' +
+        '<input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div>' +
+        '<div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div>' +
+        '<p class="derr" id="mm-err" hidden></p>' +
+        '<div class="acts">' +
+        '<button id="mm-remove" class="rm" hidden>Remove</button>' +
+        '<button id="mm-cancel">Cancel</button>' +
+        '<button id="mm-ok" class="ok">OK</button>' +
         "</div></div>" +
         '<div class="code-overlay" id="code-overlay"></div>' +
         '<div class="codepanel" id="code-panel">' +
@@ -132,6 +142,7 @@ export function initShell() {
         "</div>" +
         '<div class="btnui" id="img-ui">' +
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
+        '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +

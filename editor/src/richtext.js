@@ -141,13 +141,18 @@ export function initInlineEditor(el, onDirty, register) {
             // straight to the CMS media picker (library + upload).
             if (mediaEnabled) {
                 // Insert image; with an image selected, replaces it.
+                // Both rendition URLs ride along as data attributes so
+                // the image gear can swap between the compressed web
+                // variant and the full-quality original later.
                 ed.ui.registry.addButton("cmsimage", {
                     icon: "image",
                     tooltip: "Insert image",
                     onAction: function () {
                         openPicker("image", function (item) {
                             ed.insertContent('<img src="' + escapeAttr(item.web) +
-                                '" alt="' + escapeAttr(item.alt || "") + '">');
+                                '" alt="' + escapeAttr(item.alt || "") + '" loading="lazy"' +
+                                ' data-cms-web="' + escapeAttr(item.web) +
+                                '" data-cms-orig="' + escapeAttr(item.original) + '">');
                             onDirty();
                         });
                     },

@@ -48,15 +48,18 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 	})
 }
 
-// MenuItemInput is one entry supplied to ReplaceMenu.
+// MenuItemInput is one entry supplied to ReplaceMenu. A label-only entry
+// (no page, no URL) is a dropdown parent; Children go one level deep and
+// may not have children of their own.
 type MenuItemInput struct {
-	Label  string
-	PageID *int64
-	URL    string
-	NewTab bool
+	Label    string
+	PageID   *int64
+	URL      string
+	NewTab   bool
+	Children []MenuItemInput
 }
 
-// ReplaceMenu replaces a menu's items with the given ordered list,
+// ReplaceMenu replaces a menu's items with the given ordered tree,
 // atomically. Menus have no draft state — changes are live on commit.
 func (s *Store) ReplaceMenu(ctx context.Context, menu string, items []MenuItemInput) error {
 	tx, err := s.db.Begin(ctx)
@@ -68,12 +71,26 @@ func (s *Store) ReplaceMenu(ctx context.Context, menu string, items []MenuItemIn
 	if _, err := tx.Exec(ctx, "DELETE FROM cms_menu_items WHERE menu = $1", menu); err != nil {
 		return err
 	}
-	for i, item := range items {
-		if _, err := tx.Exec(ctx, `
+	// Children share the parent's sort sequence; ordering within a level
+	// is what matters, and (menu, sort) stays unique per row for sanity.
+	sort := 0
+	for _, item := range items {
+		var parentID int64
+		if err := tx.QueryRow(ctx, `
 			INSERT INTO cms_menu_items (menu, sort, label, page_id, url, new_tab)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			menu, i, item.Label, item.PageID, item.URL, item.NewTab); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+			menu, sort, item.Label, item.PageID, item.URL, item.NewTab).Scan(&parentID); err != nil {
 			return err
+		}
+		sort++
+		for _, child := range item.Children {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO cms_menu_items (menu, sort, label, page_id, url, new_tab, parent_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+				menu, sort, child.Label, child.PageID, child.URL, child.NewTab, parentID); err != nil {
+				return err
+			}
+			sort++
 		}
 	}
 	return tx.Commit(ctx)

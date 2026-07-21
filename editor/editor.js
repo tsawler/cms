@@ -219,7 +219,7 @@
             tooltip: "Insert image",
             onAction: function() {
               openPicker("image", function(item) {
-                ed.insertContent('<img src="' + escapeAttr(item.web) + '" alt="' + escapeAttr(item.alt || "") + '">');
+                ed.insertContent('<img src="' + escapeAttr(item.web) + '" alt="' + escapeAttr(item.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr(item.web) + '" data-cms-orig="' + escapeAttr(item.original) + '">');
                 onDirty();
               });
             }
@@ -586,175 +586,9 @@
     wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  // ../src/menu.js
-  var menuData = null;
-  var menuPages = null;
-  function openMenuPanel() {
-    closeDrawer();
-    $("menu-drawer").classList.add("on");
-    if (!menuData) loadMenu();
-    updateRail();
-  }
-  function closeMenuPanel() {
-    $("menu-drawer").classList.remove("on");
-    updateRail();
-  }
-  function loadMenu() {
-    $("menu-list").innerHTML = '<span class="empty">Loading\u2026</span>';
-    Promise.all([
-      api("/menu?menu=main", { method: "GET" }),
-      api("/pages", { method: "GET" })
-    ]).then(function(results) {
-      menuData = results[0].items || [];
-      menuPages = results[1].pages || [];
-      renderMenuRows();
-    }).catch(function(err) {
-      $("menu-list").innerHTML = "";
-      var span = document.createElement("span");
-      span.className = "empty";
-      span.textContent = err.message;
-      $("menu-list").appendChild(span);
-    });
-  }
-  function menuError(msg) {
-    var el = $("menu-err");
-    el.textContent = msg || "";
-    el.hidden = !msg;
-  }
-  function renderMenuRows() {
-    var list = $("menu-list");
-    list.innerHTML = "";
-    menuError("");
-    if (menuData.length === 0) {
-      list.innerHTML = '<span class="empty">No menu items yet \u2014 add your first one below.</span>';
-    }
-    menuData.forEach(function(item, i) {
-      var row = document.createElement("div");
-      row.className = "mrow";
-      var tools = document.createElement("div");
-      tools.className = "mtools";
-      [["\u2191", "Move up"], ["\u2193", "Move down"], ["\u2715", "Remove"]].forEach(function(b, ti) {
-        var btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = b[0];
-        btn.title = b[1];
-        btn.addEventListener("click", function() {
-          if (ti === 0 && i > 0) {
-            menuData.splice(i - 1, 0, menuData.splice(i, 1)[0]);
-          } else if (ti === 1 && i < menuData.length - 1) {
-            menuData.splice(i + 1, 0, menuData.splice(i, 1)[0]);
-          } else if (ti === 2) {
-            menuData.splice(i, 1);
-          } else {
-            return;
-          }
-          renderMenuRows();
-        });
-        tools.appendChild(btn);
-      });
-      row.appendChild(tools);
-      var label = document.createElement("input");
-      label.type = "text";
-      label.placeholder = "Label";
-      label.value = item.label;
-      label.addEventListener("input", function() {
-        item.label = label.value;
-      });
-      row.appendChild(label);
-      var sel = document.createElement("select");
-      menuPages.forEach(function(p) {
-        var opt = document.createElement("option");
-        opt.value = String(p.id);
-        opt.textContent = (p.title || "(untitled)") + (p.status === "published" ? "" : " (draft)");
-        if (item.pageId === p.id) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      var custom = document.createElement("option");
-      custom.value = "custom";
-      custom.textContent = "Custom address\u2026";
-      if (!item.pageId) custom.selected = true;
-      sel.appendChild(custom);
-      sel.addEventListener("change", function() {
-        if (sel.value === "custom") {
-          item.pageId = 0;
-        } else {
-          item.pageId = parseInt(sel.value, 10);
-          item.url = "";
-        }
-        renderMenuRows();
-      });
-      row.appendChild(sel);
-      if (!item.pageId) {
-        var url = document.createElement("input");
-        url.type = "text";
-        url.placeholder = "https://example.com or /contact";
-        url.value = item.url || "";
-        url.addEventListener("input", function() {
-          item.url = url.value;
-        });
-        row.appendChild(url);
-        var chk = document.createElement("label");
-        chk.className = "mchk";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = !!item.newTab;
-        cb.addEventListener("change", function() {
-          item.newTab = cb.checked;
-        });
-        chk.appendChild(cb);
-        chk.appendChild(document.createTextNode("Open in a new tab"));
-        row.appendChild(chk);
-      }
-      list.appendChild(row);
-    });
-  }
-  function initMenu() {
-    $("rail-menu").addEventListener("click", function() {
-      if ($("menu-drawer").classList.contains("on")) closeMenuPanel();
-      else openMenuPanel();
-    });
-    $("menu-close").addEventListener("click", closeMenuPanel);
-    $("menu-add").addEventListener("click", function() {
-      if (!menuData) return;
-      var first = menuPages && menuPages.length ? menuPages[0].id : 0;
-      menuData.push({ label: "", pageId: first, url: "", newTab: false });
-      renderMenuRows();
-      var inputs = $("menu-list").querySelectorAll(".mrow input[type=text]");
-      if (inputs.length) inputs[inputs.length - (first ? 1 : 2)].focus();
-    });
-    $("menu-save").addEventListener("click", function() {
-      if (!menuData) return;
-      for (var i = 0; i < menuData.length; i++) {
-        if (!menuData[i].label.trim()) {
-          menuError("Every menu item needs a label.");
-          return;
-        }
-        if (!menuData[i].pageId && !(menuData[i].url || "").trim()) {
-          menuError("Custom links need a web address.");
-          return;
-        }
-      }
-      menuError("");
-      setMsg("Saving menu\u2026");
-      api("/menu", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menu: "main", items: menuData })
-      }).then(function() {
-        state.dirty = {};
-        state.sectionsDirty = {};
-        window.location.reload();
-      }).catch(function(err) {
-        menuError(err.message);
-        setMsg("");
-      });
-    });
-  }
-
   // ../src/snippets.js
   var snippetsLoaded = false;
   function openDrawer() {
-    closeMenuPanel();
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
     $("drawer-hint").textContent = state.pendingSection ? "Choose a snippet to be the section's starting content." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
@@ -770,7 +604,6 @@
     var open = $("drawer").classList.contains("on");
     $("rail-add").classList.toggle("on", open && !!state.pendingSection);
     $("rail-snips").classList.toggle("on", open && !state.pendingSection);
-    $("rail-menu").classList.toggle("on", $("menu-drawer").classList.contains("on"));
   }
   function loadSnippets() {
     var list = $("snip-list");
@@ -988,15 +821,59 @@
   }
   var activeImg = null;
   var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
+  var IMG_ROUND = ["rounded-lg", "rounded-2xl", "rounded-full"];
+  var IMG_SHADOW = ["cms-shadow-subtle", "cms-shadow-strong"];
+  var IMG_SHADOW_ALL = [
+    "shadow-md",
+    "shadow-lg",
+    "shadow-xl",
+    "shadow-2xl",
+    "cms-shadow-subtle",
+    "cms-shadow-strong"
+  ];
+  var IMG_PREVIEW_SHADOW = {
+    "cms-shadow-subtle": "0 4px 12px rgba(0,0,0,.2),0 2px 4px rgba(0,0,0,.14)",
+    "cms-shadow-strong": "0 16px 40px rgba(0,0,0,.34),0 4px 12px rgba(0,0,0,.22)"
+  };
+  var IMG_PREVIEW_ROUND = { "rounded-lg": "8px", "rounded-2xl": "16px", "rounded-full": "9999px" };
+  var IMG_PREVIEW_FRACTION = {};
+  IMG_PREVIEW_FRACTION[IMG_SIZES[0]] = 1;
+  IMG_PREVIEW_FRACTION[IMG_SIZES[1]] = 2 / 3;
+  IMG_PREVIEW_FRACTION[IMG_SIZES[2]] = 1 / 2;
+  IMG_PREVIEW_FRACTION[IMG_SIZES[3]] = 1 / 3;
+  function renderImgPreview(img, v, el) {
+    el.innerHTML = "";
+    var ar = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 4 / 3;
+    var pagePad = 16;
+    var avail = (el.clientWidth || 320) - 2 * pagePad;
+    var f = IMG_PREVIEW_FRACTION[v.size] || 0;
+    var w = f ? f * avail : Math.min(img.naturalWidth || avail, avail);
+    var scale = Math.min(1, 170 / (w / ar));
+    var page = document.createElement("div");
+    page.style.cssText = "background:#fff;border:1px solid #e3e6ea;border-radius:4px;display:inline-block;width:" + Math.round(avail * scale + 2 * pagePad) + "px;padding:" + pagePad + "px;text-align:center";
+    var pimg = document.createElement("img");
+    pimg.src = v.orig === "1" ? img.getAttribute("data-cms-orig") || img.getAttribute("src") : img.getAttribute("data-cms-web") || img.getAttribute("src");
+    pimg.style.cssText = "width:" + Math.round(w * scale) + "px;height:auto;display:inline-block;vertical-align:top;border-radius:" + (IMG_PREVIEW_ROUND[v.round] || "0") + ";" + (IMG_PREVIEW_SHADOW[v.shadow] ? "box-shadow:" + IMG_PREVIEW_SHADOW[v.shadow] + ";" : "");
+    page.appendChild(pimg);
+    var caption = (v.caption || "").trim();
+    if (caption) {
+      var cap = document.createElement("div");
+      cap.textContent = caption;
+      cap.style.cssText = "font:italic 11px system-ui,sans-serif;color:#667085;margin-top:8px";
+      page.appendChild(cap);
+    }
+    el.appendChild(page);
+  }
   function showImgUI(img) {
     activeImg = img;
     var ui = $("img-ui");
     ui.classList.add("on");
     var r = img.getBoundingClientRect();
-    var top = r.top - 44;
-    if (top < 64) top = r.top + 8;
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
     ui.style.top = top + "px";
-    ui.style.left = Math.max(8, r.left) + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
   }
   function hideImgUI() {
     activeImg = null;
@@ -1007,25 +884,52 @@
     if (!a || a.tagName !== "A" || a.classList.contains("cms-btn")) return null;
     return (a.textContent || "").trim() === "" ? a : null;
   }
-  function imgSizeValue(img) {
-    for (var i = 0; i < IMG_SIZES.length; i++) {
-      if (img.classList.contains(IMG_SIZES[i].split(" ")[0])) return IMG_SIZES[i];
+  function imageFigure(img) {
+    var fig = img.closest ? img.closest("figure") : null;
+    if (!fig || fig.querySelector("img") !== img) return null;
+    var fc = fig.querySelector("figcaption");
+    var text = fig.textContent || "";
+    if (fc) text = text.replace(fc.textContent || "", "");
+    return text.trim() === "" ? fig : null;
+  }
+  function imgClassValue(img, presets) {
+    for (var i = 0; i < presets.length; i++) {
+      if (img.classList.contains(presets[i].split(" ")[0])) return presets[i];
     }
     return "";
   }
-  function applyImageSettings(img, v) {
-    img.setAttribute("alt", (v.alt || "").trim());
-    IMG_SIZES.forEach(function(s) {
+  function imgShadowValue(img) {
+    var v = imgClassValue(img, IMG_SHADOW_ALL);
+    if (v === "shadow-md" || v === "shadow-lg") return IMG_SHADOW[0];
+    if (v === "shadow-xl" || v === "shadow-2xl") return IMG_SHADOW[1];
+    return v;
+  }
+  function swapClasses(el, presets, chosen) {
+    presets.forEach(function(s) {
       s.split(" ").forEach(function(c) {
-        img.classList.remove(c);
+        el.classList.remove(c);
       });
     });
-    if (v.size) {
-      v.size.split(" ").forEach(function(c) {
-        img.classList.add(c);
+    if (chosen) {
+      chosen.split(" ").forEach(function(c) {
+        el.classList.add(c);
       });
     }
+  }
+  function applyImageSettings(img, v) {
+    img.setAttribute("alt", (v.alt || "").trim());
+    img.setAttribute("loading", "lazy");
+    swapClasses(img, IMG_SIZES, v.size);
+    swapClasses(img, IMG_ROUND, v.round);
+    swapClasses(img, IMG_SHADOW_ALL, v.shadow);
     if (!img.getAttribute("class")) img.removeAttribute("class");
+    var origURL = img.getAttribute("data-cms-orig");
+    var webURL = img.getAttribute("data-cms-web");
+    if (origURL && webURL) {
+      var src = v.orig === "1" ? origURL : webURL;
+      img.setAttribute("src", src);
+      img.setAttribute("data-mce-src", src);
+    }
     var url = (v.href || "").trim();
     var link = imageLink(img);
     if (url) {
@@ -1046,6 +950,34 @@
     } else if (link) {
       link.parentNode.insertBefore(img, link);
       link.remove();
+    }
+    var node = imageLink(img) || img;
+    var fig = imageFigure(img);
+    var caption = (v.caption || "").trim();
+    if (caption) {
+      if (!fig) {
+        fig = document.createElement("figure");
+        var p = node.parentElement;
+        if (p && p.tagName === "P") {
+          p.parentNode.insertBefore(fig, p.nextSibling);
+          fig.appendChild(node);
+          if ((p.textContent || "").trim() === "" && !p.querySelector("img,a,br")) p.remove();
+        } else {
+          node.parentNode.insertBefore(fig, node);
+          fig.appendChild(node);
+        }
+      }
+      var fc = fig.querySelector("figcaption");
+      if (!fc) {
+        fc = document.createElement("figcaption");
+        fig.appendChild(fc);
+      }
+      fc.textContent = caption;
+    } else if (fig) {
+      var host2 = document.createElement("p");
+      fig.parentNode.insertBefore(host2, fig);
+      host2.appendChild(node);
+      fig.remove();
     }
   }
   function findOwningEditor(el) {
@@ -1261,44 +1193,97 @@
       if (!activeImg) return;
       var img = activeImg;
       var link = imageLink(img);
+      var fig = imageFigure(img);
+      var fc = fig ? fig.querySelector("figcaption") : null;
+      var fields = [
+        {
+          id: "alt",
+          label: "Alternative text (screen readers, SEO)",
+          type: "text",
+          tab: "Content",
+          placeholder: "Describe the image",
+          value: img.getAttribute("alt") || ""
+        },
+        {
+          id: "caption",
+          label: "Caption (optional)",
+          type: "text",
+          tab: "Content",
+          placeholder: "Shown under the image",
+          value: fc ? fc.textContent : ""
+        },
+        {
+          id: "href",
+          label: "Link address (optional)",
+          type: "text",
+          tab: "Content",
+          placeholder: "https://example.com or /contact",
+          value: link ? link.getAttribute("href") || "" : ""
+        },
+        {
+          id: "newtab",
+          label: "Open in a new tab",
+          type: "check",
+          tab: "Content",
+          value: !!link && link.getAttribute("target") === "_blank"
+        },
+        {
+          id: "size",
+          label: "Display width",
+          type: "select",
+          tab: "Style",
+          value: imgClassValue(img, IMG_SIZES),
+          options: [
+            { value: "", label: "Natural" },
+            { value: IMG_SIZES[0], label: "Full width" },
+            { value: IMG_SIZES[1], label: "Two thirds" },
+            { value: IMG_SIZES[2], label: "Half" },
+            { value: IMG_SIZES[3], label: "One third" }
+          ]
+        },
+        {
+          id: "round",
+          label: "Corner roundness",
+          type: "select",
+          tab: "Style",
+          value: imgClassValue(img, IMG_ROUND),
+          options: [
+            { value: "", label: "Square" },
+            { value: IMG_ROUND[0], label: "Rounded" },
+            { value: IMG_ROUND[1], label: "Extra rounded" },
+            { value: IMG_ROUND[2], label: "Circle" }
+          ]
+        },
+        {
+          id: "shadow",
+          label: "Shadow",
+          type: "select",
+          tab: "Style",
+          value: imgShadowValue(img),
+          options: [
+            { value: "", label: "None" },
+            { value: IMG_SHADOW[0], label: "Subtle" },
+            { value: IMG_SHADOW[1], label: "Strong" }
+          ]
+        }
+      ];
+      if (img.getAttribute("data-cms-orig") && img.getAttribute("data-cms-web")) {
+        fields.splice(4, 0, {
+          id: "orig",
+          label: "Use full-quality original",
+          type: "check",
+          tab: "Style",
+          value: img.getAttribute("src") === img.getAttribute("data-cms-orig")
+        });
+      }
       openDialog({
         message: "Image settings",
         okLabel: "Apply",
-        fields: [
-          {
-            id: "alt",
-            label: "Alternative text (screen readers, SEO)",
-            type: "text",
-            placeholder: "Describe the image",
-            value: img.getAttribute("alt") || ""
-          },
-          {
-            id: "href",
-            label: "Link address (optional)",
-            type: "text",
-            placeholder: "https://example.com or /contact",
-            value: link ? link.getAttribute("href") || "" : ""
-          },
-          {
-            id: "newtab",
-            label: "Open in a new tab",
-            type: "check",
-            value: !!link && link.getAttribute("target") === "_blank"
-          },
-          {
-            id: "size",
-            label: "Display width",
-            type: "select",
-            value: imgSizeValue(img),
-            options: [
-              { value: "", label: "Natural" },
-              { value: IMG_SIZES[0], label: "Full width" },
-              { value: IMG_SIZES[1], label: "Two thirds" },
-              { value: IMG_SIZES[2], label: "Half" },
-              { value: IMG_SIZES[3], label: "One third" }
-            ]
-          }
-        ]
+        tabs: ["Content", "Style"],
+        fields,
+        preview: function(v, el) {
+          renderImgPreview(img, v, el);
+        }
       }).then(function(v) {
         if (!v) return;
         var ed = findOwningEditor(img);
@@ -1309,6 +1294,29 @@
         else run();
         markContainerDirty(img);
         if (activeImg === img) showImgUI(img);
+      });
+    });
+    $("img-del").addEventListener("click", function() {
+      if (!activeImg) return;
+      var img = activeImg;
+      cmsConfirm("Delete this image?", "Delete image", true).then(function(yes) {
+        if (!yes) return;
+        hideImgUI();
+        var regionEl = img.closest("[data-cms-region]");
+        var sectionsEl = img.closest("[data-cms-sections]");
+        var ed = findOwningEditor(img);
+        var run = function() {
+          var outer = imageFigure(img) || imageLink(img) || img;
+          var parent = outer.parentElement;
+          outer.remove();
+          if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" && !parent.querySelector("img,a,br")) {
+            parent.remove();
+          }
+        };
+        if (ed) ed.undoManager.transact(run);
+        else run();
+        if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+        else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       });
     });
     $("btn-del").addEventListener("click", function() {
@@ -1408,6 +1416,542 @@
     });
   }
 
+  // ../src/menu.js
+  var menus = null;
+  var pages = null;
+  var loadPromise = null;
+  function navEls() {
+    return Array.prototype.slice.call(document.querySelectorAll("nav[data-cms-menu]"));
+  }
+  function normalize(items) {
+    return (items || []).map(function(it) {
+      return {
+        label: it.label || "",
+        pageId: it.pageId || 0,
+        url: it.url || "",
+        newTab: !!it.newTab,
+        dropdown: !!it.dropdown,
+        children: normalize(it.children)
+      };
+    });
+  }
+  function loadData() {
+    if (loadPromise) return loadPromise;
+    var keys = [];
+    navEls().forEach(function(nav) {
+      var k = nav.getAttribute("data-cms-menu");
+      if (k && keys.indexOf(k) === -1) keys.push(k);
+    });
+    loadPromise = Promise.all([
+      api("/pages", { method: "GET" }),
+      Promise.all(keys.map(function(k) {
+        return api("/menu?menu=" + encodeURIComponent(k), { method: "GET" });
+      }))
+    ]).then(function(results) {
+      pages = results[0].pages || [];
+      menus = {};
+      results[1].forEach(function(body) {
+        menus[body.menu] = normalize(body.items);
+      });
+    }).catch(function(err) {
+      loadPromise = null;
+      throw err;
+    });
+    return loadPromise;
+  }
+  function whenLoaded(fn) {
+    loadData().then(fn).catch(function(err) {
+      flash(err.message);
+    });
+  }
+  function menuKeyOf(el) {
+    var nav = el.closest("nav[data-cms-menu]");
+    return nav ? nav.getAttribute("data-cms-menu") : null;
+  }
+  function itemIndex(li) {
+    var n = 0, el = li;
+    while (el = el.previousElementSibling) {
+      if (el.classList.contains("cms-nav-item")) n++;
+    }
+    return n;
+  }
+  function pathOf(li) {
+    var idx = itemIndex(li);
+    if (li.parentElement.classList.contains("cms-nav-sub")) {
+      return [itemIndex(li.parentElement.closest("li")), idx];
+    }
+    return [idx];
+  }
+  function itemAt(key, path) {
+    var it = (menus[key] || [])[path[0]];
+    if (it && path.length === 2) return (it.children || [])[path[1]];
+    return it;
+  }
+  function removeAt(key, path) {
+    if (path.length === 1) menus[key].splice(path[0], 1);
+    else menus[key][path[0]].children.splice(path[1], 1);
+  }
+  function pageById(id) {
+    for (var i = 0; i < (pages || []).length; i++) {
+      if (pages[i].id === id) return pages[i];
+    }
+    return null;
+  }
+  function itemURL(item) {
+    if (item.pageId) {
+      var p = pageById(item.pageId);
+      return p ? "/" + p.slug : null;
+    }
+    return item.url || null;
+  }
+  function itemLI(item, top) {
+    var li = document.createElement("li");
+    li.className = "cms-nav-item";
+    if (item.dropdown && top) {
+      li.className += " cms-nav-drop";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cms-nav-link cms-nav-toggle";
+      btn.setAttribute("aria-expanded", "false");
+      btn.setAttribute("aria-haspopup", "true");
+      btn.textContent = item.label;
+      var caret = document.createElement("span");
+      caret.className = "cms-nav-caret";
+      caret.setAttribute("aria-hidden", "true");
+      btn.appendChild(caret);
+      li.appendChild(btn);
+      var sub = document.createElement("ul");
+      sub.className = "cms-nav-sub";
+      item.children.forEach(function(c) {
+        sub.appendChild(itemLI(c, false));
+      });
+      if (state.editing) sub.appendChild(addChip());
+      li.appendChild(sub);
+      return li;
+    }
+    var a = document.createElement("a");
+    a.className = "cms-nav-link";
+    var url = itemURL(item);
+    a.href = url || "#";
+    if (state.editing) a.draggable = false;
+    if (url && url.indexOf("http") !== 0 && url === window.location.pathname) {
+      a.className += " cms-active";
+      a.setAttribute("aria-current", "page");
+    }
+    if (item.newTab) {
+      a.target = "_blank";
+      a.rel = "noopener";
+    }
+    a.textContent = item.label;
+    li.appendChild(a);
+    return li;
+  }
+  function addChip() {
+    var li = document.createElement("li");
+    li.className = "cms-nav-addli";
+    var b = document.createElement("button");
+    b.type = "button";
+    b.title = "Add a menu item";
+    b.textContent = "\uFF0B";
+    b.addEventListener("click", function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var key = menuKeyOf(li);
+      var sub = li.parentElement.classList.contains("cms-nav-sub") ? li.parentElement : null;
+      openModal(key, null, sub ? [itemIndex(sub.closest("li"))] : null);
+    });
+    li.appendChild(b);
+    return li;
+  }
+  function renderNav(nav) {
+    var key = nav.getAttribute("data-cms-menu");
+    if (!menus || menus[key] === void 0) return;
+    var openIdx = [];
+    nav.querySelectorAll("li.cms-nav-drop.cms-open").forEach(function(li) {
+      openIdx.push(itemIndex(li));
+    });
+    var ul = document.createElement("ul");
+    ul.className = "cms-nav-list";
+    menus[key].forEach(function(item) {
+      ul.appendChild(itemLI(item, true));
+    });
+    if (state.editing) ul.appendChild(addChip());
+    nav.innerHTML = "";
+    nav.appendChild(ul);
+    openIdx.forEach(function(i) {
+      var li = ul.children[i];
+      if (li && li.classList.contains("cms-nav-drop")) openDrop(li);
+    });
+  }
+  function renderAll() {
+    navEls().forEach(renderNav);
+  }
+  function saveMenu(key) {
+    setMsg("Saving menu\u2026");
+    api("/menu", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ menu: key, items: menus[key] })
+    }).then(function() {
+      renderAll();
+      flash("Menu updated");
+    }).catch(function(err) {
+      flash(err.message);
+      loadPromise = null;
+      whenLoaded(renderAll);
+    });
+  }
+  var modal = null;
+  var comboPageId = 0;
+  var confirmDropLoss = false;
+  function isMenuModalOpen() {
+    return !!modal;
+  }
+  function closeMenuModal() {
+    modal = null;
+    $("mm-overlay").classList.remove("on");
+    $("mm").classList.remove("on");
+  }
+  function mmError(msg) {
+    $("mm-err").textContent = msg || "";
+    $("mm-err").hidden = !msg;
+  }
+  function currentKind() {
+    if ($("mm-kind-drop").checked) return "dropdown";
+    if ($("mm-kind-url").checked) return "url";
+    return "page";
+  }
+  function setKind(kind) {
+    $("mm-kind-page").checked = kind === "page";
+    $("mm-kind-url").checked = kind === "url";
+    $("mm-kind-drop").checked = kind === "dropdown";
+    $("mm-page-fld").hidden = kind !== "page";
+    $("mm-url-fld").hidden = kind !== "url";
+    $("mm-tab-fld").hidden = kind === "dropdown";
+  }
+  function comboSet(pageId2) {
+    comboPageId = pageId2 || 0;
+    var p = pageById(comboPageId);
+    $("mm-page").value = p ? p.title || "(untitled)" : "";
+    $("mm-page-list").hidden = true;
+  }
+  function comboFilter() {
+    var q = $("mm-page").value.trim().toLowerCase();
+    var list = $("mm-page-list");
+    list.innerHTML = "";
+    var shown = 0;
+    (pages || []).forEach(function(p) {
+      if (shown >= 30) return;
+      var title = p.title || "(untitled)";
+      if (q && title.toLowerCase().indexOf(q) === -1 && p.slug.indexOf(q) === -1) return;
+      shown++;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = title + (p.status === "published" ? "" : " (draft)");
+      b.addEventListener("click", function() {
+        comboSet(p.id);
+      });
+      list.appendChild(b);
+    });
+    if (!shown) {
+      var none = document.createElement("div");
+      none.className = "none";
+      none.textContent = "No matching pages.";
+      list.appendChild(none);
+    }
+    list.hidden = false;
+  }
+  function openModal(key, path, parentPath) {
+    var item = path ? itemAt(key, path) : {
+      label: "",
+      pageId: 0,
+      url: "",
+      newTab: false,
+      dropdown: false,
+      children: []
+    };
+    if (!item) return;
+    modal = { key, path, parentPath: parentPath || null, item };
+    confirmDropLoss = false;
+    $("mm-title").textContent = path ? "Menu item" : "New menu item";
+    $("mm-label").value = item.label;
+    setKind(item.dropdown ? "dropdown" : item.url && !item.pageId ? "url" : "page");
+    comboSet(item.pageId);
+    $("mm-url").value = item.url;
+    $("mm-newtab").checked = item.newTab;
+    $("mm-kind-drop-row").hidden = path ? path.length === 2 : !!parentPath;
+    $("mm-remove").hidden = !path;
+    mmError("");
+    $("mm-overlay").classList.add("on");
+    $("mm").classList.add("on");
+    $("mm-label").focus();
+  }
+  function modalOK() {
+    var m = modal;
+    if (!m) return;
+    var label = $("mm-label").value.trim();
+    if (!label) {
+      mmError("Give the item some menu text.");
+      return;
+    }
+    var kind = currentKind();
+    var url = $("mm-url").value.trim();
+    if (kind === "page" && !comboPageId) {
+      mmError("Choose the page the item links to.");
+      return;
+    }
+    if (kind === "url" && !/^(\/|https?:\/\/|mailto:|tel:)/.test(url)) {
+      mmError("Enter a web address like https://\u2026 or a path like /contact.");
+      return;
+    }
+    var it = m.item;
+    if (it.dropdown && kind !== "dropdown" && it.children.length && !confirmDropLoss) {
+      confirmDropLoss = true;
+      mmError("This dropdown holds " + it.children.length + (it.children.length === 1 ? " item" : " items") + ", which will be removed with it \u2014 press OK again to continue.");
+      return;
+    }
+    it.label = label;
+    it.dropdown = kind === "dropdown";
+    it.pageId = kind === "page" ? comboPageId : 0;
+    it.url = kind === "url" ? url : "";
+    it.newTab = kind !== "dropdown" && $("mm-newtab").checked;
+    if (kind !== "dropdown") it.children = [];
+    if (!m.path) {
+      if (m.parentPath) itemAt(m.key, m.parentPath).children.push(it);
+      else menus[m.key].push(it);
+    }
+    closeMenuModal();
+    saveMenu(m.key);
+  }
+  function modalRemove() {
+    var m = modal;
+    if (!m || !m.path) return;
+    var it = m.item;
+    closeMenuModal();
+    var extra = it.dropdown && it.children.length ? " and the " + it.children.length + (it.children.length === 1 ? " item" : " items") + " inside it" : "";
+    cmsConfirm('Remove "' + it.label + '"' + extra + " from the menu?", "Remove", true).then(function(yes) {
+      if (!yes) return;
+      removeAt(m.key, m.path);
+      saveMenu(m.key);
+    });
+  }
+  var drag = null;
+  var indEl = null;
+  function indicator() {
+    if (!indEl) {
+      indEl = document.createElement("div");
+      indEl.id = "cms-nav-ind";
+      document.body.appendChild(indEl);
+    }
+    return indEl;
+  }
+  function hideIndicator() {
+    if (indEl) indEl.style.display = "none";
+  }
+  function listItems(list) {
+    var out = [];
+    for (var i = 0; i < list.children.length; i++) {
+      var c = list.children[i];
+      if (c.classList.contains("cms-nav-item") && c !== drag.li) out.push(c);
+    }
+    return out;
+  }
+  function insertIndex(list, e, vertical) {
+    var idx = 0;
+    listItems(list).forEach(function(c) {
+      var r = c.getBoundingClientRect();
+      var mid = vertical ? r.top + r.height / 2 : r.left + r.width / 2;
+      if ((vertical ? e.clientY : e.clientX) > mid) idx++;
+    });
+    return idx;
+  }
+  function showLineIndicator(list, idx, vertical) {
+    var items = listItems(list);
+    var el = indicator();
+    var lr = list.getBoundingClientRect();
+    if (vertical) {
+      var y = idx < items.length ? items[idx].getBoundingClientRect().top - 2 : (items.length ? items[items.length - 1].getBoundingClientRect().bottom : lr.top) + 1;
+      el.style.cssText = "display:block;left:" + (lr.left + 6) + "px;top:" + y + "px;width:" + Math.max(lr.width - 12, 24) + "px;height:3px";
+    } else {
+      var x = idx < items.length ? items[idx].getBoundingClientRect().left - 4 : (items.length ? items[items.length - 1].getBoundingClientRect().right : lr.left) + 2;
+      var ref = (items[0] || list).getBoundingClientRect();
+      el.style.cssText = "display:block;left:" + x + "px;top:" + ref.top + "px;width:3px;height:" + ref.height + "px";
+    }
+  }
+  function showNestIndicator(li) {
+    var r = li.getBoundingClientRect();
+    indicator().style.cssText = "display:block;left:" + (r.left - 3) + "px;top:" + (r.top - 3) + "px;width:" + (r.width + 6) + "px;height:" + (r.height + 6) + "px;background:rgba(47,95,224,.14);border:2px solid #2f5fe0;border-radius:6px";
+  }
+  function openDrop(li) {
+    li.classList.add("cms-open");
+    var b = li.querySelector(".cms-nav-toggle");
+    if (b) b.setAttribute("aria-expanded", "true");
+  }
+  function updateDrop(e) {
+    var d = drag;
+    d.drop = null;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    var nav = el && el.closest ? el.closest("nav[data-cms-menu]") : null;
+    if (!nav || nav.getAttribute("data-cms-menu") !== d.key) {
+      hideIndicator();
+      return;
+    }
+    var dragged = itemAt(d.key, d.path);
+    var isParent = d.path.length === 1 && dragged && dragged.dropdown;
+    var sub = el.closest(".cms-nav-sub");
+    if (sub) {
+      if (isParent) {
+        hideIndicator();
+        return;
+      }
+      var idx = insertIndex(sub, e, true);
+      d.drop = { parentItem: itemAt(d.key, [itemIndex(sub.closest("li"))]), index: idx };
+      showLineIndicator(sub, idx, true);
+      return;
+    }
+    var overDrop = el.closest("li.cms-nav-drop");
+    if (overDrop && overDrop !== d.li && !isParent) {
+      var r = overDrop.getBoundingClientRect();
+      if (e.clientX > r.left + r.width * 0.25 && e.clientX < r.right - r.width * 0.25) {
+        openDrop(overDrop);
+        var parentItem = itemAt(d.key, [itemIndex(overDrop)]);
+        d.drop = { parentItem, index: parentItem.children.length };
+        showNestIndicator(overDrop);
+        return;
+      }
+    }
+    var list = nav.querySelector(".cms-nav-list");
+    if (!list) {
+      hideIndicator();
+      return;
+    }
+    var tIdx = insertIndex(list, e, false);
+    d.drop = { parentItem: null, index: tIdx };
+    showLineIndicator(list, tIdx, false);
+  }
+  function applyDrop(d) {
+    var item = itemAt(d.key, d.path);
+    if (!item) return;
+    var before = JSON.stringify(menus[d.key]);
+    removeAt(d.key, d.path);
+    if (d.drop.parentItem) d.drop.parentItem.children.splice(d.drop.index, 0, item);
+    else menus[d.key].splice(d.drop.index, 0, item);
+    if (JSON.stringify(menus[d.key]) === before) {
+      renderAll();
+      return;
+    }
+    saveMenu(d.key);
+  }
+  function setMenuEditing(on) {
+    if (on) {
+      if (navEls().length) whenLoaded(renderAll);
+      return;
+    }
+    if (modal) closeMenuModal();
+    if (menus) renderAll();
+  }
+  var pressTimer = null;
+  function initMenu() {
+    document.addEventListener("contextmenu", function(e) {
+      if (!state.editing || !e.target.closest) return;
+      var nav = e.target.closest("nav[data-cms-menu]");
+      if (!nav) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (modal) return;
+      var li = e.target.closest("li.cms-nav-item");
+      whenLoaded(function() {
+        openModal(nav.getAttribute("data-cms-menu"), li ? pathOf(li) : null, null);
+      });
+    }, true);
+    document.addEventListener("click", function(e) {
+      if (!state.editing || !e.target.closest) return;
+      if (e.target.closest("nav[data-cms-menu] a.cms-nav-link")) {
+        e.preventDefault();
+        e.stopPropagation();
+        flash("Right-click a menu item to edit it; drag to rearrange");
+      }
+    }, true);
+    document.addEventListener("dragstart", function(e) {
+      if (state.editing && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
+        e.preventDefault();
+      }
+    }, true);
+    document.addEventListener("pointerdown", function(e) {
+      if (!state.editing || e.pointerType === "mouse" || !e.target.closest) return;
+      var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
+      if (!li) return;
+      var sx = e.clientX, sy = e.clientY;
+      var cancel = function() {
+        clearTimeout(pressTimer);
+        document.removeEventListener("pointerup", cancel, true);
+        document.removeEventListener("pointercancel", cancel, true);
+        document.removeEventListener("pointermove", onMove, true);
+      };
+      var onMove = function(me) {
+        if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) > 10) cancel();
+      };
+      pressTimer = setTimeout(function() {
+        cancel();
+        whenLoaded(function() {
+          openModal(menuKeyOf(li), pathOf(li), null);
+        });
+      }, 550);
+      document.addEventListener("pointerup", cancel, true);
+      document.addEventListener("pointercancel", cancel, true);
+      document.addEventListener("pointermove", onMove, true);
+    }, true);
+    document.addEventListener("pointerdown", function(e) {
+      if (!state.editing || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
+      var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
+      if (!li || !menus) return;
+      drag = { key: menuKeyOf(li), li, startX: e.clientX, startY: e.clientY, active: false };
+    }, true);
+    document.addEventListener("pointermove", function(e) {
+      if (!drag) return;
+      if (!drag.active) {
+        if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 8) return;
+        drag.active = true;
+        drag.path = pathOf(drag.li);
+        drag.li.classList.add("cms-nav-dragli");
+        document.body.classList.add("cms-nav-dragging");
+        indicator().style.display = "block";
+      }
+      e.preventDefault();
+      updateDrop(e);
+    }, true);
+    document.addEventListener("pointerup", function() {
+      if (!drag) return;
+      var d = drag;
+      drag = null;
+      if (!d.active) return;
+      d.li.classList.remove("cms-nav-dragli");
+      document.body.classList.remove("cms-nav-dragging");
+      hideIndicator();
+      if (d.drop) applyDrop(d);
+    }, true);
+    $("mm-ok").addEventListener("click", modalOK);
+    $("mm-cancel").addEventListener("click", closeMenuModal);
+    $("mm-overlay").addEventListener("click", closeMenuModal);
+    $("mm-remove").addEventListener("click", modalRemove);
+    $("mm").addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && e.target.id !== "mm-page") {
+        e.preventDefault();
+        modalOK();
+      }
+    });
+    ["mm-kind-page", "mm-kind-url", "mm-kind-drop"].forEach(function(id) {
+      $(id).addEventListener("change", function() {
+        setKind(currentKind());
+      });
+    });
+    $("mm-page").addEventListener("focus", comboFilter);
+    $("mm-page").addEventListener("input", function() {
+      comboPageId = 0;
+      comboFilter();
+    });
+  }
+
   // ../src/editing.js
   function textRegions() {
     return Array.prototype.slice.call(
@@ -1458,9 +2002,9 @@
     $("cancel").hidden = !on;
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     $("rail").classList.toggle("on", on);
+    setMenuEditing(on);
     if (!on) {
       closeDrawer();
-      closeMenuPanel();
       state.pendingSection = null;
     }
     updateBarButtons();
@@ -1485,6 +2029,7 @@
     } else {
       hideButtonUI();
       hideSnipUI();
+      hideImgUI();
       removeRichEditors();
       reapplySectionClasses();
     }
@@ -1931,13 +2476,16 @@
         dialogDismiss();
         return;
       }
+      if (isMenuModalOpen()) {
+        closeMenuModal();
+        return;
+      }
       if ($("code-panel").classList.contains("on")) {
         dismissCodePanel();
         return;
       }
       closeMore();
       closeDrawer();
-      closeMenuPanel();
     });
   }
 
@@ -2327,6 +2875,9 @@
       });
       $("save").disabled = true;
       if (state.pageStatus === "published") state.hasUnpublished = true;
+      hideButtonUI();
+      hideSnipUI();
+      hideImgUI();
       flash("Draft saved");
       updateChip();
       updateBarButtons();
@@ -2430,10 +2981,354 @@
   }
 
   // ../src/styles.css
-  var styles_default = "/* Shadow-DOM styles for the editor chrome. Imported as text by shell.js\n * and injected into the shadow root, so host-page CSS can't reach it \u2014\n * and these rules can't leak out. */\n\n:host{all:initial}\n*{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}\n/* Author display rules (inline-flex buttons etc.) would otherwise\n   beat the UA's [hidden]{display:none}. */\n[hidden]{display:none!important}\n\n/* ---- bottom pill bar (dark) ---- */\n.bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;\ndisplay:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;\npadding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap;\ntransition:transform .25s ease,opacity .25s ease}\n.bar.min{transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none}\n.fab{position:fixed;bottom:20px;left:50%;z-index:2147483000;width:48px;height:48px;\nborder-radius:50%;background:#1c2128;color:#fff;border:none;cursor:pointer;\nbox-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:0;\ntransform:translateX(-50%) scale(.25);opacity:0;pointer-events:none;\ntransition:transform .25s ease,opacity .25s ease}\n.fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}\n.fab:hover{background:#2a3140}\n.fab svg{width:20px;height:20px;fill:currentColor}\n.chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}\n.chip.published{background:#1e7e4e}\n.chip.changes{background:#b45309;text-transform:none}\n.msg{opacity:.75;font-size:12px;max-width:14em;overflow:hidden;text-overflow:ellipsis}\n.bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);\nborder-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}\n.bar .ic{display:inline-flex}\n.bar button:hover{background:rgba(255,255,255,.1)}\n.bar button:disabled{opacity:.4;cursor:default}\n.bar button.primary{background:#2f5fe0;border-color:#2f5fe0}\n.bar button.primary:hover{background:#2149b8}\n.bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}\n/* Amber ring on Save while there are unsaved changes. */\n.bar button.attn{border-color:#f0b429}\n\n/* ---- overflow (\u22EF) menu: rare and destructive actions ---- */\n.more{position:relative;display:inline-flex}\n#more{font-size:16px;padding:4px 10px;line-height:1}\n.menu{position:absolute;bottom:calc(100% + 12px);right:0;display:none;flex-direction:column;\nbackground:#242a33;border-radius:12px;padding:6px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4)}\n.menu.on{display:flex}\n.menu button,.menu a{font:inherit;font-size:13px;color:#fff;background:none;border:none;border-radius:8px;\npadding:8px 12px;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}\n.menu button:hover,.menu a:hover{background:rgba(255,255,255,.1)}\n.menu button.dngr{color:#fca5a5}\n.menu button.dngr:hover{background:rgba(252,165,165,.15)}\n.menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}\n\n/* ---- page CSS & JS panel (wide, admin-only) ---- */\n.code-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}\n.code-overlay.on{display:block}\n.codepanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147482999;\nwidth:min(1000px,94vw);height:min(680px,88vh);background:#fff;color:#1c2128;border-radius:12px;\nbox-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}\n.codepanel.on{display:flex}\n.chead{display:flex;align-items:center;gap:18px;padding:10px 16px;border-bottom:1px solid #e3e6ea}\n.chead h2{margin:0;font-size:15px;white-space:nowrap}\n.ctabs{display:flex;gap:4px}\n.ctabs button{border:none;background:none;padding:8px 14px;font-size:13px;color:#667085;\ncursor:pointer;border-bottom:2px solid transparent;border-radius:0}\n.ctabs button:hover{color:#1c2128}\n.ctabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}\n#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;\npadding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}\n#code-close:hover{background:#eceef1;color:#1c2128}\n.clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}\n.clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}\n.clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;\nborder:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;\nfont:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}\n.cbody{flex:1;position:relative;background:#11151c;min-height:0}\n#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;\nfont:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}\n#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}\n/* The universal reset sets font-family on every element \u2014 token\n   spans must stay in the editor's monospace or the visible text\n   drifts out of alignment with the textarea's caret. */\n#code-hl span{font:inherit}\n#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;\noverflow:auto}\n#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}\n.tok-c{color:#7d8799} /* comments */\n.tok-s{color:#9ecbff} /* strings */\n.tok-k{color:#ff7b8a} /* keywords / at-rules */\n.tok-p{color:#b392f0} /* CSS properties */\n.tok-n{color:#f2cc60} /* numbers / colors */\n.cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}\n.chint{flex:1;font-size:12px;color:#667085}\n\n/* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */\n.btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;\nborder:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;\nbox-shadow:0 4px 12px rgba(0,0,0,.35)}\n.btnui.on{display:flex}\n.btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;\nborder-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}\n.btnui button:hover{background:rgba(255,255,255,.18)}\n.btnui button svg{display:block;width:15px;height:15px;fill:currentColor}\n#btn-del,#snip-del{color:#fca5a5}\n#btn-del:hover,#snip-del:hover{background:rgba(252,165,165,.2)}\n#snip-move{cursor:grab;font-size:13px;letter-spacing:1px}\n\n/* ---- tool rail (left edge, edit mode only) ---- */\n.rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;\nbackground:#1c2128;display:none;flex-direction:column;align-items:center;\npadding-top:14px;gap:6px;box-shadow:2px 0 12px rgba(0,0,0,.25)}\n.rail.on{display:flex}\n.rail button{width:46px;height:46px;border-radius:10px;border:none;background:transparent;\ncolor:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;\njustify-content:center;gap:3px;font-size:17px;line-height:1;padding:0}\n.rail button span{font-size:9px;opacity:.75;letter-spacing:.02em}\n.rail button:hover:not(:disabled){background:rgba(255,255,255,.14)}\n.rail button.on{background:rgba(255,255,255,.2)}\n.rail button:disabled{opacity:.35;cursor:default}\n\n/* ---- media modal (light, centered) ---- */\n/* Sits above the small dialog: section settings can open the\n   picker to choose a background image while the dialog stays. */\n.overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483003;display:none}\n.overlay.on{display:block}\n.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483004;\nwidth:min(940px,94vw);height:min(640px,88vh);background:#fff;color:#1c2128;\nborder-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}\n.panel.on{display:flex}\n.panel button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;\nborder-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}\n.panel button:hover{background:#f4f5f7}\n.head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e3e6ea}\n.head h2{margin:0;font-size:15px;white-space:nowrap}\n#search{flex:1;min-width:0;padding:7px 12px;border:1px solid #d9dce1;border-radius:8px;font:inherit;font-size:13px}\n.views{display:flex;gap:2px}\n.views button{padding:6px 10px}\n.views button.on{background:#e8edfb;border-color:#2f5fe0;color:#2149b8}\n#picker-close{border:none;font-size:20px;line-height:1;padding:4px 9px;color:#667085}\n#picker-close:hover{background:#eceef1;color:#1c2128}\n.pbody{flex:1;display:flex;min-height:0}\n.side{width:200px;flex-shrink:0;border-right:1px solid #e3e6ea;overflow-y:auto;padding:10px}\n.side button{display:block;width:100%;text-align:left;border:none;background:none;\npadding:8px 10px;border-radius:8px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.side button.on{background:#e8edfb;color:#2149b8;font-weight:600}\n.side button .n{color:#98a2b3;font-size:11px;margin-left:4px}\n.side .newf{color:#667085;margin-top:8px;border-top:1px solid #eceef1;border-radius:0;padding-top:12px}\n.side .newf:hover{color:#2149b8;background:none}\n.main{flex:1;display:flex;flex-direction:column;min-width:0}\n.up{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e6ea}\n.up input[type=file]{font-size:12px;min-width:0;flex:1}\n.items{flex:1;overflow-y:auto;padding:14px}\n.items.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;align-content:start}\n.items.grid figure{margin:0;cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden}\n.items.grid figure:hover{border-color:#2f5fe0}\n.items.grid img{display:block;width:100%;height:92px;object-fit:cover}\n.items.grid .doc{display:flex;align-items:center;justify-content:center;height:92px;background:#f4f5f7;font-size:30px}\n.items.grid .doc span{font-size:11px;font-weight:700;color:#667085;margin-left:4px;text-transform:uppercase}\n.items.grid figcaption{font-size:11px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.items.list .row{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;cursor:pointer}\n.items.list .row:hover{background:#f4f5f7}\n.items.list img{width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0}\n.items.list .doc{width:44px;height:44px;display:flex;align-items:center;justify-content:center;\nbackground:#f4f5f7;border-radius:6px;font-size:20px;flex-shrink:0}\n.items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.items.list .sz{color:#667085;font-size:12px;white-space:nowrap}\n.empty{color:#667085;font-size:13px}\n\n/* ---- snippet drawer: slides out leftward from beside the tool\n   rail (non-modal, so drag-and-drop can reach the page) ---- */\n.drawer{position:fixed;top:0;left:56px;bottom:0;width:300px;z-index:2147482997;\nbackground:#fff;color:#1c2128;box-shadow:8px 0 32px rgba(0,0,0,.18);\ndisplay:flex;flex-direction:column;transform:translateX(-130%);transition:transform .25s ease}\n.drawer.on{transform:translateX(0)}\n.drawer .dhead{display:flex;align-items:center;justify-content:space-between;\npadding:14px 16px;border-bottom:1px solid #e3e6ea}\n.drawer .dhead h2{margin:0;font-size:15px}\n.drawer .dhead button{border:none;background:none;font-size:20px;line-height:1;\npadding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}\n.drawer .dhead button:hover{background:#eceef1;color:#1c2128}\n.drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}\n.drawer .dlist{flex:1;overflow-y:auto;padding:12px}\n.snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;\ncursor:grab;background:#fff}\n.snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}\n.snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}\n.snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;\n-webkit-line-clamp:2;-webkit-box-orient:vertical}\n\n/* ---- menu panel rows ---- */\n.mfoot{display:flex;gap:8px;align-items:center;padding:12px;border-top:1px solid #e3e6ea}\n.mbtn{font:12px system-ui,sans-serif;color:#1c2128;background:#fff;border:1px solid #d9dce1;\nborder-radius:8px;padding:7px 12px;cursor:pointer}\n.mbtn:hover{background:#f4f5f7}\n.mbtn.primary{background:#2f5fe0;border-color:#2f5fe0;color:#fff}\n.mbtn.primary:hover{background:#2149b8}\n.mrow{border:1px solid #d9dce1;border-radius:10px;padding:10px;margin-bottom:10px}\n.mrow input[type=text],.mrow select{width:100%;padding:6px 9px;border:1px solid #d9dce1;\nborder-radius:8px;font:inherit;font-size:12px;margin-bottom:6px;background:#fff}\n.mrow .mchk{display:flex;gap:6px;align-items:center;font-size:12px;color:#475467;margin-bottom:6px}\n.mrow .mtools{display:flex;gap:2px;justify-content:flex-end}\n.mrow .mtools button{border:none;background:none;padding:3px 7px;border-radius:6px;\ncolor:#667085;cursor:pointer;font-size:13px}\n.mrow .mtools button:hover{background:#eceef1;color:#1c2128}\n.merr{color:#c0392b;font-size:12px;padding:0 14px 10px}\n\n/* ---- small dialog (replaces window.confirm / window.prompt) ---- */\n.dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}\n.dlg-overlay.on{display:block}\n.dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;\nwidth:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;\nbox-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}\n.dlg.on{display:block}\n.dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}\n.dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;\nfont:inherit;font-size:13px;margin-bottom:14px}\n.dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}\n/* inline validation error under the prompt input */\n.dlg input.invalid{border-color:#c0392b}\n.dlg input.invalid:focus{outline-color:#c0392b}\n.dlg p.derr{color:#c0392b;font-size:12px;margin:-8px 0 12px}\n.dlg .fld{margin:0 0 12px}\n.dlg .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475467}\n/* color / image field rows in dialogs */\n.dlg .crow,.dlg .irow{display:flex;gap:8px;align-items:center}\n.dlg .crow input[type=color]{width:38px;height:30px;padding:2px;border:1px solid #d9dce1;\nborder-radius:6px;background:#fff;cursor:pointer}\n.dlg .cval{flex:1;font-size:12px;color:#667085}\n.dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}\n.dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}\n.dlg .crow input,.dlg .irow input{margin:0}\n/* range field (slider + numeric input) */\n.dlg .rrow{display:flex;gap:10px;align-items:center}\n.dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}\n.dlg .rnum{width:64px;margin:0;padding:5px 8px}\n/* live preview pane */\n#dlg-preview{margin:0 0 14px;padding:20px;border:1px solid #e3e6ea;border-radius:8px;\nbackground:#f8f9fb;display:flex;justify-content:center;align-items:center;min-height:72px}\n/* plain text + checkbox fields (label.chk must out-rank the\n   .dlg .fld label heading rule, which sets display:block) */\n.dlg .tinput{margin:0}\n.dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;\nfont-weight:400;margin:0}\n.dlg .chk input{width:auto;margin:0}\n/* tab bar */\n.dlg .tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #e3e6ea}\n.dlg .tabs button{border:none;background:none;border-radius:0;padding:8px 14px;font-size:13px;\ncolor:#667085;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}\n.dlg .tabs button:hover{background:none;color:#1c2128}\n.dlg .tabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}\n.dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;\nfont:inherit;font-size:13px;background:#fff}\n.dlg .acts{display:flex;justify-content:flex-end;gap:8px}\n.dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;\nborder-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}\n.dlg button:hover{background:#f4f5f7}\n.dlg button.ok{background:#2f5fe0;border-color:#2f5fe0;color:#fff}\n.dlg button.ok:hover{background:#2149b8}\n.dlg button.ok.danger{background:#c0392b;border-color:#c0392b}\n.dlg button.ok.danger:hover{background:#a03024}\n";
+  var styles_default = `/* Shadow-DOM styles for the editor chrome. Imported as text by shell.js
+ * and injected into the shadow root, so host-page CSS can't reach it \u2014
+ * and these rules can't leak out. */
+
+:host{all:initial}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+/* Author display rules (inline-flex buttons etc.) would otherwise
+   beat the UA's [hidden]{display:none}. */
+[hidden]{display:none!important}
+
+/* ---- bottom pill bar (dark) ---- */
+.bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;
+display:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;
+padding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap;
+transition:transform .25s ease,opacity .25s ease}
+.bar.min{transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none}
+.fab{position:fixed;bottom:20px;left:50%;z-index:2147483000;width:48px;height:48px;
+border-radius:50%;background:#1c2128;color:#fff;border:none;cursor:pointer;
+box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:0;
+transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none;
+transition:transform .25s ease,opacity .25s ease}
+.fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}
+.fab:hover{background:#2a3140}
+.fab svg{width:20px;height:20px;fill:currentColor}
+.chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}
+.chip.published{background:#1e7e4e}
+.chip.changes{background:#b45309;text-transform:none}
+.msg{opacity:.75;font-size:12px;max-width:14em;overflow:hidden;text-overflow:ellipsis}
+.bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);
+border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}
+.bar .ic{display:inline-flex}
+.bar button:hover{background:rgba(255,255,255,.1)}
+.bar button:disabled{opacity:.4;cursor:default}
+.bar button.primary{background:#2f5fe0;border-color:#2f5fe0}
+.bar button.primary:hover{background:#2149b8}
+.bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}
+/* Amber ring on Save while there are unsaved changes. */
+.bar button.attn{border-color:#f0b429}
+
+/* ---- overflow (\u22EF) menu: rare and destructive actions ---- */
+.more{position:relative;display:inline-flex}
+#more{font-size:16px;padding:4px 10px;line-height:1}
+.menu{position:absolute;bottom:calc(100% + 12px);right:0;display:none;flex-direction:column;
+background:#242a33;border-radius:12px;padding:6px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.menu.on{display:flex}
+.menu button,.menu a{font:inherit;font-size:13px;color:#fff;background:none;border:none;border-radius:8px;
+padding:8px 12px;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
+.menu button:hover,.menu a:hover{background:rgba(255,255,255,.1)}
+.menu button.dngr{color:#fca5a5}
+.menu button.dngr:hover{background:rgba(252,165,165,.15)}
+.menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}
+
+/* ---- page CSS & JS panel (wide, admin-only) ---- */
+.code-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}
+.code-overlay.on{display:block}
+.codepanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147482999;
+width:min(1000px,94vw);height:min(680px,88vh);background:#fff;color:#1c2128;border-radius:12px;
+box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}
+.codepanel.on{display:flex}
+.chead{display:flex;align-items:center;gap:18px;padding:10px 16px;border-bottom:1px solid #e3e6ea}
+.chead h2{margin:0;font-size:15px;white-space:nowrap}
+.ctabs{display:flex;gap:4px}
+.ctabs button{border:none;background:none;padding:8px 14px;font-size:13px;color:#667085;
+cursor:pointer;border-bottom:2px solid transparent;border-radius:0}
+.ctabs button:hover{color:#1c2128}
+.ctabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
+#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;
+padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
+#code-close:hover{background:#eceef1;color:#1c2128}
+.clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}
+.clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}
+.clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;
+border:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;
+font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}
+.cbody{flex:1;position:relative;background:#11151c;min-height:0}
+#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;
+font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}
+#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}
+/* The universal reset sets font-family on every element \u2014 token
+   spans must stay in the editor's monospace or the visible text
+   drifts out of alignment with the textarea's caret. */
+#code-hl span{font:inherit}
+#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;
+overflow:auto}
+#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}
+.tok-c{color:#7d8799} /* comments */
+.tok-s{color:#9ecbff} /* strings */
+.tok-k{color:#ff7b8a} /* keywords / at-rules */
+.tok-p{color:#b392f0} /* CSS properties */
+.tok-n{color:#f2cc60} /* numbers / colors */
+.cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}
+.chint{flex:1;font-size:12px;color:#667085}
+
+/* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
+.btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;
+border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;
+box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.btnui.on{display:flex}
+.btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
+border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
+.btnui button:hover{background:rgba(255,255,255,.18)}
+.btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
+#btn-del,#snip-del,#img-del{color:#fca5a5}
+#btn-del:hover,#snip-del:hover,#img-del:hover{background:rgba(252,165,165,.2)}
+#snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
+
+/* ---- tool rail (left edge, edit mode only) ---- */
+.rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
+background:#1c2128;display:none;flex-direction:column;align-items:center;
+padding-top:14px;gap:6px;box-shadow:2px 0 12px rgba(0,0,0,.25)}
+.rail.on{display:flex}
+.rail button{width:46px;height:46px;border-radius:10px;border:none;background:transparent;
+color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;
+justify-content:center;gap:3px;font-size:17px;line-height:1;padding:0}
+.rail button span{font-size:9px;opacity:.75;letter-spacing:.02em}
+.rail button:hover:not(:disabled){background:rgba(255,255,255,.14)}
+.rail button.on{background:rgba(255,255,255,.2)}
+.rail button:disabled{opacity:.35;cursor:default}
+
+/* ---- media modal (light, centered) ---- */
+/* Sits above the small dialog: section settings can open the
+   picker to choose a background image while the dialog stays. */
+.overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483003;display:none}
+.overlay.on{display:block}
+.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483004;
+width:min(940px,94vw);height:min(640px,88vh);background:#fff;color:#1c2128;
+border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflow:hidden}
+.panel.on{display:flex}
+.panel button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+.panel button:hover{background:#f4f5f7}
+.head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e3e6ea}
+.head h2{margin:0;font-size:15px;white-space:nowrap}
+#search{flex:1;min-width:0;padding:7px 12px;border:1px solid #d9dce1;border-radius:8px;font:inherit;font-size:13px}
+.views{display:flex;gap:2px}
+.views button{padding:6px 10px}
+.views button.on{background:#e8edfb;border-color:#2f5fe0;color:#2149b8}
+#picker-close{border:none;font-size:20px;line-height:1;padding:4px 9px;color:#667085}
+#picker-close:hover{background:#eceef1;color:#1c2128}
+.pbody{flex:1;display:flex;min-height:0}
+.side{width:200px;flex-shrink:0;border-right:1px solid #e3e6ea;overflow-y:auto;padding:10px}
+.side button{display:block;width:100%;text-align:left;border:none;background:none;
+padding:8px 10px;border-radius:8px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side button.on{background:#e8edfb;color:#2149b8;font-weight:600}
+.side button .n{color:#98a2b3;font-size:11px;margin-left:4px}
+.side .newf{color:#667085;margin-top:8px;border-top:1px solid #eceef1;border-radius:0;padding-top:12px}
+.side .newf:hover{color:#2149b8;background:none}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.up{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e6ea}
+.up input[type=file]{font-size:12px;min-width:0;flex:1}
+.items{flex:1;overflow-y:auto;padding:14px}
+.items.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;align-content:start}
+.items.grid figure{margin:0;cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden}
+.items.grid figure:hover{border-color:#2f5fe0}
+.items.grid img{display:block;width:100%;height:92px;object-fit:cover}
+.items.grid .doc{display:flex;align-items:center;justify-content:center;height:92px;background:#f4f5f7;font-size:30px}
+.items.grid .doc span{font-size:11px;font-weight:700;color:#667085;margin-left:4px;text-transform:uppercase}
+.items.grid figcaption{font-size:11px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.items.list .row{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.items.list .row:hover{background:#f4f5f7}
+.items.list img{width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0}
+.items.list .doc{width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+background:#f4f5f7;border-radius:6px;font-size:20px;flex-shrink:0}
+.items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.items.list .sz{color:#667085;font-size:12px;white-space:nowrap}
+.empty{color:#667085;font-size:13px}
+
+/* ---- snippet drawer: slides out leftward from beside the tool
+   rail (non-modal, so drag-and-drop can reach the page) ---- */
+.drawer{position:fixed;top:0;left:56px;bottom:0;width:300px;z-index:2147482997;
+background:#fff;color:#1c2128;box-shadow:8px 0 32px rgba(0,0,0,.18);
+display:flex;flex-direction:column;transform:translateX(-130%);transition:transform .25s ease}
+.drawer.on{transform:translateX(0)}
+.drawer .dhead{display:flex;align-items:center;justify-content:space-between;
+padding:14px 16px;border-bottom:1px solid #e3e6ea}
+.drawer .dhead h2{margin:0;font-size:15px}
+.drawer .dhead button{border:none;background:none;font-size:20px;line-height:1;
+padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
+.drawer .dhead button:hover{background:#eceef1;color:#1c2128}
+.drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
+.drawer .dlist{flex:1;overflow-y:auto;padding:12px}
+.snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;
+cursor:grab;background:#fff}
+.snip:hover{border-color:#2f5fe0;box-shadow:0 2px 8px rgba(47,95,224,.12)}
+.snip .sname{font-size:13px;font-weight:600;margin:0 0 3px}
+.snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
+-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+/* ---- small buttons shared by the code panel footer ---- */
+.mbtn{font:12px system-ui,sans-serif;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:7px 12px;cursor:pointer}
+.mbtn:hover{background:#f4f5f7}
+.mbtn.primary{background:#2f5fe0;border-color:#2f5fe0;color:#fff}
+.mbtn.primary:hover{background:#2149b8}
+
+/* ---- menu-item modal: the searchable page picker and Remove ---- */
+.combo{position:relative}
+.combo-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:5;background:#fff;
+border:1px solid #d9dce1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);
+max-height:180px;overflow-y:auto;padding:4px}
+.combo-list button{display:block;width:100%;text-align:left;border:none;background:none;
+padding:7px 10px;border-radius:6px;font-size:13px;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis}
+.combo-list button:hover{background:#e8edfb;color:#2149b8}
+.combo-list .none{padding:7px 10px;font-size:12px;color:#667085}
+.dlg .acts .rm{margin-right:auto;color:#c0392b;border-color:#eac3bd}
+.dlg .acts .rm:hover{background:#fdf2f0}
+/* radio rows under the "Links to" heading */
+#mm .fld label.chk{margin:0 0 6px}
+
+/* ---- small dialog (replaces window.confirm / window.prompt) ---- */
+.dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}
+.dlg-overlay.on{display:block}
+.dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
+width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
+box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}
+.dlg.on{display:block}
+.dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}
+.dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
+font:inherit;font-size:13px;margin-bottom:14px}
+.dlg input:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}
+/* inline validation error under the prompt input */
+.dlg input.invalid{border-color:#c0392b}
+.dlg input.invalid:focus{outline-color:#c0392b}
+.dlg p.derr{color:#c0392b;font-size:12px;margin:-8px 0 12px}
+.dlg .fld{margin:0 0 12px}
+.dlg .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475467}
+/* color / image field rows in dialogs */
+.dlg .crow,.dlg .irow{display:flex;gap:8px;align-items:center}
+.dlg .crow input[type=color]{width:38px;height:30px;padding:2px;border:1px solid #d9dce1;
+border-radius:6px;background:#fff;cursor:pointer}
+.dlg .cval{flex:1;font-size:12px;color:#667085}
+.dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}
+.dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}
+.dlg .crow input,.dlg .irow input{margin:0}
+/* range field (slider + numeric input) */
+.dlg .rrow{display:flex;gap:10px;align-items:center}
+.dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}
+.dlg .rnum{width:64px;margin:0;padding:5px 8px}
+/* live preview pane */
+#dlg-preview{margin:0 0 14px;padding:20px;border:1px solid #e3e6ea;border-radius:8px;
+background:#f8f9fb;display:flex;justify-content:center;align-items:center;min-height:72px}
+/* plain text + checkbox fields (label.chk must out-rank the
+   .dlg .fld label heading rule, which sets display:block) */
+.dlg .tinput{margin:0}
+.dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;
+font-weight:400;margin:0}
+.dlg .chk input{width:auto;margin:0}
+/* tab bar */
+.dlg .tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #e3e6ea}
+.dlg .tabs button{border:none;background:none;border-radius:0;padding:8px 14px;font-size:13px;
+color:#667085;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.dlg .tabs button:hover{background:none;color:#1c2128}
+.dlg .tabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
+.dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;
+font:inherit;font-size:13px;background:#fff}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+.dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;
+border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
+.dlg button:hover{background:#f4f5f7}
+.dlg button.ok{background:#2f5fe0;border-color:#2f5fe0;color:#fff}
+.dlg button.ok:hover{background:#2149b8}
+.dlg button.ok.danger{background:#c0392b;border-color:#c0392b}
+.dlg button.ok.danger:hover{background:#a03024}
+`;
 
   // ../src/light.css
-  var light_default = "/* Light-DOM styles for region outlines while editing. Imported as text\n * by shell.js and injected into <head> \u2014 these rules style the host\n * page's own content (regions, sections, snippets), which the shadow\n * root can't reach. */\n\n/* The tool rail is fixed to the left edge; push the page content\n   right so the rail sits beside it instead of covering it. The\n   transition matches the rail's appearance. */\nbody{transition:margin-left .25s ease}\nbody.cms-editing{margin-left:56px}\n.cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}\n.cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}\n.cms-editing [data-cms-region]:empty::before{content:'Click to edit\u2026';opacity:.4}\n.cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}\n.cms-editing [data-cms-image]:hover{outline-style:solid}\n/* TinyMCE inline adds its own focus outline; ours is enough. */\n.cms-editing [data-cms-region].mce-edit-focus{outline:1.5px solid rgba(47,95,224,.6)}\n#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}\n\n/* Sections */\n.cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}\n.cms-editing [data-cms-section]:hover{outline-style:solid}\n.cms-editing [data-cms-section-content]{min-height:2em}\n.cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;\nbackground:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;\npadding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35)}\n.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;\nborder-radius:999px;padding:6px 9px;cursor:pointer}\n.cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}\n.cms-sec-ui button:hover{background:rgba(255,255,255,.18)}\n.cms-sec-ui button[data-secact='del']{color:#fca5a5}\n.cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}\n.cms-add-section{padding:14px;text-align:center}\n.cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;\nborder:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}\n.cms-add-section button:hover{background:#dbe4fa}\n\n/* Buttons (a.cms-btn): click while editing for gear/trash chrome. */\n.cms-editing a.cms-btn{cursor:pointer}\n.cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}\n\n/* Snippet blocks (.cms-snippet): dotted outline while editing;\n * click for drag-handle/trash chrome. !important beats host CSS\n * (e.g. Tailwind preflight/utilities) that also sets outlines. */\n.cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}\n.cms-editing .cms-snippet:hover{outline-style:solid!important}\n\n/* Flexible-space snippet: invisible on the live site, visible and\n * click-to-adjust while editing. */\n.cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;\noutline:1.5px dashed rgba(217,119,6,.55);outline-offset:-2px;\nbackground:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.06) 8px,transparent 8px,transparent 16px)}\n.cms-editing .cms-spacer:hover{outline-style:solid}\n.cms-editing .cms-spacer::after{content:'\u2195 Space \xB7 ' attr(data-height) ' \u2014 click to adjust';\nposition:absolute;top:50%;left:50%;transform:translate(-50%,-50%);\nfont:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}\n";
+  var light_default = `/* Light-DOM styles for region outlines while editing. Imported as text
+ * by shell.js and injected into <head> \u2014 these rules style the host
+ * page's own content (regions, sections, snippets), which the shadow
+ * root can't reach. */
+
+/* The tool rail is fixed to the left edge; push the page content
+   right so the rail sits beside it instead of covering it. The
+   transition matches the rail's appearance. */
+body{transition:margin-left .25s ease}
+body.cms-editing{margin-left:56px}
+.cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
+.cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
+.cms-editing [data-cms-region]:empty::before{content:'Click to edit\u2026';opacity:.4}
+.cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}
+.cms-editing [data-cms-image]:hover{outline-style:solid}
+/* TinyMCE inline adds its own focus outline; ours is enough. */
+.cms-editing [data-cms-region].mce-edit-focus{outline:1.5px solid rgba(47,95,224,.6)}
+#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}
+
+/* Sections */
+.cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}
+.cms-editing [data-cms-section]:hover{outline-style:solid}
+.cms-editing [data-cms-section-content]{min-height:2em}
+.cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;
+background:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;
+padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
+border-radius:999px;padding:6px 9px;cursor:pointer}
+.cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}
+.cms-sec-ui button:hover{background:rgba(255,255,255,.18)}
+.cms-sec-ui button[data-secact='del']{color:#fca5a5}
+.cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}
+.cms-add-section{padding:14px;text-align:center}
+.cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;
+border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
+.cms-add-section button:hover{background:#dbe4fa}
+
+/* Buttons (a.cms-btn): click while editing for gear/trash chrome. */
+.cms-editing a.cms-btn{cursor:pointer}
+.cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}
+
+/* Snippet blocks (.cms-snippet): dotted outline while editing;
+ * click for drag-handle/trash chrome. !important beats host CSS
+ * (e.g. Tailwind preflight/utilities) that also sets outlines. */
+.cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
+.cms-editing .cms-snippet:hover{outline-style:solid!important}
+
+/* Site menus ({{cmsNav}}): while editing, items are right-clickable
+ * (long-press on touch) and drag to rearrange; "\uFF0B" chips add items. */
+.cms-editing nav[data-cms-menu]{outline:1.5px dashed rgba(47,95,224,.45);outline-offset:6px;
+border-radius:2px;position:relative}
+/* Hovering the nav explains the interaction; the delay keeps it from
+ * flashing on every pass-over, and it gets out of the way mid-drag. */
+.cms-editing nav[data-cms-menu]::after{content:'Right-click a menu item to edit it \u2014 drag to rearrange';
+position:absolute;top:calc(100% + 10px);left:0;z-index:2147482995;
+font:11px/1.4 system-ui,sans-serif;color:#fff;background:#1c2128;padding:5px 10px;
+border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.25);white-space:nowrap;
+pointer-events:none;opacity:0;transition:opacity .15s ease .4s}
+.cms-editing nav[data-cms-menu]:hover::after{opacity:1}
+body.cms-nav-dragging nav[data-cms-menu]::after{display:none}
+.cms-editing nav[data-cms-menu] .cms-nav-item{cursor:context-menu}
+.cms-nav-addli button{font:13px/1 system-ui,sans-serif;color:#2149b8;background:#e8edfb;
+border:1.5px dashed #2f5fe0;border-radius:8px;width:24px;height:24px;cursor:pointer;padding:0}
+.cms-nav-addli button:hover{background:#dbe4fa}
+.cms-nav-sub .cms-nav-addli{padding:.25em .9em}
+.cms-nav-dragli{opacity:.35}
+body.cms-nav-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
+#cms-nav-ind{position:fixed;z-index:2147482996;background:#2f5fe0;border-radius:2px;
+pointer-events:none;display:none}
+
+/* Flexible-space snippet: invisible on the live site, visible and
+ * click-to-adjust while editing. */
+.cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;
+outline:1.5px dashed rgba(217,119,6,.55);outline-offset:-2px;
+background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.06) 8px,transparent 8px,transparent 16px)}
+.cms-editing .cms-spacer:hover{outline-style:solid}
+.cms-editing .cms-spacer::after{content:'\u2195 Space \xB7 ' attr(data-height) ' \u2014 click to adjust';
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
+`;
 
   // ../src/shell.js
   var ICONS = {
@@ -2452,7 +3347,7 @@
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-menu" title="Edit the site menu">\u2630<span>Menu</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="drawer" id="menu-drawer"><div class="dhead"><h2>Site menu</h2><button id="menu-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint">Items link to a page or a custom address. Saving applies to the whole site immediately.</div><div class="dlist" id="menu-list"></div><div class="merr" id="menu-err" hidden></div><div class="mfoot"><button class="mbtn" id="menu-add">\uFF0B Add item</button><span style="flex:1"></span><button class="mbtn primary" id="menu-save">Save menu</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();

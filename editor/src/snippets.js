@@ -10,12 +10,10 @@ import { openDialog } from "./dialogs.js";
 import { markDirty, markSectionsDirty } from "./editing.js";
 import { lockButtons } from "./buttons.js";
 import { createSection } from "./sections.js";
-import { closeMenuPanel } from "./menu.js";
 
 var snippetsLoaded = false;
 
 export function openDrawer() {
-    closeMenuPanel();
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
     $("drawer-hint").textContent = state.pendingSection
@@ -30,14 +28,12 @@ export function closeDrawer() {
     updateRail();
 }
 
-// updateRail highlights whichever rail button the open panel belongs
-// to (Section when choosing a new section's start, Snippets otherwise,
-// Menu for the menu panel).
+// updateRail highlights whichever rail button the open drawer belongs
+// to (Section when choosing a new section's start, Snippets otherwise).
 export function updateRail() {
     var open = $("drawer").classList.contains("on");
     $("rail-add").classList.toggle("on", open && !!state.pendingSection);
     $("rail-snips").classList.toggle("on", open && !state.pendingSection);
-    $("rail-menu").classList.toggle("on", $("menu-drawer").classList.contains("on"));
 }
 
 function loadSnippets() {

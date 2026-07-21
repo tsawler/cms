@@ -8,7 +8,7 @@ import { cmsPrompt, isDialogOpen, dialogDismiss } from "./dialogs.js";
 import { dismissCodePanel } from "./pagecode.js";
 import { closeMore } from "./saving.js";
 import { closeDrawer } from "./snippets.js";
-import { closeMenuPanel } from "./menu.js";
+import { isMenuModalOpen, closeMenuModal } from "./menu.js";
 
 var DOC_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip";
 
@@ -234,12 +234,15 @@ export function initMedia() {
             dialogDismiss();
             return;
         }
+        if (isMenuModalOpen()) {
+            closeMenuModal();
+            return;
+        }
         if ($("code-panel").classList.contains("on")) {
             dismissCodePanel();
             return;
         }
         closeMore();
         closeDrawer();
-        closeMenuPanel();
     });
 }
