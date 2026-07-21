@@ -352,6 +352,7 @@ carries stable classes your stylesheet targets:
 
 ```html
 <nav class="cms-nav">
+  <button class="cms-nav-burger">…</button> <!-- hamburger; hidden above 768px -->
   <ul class="cms-nav-list">                <!-- horizontal flex list -->
     <li class="cms-nav-item">
       <a class="cms-nav-link cms-active" aria-current="page" href="/">Home</a>
@@ -364,10 +365,17 @@ carries stable classes your stylesheet targets:
 </nav>
 ```
 
+On screens 768px and narrower the list collapses behind the hamburger
+button: tapping it sets `.cms-nav-open` on the nav and the items open
+in a left-aligned panel anchored below the button — the header keeps
+its height — with dropdown submenus expanding inline inside the panel.
+Override the `.cms-nav-burger` / `@media` rules in your CSS to change
+the breakpoint or the look.
+
 The CMS injects only the functional minimum (layout of the list, hiding
-and positioning of dropdown panels, a neutral panel look) — colors,
-spacing, and typography come from your CSS, and every injected rule can
-be overridden by class.
+and positioning of dropdown panels, a neutral panel look, the mobile
+collapse) — colors, spacing, and typography come from your CSS, and
+every injected rule can be overridden by class.
 
 **Editing happens right on the nav.** While in edit mode, editors
 right-click any menu item (long-press on touch) to set its text, link it

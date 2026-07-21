@@ -224,7 +224,10 @@ func TestRenderNav(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`<nav class="cms-nav" data-cms-menu="main"><ul class="cms-nav-list">`,
+		`<nav class="cms-nav" data-cms-menu="main">` +
+			`<button type="button" class="cms-nav-burger" aria-expanded="false" aria-label="Menu">` +
+			`<span class="cms-nav-burger-bar" aria-hidden="true"></span></button>` +
+			`<ul class="cms-nav-list">`,
 		`<a class="cms-nav-link cms-active" href="/about" aria-current="page">About &lt;x&gt;</a>`,
 		`<button type="button" class="cms-nav-link cms-nav-toggle" aria-expanded="false" aria-haspopup="true">` +
 			`More<span class="cms-nav-caret" aria-hidden="true"></span></button>`,
@@ -242,6 +245,13 @@ func TestRenderNav(t *testing.T) {
 	// cmsHead/cmsScripts.
 	if !strings.Contains(out, ".cms-nav-sub{display:none") || !strings.Contains(out, ".cms-nav-toggle") {
 		t.Error("nav CSS or toggle script missing from output")
+	}
+	// The mobile collapse: burger shown and list hidden under the
+	// breakpoint, with the script's .cms-nav-open class revealing it.
+	if !strings.Contains(out, "@media (max-width:768px)") ||
+		!strings.Contains(out, ".cms-nav.cms-nav-open>.cms-nav-list{display:flex}") ||
+		!strings.Contains(out, ".cms-nav-burger") {
+		t.Error("mobile nav CSS missing from output")
 	}
 
 	// Edit renders mark each item with its id for the in-place editor.

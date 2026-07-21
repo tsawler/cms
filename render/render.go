@@ -623,7 +623,8 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 }
 
 // navHTML renders {{cmsNav "main"}}: complete nav markup with stable
-// cms-nav-* classes the host site styles, one dropdown level, and — on
+// cms-nav-* classes the host site styles, one dropdown level, a
+// hamburger toggle that takes over on narrow screens, and — on
 // edit renders — the data-cms-menu-item markers the in-place editor uses
 // for click-to-edit. The functional CSS and the dropdown-toggle
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
@@ -633,7 +634,9 @@ func navHTML(key string, entries []MenuEntry, edit bool) template.HTML {
 	var sb strings.Builder
 	sb.WriteString(`<nav class="cms-nav" data-cms-menu="`)
 	sb.WriteString(html.EscapeString(key))
-	sb.WriteString(`"><ul class="cms-nav-list">`)
+	sb.WriteString(`"><button type="button" class="cms-nav-burger" aria-expanded="false" aria-label="Menu">`)
+	sb.WriteString(`<span class="cms-nav-burger-bar" aria-hidden="true"></span></button>`)
+	sb.WriteString(`<ul class="cms-nav-list">`)
 	for _, e := range entries {
 		writeNavItem(&sb, e, edit)
 	}
@@ -675,8 +678,10 @@ func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
 }
 
 // navCSS is the functional minimum for cmsNav markup: horizontal list,
-// hidden dropdown panels shown on .cms-open, and a neutral panel look.
-// Everything is plain classes the host stylesheet can override.
+// hidden dropdown panels shown on .cms-open, a neutral panel look, and
+// — under 768px — a hamburger toggle (.cms-nav-burger, hidden on
+// desktop) that collapses the list until .cms-nav-open is set on the
+// nav. Everything is plain classes the host stylesheet can override.
 const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
 	`.cms-nav-list{display:flex;flex-wrap:wrap;align-items:center;gap:.25em 1.25em}` +
 	`.cms-nav-item{position:relative}` +
@@ -687,23 +692,60 @@ const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
 	`margin-top:.4em;padding:.35em 0;background:#fff;color:#1a1a1a;` +
 	`border:1px solid rgba(0,0,0,.12);border-radius:.5em;box-shadow:0 8px 24px rgba(0,0,0,.14)}` +
 	`.cms-nav-drop.cms-open>.cms-nav-sub{display:block}` +
-	`.cms-nav-sub .cms-nav-link{display:block;padding:.35em 1em;white-space:nowrap}`
+	`.cms-nav-sub .cms-nav-link{display:block;padding:.35em 1em;white-space:nowrap}` +
+	`.cms-nav-burger{display:none;font:inherit;color:inherit;background:none;border:none;` +
+	`padding:.35em 0;cursor:pointer}` +
+	`.cms-nav-burger-bar{display:block;position:relative;width:1.4em;height:2px;` +
+	`background:currentColor;border-radius:1px}` +
+	`.cms-nav-burger-bar::before,.cms-nav-burger-bar::after{content:'';position:absolute;left:0;` +
+	`width:100%;height:2px;background:currentColor;border-radius:1px}` +
+	`.cms-nav-burger-bar::before{top:-.45em}` +
+	`.cms-nav-burger-bar::after{top:.45em}` +
+	// The open list is an absolutely-positioned panel rather than in-flow:
+	// stacking it in place would stretch the nav (and whatever header the
+	// host centers it in), shoving the site brand around. Anchored under
+	// the nav, the header keeps its height and the panel drops over the
+	// content, items left-aligned.
+	`@media (max-width:768px){` +
+	`.cms-nav{position:relative}` +
+	`.cms-nav-burger{display:block}` +
+	`.cms-nav-list{display:none;position:absolute;top:100%;right:0;z-index:40;` +
+	`flex-direction:column;align-items:stretch;gap:0;` +
+	`width:max-content;min-width:13em;max-width:calc(100vw - 2em);` +
+	`margin-top:.4em;padding:.35em 0;background:#fff;color:#1a1a1a;text-align:left;` +
+	`border:1px solid rgba(0,0,0,.12);border-radius:.5em;box-shadow:0 8px 24px rgba(0,0,0,.14)}` +
+	`.cms-nav.cms-nav-open>.cms-nav-list{display:flex}` +
+	`.cms-nav-list .cms-nav-link{display:block;width:100%;text-align:left;` +
+	`padding:.45em 1em;white-space:normal}` +
+	`.cms-nav-sub{position:static;min-width:0;margin:0;padding:0 0 0 1em;` +
+	`background:none;color:inherit;border:none;border-radius:0;box-shadow:none}` +
+	`}`
 
-// navJS toggles cmsNav dropdowns: click opens/closes (one at a time),
-// clicking elsewhere or Escape closes. Delegated on document, so the
-// editor's client-side nav re-renders keep working.
+// navJS toggles cmsNav dropdowns and the mobile hamburger: click
+// opens/closes (one dropdown at a time), clicking elsewhere or Escape
+// closes. The hamburger sets .cms-nav-open on its nav; clicking outside
+// any nav or pressing Escape collapses open navs too. Delegated on
+// document, so the editor's client-side nav re-renders keep working.
 const navJS = `(function(){` +
 	`function closeAll(except){document.querySelectorAll('.cms-nav-drop.cms-open').forEach(function(li){` +
 	`if(li===except)return;li.classList.remove('cms-open');` +
 	`var b=li.querySelector('.cms-nav-toggle');if(b)b.setAttribute('aria-expanded','false');});}` +
+	`function closeBurgers(){document.querySelectorAll('.cms-nav.cms-nav-open').forEach(function(n){` +
+	`n.classList.remove('cms-nav-open');` +
+	`var b=n.querySelector('.cms-nav-burger');if(b)b.setAttribute('aria-expanded','false');});}` +
 	`document.addEventListener('click',function(e){` +
 	`if(e.target&&e.target.id==='cms-editor-host')return;` +
+	`var g=e.target.closest?e.target.closest('.cms-nav-burger'):null;` +
+	`if(g){var nav=g.closest('.cms-nav');var on=!nav.classList.contains('cms-nav-open');` +
+	`closeBurgers();closeAll(null);nav.classList.toggle('cms-nav-open',on);` +
+	`g.setAttribute('aria-expanded',on?'true':'false');return;}` +
+	`if(!e.target.closest||!e.target.closest('.cms-nav'))closeBurgers();` +
 	`var t=e.target.closest?e.target.closest('.cms-nav-toggle'):null;` +
 	`if(!t){closeAll(null);return;}` +
 	`var li=t.closest('.cms-nav-drop');var open=!li.classList.contains('cms-open');` +
 	`closeAll(li);li.classList.toggle('cms-open',open);` +
 	`t.setAttribute('aria-expanded',open?'true':'false');});` +
-	`document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAll(null);});` +
+	`document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeAll(null);closeBurgers();}});` +
 	`})();`
 
 // btnCSS gives button-snippet links (a.cms-btn) a uniform hover and

@@ -1757,6 +1757,15 @@
     nav.querySelectorAll("li.cms-nav-drop.cms-open").forEach(function(li) {
       openIdx.push(itemIndex(li));
     });
+    var burger = document.createElement("button");
+    burger.type = "button";
+    burger.className = "cms-nav-burger";
+    burger.setAttribute("aria-label", "Menu");
+    burger.setAttribute("aria-expanded", nav.classList.contains("cms-nav-open") ? "true" : "false");
+    var bar = document.createElement("span");
+    bar.className = "cms-nav-burger-bar";
+    bar.setAttribute("aria-hidden", "true");
+    burger.appendChild(bar);
     var ul = document.createElement("ul");
     ul.className = "cms-nav-list";
     menus[key].forEach(function(item) {
@@ -1764,6 +1773,7 @@
     });
     if (state.editing) ul.appendChild(addChip());
     nav.innerHTML = "";
+    nav.appendChild(burger);
     nav.appendChild(ul);
     openIdx.forEach(function(i) {
       var li = ul.children[i];
