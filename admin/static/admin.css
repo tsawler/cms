@@ -246,7 +246,8 @@ a.cms-card:hover { border-color: var(--cms-primary); }
     overflow: hidden;
 }
 .cms-media-card > a { display: block; background: #eceef1; }
-.cms-media-card img {
+.cms-media-card img,
+.cms-media-card video {
     display: block;
     width: 100%;
     height: 9rem;

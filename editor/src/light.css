@@ -86,6 +86,15 @@ border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,
 #cms-nav-ghost .sub{color:#6b7280;font-size:11px}
 #cms-nav-ghost.nodrop{opacity:.25}
 
+/* Video slots: a click-to-fill placeholder from the video snippets.
+ * While editing, players and embeds go click-through so a click reaches
+ * the gear/trash chrome (buttons.js hit-tests their rectangles) instead
+ * of playing the video or vanishing into a cross-origin iframe. */
+.cms-editing [data-cms-video-slot]{cursor:pointer}
+.cms-editing [data-cms-video-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
+.cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,
+.cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}
+
 /* Flexible-space snippet: invisible on the live site, visible and
  * click-to-adjust while editing. */
 .cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;

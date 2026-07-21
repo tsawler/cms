@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,27 +17,29 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Kind distinguishes images (resized, embeddable) from plain files like
-// PDFs and office documents (stored as-is, linked to).
+// Kind distinguishes images (resized, embeddable) and videos (stored as
+// uploaded, embedded as players) from plain files like PDFs and office
+// documents (stored as-is, linked to).
 type Kind string
 
 const (
 	KindImage Kind = "image"
 	KindFile  Kind = "file"
+	KindVideo Kind = "video"
 )
 
-// Media is one uploaded image or document. Alt is the alt text for the
-// locale it was loaded with (images only).
+// Media is one uploaded image, video, or document. Alt is the alt text for
+// the locale it was loaded with (images only).
 type Media struct {
 	ID         int64
 	Kind       Kind
-	S3Key      string // images: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
+	S3Key      string // images/videos: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
 	Filename   string
 	Mime       string
 	Ext        string
-	VariantExt string // images: extension of the web/thumb objects (".webp"; legacy rows ".jpg"/".png")
-	Width      int    // zero for files
-	Height     int    // zero for files
+	VariantExt string // extension of the web/thumb objects (".webp"; legacy rows ".jpg"/".png"); empty for a video without a poster
+	Width      int    // zero for files, and for videos without a poster
+	Height     int    // zero for files, and for videos without a poster
 	Size       int64
 	FolderID   *int64 // nil = unfiled
 	UploadedBy *int64
@@ -58,11 +61,12 @@ var ErrNotFound = errors.New("media: not found")
 
 // Manager coordinates the object store and the Postgres metadata.
 type Manager struct {
-	db          *pgxpool.Pool
-	objects     ObjectStore
-	keyRoot     string
-	webpQuality float64
-	logger      *slog.Logger
+	db            *pgxpool.Pool
+	objects       ObjectStore
+	keyRoot       string
+	webpQuality   float64
+	maxVideoBytes int64
+	logger        *slog.Logger
 }
 
 // NewManager returns a Manager storing binaries in objects and metadata in
@@ -74,7 +78,7 @@ func NewManager(db *pgxpool.Pool, objects ObjectStore, logger *slog.Logger) *Man
 		prefix = kp.KeyPrefix()
 	}
 	return &Manager{db: db, objects: objects, keyRoot: keyRoot(prefix),
-		webpQuality: DefaultWebPQuality, logger: logger}
+		webpQuality: DefaultWebPQuality, maxVideoBytes: DefaultMaxVideoBytes, logger: logger}
 }
 
 // SetWebPQuality overrides the lossy WebP quality used for image variants.
@@ -85,6 +89,20 @@ func (m *Manager) SetWebPQuality(q float64) {
 	}
 }
 
+// SetMaxVideoBytes overrides the video upload size cap. Values below one
+// are ignored.
+func (m *Manager) SetMaxVideoBytes(n int64) {
+	if n > 0 {
+		m.maxVideoBytes = n
+	}
+}
+
+// MaxVideoBytes returns the video upload size cap, for request-body limits
+// and user-facing messages.
+func (m *Manager) MaxVideoBytes() int64 {
+	return m.maxVideoBytes
+}
+
 // KeyRoot returns the bucket prefix every object this manager stores lives
 // under: "media/", or "<prefix>/media/" for a store with a deployment
 // prefix.
@@ -92,11 +110,34 @@ func (m *Manager) KeyRoot() string {
 	return m.keyRoot
 }
 
-// Upload validates and stores an upload, returning its record. Images are
-// stored untouched alongside resized WebP web and thumb variants; whitelisted
-// documents (PDF, office formats, text/CSV, ZIP) are stored as-is. A
-// non-nil folderID files the upload into that folder.
+// Upload validates and stores a buffered upload, returning its record. It
+// is UploadFrom for callers that already hold the bytes; videos should
+// arrive through UploadFrom so they stream to the object store instead.
 func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uploadedBy int64, folderID *int64) (*Media, error) {
+	return m.UploadFrom(ctx, filename, bytes.NewReader(data), int64(len(data)), nil, uploadedBy, folderID)
+}
+
+// UploadFrom validates and stores an upload, sniffing its leading bytes to
+// pick the pipeline. Images are buffered and stored untouched alongside
+// resized WebP web and thumb variants; whitelisted documents (PDF, office
+// formats, text/CSV, ZIP) are buffered and stored as-is; videos (MP4,
+// WebM) are streamed to the object store as uploaded — no transcoding.
+// size is the upload's byte length (multipart.FileHeader.Size). poster
+// optionally carries a client-captured still image for videos, processed
+// into the same web/thumb variants images get; it is ignored for other
+// kinds and dropped, not fatal, when undecodable. A non-nil folderID files
+// the upload into that folder.
+func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSeeker, size int64, poster []byte, uploadedBy int64, folderID *int64) (*Media, error) {
+	head := make([]byte, 512)
+	n, err := io.ReadFull(src, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	sniffed := http.DetectContentType(head[:n])
+
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
 		return nil, err
@@ -111,8 +152,9 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 			}
 		}
 	}
-	put := func(key, contentType string, body []byte) error {
-		if err := m.objects.Put(ctx, key, contentType, bytes.NewReader(body)); err != nil {
+	put := func(key, contentType string, body io.Reader) error {
+		if err := m.objects.Put(ctx, key, contentType, body); err != nil {
+			cleanup()
 			return err
 		}
 		stored = append(stored, key)
@@ -121,15 +163,49 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 
 	md := &Media{
 		Filename: filename,
-		Size:     int64(len(data)),
+		Size:     size,
 		FolderID: folderID,
 	}
 	if uploadedBy != 0 {
 		md.UploadedBy = &uploadedBy
 	}
 
-	sniffed := http.DetectContentType(data)
-	if strings.HasPrefix(sniffed, "image/") {
+	if ext, contentType, ok := videoTypeFor(filename, sniffed); ok {
+		if size > m.maxVideoBytes {
+			return nil, ErrTooLarge
+		}
+		md.Kind = KindVideo
+		md.S3Key = prefix
+		md.Mime = contentType
+		md.Ext = ext
+
+		// The poster is decorative; a bad one downgrades the video to
+		// posterless rather than failing the upload.
+		if len(poster) > 0 {
+			p, err := process(poster, http.DetectContentType(poster), m.webpQuality)
+			if err != nil {
+				m.logger.Warn("cms media: dropping undecodable video poster", "filename", filename, "err", err)
+			} else {
+				md.VariantExt = p.VariantExt
+				md.Width, md.Height = p.Width, p.Height
+				for _, v := range p.Variants {
+					if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+		if err := put(prefix+"/original"+ext, contentType, src); err != nil {
+			return nil, err
+		}
+	} else if strings.HasPrefix(sniffed, "image/") {
+		if size > MaxImageDocBytes {
+			return nil, ErrTooLarge
+		}
+		data, err := io.ReadAll(src)
+		if err != nil {
+			return nil, err
+		}
 		p, err := process(data, sniffed, m.webpQuality)
 		if err != nil {
 			return nil, err
@@ -141,12 +217,11 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 		md.VariantExt = p.VariantExt
 		md.Width, md.Height = p.Width, p.Height
 
-		if err := put(prefix+"/original"+p.Ext, sniffed, data); err != nil {
+		if err := put(prefix+"/original"+p.Ext, sniffed, bytes.NewReader(data)); err != nil {
 			return nil, err
 		}
 		for _, v := range p.Variants {
-			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, v.Data); err != nil {
-				cleanup()
+			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
 				return nil, err
 			}
 		}
@@ -155,17 +230,24 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 		if !ok {
 			return nil, ErrUnsupportedType
 		}
+		if size > MaxImageDocBytes {
+			return nil, ErrTooLarge
+		}
+		data, err := io.ReadAll(src)
+		if err != nil {
+			return nil, err
+		}
 		md.Kind = KindFile
 		md.S3Key = prefix + "/" + safeObjectName(filename, ext)
 		md.Mime = contentType
 		md.Ext = ext
 
-		if err := put(md.S3Key, contentType, data); err != nil {
+		if err := put(md.S3Key, contentType, bytes.NewReader(data)); err != nil {
 			return nil, err
 		}
 	}
 
-	err := m.db.QueryRow(ctx, `
+	err = m.db.QueryRow(ctx, `
 		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at`,
@@ -286,18 +368,39 @@ func (m *Manager) objectKeys(md *Media) []string {
 	if md.Kind == KindFile {
 		return []string{md.S3Key}
 	}
-	return []string{
-		md.S3Key + "/original" + md.Ext,
-		md.S3Key + "/web" + md.VariantExt,
-		md.S3Key + "/thumb" + md.VariantExt,
+	keys := []string{md.S3Key + "/original" + md.Ext}
+	if md.VariantExt != "" {
+		keys = append(keys,
+			md.S3Key+"/web"+md.VariantExt,
+			md.S3Key+"/thumb"+md.VariantExt)
 	}
+	return keys
 }
 
 // URL returns the public URL of one rendition: "original", "web", or
-// "thumb". Files have a single rendition, returned for any name.
+// "thumb". Files have a single rendition, returned for any name. Videos
+// have "original" (the video itself; also returned for "web"), plus
+// "poster" and "thumb" — empty when the video has no poster.
 func (m *Manager) URL(md *Media, rendition string) string {
-	if md.Kind == KindFile {
+	switch md.Kind {
+	case KindFile:
 		return m.objects.PublicURL(md.S3Key)
+	case KindVideo:
+		switch rendition {
+		case "poster", "thumb":
+			if md.VariantExt == "" {
+				return ""
+			}
+			// The poster's renditions reuse the image variant names, so
+			// the full-size poster lives at web.<ext>.
+			name := "web"
+			if rendition == "thumb" {
+				name = "thumb"
+			}
+			return m.objects.PublicURL(md.S3Key + "/" + name + md.VariantExt)
+		default:
+			return m.objects.PublicURL(md.S3Key + "/original" + md.Ext)
+		}
 	}
 	switch rendition {
 	case "web":
@@ -315,18 +418,27 @@ type View struct {
 	OriginalURL string
 	WebURL      string
 	ThumbURL    string
+	PosterURL   string // videos only: the full-size poster frame, if one exists
 }
 
 // Views converts records to template-ready views. Files have no thumbnail;
-// their web and original URLs are the document itself.
+// their web and original URLs are the document itself. Videos' web and
+// original URLs are both the video; poster and thumb are empty without a
+// poster frame.
 func (m *Manager) Views(items []Media) []View {
 	out := make([]View, len(items))
 	for i, md := range items {
 		v := View{Media: md}
-		if md.Kind == KindFile {
+		switch md.Kind {
+		case KindFile:
 			url := m.URL(&md, "original")
 			v.OriginalURL, v.WebURL = url, url
-		} else {
+		case KindVideo:
+			url := m.URL(&md, "original")
+			v.OriginalURL, v.WebURL = url, url
+			v.PosterURL = m.URL(&md, "poster")
+			v.ThumbURL = m.URL(&md, "thumb")
+		default:
 			v.OriginalURL = m.URL(&md, "original")
 			v.WebURL = m.URL(&md, "web")
 			v.ThumbURL = m.URL(&md, "thumb")

@@ -144,6 +144,10 @@ export function initShell() {
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
         '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +
         "</div>" +
+        '<div class="btnui" id="vid-ui">' +
+        '<button id="vid-set" title="Change this video">' + ICONS.gear + "</button>" +
+        '<button id="vid-del" title="Delete video">' + ICONS.trash + "</button>" +
+        "</div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +

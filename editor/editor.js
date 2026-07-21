@@ -160,7 +160,7 @@
       // In inline mode the toolbar floats docked to the region
       // as soon as it gains focus — a click is enough, no text
       // selection needed.
-      toolbar: (styleFormats.length ? "styles | " : "") + "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" + (mediaEnabled ? " | cmsimage cmsdoc" : "") + " | removeformat",
+      toolbar: (styleFormats.length ? "styles | " : "") + "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
       fixed_toolbar_container: "#cms-mce-toolbar",
       plugins: "lists link autolink",
       // Paste and drag-drop of image data still upload through
@@ -220,6 +220,16 @@
             onAction: function() {
               openPicker("image", function(item) {
                 ed.insertContent('<img src="' + escapeAttr(item.web) + '" alt="' + escapeAttr(item.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr(item.web) + '" data-cms-orig="' + escapeAttr(item.original) + '">');
+                onDirty();
+              });
+            }
+          });
+          ed.ui.registry.addButton("cmsvideo", {
+            icon: "embed",
+            tooltip: "Insert video",
+            onAction: function() {
+              openPicker("video", function(item) {
+                ed.insertContent('<video controls preload="metadata" src="' + escapeAttr(item.original) + '"' + (item.poster ? ' poster="' + escapeAttr(item.poster) + '"' : "") + "></video>");
                 onDirty();
               });
             }
@@ -768,6 +778,91 @@
     $("drawer-close").addEventListener("click", closeDrawer);
   }
 
+  // ../src/videos.js
+  function escapeAttr2(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  function embedURL(raw) {
+    var u;
+    try {
+      u = new URL(raw.trim());
+    } catch (e) {
+      return null;
+    }
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    var host2 = u.hostname.replace(/^www\./, "").replace(/^m\./, "");
+    var id = null;
+    if (host2 === "youtu.be") {
+      id = u.pathname.slice(1).split("/")[0];
+    } else if (host2 === "youtube.com" || host2 === "youtube-nocookie.com") {
+      if (u.pathname === "/watch") id = u.searchParams.get("v");
+      else {
+        var m = u.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]+)/);
+        if (m) id = m[1];
+      }
+    }
+    if (id && /^[\w-]{5,20}$/.test(id)) {
+      return "https://www.youtube-nocookie.com/embed/" + id;
+    }
+    if (host2 === "vimeo.com" || host2 === "player.vimeo.com") {
+      var vm = u.pathname.match(/\/(?:video\/)?([0-9]{4,15})(?:\/|$)/);
+      if (vm) return "https://player.vimeo.com/video/" + vm[1];
+    }
+    return null;
+  }
+  function replaceEl(el, html) {
+    var region = el.closest("[data-cms-region]");
+    var container = el.closest("[data-cms-sections]");
+    el.outerHTML = html;
+    if (region) markDirty(region.getAttribute("data-cms-region"));
+    else if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
+  }
+  function fillFromLibrary(el) {
+    openPicker("video", function(item) {
+      replaceEl(el, '<video controls preload="metadata" class="w-full rounded-lg" src="' + escapeAttr2(item.original) + '"' + (item.poster ? ' poster="' + escapeAttr2(item.poster) + '"' : "") + "></video>");
+    });
+  }
+  function fillFromURL(el) {
+    cmsPrompt("Paste the video's link", "https://www.youtube.com/watch?v=\u2026", "Embed video").then(function(v) {
+      if (v === null || v === "") return;
+      var src = embedURL(v);
+      if (!src) {
+        setMsg("That doesn't look like a YouTube or Vimeo link.");
+        return;
+      }
+      replaceEl(el, '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr2(src) + '" title="Video" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen=""></iframe>');
+    });
+  }
+  function chooseVideoInto(el, message) {
+    openDialog({
+      message,
+      okLabel: "Next",
+      selects: [{
+        id: "source",
+        label: "Where is the video?",
+        value: "library",
+        options: [
+          { value: "library", label: "Media library (uploaded file)" },
+          { value: "url", label: "YouTube or Vimeo link" }
+        ]
+      }]
+    }).then(function(values) {
+      if (!values) return;
+      if (values.source === "url") fillFromURL(el);
+      else fillFromLibrary(el);
+    });
+  }
+  function initVideoSlots() {
+    document.addEventListener("click", function(e) {
+      if (!state.editing) return;
+      var slot = e.target.closest ? e.target.closest("[data-cms-video-slot]") : null;
+      if (!slot) return;
+      e.preventDefault();
+      e.stopPropagation();
+      chooseVideoInto(slot, "Add a video");
+    }, true);
+  }
+
   // ../src/buttons.js
   var BTN_SIZES = {
     s: { padding: "6px 14px", fontSize: "13px" },
@@ -879,6 +974,32 @@
   function hideImgUI() {
     activeImg = null;
     $("img-ui").classList.remove("on");
+  }
+  var activeVid = null;
+  function mediaAtPoint(x, y) {
+    var els = document.querySelectorAll(
+      "[data-cms-region] video, [data-cms-region] iframe,[data-cms-sections] video, [data-cms-sections] iframe"
+    );
+    for (var i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return els[i];
+    }
+    return null;
+  }
+  function showVidUI(vid) {
+    activeVid = vid;
+    var ui = $("vid-ui");
+    ui.classList.add("on");
+    var r = vid.getBoundingClientRect();
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
+  }
+  function hideVidUI() {
+    activeVid = null;
+    $("vid-ui").classList.remove("on");
   }
   function imageLink(img) {
     var a = img.parentElement;
@@ -1072,8 +1193,10 @@
       if (!btn && t.tagName === "IMG" && !t.closest("[data-cms-image]") && t.closest("[data-cms-region],[data-cms-sections]")) {
         img = t;
       }
+      var vid = null;
+      if (!btn && !img) vid = mediaAtPoint(e.clientX, e.clientY);
       var snip = null;
-      if (!btn && !img && t.closest) {
+      if (!btn && !img && !vid && t.closest) {
         snip = t.closest(".cms-snippet");
         if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
       }
@@ -1082,30 +1205,41 @@
         btn.setAttribute("contenteditable", "false");
         hideSnipUI();
         hideImgUI();
+        hideVidUI();
         showButtonUI(btn);
       } else if (img) {
         hideButtonUI();
         hideSnipUI();
+        hideVidUI();
         showImgUI(img);
+      } else if (vid) {
+        hideButtonUI();
+        hideSnipUI();
+        hideImgUI();
+        showVidUI(vid);
       } else if (snip) {
         hideButtonUI();
         hideImgUI();
+        hideVidUI();
         showSnipUI(snip);
       } else {
         hideButtonUI();
         hideSnipUI();
         hideImgUI();
+        hideVidUI();
       }
     }, true);
     window.addEventListener("scroll", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
       if (activeImg) showImgUI(activeImg);
+      if (activeVid) showVidUI(activeVid);
     }, true);
     window.addEventListener("resize", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
       if (activeImg) showImgUI(activeImg);
+      if (activeVid) showVidUI(activeVid);
     });
     $("btn-set").addEventListener("click", function() {
       if (!activeBtn) return;
@@ -1335,6 +1469,34 @@
           var parent = outer.parentElement;
           outer.remove();
           if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" && !parent.querySelector("img,a,br")) {
+            parent.remove();
+          }
+        };
+        if (ed) ed.undoManager.transact(run);
+        else run();
+        if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+        else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+      });
+    });
+    $("vid-set").addEventListener("click", function() {
+      if (!activeVid) return;
+      var vid = activeVid;
+      hideVidUI();
+      chooseVideoInto(vid, "Change the video");
+    });
+    $("vid-del").addEventListener("click", function() {
+      if (!activeVid) return;
+      var vid = activeVid;
+      cmsConfirm("Delete this video?", "Delete video", true).then(function(yes) {
+        if (!yes) return;
+        hideVidUI();
+        var regionEl = vid.closest("[data-cms-region]");
+        var sectionsEl = vid.closest("[data-cms-sections]");
+        var ed = findOwningEditor(vid);
+        var run = function() {
+          var parent = vid.parentElement;
+          vid.remove();
+          if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" && !parent.querySelector("img,video,iframe,a,br")) {
             parent.remove();
           }
         };
@@ -2126,6 +2288,7 @@
       hideButtonUI();
       hideSnipUI();
       hideImgUI();
+      hideVidUI();
       removeRichEditors();
       reapplySectionClasses();
     }
@@ -2354,6 +2517,7 @@
 
   // ../src/media.js
   var DOC_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip";
+  var VIDEO_ACCEPT = "video/mp4,video/webm,.mp4,.webm";
   var pickerHandler = null;
   var pickerKind = "image";
   var pickerFolder = "";
@@ -2369,8 +2533,8 @@
     pickerFolder = "";
     pickerQuery = "";
     $("search").value = "";
-    $("picker-title").textContent = kind === "file" ? "Choose a document" : "Choose an image";
-    $("file").setAttribute("accept", kind === "file" ? DOC_ACCEPT : "image/*");
+    $("picker-title").textContent = kind === "file" ? "Choose a document" : kind === "video" ? "Choose a video" : "Choose an image";
+    $("file").setAttribute("accept", kind === "file" ? DOC_ACCEPT : kind === "video" ? VIDEO_ACCEPT : "image/*");
     $("overlay").classList.add("on");
     $("picker").classList.add("on");
     applyView();
@@ -2469,13 +2633,22 @@
   function docBadge(item, forList) {
     var doc = document.createElement("div");
     doc.className = "doc";
-    doc.textContent = "\u{1F4C4}";
+    doc.textContent = item.kind === "video" ? "\u{1F3AC}" : "\u{1F4C4}";
     if (!forList) {
       var ext = document.createElement("span");
       ext.textContent = item.filename.split(".").pop();
       doc.appendChild(ext);
     }
     return doc;
+  }
+  function itemPreview(item, forList) {
+    if (item.thumb) {
+      var img = document.createElement("img");
+      img.src = item.thumb;
+      img.alt = item.alt || "";
+      return img;
+    }
+    return docBadge(item, forList);
   }
   function renderItems(items) {
     var grid = $("grid");
@@ -2489,34 +2662,20 @@
       if (pickerView === "list") {
         el = document.createElement("div");
         el.className = "row";
-        if (item.kind === "file") {
-          el.appendChild(docBadge(item, true));
-        } else {
-          var img = document.createElement("img");
-          img.src = item.thumb;
-          img.alt = item.alt || "";
-          el.appendChild(img);
-        }
+        el.appendChild(itemPreview(item, true));
         var nm = document.createElement("span");
         nm.className = "nm";
         nm.textContent = item.filename;
         var sz = document.createElement("span");
         sz.className = "sz";
-        sz.textContent = item.kind === "file" ? item.size : item.width + "\xD7" + item.height;
+        sz.textContent = item.kind === "image" ? item.width + "\xD7" + item.height : item.size;
         el.appendChild(nm);
         el.appendChild(sz);
       } else {
         el = document.createElement("figure");
-        if (item.kind === "file") {
-          el.appendChild(docBadge(item, false));
-        } else {
-          var gimg = document.createElement("img");
-          gimg.src = item.thumb;
-          gimg.alt = item.alt || "";
-          el.appendChild(gimg);
-        }
+        el.appendChild(itemPreview(item, false));
         var cap = document.createElement("figcaption");
-        cap.textContent = item.filename + (item.kind === "file" ? " \xB7 " + item.size : "");
+        cap.textContent = item.filename + (item.kind === "image" ? "" : " \xB7 " + item.size);
         el.appendChild(cap);
       }
       el.addEventListener("click", function() {
@@ -2528,6 +2687,53 @@
   function pick(item) {
     if (pickerHandler) pickerHandler(item);
     closePicker();
+  }
+  function capturePoster(file) {
+    return new Promise(function(resolve) {
+      var url = URL.createObjectURL(file);
+      var video = document.createElement("video");
+      var done = false;
+      var timer = setTimeout(function() {
+        finish(null);
+      }, 5e3);
+      function finish(blob) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      }
+      video.muted = true;
+      video.preload = "auto";
+      video.addEventListener("error", function() {
+        finish(null);
+      });
+      video.addEventListener("loadeddata", function() {
+        try {
+          video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
+        } catch (e) {
+          finish(null);
+        }
+      });
+      video.addEventListener("seeked", function() {
+        try {
+          if (!video.videoWidth) {
+            finish(null);
+            return;
+          }
+          var canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext("2d").drawImage(video, 0, 0);
+          canvas.toBlob(function(blob) {
+            finish(blob);
+          }, "image/jpeg", 0.85);
+        } catch (e) {
+          finish(null);
+        }
+      });
+      video.src = url;
+    });
   }
   function initMedia() {
     $("view-grid").addEventListener("click", function() {
@@ -2547,11 +2753,16 @@
     $("upload").addEventListener("click", function() {
       var input = $("file");
       if (!input.files || input.files.length === 0) return;
+      var file = input.files[0];
       var fd = new FormData();
-      fd.append("file", input.files[0]);
+      fd.append("file", file);
       if (pickerFolder && pickerFolder !== "root") fd.append("folder", pickerFolder);
       setMsg("Uploading\u2026");
-      api("/media", { method: "POST", body: fd }).then(function(body) {
+      var poster = pickerKind === "video" && file.type.indexOf("video/") === 0 ? capturePoster(file) : Promise.resolve(null);
+      poster.then(function(blob) {
+        if (blob) fd.append("poster", blob, "poster.jpg");
+        return api("/media", { method: "POST", body: fd });
+      }).then(function(body) {
         flash("File uploaded");
         input.value = "";
         if (body.media) pick(body.media);
@@ -3180,8 +3391,8 @@ box-shadow:0 4px 12px rgba(0,0,0,.35)}
 border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del{color:#fca5a5}
-#btn-del:hover,#snip-del:hover,#img-del:hover{background:rgba(252,165,165,.2)}
+#btn-del,#snip-del,#img-del,#vid-del{color:#fca5a5}
+#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
@@ -3440,6 +3651,15 @@ border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,
 #cms-nav-ghost .sub{color:#6b7280;font-size:11px}
 #cms-nav-ghost.nodrop{opacity:.25}
 
+/* Video slots: a click-to-fill placeholder from the video snippets.
+ * While editing, players and embeds go click-through so a click reaches
+ * the gear/trash chrome (buttons.js hit-tests their rectangles) instead
+ * of playing the video or vanishing into a cross-origin iframe. */
+.cms-editing [data-cms-video-slot]{cursor:pointer}
+.cms-editing [data-cms-video-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
+.cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,
+.cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}
+
 /* Flexible-space snippet: invisible on the live site, visible and
  * click-to-adjust while editing. */
 .cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;
@@ -3468,7 +3688,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
@@ -3518,6 +3738,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
   initDialogs();
   initLightDom();
   initEditing();
+  initVideoSlots();
   initButtons();
   initSaving();
   initPageCode();

@@ -219,10 +219,12 @@ type templateData struct {
 	// Media pages.
 	MediaEnabled bool
 	Media        []media.View // images
+	Videos       []media.View
 	Documents    []media.View // files (PDFs, office docs, ...)
 	Folders      []media.Folder
 	MediaQuery   string // active search filter
 	MediaFolder  string // active folder filter ("", "root", or an id)
+	MaxVideoMB   int64  // video upload cap, for the upload hint
 
 	// Snippet pages.
 	Snippets       []snippets.Snippet // admin-created

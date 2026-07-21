@@ -743,7 +743,9 @@ func headHTML(p *content.Page) template.HTML {
 	// External stylesheets come before the inline CSS so the page's own
 	// rules can override the library's.
 	for _, u := range resourceLinks(p.CSSLinks) {
-		sb.WriteString(`<link rel="stylesheet" href="`);sb.WriteString(html.EscapeString(u));sb.WriteString("\">\n")
+		sb.WriteString(`<link rel="stylesheet" href="`)
+		sb.WriteString(html.EscapeString(u))
+		sb.WriteString("\">\n")
 	}
 	if p.Description != "" {
 		sb.WriteString(`<meta name="description" content="`)

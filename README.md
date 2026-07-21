@@ -7,8 +7,8 @@ architecture and build plan.
 
 **Status: phase 5 (snippets).** Auth, user management, page CRUD with
 draft/publish, public rendering through the host's own templates, the
-media library (any S3-compatible bucket, automatic resizing, folders and
-search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
+media library (any S3-compatible bucket, automatic image resizing,
+MP4/WebM video, folders and search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
 self-hosted), the curated Styles menu, and the snippet palette are all
 working: log in, browse the site, click Edit, change text and images
 directly on the page, drop in ready-made blocks, save drafts, publish.
@@ -104,8 +104,9 @@ also apply utility classes — `text-left/center/right` on blocks, and
 `float-left mr-6`, `block mx-auto`, or `float-right ml-6` on images — as
 does the image gear's display-width and roundness settings (`w-full`,
 `w-2/3`, `w-1/2`, `w-1/3`, `h-auto`, `rounded-lg`, `rounded-2xl`,
-`rounded-full`) — so safelist those regardless of which Styles menu you
-ship. (The gear's Shadow presets apply the CMS's own
+`rounded-full`) and the video slot's generated players (`w-full`,
+`rounded-lg`, and `aspect-video` on YouTube/Vimeo embeds) — so safelist
+those regardless of which Styles menu you ship. (The gear's Shadow presets apply the CMS's own
 `cms-shadow-subtle`/`cms-shadow-strong` classes, styled by CSS that
 `{{cmsHead}}` ships — no safelisting needed, and overridable by your
 stylesheet.) For the default menu plus alignment and the image gear:
@@ -119,13 +120,13 @@ safelist: [
     "text-left", "text-center", "text-right",
     "float-left", "float-right", "mr-6", "ml-6", "block", "mx-auto",
     "w-full", "w-2/3", "w-1/2", "w-1/3", "h-auto",
-    "rounded-lg", "rounded-2xl", "rounded-full",
+    "rounded-lg", "rounded-2xl", "rounded-full", "aspect-video",
 ],
 ```
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video");
 ```
 
 (The example site uses the Tailwind Play CDN, which generates CSS in the
@@ -187,12 +188,16 @@ places:
 
 - **`Config.Snippets`** — per-customer components, versioned with your
   code. Nil gets a Tailwind-first default library: inline blocks
-  (callout, call-to-action, two columns, quote, button link, flexible
-  space) plus the section presets described under Sections below (hero,
-  feature grid, stats, testimonials, FAQ, call-to-action banner); an
-  empty slice ships none. The **flexible space** is invisible on the live
-  site but shows as a striped, labelled band while editing — click it to
-  set its height in pixels.
+  (callout, call-to-action, two columns, quote, button link, video,
+  flexible space) plus the section presets described under Sections below
+  (hero, feature grid, stats, testimonials, FAQ, the three video
+  layouts, call-to-action banner); an empty slice ships none. The
+  **flexible space** is invisible on the live site but shows as a
+  striped, labelled band while editing — click it to set its height in
+  pixels. The **video** block (and the video section presets) ship a
+  "Click to add a video" slot: clicking it while editing offers the
+  media library or a YouTube/Vimeo link, and the slot becomes a native
+  `<video>` player or a privacy-enhanced embed.
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks and
   section presets created after deployment.
 
@@ -217,11 +222,13 @@ safelist: [
     "bg-slate-900", "bg-white", "p-4", "p-6", "px-5", "px-6", "py-2.5",
     "py-3", "text-blue-700", "text-blue-900", "text-white",
     "text-slate-500", "text-slate-600", "text-slate-700", "text-center",
-    "text-sm", "text-lg", "text-xl", "text-3xl", "text-4xl",
+    "text-sm", "text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl",
     "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
     "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
     "grid", "gap-6", "gap-8", "sm:grid-cols-2", "sm:grid-cols-3",
-    "inline-block",
+    "inline-block", "flex", "items-center", "justify-center",
+    "w-full", "aspect-video", "border-2", "border-dashed",
+    "border-slate-300",
 ],
 ```
 
@@ -249,10 +256,11 @@ one-click starting point for a whole section, not an inline block. The
 editor lists presets first in the "Add a section" chooser (tagged
 "Section") and hides them from the inline-insert drawer; choosing one
 creates the section with the settings already applied along with the
-starting HTML. The default library ships six — **Hero** (dark, 75%
+starting HTML. The default library ships nine — **Hero** (dark, 75%
 screen height, centered), **Feature grid**, **Stats**, **Testimonials**,
-**FAQ**, and **Call-to-action banner** — so a blank-canvas page can be
-composed into a landing page without touching the settings dialog.
+**FAQ**, **Full-width video**, **Text + video**, **Video + text**, and
+**Call-to-action banner** — so a blank-canvas page can be composed into
+a landing page without touching the settings dialog.
 
 Settings use the section-settings vocabulary: `bg` and `width` name
 `SectionStyles` option keys, `height` is `"50"`/`"75"`/`"100"` (percent
@@ -548,7 +556,8 @@ The example reads S3 credentials from a `.env` file at the repo root
 `S3_REGION` and `S3_KEY_PREFIX`); without one, the media library is
 simply disabled. `CMS_MEDIA_WEBP_QUALITY` (a value in (0, 1], e.g.
 `0.5`) overrides the WebP quality used for image variants; unset uses
-the default 0.3.
+the default 0.3. `CMS_MEDIA_MAX_VIDEO_MB` overrides the video upload
+cap; unset allows 512 MB.
 
 Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with

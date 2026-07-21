@@ -14,6 +14,7 @@ import { cmsConfirm, openDialog } from "./dialogs.js";
 import { markDirty, markSectionsDirty, hasUnsaved } from "./editing.js";
 import { openPicker } from "./media.js";
 import { unnestSnippets } from "./snippets.js";
+import { chooseVideoInto } from "./videos.js";
 
 var BTN_SIZES = {
     s: { padding: "6px 14px", fontSize: "13px" },
@@ -171,6 +172,43 @@ function showImgUI(img) {
 export function hideImgUI() {
     activeImg = null;
     $("img-ui").classList.remove("on");
+}
+
+/* Videos and external embeds in rich content get a gear (swap the
+ * source: another upload or a different YouTube/Vimeo link) and a trash
+ * can, anchored like the image chrome. */
+var activeVid = null;
+
+// mediaAtPoint finds the video or embed under a click. While editing
+// these are pointer-events:none (embeds can't swallow clicks, players
+// don't start mid-edit) — which also means they can never be the event
+// target, so hit-test their rectangles instead.
+function mediaAtPoint(x, y) {
+    var els = document.querySelectorAll(
+        "[data-cms-region] video, [data-cms-region] iframe," +
+        "[data-cms-sections] video, [data-cms-sections] iframe");
+    for (var i = 0; i < els.length; i++) {
+        var r = els[i].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return els[i];
+    }
+    return null;
+}
+
+function showVidUI(vid) {
+    activeVid = vid;
+    var ui = $("vid-ui");
+    ui.classList.add("on");
+    var r = vid.getBoundingClientRect();
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
+}
+
+export function hideVidUI() {
+    activeVid = null;
+    $("vid-ui").classList.remove("on");
 }
 
 // imageLink returns the <a> wrapping img when that anchor exists purely
@@ -420,8 +458,12 @@ export function initButtons() {
             t.closest("[data-cms-region],[data-cms-sections]")) {
             img = t;
         }
+        // Videos and embeds are pointer-events:none while editing, so
+        // they're found by position, not as the target.
+        var vid = null;
+        if (!btn && !img) vid = mediaAtPoint(e.clientX, e.clientY);
         var snip = null;
-        if (!btn && !img && t.closest) {
+        if (!btn && !img && !vid && t.closest) {
             snip = t.closest(".cms-snippet");
             if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
         }
@@ -430,23 +472,32 @@ export function initButtons() {
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
             hideSnipUI();
             hideImgUI();
+            hideVidUI();
             showButtonUI(btn);
         } else if (img) {
             // No preventDefault: the click still gives TinyMCE the
             // selection (and its resize handles).
             hideButtonUI();
             hideSnipUI();
+            hideVidUI();
             showImgUI(img);
+        } else if (vid) {
+            hideButtonUI();
+            hideSnipUI();
+            hideImgUI();
+            showVidUI(vid);
         } else if (snip) {
             // No preventDefault: the click still places the caret for
             // editing the snippet's text.
             hideButtonUI();
             hideImgUI();
+            hideVidUI();
             showSnipUI(snip);
         } else {
             hideButtonUI();
             hideSnipUI();
             hideImgUI();
+            hideVidUI();
         }
     }, true);
 
@@ -455,11 +506,13 @@ export function initButtons() {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeImg) showImgUI(activeImg);
+        if (activeVid) showVidUI(activeVid);
     }, true);
     window.addEventListener("resize", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeImg) showImgUI(activeImg);
+        if (activeVid) showVidUI(activeVid);
     });
 
     $("btn-set").addEventListener("click", function () {
@@ -607,6 +660,38 @@ export function initButtons() {
                 outer.remove();
                 if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" &&
                     !parent.querySelector("img,a,br")) {
+                    parent.remove();
+                }
+            };
+            if (ed) ed.undoManager.transact(run); else run();
+            if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+            else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+        });
+    });
+
+    $("vid-set").addEventListener("click", function () {
+        if (!activeVid) return;
+        var vid = activeVid;
+        hideVidUI(); // the element is replaced; the chrome can't follow it
+        chooseVideoInto(vid, "Change the video");
+    });
+
+    $("vid-del").addEventListener("click", function () {
+        if (!activeVid) return;
+        var vid = activeVid;
+        cmsConfirm("Delete this video?", "Delete video", true).then(function (yes) {
+            if (!yes) return;
+            hideVidUI();
+            // Resolve the dirty target before the video leaves the DOM.
+            var regionEl = vid.closest("[data-cms-region]");
+            var sectionsEl = vid.closest("[data-cms-sections]");
+            var ed = findOwningEditor(vid);
+            var run = function () {
+                var parent = vid.parentElement;
+                vid.remove();
+                // A paragraph left holding nothing was scaffolding.
+                if (parent && parent.tagName === "P" && (parent.textContent || "").trim() === "" &&
+                    !parent.querySelector("img,video,iframe,a,br")) {
                     parent.remove();
                 }
             };

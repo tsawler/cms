@@ -1,8 +1,10 @@
-// Package media stores uploaded images: the binary objects on any
-// S3-compatible bucket (AWS, Linode, DigitalOcean, MinIO, R2, ...) and their
-// metadata in Postgres. Each upload produces the untouched original plus
-// resized "web" and "thumb" variants encoded as lossy WebP, all served
-// directly from the bucket.
+// Package media stores uploads — images, videos, and documents: the binary
+// objects on any S3-compatible bucket (AWS, Linode, DigitalOcean, MinIO,
+// R2, ...) and their metadata in Postgres. Each image upload produces the
+// untouched original plus resized "web" and "thumb" variants encoded as
+// lossy WebP; videos are stored as uploaded (no transcoding) with an
+// optional poster frame; documents are stored as-is. Everything is served
+// directly from the bucket, or proxied by the CMS.
 package media
 
 import (
@@ -17,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 // ObjectStore is where media binaries live. The S3 implementation is the
@@ -38,6 +41,25 @@ type ObjectStore interface {
 
 // ErrObjectNotFound is returned by Get for missing keys.
 var ErrObjectNotFound = errors.New("media: object not found")
+
+// ErrInvalidRange is returned by GetRange for unsatisfiable ranges; the
+// media proxy answers it with 416.
+var ErrInvalidRange = errors.New("media: invalid range")
+
+// RangeGetter is an optional ObjectStore interface for serving HTTP Range
+// requests. Without it, proxied video cannot seek — and Safari, which
+// probes with a Range request before playing, cannot play it at all.
+// S3Store implements it; custom stores that skip it still work for images
+// and documents.
+type RangeGetter interface {
+	// GetRange retrieves part of the object at key, where rangeSpec is a
+	// verbatim HTTP Range header value ("bytes=0-1023"). contentRange is
+	// the Content-Range for a 206 response; when the backend ignored the
+	// range (e.g. a multi-range request) it is empty and body is the
+	// whole object. length is the byte count of body. Unsatisfiable
+	// ranges return ErrInvalidRange.
+	GetRange(ctx context.Context, key, rangeSpec string) (body io.ReadCloser, contentType, contentRange string, length int64, err error)
+}
 
 // KeyPrefixer is an optional interface an ObjectStore may implement to
 // namespace one deployment's objects inside a bucket shared by several
@@ -231,6 +253,27 @@ func (s *S3Store) Get(ctx context.Context, key string) (io.ReadCloser, string, e
 		return nil, "", fmt.Errorf("media: getting %s: %w", key, err)
 	}
 	return out.Body, aws.ToString(out.ContentType), nil
+}
+
+// GetRange implements RangeGetter by forwarding the Range header to S3.
+func (s *S3Store) GetRange(ctx context.Context, key, rangeSpec string) (io.ReadCloser, string, string, int64, error) {
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.cfg.Bucket),
+		Key:    aws.String(key),
+		Range:  aws.String(rangeSpec),
+	})
+	if err != nil {
+		var noKey *types.NoSuchKey
+		if errors.As(err, &noKey) {
+			return nil, "", "", 0, ErrObjectNotFound
+		}
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "InvalidRange" {
+			return nil, "", "", 0, ErrInvalidRange
+		}
+		return nil, "", "", 0, fmt.Errorf("media: getting %s: %w", key, err)
+	}
+	return out.Body, aws.ToString(out.ContentType), aws.ToString(out.ContentRange), aws.ToInt64(out.ContentLength), nil
 }
 
 func (s *S3Store) Delete(ctx context.Context, key string) error {

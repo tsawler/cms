@@ -2,7 +2,7 @@ package admin
 
 import (
 	"errors"
-	"io"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,8 +11,22 @@ import (
 	"github.com/tsawler/cms/media"
 )
 
-// maxUploadBytes bounds one image upload (25 MB).
-const maxUploadBytes = 25 << 20
+// uploadLimit is the request-body cap for media uploads: big enough for
+// the largest allowed video, and never below the image/document limit.
+func (s *server) uploadLimit() int64 {
+	limit := int64(media.MaxImageDocBytes)
+	if v := s.deps.Media.MaxVideoBytes(); v > limit {
+		limit = v
+	}
+	return limit
+}
+
+func (s *server) uploadTooLargeMsg() string {
+	return fmt.Sprintf("That file is too large — images and documents must be under %d MB, videos under %d MB.",
+		media.MaxImageDocBytes>>20, s.deps.Media.MaxVideoBytes()>>20)
+}
+
+const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), video (MP4, WebM), PDF, office document, text/CSV, or ZIP."
 
 func (s *server) mediaList(w http.ResponseWriter, r *http.Request) {
 	s.renderMediaList(w, r, http.StatusOK, "")
@@ -52,53 +66,49 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 
 	data := s.newTemplateData(r)
 	for _, v := range s.deps.Media.Views(items) {
-		if v.Kind == media.KindFile {
+		switch v.Kind {
+		case media.KindFile:
 			data.Documents = append(data.Documents, v)
-		} else {
+		case media.KindVideo:
+			data.Videos = append(data.Videos, v)
+		default:
 			data.Media = append(data.Media, v)
 		}
 	}
 	data.Folders = folders
 	data.MediaQuery = query
 	data.MediaFolder = folderParam
+	data.MaxVideoMB = s.deps.Media.MaxVideoBytes() >> 20
 	data.Error = formError
 	s.render(w, status, "media", data)
 }
 
 func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, s.uploadLimit())
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, "That file is too large — images must be under 25 MB.")
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
 			return
 		}
-		s.renderMediaList(w, r, http.StatusUnprocessableEntity, "Choose an image file to upload.")
+		s.renderMediaList(w, r, http.StatusUnprocessableEntity, "Choose a file to upload.")
 		return
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, "That file is too large — images must be under 25 MB.")
-			return
-		}
-		s.serverError(w, err)
-		return
-	}
-
 	user := s.currentUser(r)
 	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
-	md, err := s.deps.Media.Upload(r.Context(), sanitizeFilename(header.Filename), data, user.ID, folderID)
+	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, nil, user.ID, folderID)
 	if err != nil {
-		if errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image") {
-			s.renderMediaList(w, r, http.StatusUnprocessableEntity, "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), PDF, office document, text/CSV, or ZIP.")
-			return
+		switch {
+		case errors.Is(err, media.ErrTooLarge):
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+		case errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image"):
+			s.renderMediaList(w, r, http.StatusUnprocessableEntity, unsupportedTypeMsg)
+		default:
+			s.serverError(w, err)
 		}
-		s.serverError(w, err)
 		return
 	}
 
@@ -110,7 +120,14 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.flash(r, "Image uploaded.")
+	switch md.Kind {
+	case media.KindVideo:
+		s.flash(r, "Video uploaded.")
+	case media.KindFile:
+		s.flash(r, "Document uploaded.")
+	default:
+		s.flash(r, "Image uploaded.")
+	}
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 
@@ -142,7 +159,7 @@ func (s *server) mediaDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, "Image deleted.")
+	s.flash(r, "Media deleted.")
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 

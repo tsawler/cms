@@ -138,6 +138,16 @@ func run(logger *slog.Logger) error {
 		webpQuality = q
 	}
 
+	// Video upload cap in MB; unset falls back to the CMS default (512).
+	var maxVideoMB int
+	if v := os.Getenv("CMS_MEDIA_MAX_VIDEO_MB"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CMS_MEDIA_MAX_VIDEO_MB %q is not a number: %w", v, err)
+		}
+		maxVideoMB = n
+	}
+
 	c, err := cms.New(cms.Config{
 		DB:               db,
 		Locales:          []string{"en", "fr"},
@@ -146,6 +156,7 @@ func run(logger *slog.Logger) error {
 		Captcha:          capCfg,
 		RememberFor:      rememberFor,
 		MediaWebPQuality: webpQuality,
+		MediaMaxVideoMB:  maxVideoMB,
 		TemplateFS:       templateFS,
 		SharedTemplates:  []string{"templates/base.gohtml"},
 		PageTemplates: []cms.PageTemplate{

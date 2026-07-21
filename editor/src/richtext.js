@@ -83,7 +83,7 @@ export function initInlineEditor(el, onDirty, register) {
         // selection needed.
         toolbar: (styleFormats.length ? "styles | " : "") +
             "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" +
-            (mediaEnabled ? " | cmsimage cmsdoc" : "") + " | removeformat",
+            (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
         fixed_toolbar_container: "#cms-mce-toolbar",
         plugins: "lists link autolink",
         // Paste and drag-drop of image data still upload through
@@ -157,7 +157,24 @@ export function initInlineEditor(el, onDirty, register) {
                         });
                     },
                 });
-                // Link to a document (PDF, office file, ...):
+                // Insert video: a native player for a library MP4/WebM,
+            // stored as uploaded. preload="metadata" keeps page loads
+            // light; the poster (when the upload captured one) gives
+            // the player a face before playback.
+            ed.ui.registry.addButton("cmsvideo", {
+                icon: "embed",
+                tooltip: "Insert video",
+                onAction: function () {
+                    openPicker("video", function (item) {
+                        ed.insertContent('<video controls preload="metadata" src="' +
+                            escapeAttr(item.original) + '"' +
+                            (item.poster ? ' poster="' + escapeAttr(item.poster) + '"' : "") +
+                            "></video>");
+                        onDirty();
+                    });
+                },
+            });
+            // Link to a document (PDF, office file, ...):
                 // selected text becomes the link; with no
                 // selection, the filename is inserted as the link.
                 // Fill-based glyph: TinyMCE's CSS fills icon paths

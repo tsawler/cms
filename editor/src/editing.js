@@ -8,7 +8,7 @@ import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
 import { loadTinyMCE, initRichEditors, removeRichEditors } from "./richtext.js";
-import { lockButtons, hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
+import { lockButtons, hideButtonUI, hideSnipUI, hideImgUI, hideVidUI } from "./buttons.js";
 import { closeDrawer } from "./snippets.js";
 import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
@@ -89,6 +89,7 @@ export function setEditing(on) {
         hideButtonUI();
         hideSnipUI();
         hideImgUI();
+        hideVidUI();
         removeRichEditors();
         reapplySectionClasses();
     }

@@ -11,9 +11,10 @@ import { closeDrawer } from "./snippets.js";
 import { isMenuModalOpen, closeMenuModal } from "./menu.js";
 
 var DOC_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip";
+var VIDEO_ACCEPT = "video/mp4,video/webm,.mp4,.webm";
 
 var pickerHandler = null; // function(mediaItem) while the picker is open
-var pickerKind = "image"; // "image" or "file" while the picker is open
+var pickerKind = "image"; // "image", "video", or "file" while the picker is open
 var pickerFolder = ""; // "" = all files, "root" = unfiled, or a folder id
 var pickerQuery = "";
 var pickerView = "grid";
@@ -27,8 +28,10 @@ export function openPicker(kind, handler) {
     pickerFolder = "";
     pickerQuery = "";
     $("search").value = "";
-    $("picker-title").textContent = kind === "file" ? "Choose a document" : "Choose an image";
-    $("file").setAttribute("accept", kind === "file" ? DOC_ACCEPT : "image/*");
+    $("picker-title").textContent = kind === "file" ? "Choose a document"
+        : kind === "video" ? "Choose a video" : "Choose an image";
+    $("file").setAttribute("accept", kind === "file" ? DOC_ACCEPT
+        : kind === "video" ? VIDEO_ACCEPT : "image/*");
     $("overlay").classList.add("on");
     $("picker").classList.add("on");
     applyView();
@@ -129,13 +132,25 @@ function loadMedia() {
 function docBadge(item, forList) {
     var doc = document.createElement("div");
     doc.className = "doc";
-    doc.textContent = "📄";
+    doc.textContent = item.kind === "video" ? "🎬" : "📄";
     if (!forList) {
         var ext = document.createElement("span");
         ext.textContent = item.filename.split(".").pop();
         doc.appendChild(ext);
     }
     return doc;
+}
+
+// itemPreview renders an item's tile media: its thumbnail when one exists
+// (images always; videos with a captured poster), a badge otherwise.
+function itemPreview(item, forList) {
+    if (item.thumb) {
+        var img = document.createElement("img");
+        img.src = item.thumb;
+        img.alt = item.alt || "";
+        return img;
+    }
+    return docBadge(item, forList);
 }
 
 function renderItems(items) {
@@ -150,34 +165,20 @@ function renderItems(items) {
         if (pickerView === "list") {
             el = document.createElement("div");
             el.className = "row";
-            if (item.kind === "file") {
-                el.appendChild(docBadge(item, true));
-            } else {
-                var img = document.createElement("img");
-                img.src = item.thumb;
-                img.alt = item.alt || "";
-                el.appendChild(img);
-            }
+            el.appendChild(itemPreview(item, true));
             var nm = document.createElement("span");
             nm.className = "nm";
             nm.textContent = item.filename;
             var sz = document.createElement("span");
             sz.className = "sz";
-            sz.textContent = item.kind === "file" ? item.size : item.width + "×" + item.height;
+            sz.textContent = item.kind === "image" ? item.width + "×" + item.height : item.size;
             el.appendChild(nm);
             el.appendChild(sz);
         } else {
             el = document.createElement("figure");
-            if (item.kind === "file") {
-                el.appendChild(docBadge(item, false));
-            } else {
-                var gimg = document.createElement("img");
-                gimg.src = item.thumb;
-                gimg.alt = item.alt || "";
-                el.appendChild(gimg);
-            }
+            el.appendChild(itemPreview(item, false));
             var cap = document.createElement("figcaption");
-            cap.textContent = item.filename + (item.kind === "file" ? " · " + item.size : "");
+            cap.textContent = item.filename + (item.kind === "image" ? "" : " · " + item.size);
             el.appendChild(cap);
         }
         el.addEventListener("click", function () { pick(item); });
@@ -188,6 +189,44 @@ function renderItems(items) {
 function pick(item) {
     if (pickerHandler) pickerHandler(item);
     closePicker();
+}
+
+// capturePoster draws an early frame of a local video file onto a canvas
+// and returns it as a JPEG blob. Always resolves — null on any failure or
+// after a timeout — so a stubborn file just uploads without a poster.
+function capturePoster(file) {
+    return new Promise(function (resolve) {
+        var url = URL.createObjectURL(file);
+        var video = document.createElement("video");
+        var done = false;
+        var timer = setTimeout(function () { finish(null); }, 5000);
+        function finish(blob) {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            URL.revokeObjectURL(url);
+            resolve(blob);
+        }
+        video.muted = true;
+        video.preload = "auto";
+        video.addEventListener("error", function () { finish(null); });
+        video.addEventListener("loadeddata", function () {
+            // Skip a beat in: the very first frame is often black.
+            try { video.currentTime = Math.min(0.5, (video.duration || 1) / 2); }
+            catch (e) { finish(null); }
+        });
+        video.addEventListener("seeked", function () {
+            try {
+                if (!video.videoWidth) { finish(null); return; }
+                var canvas = document.createElement("canvas");
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext("2d").drawImage(video, 0, 0);
+                canvas.toBlob(function (blob) { finish(blob); }, "image/jpeg", 0.85);
+            } catch (e) { finish(null); }
+        });
+        video.src = url;
+    });
 }
 
 export function initMedia() {
@@ -206,12 +245,21 @@ export function initMedia() {
     $("upload").addEventListener("click", function () {
         var input = $("file");
         if (!input.files || input.files.length === 0) return;
+        var file = input.files[0];
         var fd = new FormData();
-        fd.append("file", input.files[0]);
+        fd.append("file", file);
         // Upload into the folder being viewed (root/all -> unfiled).
         if (pickerFolder && pickerFolder !== "root") fd.append("folder", pickerFolder);
         setMsg("Uploading…");
-        api("/media", { method: "POST", body: fd }).then(function (body) {
+        // Videos ride along with a poster frame captured in the browser —
+        // the server stores files as-is and can't extract one itself.
+        var poster = pickerKind === "video" && file.type.indexOf("video/") === 0
+            ? capturePoster(file)
+            : Promise.resolve(null);
+        poster.then(function (blob) {
+            if (blob) fd.append("poster", blob, "poster.jpg");
+            return api("/media", { method: "POST", body: fd });
+        }).then(function (body) {
             flash("File uploaded");
             input.value = "";
             if (body.media) pick(body.media);

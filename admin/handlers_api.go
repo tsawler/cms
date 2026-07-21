@@ -520,6 +520,7 @@ type mediaJSON struct {
 	Thumb    string `json:"thumb"`
 	Web      string `json:"web"`
 	Original string `json:"original"`
+	Poster   string `json:"poster,omitempty"` // videos: full-size poster frame, if any
 }
 
 func toMediaJSON(v media.View) mediaJSON {
@@ -534,14 +535,15 @@ func toMediaJSON(v media.View) mediaJSON {
 		Thumb:    v.ThumbURL,
 		Web:      v.WebURL,
 		Original: v.OriginalURL,
+		Poster:   v.PosterURL,
 	}
 }
 
 // apiMediaList returns the media library for the editor's pickers.
-// GET /api/media?kind=image|file&q=term&folder=<id|root>
+// GET /api/media?kind=image|file|video&q=term&folder=<id|root>
 func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 	kind := media.Kind(r.URL.Query().Get("kind"))
-	if kind != "" && kind != media.KindImage && kind != media.KindFile {
+	if kind != "" && kind != media.KindImage && kind != media.KindFile && kind != media.KindVideo {
 		jsonError(w, http.StatusBadRequest, "Unknown media kind.")
 		return
 	}
@@ -565,37 +567,46 @@ func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"media": out})
 }
 
-// apiMediaUpload accepts a multipart image upload and returns its record.
-// POST /api/media  (multipart field "file")
+// apiMediaUpload accepts a multipart media upload and returns its record.
+// POST /api/media  (multipart field "file"; optional "poster", a
+// client-captured still for video uploads)
 func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, s.uploadLimit())
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			jsonError(w, http.StatusRequestEntityTooLarge, "That file is too large — images must be under 25 MB.")
+			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
 			return
 		}
-		jsonError(w, http.StatusUnprocessableEntity, "Choose an image file to upload.")
+		jsonError(w, http.StatusUnprocessableEntity, "Choose a file to upload.")
 		return
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		jsonError(w, http.StatusRequestEntityTooLarge, "That file is too large — images must be under 25 MB.")
-		return
+	// A poster over the cap is silently dropped, like an undecodable one:
+	// it is decorative, never worth failing the upload over.
+	var poster []byte
+	if pf, _, err := r.FormFile("poster"); err == nil {
+		poster, err = io.ReadAll(io.LimitReader(pf, 8<<20))
+		pf.Close()
+		if err != nil {
+			poster = nil
+		}
 	}
 
 	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
-	md, err := s.deps.Media.Upload(r.Context(), sanitizeFilename(header.Filename), data, s.currentUser(r).ID, folderID)
+	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, poster, s.currentUser(r).ID, folderID)
 	if err != nil {
-		if errors.Is(err, media.ErrUnsupportedType) {
-			jsonError(w, http.StatusUnprocessableEntity, "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), PDF, office document, text/CSV, or ZIP.")
-			return
+		switch {
+		case errors.Is(err, media.ErrTooLarge):
+			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+		case errors.Is(err, media.ErrUnsupportedType):
+			jsonError(w, http.StatusUnprocessableEntity, unsupportedTypeMsg)
+		default:
+			s.deps.Logger.Error("cms admin: api media upload", "err", err)
+			jsonError(w, http.StatusUnprocessableEntity, "That file could not be processed.")
 		}
-		s.deps.Logger.Error("cms admin: api media upload", "err", err)
-		jsonError(w, http.StatusUnprocessableEntity, "That file could not be processed.")
 		return
 	}
 

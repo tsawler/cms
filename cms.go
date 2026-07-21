@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,6 +133,13 @@ type Config struct {
 	// uses 0.3, tuned for fast page loads; the untouched original is
 	// always stored alongside. Other values are invalid.
 	MediaWebPQuality float64
+
+	// MediaMaxVideoMB caps video uploads, in megabytes. Zero — the
+	// default — allows 512 MB; negative values are invalid. Images and
+	// documents have a fixed 25 MB cap. Videos are stored exactly as
+	// uploaded (no transcoding), so the practical ceiling is what
+	// visitors' connections can stream.
+	MediaMaxVideoMB int
 
 	// EditorStyles populates the in-place editor's Styles menu — named,
 	// on-brand text styles that apply CSS classes. Nil gets the
@@ -268,9 +276,15 @@ func New(cfg Config) (*CMS, error) {
 		if cfg.MediaWebPQuality < 0 || cfg.MediaWebPQuality > 1 {
 			return nil, fmt.Errorf("cms: MediaWebPQuality must be in (0, 1], got %g", cfg.MediaWebPQuality)
 		}
+		if cfg.MediaMaxVideoMB < 0 {
+			return nil, fmt.Errorf("cms: MediaMaxVideoMB must be positive, got %d", cfg.MediaMaxVideoMB)
+		}
 		mediaManager = media.NewManager(cfg.DB, objects, cfg.Logger)
 		if cfg.MediaWebPQuality != 0 {
 			mediaManager.SetWebPQuality(cfg.MediaWebPQuality)
+		}
+		if cfg.MediaMaxVideoMB != 0 {
+			mediaManager.SetMaxVideoBytes(int64(cfg.MediaMaxVideoMB) << 20)
 		}
 	}
 
@@ -493,9 +507,32 @@ func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	key := c.media.KeyRoot() + rest
 
-	body, contentType, err := c.objects.Get(r.Context(), key)
+	// Range requests make proxied video seekable (and playable at all in
+	// Safari, which probes with one). They are forwarded to the object
+	// store when it supports them; other stores keep working range-less.
+	ranger, canRange := c.objects.(media.RangeGetter)
+	if canRange {
+		w.Header().Set("Accept-Ranges", "bytes")
+	}
+
+	var (
+		body                      io.ReadCloser
+		contentType, contentRange string
+		length                    int64
+		err                       error
+	)
+	if rangeSpec := r.Header.Get("Range"); canRange && rangeSpec != "" {
+		body, contentType, contentRange, length, err = ranger.GetRange(r.Context(), key, rangeSpec)
+	} else {
+		body, contentType, err = c.objects.Get(r.Context(), key)
+		length = -1
+	}
 	if errors.Is(err, media.ErrObjectNotFound) {
 		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, media.ErrInvalidRange) {
+		http.Error(w, "Requested range not satisfiable.", http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
 	if err != nil {
@@ -510,6 +547,13 @@ func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if length >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	}
+	if contentRange != "" {
+		w.Header().Set("Content-Range", contentRange)
+		w.WriteHeader(http.StatusPartialContent)
+	}
 	if r.Method == http.MethodHead {
 		return
 	}

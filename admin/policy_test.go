@@ -42,7 +42,19 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<a href="/w" target="_evil" rel="opener stylesheet">bad target</a>` +
 		`<script>alert(1)</script>` +
 		`<img src=x onerror=alert(2)>` +
-		`<a href="javascript:alert(3)">bad</a>`
+		`<a href="javascript:alert(3)">bad</a>` +
+		// Videos inserted by the editor: sources bound to media-style
+		// URLs, controls in both boolean serializations, bounded preload.
+		`<video controls preload="metadata" src="/cms/media/vid789/original.mp4" poster="/cms/media/vid789/web.webp"></video>` +
+		`<video controls="controls" src="https://bucket.example.com/media/v/original.webm" width="1280" height="720"></video>` +
+		`<video src="javascript:alert(7)" poster="data:text/html,x" preload="evil" onplay="alert(8)"></video>` +
+		// Video-slot placeholders and the embeds that replace them: only
+		// YouTube/Vimeo player URLs may ride in an iframe.
+		`<div class="cms-video-slot not-prose" data-cms-video-slot=""><p>Click to add a video</p></div>` +
+		`<iframe class="w-full aspect-video" src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" title="Video" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen=""></iframe>` +
+		`<iframe src="https://player.vimeo.com/video/76979871" allowfullscreen="allowfullscreen"></iframe>` +
+		`<iframe src="https://evil.example.com/embed/xyz"></iframe>` +
+		`<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" srcdoc="<script>alert(9)</script>" sandbox="allow-scripts" onload="alert(10)"></iframe>`
 
 	out := editorHTMLPolicy.Sanitize(in)
 
@@ -81,6 +93,19 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`data-cms-web="/cms/media/def456/web.webp"`,
 		`data-cms-orig="/cms/media/def456/original.jpg"`,
 		`<figcaption>Our office in winter</figcaption>`,
+		// Editor-inserted videos keep their player attributes.
+		`src="/cms/media/vid789/original.mp4"`,
+		`poster="/cms/media/vid789/web.webp"`,
+		`preload="metadata"`,
+		`src="https://bucket.example.com/media/v/original.webm"`,
+		`width="1280"`,
+		// Video slots and YouTube/Vimeo embeds survive.
+		`data-cms-video-slot=""`,
+		`src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"`,
+		`allow="fullscreen; picture-in-picture"`,
+		`allowfullscreen=""`,
+		`src="https://player.vimeo.com/video/76979871"`,
+		`src="https://www.youtube.com/embed/dQw4w9WgXcQ"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sanitized output lost %q:\n%s", want, out)
@@ -88,7 +113,8 @@ func TestEditorHTMLPolicy(t *testing.T) {
 	}
 	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color: red", "50vh",
 		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, `<div style`, "_evil", "opener stylesheet",
-		"onload", "data:text/html"} {
+		"onload", "data:text/html", `preload="evil"`, "onplay",
+		"evil.example.com", "srcdoc", "sandbox"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("sanitized output kept %q:\n%s", banned, out)
 		}

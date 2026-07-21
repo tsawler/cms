@@ -28,6 +28,11 @@ var pixelHeightRe = regexp.MustCompile(`^[0-9]{1,4}px$`)
 // absolute http(s) or app-relative paths only.
 var mediaURLRe = regexp.MustCompile(`^(?:https?://|/)[^\s"'<>\\]+$`)
 
+// embedURLRe bounds iframe sources to the exact embed URLs the editor's
+// video slot generates: YouTube (privacy-enhanced host included) and
+// Vimeo players, nothing else.
+var embedURLRe = regexp.MustCompile(`^https://(?:www\.)?youtube(?:-nocookie)?\.com/embed/[\w-]{5,20}$|^https://player\.vimeo\.com/video/[0-9]{4,15}$`)
+
 // The button editor (editor.js) stores its settings as inline styles on
 // <a class="cms-btn"> elements. Browsers serialize colors as rgb(...) in
 // cssText, so both hex and rgb forms must pass.
@@ -51,6 +56,23 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	// no javascript: or data: schemes.
 	p.AllowAttrs("data-cms-web", "data-cms-orig").Matching(mediaURLRe).OnElements("img")
 	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(?:lazy|eager)$`)).OnElements("img")
+	// Videos inserted by the editor: a plain <video> playing a
+	// media-library file. Sources are bounded like image URLs; the
+	// boolean controls attribute may serialize empty or mirrored.
+	p.AllowAttrs("src", "poster").Matching(mediaURLRe).OnElements("video")
+	p.AllowAttrs("controls").Matching(regexp.MustCompile(`^(?:controls)?$`)).OnElements("video")
+	p.AllowAttrs("preload").Matching(regexp.MustCompile(`^(?:none|metadata|auto)$`)).OnElements("video")
+	p.AllowAttrs("width", "height").Matching(regexp.MustCompile(`^[0-9]{1,4}$`)).OnElements("video")
+	// Unfilled video-slot placeholders from the video snippets survive
+	// saves; the editor turns them into a <video> or an embed on click.
+	p.AllowAttrs("data-cms-video-slot").Matching(regexp.MustCompile(`^$`)).OnElements("div")
+	// External video embeds from the video slot: iframes strictly bounded
+	// to YouTube/Vimeo player URLs, with only presentation attributes.
+	p.AllowAttrs("src").Matching(embedURLRe).OnElements("iframe")
+	p.AllowAttrs("title").Matching(regexp.MustCompile(`^[^<>"]{0,200}$`)).OnElements("iframe")
+	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(?:lazy|eager)$`)).OnElements("iframe")
+	p.AllowAttrs("allow").Matching(regexp.MustCompile(`^[a-z-;* ]*$`)).OnElements("iframe")
+	p.AllowAttrs("allowfullscreen").Matching(regexp.MustCompile(`^(?:|allowfullscreen)$`)).OnElements("iframe")
 	// The "Flexible space" snippet stores its height on the element.
 	p.AllowStyles("height").Matching(pixelHeightRe).Globally()
 	p.AllowAttrs("data-height").Matching(pixelHeightRe).OnElements("div")

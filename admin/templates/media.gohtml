@@ -10,7 +10,7 @@
 <form class="cms-upload" method="post" action="{{.AdminPath}}/media/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <div class="cms-upload-row">
-        <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
+        <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,.mp4,.webm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
         <input type="text" name="alt" placeholder="Description (alt text, for images)">
         <select name="folder">
             <option value="">No folder</option>
@@ -18,7 +18,7 @@
         </select>
         <button type="submit" class="cms-btn cms-btn-primary">Upload</button>
     </div>
-    <p class="cms-hint">Images (JPEG, PNG, GIF, WebP — resized automatically), PDFs, office documents, text/CSV, or ZIP, up to 25&nbsp;MB. Everything is stored on your site's bucket.</p>
+    <p class="cms-hint">Images (JPEG, PNG, GIF, WebP — resized automatically), videos (MP4, WebM — stored as uploaded), PDFs, office documents, text/CSV, or ZIP. Images and documents up to 25&nbsp;MB; videos up to {{.MaxVideoMB}}&nbsp;MB. Everything is stored on your site's bucket.</p>
 </form>
 
 <div class="cms-filter-bar">
@@ -77,6 +77,43 @@
     <p class="cms-muted">No images yet — upload your first one above.</p>
     {{end}}
 </div>
+
+{{if .Videos}}
+<h2 class="cms-section-head">Videos</h2>
+<div class="cms-media-grid">
+    {{range .Videos}}
+    <div class="cms-media-card">
+        <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
+            {{if .ThumbURL}}
+            <img src="{{.ThumbURL}}" alt="" loading="lazy">
+            {{else}}
+            <video src="{{.OriginalURL}}" preload="metadata" muted></video>
+            {{end}}
+        </a>
+        <div class="cms-media-body">
+            <p class="cms-media-name" title="{{.Filename}}">{{.Filename}}</p>
+            <p class="cms-muted cms-media-dims">{{if .Width}}{{.Width}}×{{.Height}} · {{end}}{{.SizeHuman}}</p>
+            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move" class="cms-media-move">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <select name="folder" data-autosubmit title="Folder">
+                    <option value="">No folder</option>
+                    {{$current := .FolderIDValue}}
+                    {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
+                </select>
+            </form>
+            <div class="cms-media-actions">
+                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">Copy link</button>
+                <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
+                      data-confirm="Delete this video? Pages still using it will show a broken player.">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{end}}
 
 <h2 class="cms-section-head">Documents</h2>
 <table class="cms-table">

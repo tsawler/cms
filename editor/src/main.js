@@ -9,13 +9,15 @@
  *
  * This entry point only wires the modules together. The init order
  * mirrors the original single-file script: listener registration order
- * matters for the capture-phase click handlers (spacer before button
- * chrome before image regions) and for who wins a shared click.
+ * matters for the capture-phase click handlers (spacer and video slots
+ * before button chrome before image regions) and for who wins a shared
+ * click.
  */
 
 import { initShell, initLightDom, initBarMin } from "./shell.js";
 import { initDialogs } from "./dialogs.js";
 import { initEditing } from "./editing.js";
+import { initVideoSlots } from "./videos.js";
 import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
@@ -28,6 +30,7 @@ initShell(); // shadow-DOM chrome first: everything else looks up $(...)
 initDialogs();
 initLightDom(); // TinyMCE toolbar strip + light-DOM editing styles
 initEditing();
+initVideoSlots(); // before initButtons: slot clicks beat snippet chrome
 initButtons();
 initSaving();
 initPageCode();

@@ -42,6 +42,13 @@ type Snippet struct {
 // ErrNotFound is returned when no snippet matches the query.
 var ErrNotFound = errors.New("snippets: not found")
 
+// videoSlotHTML is the shared "Click to add a video" placeholder used by
+// the video snippet and section presets. While editing, the editor script
+// turns a click on it into a chooser (media library or YouTube/Vimeo
+// link) and replaces the slot with a <video> player or a bounded <iframe>
+// embed — both shapes the editor sanitizer keeps.
+const videoSlotHTML = `<div class="cms-video-slot not-prose flex aspect-video w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50" data-cms-video-slot=""><p class="font-semibold text-slate-500">&#127916; Click to add a video</p></div>`
+
 // DefaultSnippets is the Tailwind-first default library, used when the
 // host does not configure its own. The markup avoids elements the editor
 // sanitizer strips (no SVG, no scripts) and uses `not-prose` so Tailwind
@@ -76,6 +83,11 @@ func DefaultSnippets() []Snippet {
 		{Name: "Button link", HTML: `<p class="cms-snippet not-prose my-4">
 <a href="/" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
 </p>`},
+		// A movie, dropped inline: the slot offers the media library or a
+		// YouTube/Vimeo link when clicked while editing.
+		{Name: "Video", HTML: `<div class="cms-snippet not-prose my-6">
+` + videoSlotHTML + `
+</div>`},
 		// Invisible on the live site; in edit mode the editor script makes
 		// it visible and click-to-adjust (see editor.js and the height
 		// allowance in the sanitizer policy).
@@ -139,6 +151,23 @@ func DefaultSectionPresets() []Snippet {
 <p>Another short, direct answer.</p>
 <h3>The third question people ask?</h3>
 <p>One more short, direct answer.</p>
+</div>`},
+		// Movie sections: a full-width player, and both split layouts.
+		// The slot picks up a library video or a YouTube/Vimeo embed when
+		// clicked while editing (see videoSlotHTML).
+		{Name: "Full-width video", Settings: map[string]string{"width": "wide"},
+			HTML: `<div class="cms-snippet not-prose my-8">
+` + videoSlotHTML + `
+</div>`},
+		{Name: "Text + video", Settings: map[string]string{"width": "wide"},
+			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 items-center sm:grid-cols-2">
+<div><h2 class="text-2xl font-bold mb-2">A headline for the video</h2><p class="text-slate-600">Set up what viewers will see and why it&rsquo;s worth watching.</p></div>
+` + videoSlotHTML + `
+</div>`},
+		{Name: "Video + text", Settings: map[string]string{"width": "wide"},
+			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 items-center sm:grid-cols-2">
+` + videoSlotHTML + `
+<div><h2 class="text-2xl font-bold mb-2">A headline for the video</h2><p class="text-slate-600">Set up what viewers will see and why it&rsquo;s worth watching.</p></div>
 </div>`},
 		{Name: "Call-to-action banner", Settings: map[string]string{"bg": "accent", "valign": "center"},
 			HTML: `<div class="cms-snippet text-center">

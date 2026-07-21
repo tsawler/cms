@@ -101,8 +101,8 @@ box-shadow:0 4px 12px rgba(0,0,0,.35)}
 border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del{color:#fca5a5}
-#btn-del:hover,#snip-del:hover,#img-del:hover{background:rgba(252,165,165,.2)}
+#btn-del,#snip-del,#img-del,#vid-del{color:#fca5a5}
+#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
