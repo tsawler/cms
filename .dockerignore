@@ -1,0 +1,6 @@
+# Keep the image build context lean and secret-free.
+.git
+.claude
+.DS_Store
+examples/basic/.env
+examples/basic/static/site.css

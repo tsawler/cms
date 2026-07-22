@@ -61,6 +61,13 @@ func loadDotEnv(paths ...string) {
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// The compiled site stylesheet is gitignored (a build artifact, like
+	// a binary): fresh checkouts must generate it once or every page
+	// renders unstyled.
+	if _, err := os.Stat("static/site.css"); err != nil {
+		logger.Warn("static/site.css not found — run `go generate .` in examples/basic (requires the tailwindcss CLI, e.g. brew install tailwindcss)")
+	}
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "err", err)
 		os.Exit(1)
