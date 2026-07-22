@@ -17,6 +17,10 @@ import (
 type Role string
 
 const (
+	// RoleSuperadmin has every admin power plus raw HTML access in the
+	// in-place editor (the whole-page source view) — for users who are
+	// comfortable hand-editing markup.
+	RoleSuperadmin Role = "superadmin"
 	// RoleAdmin may manage users and site settings in addition to content.
 	RoleAdmin Role = "admin"
 	// RoleEditor may create and edit content but not manage users.
@@ -24,7 +28,15 @@ const (
 )
 
 // Valid reports whether r is a role the CMS knows about.
-func (r Role) Valid() bool { return r == RoleAdmin || r == RoleEditor }
+func (r Role) Valid() bool { return r == RoleSuperadmin || r == RoleAdmin || r == RoleEditor }
+
+// IsAdmin reports whether the role carries admin powers (user management,
+// unsanitized content, page CSS/JS). Superadmin is a superset of admin.
+func (r Role) IsAdmin() bool { return r == RoleAdmin || r == RoleSuperadmin }
+
+// IsSuperadmin reports whether the role may edit raw page HTML in the
+// in-place editor.
+func (r Role) IsSuperadmin() bool { return r == RoleSuperadmin }
 
 // User is a CMS account.
 type User struct {

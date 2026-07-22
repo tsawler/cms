@@ -288,10 +288,10 @@ func navSectionsFor(sections []Section, adminPath string, isAdmin bool) []navLin
 	return links
 }
 
-// IsAdmin reports whether the logged-in user has the admin role; used by
-// templates to show admin-only fields.
+// IsAdmin reports whether the logged-in user has admin powers (admin or
+// superadmin); used by templates to show admin-only fields.
 func (td templateData) IsAdmin() bool {
-	return td.User != nil && td.User.Role == auth.RoleAdmin
+	return td.User != nil && td.User.Role.IsAdmin()
 }
 
 // TemplateLabel returns the human label for a page template file, for the

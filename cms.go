@@ -325,7 +325,9 @@ func (c *CMS) Migrate(ctx context.Context) error {
 
 // SeedAdmin creates an initial administrator account if and only if no users
 // exist yet. It returns true if the account was created. Call it after
-// Migrate; it is a no-op on every startup after the first.
+// Migrate; it is a no-op on every startup after the first. The account gets
+// the superadmin role — it belongs to whoever set the site up, and further
+// users can be created with lesser roles from the admin area.
 func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool, error) {
 	n, err := c.users.Count(ctx)
 	if err != nil {
@@ -342,7 +344,7 @@ func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool
 		Email:        email,
 		Name:         name,
 		PasswordHash: hash,
-		Role:         auth.RoleAdmin,
+		Role:         auth.RoleSuperadmin,
 		Active:       true,
 	})
 	if err != nil {
@@ -458,7 +460,8 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			Status:         string(page.Status),
 			HasUnpublished: hasUnpublished,
 			MediaEnabled:   c.media != nil,
-			IsAdmin:        user.Role == auth.RoleAdmin,
+			IsAdmin:        user.Role.IsAdmin(),
+			IsSuperadmin:   user.Role.IsSuperadmin(),
 			Styles:         c.cfg.EditorStyles,
 			Sections:       c.cfg.SectionStyles,
 		}

@@ -33,6 +33,7 @@
         <select id="role" name="role">
             <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>Editor — can edit content</option>
             <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>Admin — can also manage users</option>
+            <option value="superadmin" {{if eq .FormUser.Role "superadmin"}}selected{{end}}>Superadmin — can also edit raw page HTML</option>
         </select>
         {{with index .FormErrors "role"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>

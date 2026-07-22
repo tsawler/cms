@@ -51,7 +51,7 @@ func (s *server) requireUser(next http.Handler) http.Handler {
 func (s *server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := s.currentUser(r)
-		if u == nil || u.Role != auth.RoleAdmin {
+		if u == nil || !u.Role.IsAdmin() {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}

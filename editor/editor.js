@@ -7,6 +7,7 @@
   var csrf = cfg.csrf;
   var mediaEnabled = cfg.media === "1";
   var isAdmin = cfg.isAdmin === "1";
+  var isSuperadmin = cfg.isSuperadmin === "1";
   var EDITOR_BASE = "/cms/editor/";
   var styleFormats = [];
   try {
@@ -488,6 +489,16 @@
   }
   var srcResolve = null;
   var srcOriginal = "";
+  var srcValidate = null;
+  function showSourceError(msg) {
+    $("src-err").textContent = msg;
+    $("src-err").hidden = false;
+    $("src-hint").hidden = true;
+  }
+  function clearSourceError() {
+    $("src-err").hidden = true;
+    $("src-hint").hidden = false;
+  }
   function isSourceOpen() {
     return !!srcResolve;
   }
@@ -499,6 +510,8 @@
       srcResolve = resolve;
       $("src-title").textContent = opts.title || "HTML source";
       $("src-hint").textContent = (opts.hint ? opts.hint + " " : "") + (isAdmin ? "" : "Scripts and unsafe markup are removed when your changes are saved.");
+      srcValidate = opts.validate || null;
+      clearSourceError();
       srcOriginal = formatHTML(opts.html || "");
       var ta = $("src-ta");
       ta.value = srcOriginal;
@@ -519,6 +532,7 @@
     $("src-panel").classList.remove("on");
     var resolve = srcResolve;
     srcResolve = null;
+    srcValidate = null;
     resolve(value);
   }
   function dismissSource() {
@@ -536,9 +550,19 @@
     $("src-cancel").addEventListener("click", dismissSource);
     $("src-overlay").addEventListener("click", dismissSource);
     $("src-apply").addEventListener("click", function() {
+      if (srcValidate) {
+        var err = srcValidate($("src-ta").value);
+        if (err) {
+          showSourceError(err);
+          return;
+        }
+      }
       settleSource($("src-ta").value);
     });
-    $("src-ta").addEventListener("input", renderSource);
+    $("src-ta").addEventListener("input", function() {
+      clearSourceError();
+      renderSource();
+    });
     $("src-ta").addEventListener("scroll", function() {
       $("src-hl").scrollTop = $("src-ta").scrollTop;
       $("src-hl").scrollLeft = $("src-ta").scrollLeft;
@@ -3726,6 +3750,8 @@ overflow:auto}
 .tok-n{color:#f2cc60} /* numbers / colors */
 .cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}
 .chint{flex:1;font-size:12px;color:#667085}
+/* validation error in the source panel's footer (replaces the hint) */
+.cfoot .derr{flex:1;font-size:12px;color:#c0392b;font-weight:600}
 
 /* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
 .btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;
@@ -4034,7 +4060,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><span class="derr" id="src-err" hidden></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
@@ -4079,6 +4105,121 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
     updateBarButtons();
   }
 
+  // ../src/pagesource.js
+  var INTRO = "<!-- Editable page content. Keep the cms: marker comments \u2014 they route each chunk back to its place. Text areas, images, menus, and section layout/settings are edited on the page itself. -->";
+  function openMarker(c) {
+    return "<!-- cms:" + c.key + " -->";
+  }
+  function closeMarker(c) {
+    return "<!-- /cms:" + c.key + " -->";
+  }
+  function chunkList() {
+    var chunks = [];
+    document.querySelectorAll('[data-cms-region][data-cms-kind="html"]').forEach(function(el) {
+      var name = el.dataset.cmsRegion;
+      if (state.mceEditors[name]) {
+        chunks.push({ key: "region " + name, region: name });
+      }
+    });
+    document.querySelectorAll("[data-cms-sections]").forEach(function(container) {
+      var region = container.getAttribute("data-cms-sections");
+      var i = 0;
+      container.querySelectorAll("[data-cms-section-content]").forEach(function(el) {
+        i++;
+        state.sectionEditors.some(function(s) {
+          if (s.el !== el) return false;
+          chunks.push({ key: "section " + region + "/" + i, region, entry: s });
+          return true;
+        });
+      });
+    });
+    return chunks;
+  }
+  function chunkContent(c) {
+    return c.entry ? c.entry.ed.getContent() : state.mceEditors[c.region].getContent();
+  }
+  function compose(chunks) {
+    var parts = [INTRO];
+    chunks.forEach(function(c) {
+      parts.push("", openMarker(c), c.orig, closeMarker(c));
+    });
+    return parts.join("\n");
+  }
+  function parse(text, chunks) {
+    var parts = [];
+    var pos = 0;
+    for (var i = 0; i < chunks.length; i++) {
+      var c = chunks[i];
+      var o = openMarker(c);
+      var cl = closeMarker(c);
+      var oi = text.indexOf(o);
+      var ci = text.indexOf(cl);
+      if (oi === -1 || ci === -1) {
+        return { error: 'The marker for "' + c.key + '" is missing or altered \u2014 put it back, or Cancel and reopen.' };
+      }
+      if (text.indexOf(o, oi + 1) !== -1 || text.indexOf(cl, ci + 1) !== -1) {
+        return { error: 'The marker for "' + c.key + '" appears more than once.' };
+      }
+      if (oi < pos || ci < oi) {
+        return { error: "The cms: markers are out of order \u2014 keep the chunks in their original order." };
+      }
+      parts.push({ chunk: c, html: text.slice(oi + o.length, ci).trim() });
+      pos = ci + cl.length;
+    }
+    var total = (text.match(/<!--\s*\/?cms:/g) || []).length;
+    if (total !== chunks.length * 2) {
+      return { error: "Unexpected cms: markers found \u2014 regions and sections can't be added or removed here. Use the page tools instead, then reopen." };
+    }
+    return { parts };
+  }
+  function initPageSource() {
+    var btn = $("rail-html");
+    btn.hidden = !isSuperadmin;
+    if (!isSuperadmin) return;
+    btn.addEventListener("click", function() {
+      var chunks = chunkList();
+      if (!chunks.length) {
+        var hasAreas = document.querySelector(
+          '[data-cms-region][data-cms-kind="html"],[data-cms-section-content]'
+        );
+        setMsg(hasAreas ? "The editor is still loading \u2014 try again in a moment." : "This page has no HTML content areas.");
+        return;
+      }
+      chunks.forEach(function(c) {
+        c.orig = chunkContent(c);
+      });
+      openSource({
+        title: "Page HTML",
+        hint: "All editable HTML on this page, in order. Keep the cms: markers. Applied changes still need Save.",
+        html: compose(chunks),
+        validate: function(text) {
+          return parse(text, chunks).error || null;
+        }
+      }).then(function(text) {
+        if (text === null) return;
+        var r = parse(text, chunks);
+        if (r.error) return;
+        var changed = 0;
+        r.parts.forEach(function(p) {
+          if (p.html === formatHTML(p.chunk.orig).trim()) return;
+          changed++;
+          var ed = p.chunk.entry ? p.chunk.entry.ed : state.mceEditors[p.chunk.region];
+          ed.undoManager.transact(function() {
+            ed.setContent(p.html);
+          });
+          if (p.chunk.entry) markSectionsDirty(p.chunk.region);
+          else markDirty(p.chunk.region);
+        });
+        if (!changed) {
+          flash("No changes to apply");
+          return;
+        }
+        lockButtons();
+        flash(changed === 1 ? "1 area updated" : changed + " areas updated");
+      });
+    });
+  }
+
   // ../src/main.js
   initShell();
   initDialogs();
@@ -4089,6 +4230,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
   initSaving();
   initPageCode();
   initSource();
+  initPageSource();
   initBarMin();
   initSnippets();
   initSections();

@@ -82,7 +82,7 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 		if !form.Active {
 			errs["active"] = "You cannot deactivate your own account."
 		}
-		if form.Role != auth.RoleAdmin {
+		if !form.Role.IsAdmin() {
 			errs["role"] = "You cannot remove your own admin role."
 		}
 	}

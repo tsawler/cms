@@ -330,9 +330,12 @@ type EditInfo struct {
 	MediaEnabled   bool
 	// IsAdmin unlocks admin-only editor chrome (the page CSS & JS
 	// panel); the server enforces the restriction regardless.
-	IsAdmin  bool
-	Styles   []EditorStyle  // entries for the editor's Styles menu
-	Sections *SectionStyles // options for section settings
+	IsAdmin bool
+	// IsSuperadmin unlocks the whole-page HTML source view on the
+	// editor's tool rail.
+	IsSuperadmin bool
+	Styles       []EditorStyle  // entries for the editor's Styles menu
+	Sections     *SectionStyles // options for section settings
 }
 
 // Renderer holds one parsed template set per page template: the shared
@@ -580,6 +583,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.IsAdmin {
 		adminFlag = "1"
 	}
+	superFlag := "0"
+	if edit.IsSuperadmin {
+		superFlag = "1"
+	}
 	stylesJSON, err := json.Marshal(edit.Styles)
 	if err != nil || edit.Styles == nil {
 		stylesJSON = []byte("[]")
@@ -606,6 +613,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
+		` data-is-superadmin="` + superFlag + `"` +
 		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"` +
 		` data-section-styles="` + html.EscapeString(string(sectionsJSON)) + `"` +
 		` data-page-templates="` + html.EscapeString(string(templatesJSON)) + `"></script>`

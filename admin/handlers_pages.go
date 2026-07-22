@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
@@ -186,7 +185,7 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Per-page CSS/JS can inject arbitrary code into the public site, so
 	// only admins may change it; for editors the existing values persist.
-	if s.currentUser(r).Role == auth.RoleAdmin {
+	if s.currentUser(r).Role.IsAdmin() {
 		form.HeadCSS = r.PostFormValue("head_css")
 		form.BodyJS = r.PostFormValue("body_js")
 	} else {
@@ -249,7 +248,7 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
 	for _, region := range s.deps.Renderer.Regions(regionsTemplate) {
 		values[region.Name] = r.PostFormValue("region-" + region.Name)
 	}
-	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
+	isAdmin := s.currentUser(r).Role.IsAdmin()
 	return s.saveRegions(r.Context(), page.ID, regionsTemplate, values, isAdmin)
 }
 

@@ -13,6 +13,7 @@ export var adminPath = cfg.adminPath || "/admin";
 export var csrf = cfg.csrf;
 export var mediaEnabled = cfg.media === "1";
 export var isAdmin = cfg.isAdmin === "1";
+export var isSuperadmin = cfg.isSuperadmin === "1";
 
 export var EDITOR_BASE = "/cms/editor/";
 

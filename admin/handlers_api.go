@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/pgutil"
 	"github.com/tsawler/cms/media"
@@ -54,7 +53,7 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
+	isAdmin := s.currentUser(r).Role.IsAdmin()
 	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, body.Regions, isAdmin); err != nil {
 		s.deps.Logger.Error("cms admin: api saving regions", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
@@ -365,7 +364,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isAdmin := s.currentUser(r).Role == auth.RoleAdmin
+	isAdmin := s.currentUser(r).Role.IsAdmin()
 	inputs := make([]content.SectionInput, len(body.Sections))
 	for i, sec := range body.Sections {
 		html := sec.HTML

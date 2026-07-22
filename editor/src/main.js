@@ -22,6 +22,7 @@ import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
 import { initSource } from "./source.js";
+import { initPageSource } from "./pagesource.js";
 import { initSnippets } from "./snippets.js";
 import { initSections } from "./sections.js";
 import { initMedia } from "./media.js";
@@ -36,6 +37,7 @@ initButtons();
 initSaving();
 initPageCode();
 initSource(); // the HTML-source modal for snippet blocks and sections
+initPageSource(); // whole-page HTML view on the rail (superadmin only)
 initBarMin(); // restores the remembered minimized state before first paint
 initSnippets();
 initSections();

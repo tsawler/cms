@@ -91,6 +91,8 @@ overflow:auto}
 .tok-n{color:#f2cc60} /* numbers / colors */
 .cfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e3e6ea}
 .chint{flex:1;font-size:12px;color:#667085}
+/* validation error in the source panel's footer (replaces the hint) */
+.cfoot .derr{flex:1;font-size:12px;color:#c0392b;font-weight:600}
 
 /* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
 .btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;
