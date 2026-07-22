@@ -1,0 +1,22 @@
+{{template "base" .}}
+
+{{define "content"}}
+{{with .Post}}
+{{if .HeaderURL}}
+<img src="{{.HeaderURL}}" alt="" class="h-64 w-full object-cover sm:h-80">
+{{end}}
+{{end}}
+
+<article>
+    <header class="mx-auto max-w-3xl px-6 pt-12">
+        <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h1>
+        {{with .Post}}
+        <p class="mt-3 text-sm text-slate-500">
+            {{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}
+        </p>
+        {{end}}
+    </header>
+
+    {{cmsSections "sections"}}
+</article>
+{{end}}

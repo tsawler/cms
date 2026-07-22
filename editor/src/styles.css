@@ -272,3 +272,8 @@ border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
 .dlg button.ok:hover{background:#2149b8}
 .dlg button.ok.danger{background:#c0392b;border-color:#c0392b}
 .dlg button.ok.danger:hover{background:#a03024}
+.post-pill{position:fixed;top:16px;right:16px;z-index:2147482999;display:flex;align-items:center;gap:7px;
+background:#1c2128;color:#fff;border:none;border-radius:999px;padding:9px 15px;font-size:13px;
+line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.post-pill:hover{background:#2b323d}
+.post-pill[hidden]{display:none}

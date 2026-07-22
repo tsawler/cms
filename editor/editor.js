@@ -8,6 +8,12 @@
   var mediaEnabled = cfg.media === "1";
   var isAdmin = cfg.isAdmin === "1";
   var isSuperadmin = cfg.isSuperadmin === "1";
+  var postsEnabled = cfg.posts === "1";
+  var postInfo = null;
+  try {
+    postInfo = JSON.parse(cfg.post || "null");
+  } catch (e) {
+  }
   var EDITOR_BASE = "/cms/editor/";
   var styleFormats = [];
   try {
@@ -916,6 +922,13 @@
 
   // ../src/snippets.js
   var snippetsLoaded = false;
+  function datetimeNow() {
+    var d = /* @__PURE__ */ new Date();
+    var p = function(n) {
+      return (n < 10 ? "0" : "") + n;
+    };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
   function openDrawer() {
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
@@ -1092,6 +1105,58 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: values.input, template: values.template })
+        }).then(function(body) {
+          window.location.href = body.url;
+        }).catch(function(err) {
+          setMsg(err.message);
+        });
+      });
+    });
+    $("rail-post").hidden = !postsEnabled;
+    $("rail-post").addEventListener("click", function() {
+      var fields = [
+        {
+          id: "feed",
+          label: "Publish under",
+          type: "select",
+          value: "blog",
+          options: [
+            { value: "blog", label: "Blog" },
+            { value: "news", label: "News" }
+          ]
+        },
+        {
+          id: "summary",
+          label: "Summary",
+          type: "text",
+          placeholder: "Shown in listings and feeds (optional)"
+        },
+        { id: "date", label: "Date", type: "datetime", value: datetimeNow() }
+      ];
+      if (mediaEnabled) {
+        fields.push({ id: "image", label: "Image", type: "image", value: "" });
+      }
+      openDialog({
+        message: "Create a new post",
+        prompt: true,
+        placeholder: "Post title",
+        required: "Give the post a title.",
+        okLabel: "Create post",
+        fields
+      }).then(function(values) {
+        if (!values || !values.input) return;
+        setMsg("Creating post\u2026");
+        api("/posts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: values.input,
+            feed: values.feed,
+            summary: values.summary || "",
+            published_at: values.date || "",
+            header_url: values.image || "",
+            thumbnail_url: values.image_thumb || ""
+          })
         }).then(function(body) {
           window.location.href = body.url;
         }).catch(function(err) {
@@ -2623,6 +2688,7 @@
     $("edit-label").textContent = on ? "Done" : "Edit";
     $("edit").title = on ? "Finish editing" : "Edit this page in place";
     $("cancel").hidden = !on;
+    $("post-settings").hidden = !on || !postInfo;
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     $("rail").classList.toggle("on", on);
     setMenuEditing(on);
@@ -3207,6 +3273,7 @@
         else if (f.type === "image") buildImageField(wrap, f);
         else if (f.type === "range") buildRangeField(wrap, f);
         else if (f.type === "text") buildTextField(wrap, f);
+        else if (f.type === "datetime") buildDatetimeField(wrap, f);
         else if (f.type === "check") buildCheckField(wrap, f);
         else buildSelectField(wrap, f);
         fields.appendChild(wrap);
@@ -3308,6 +3375,18 @@
     });
     wrap.appendChild(inp);
   }
+  function buildDatetimeField(wrap, f) {
+    var inp = document.createElement("input");
+    inp.type = "datetime-local";
+    inp.className = "tinput";
+    inp.value = f.value || "";
+    dlgValues[f.id] = inp.value;
+    inp.addEventListener("input", function() {
+      dlgValues[f.id] = inp.value;
+      dlgChanged();
+    });
+    wrap.appendChild(inp);
+  }
   function buildCheckField(wrap, f) {
     var heading = wrap.querySelector("label");
     if (heading) heading.remove();
@@ -3383,12 +3462,14 @@
     choose.addEventListener("click", function() {
       openPicker("image", function(item) {
         dlgValues[f.id] = item.web;
+        dlgValues[f.id + "_thumb"] = item.thumb || item.web;
         show();
         dlgChanged();
       });
     });
     clear.addEventListener("click", function() {
       dlgValues[f.id] = "";
+      dlgValues[f.id + "_thumb"] = "";
       show();
       dlgChanged();
     });
@@ -3961,6 +4042,11 @@ border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
 .dlg button.ok:hover{background:#2149b8}
 .dlg button.ok.danger{background:#c0392b;border-color:#c0392b}
 .dlg button.ok.danger:hover{background:#a03024}
+.post-pill{position:fixed;top:16px;right:16px;z-index:2147482999;display:flex;align-items:center;gap:7px;
+background:#1c2128;color:#fff;border:none;border-radius:999px;padding:9px 15px;font-size:13px;
+line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.post-pill:hover{background:#2b323d}
+.post-pill[hidden]{display:none}
 `;
 
   // ../src/light.css
@@ -4090,7 +4176,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><span class="derr" id="src-err" hidden></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="msg" id="msg" hidden></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button><button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2>Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="clinks"><label for="code-links" id="code-links-label">External stylesheets \u2014 one URL per line</label><textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off" placeholder="https://cdn.example.com/library.css"></textarea></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint">This page only. Enter plain code \u2014 no &lt;style&gt; or &lt;script&gt; tags; CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><span class="derr" id="src-err" hidden></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
@@ -4250,6 +4336,56 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
     });
   }
 
+  // ../src/postsettings.js
+  function initPostSettings() {
+    $("post-settings").addEventListener("click", function() {
+      if (!postInfo) return;
+      var fields = [
+        { id: "date", label: "Date", type: "datetime", value: postInfo.publishedAt },
+        {
+          id: "summary",
+          label: "Summary",
+          type: "text",
+          value: postInfo.summary,
+          placeholder: "Shown in listings and feeds"
+        }
+      ];
+      if (mediaEnabled) {
+        fields.push(
+          { id: "thumb", label: "Thumbnail", type: "image", value: postInfo.thumbnailUrl },
+          { id: "header", label: "Header image", type: "image", value: postInfo.headerUrl }
+        );
+      }
+      openDialog({
+        message: "Post settings",
+        okLabel: "Save",
+        fields
+      }).then(function(values) {
+        if (!values) return;
+        var thumb = values.thumb !== void 0 ? values.thumb : postInfo.thumbnailUrl || "";
+        var header = values.header !== void 0 ? values.header : postInfo.headerUrl || "";
+        api("/posts/" + postInfo.id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: values.summary,
+            published_at: values.date,
+            thumbnail_url: thumb,
+            header_url: header
+          })
+        }).then(function() {
+          postInfo.publishedAt = values.date;
+          postInfo.summary = values.summary;
+          postInfo.thumbnailUrl = thumb;
+          postInfo.headerUrl = header;
+          flash("Post settings saved \u2014 the page shows them after a reload.");
+        }).catch(function(err) {
+          setMsg(err.message);
+        });
+      });
+    });
+  }
+
   // ../src/main.js
   initShell();
   initDialogs();
@@ -4263,6 +4399,7 @@ font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:n
   initPageSource();
   initBarMin();
   initSnippets();
+  initPostSettings();
   initSections();
   initMedia();
   initMenu();

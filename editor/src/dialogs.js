@@ -57,6 +57,7 @@ export function openDialog(opts) {
             else if (f.type === "image") buildImageField(wrap, f);
             else if (f.type === "range") buildRangeField(wrap, f);
             else if (f.type === "text") buildTextField(wrap, f);
+            else if (f.type === "datetime") buildDatetimeField(wrap, f);
             else if (f.type === "check") buildCheckField(wrap, f);
             else buildSelectField(wrap, f);
             fields.appendChild(wrap);
@@ -149,6 +150,16 @@ function buildTextField(wrap, f) {
     wrap.appendChild(inp);
 }
 
+function buildDatetimeField(wrap, f) {
+    var inp = document.createElement("input");
+    inp.type = "datetime-local";
+    inp.className = "tinput";
+    inp.value = f.value || "";
+    dlgValues[f.id] = inp.value;
+    inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; dlgChanged(); });
+    wrap.appendChild(inp);
+}
+
 function buildCheckField(wrap, f) {
     // The field's own label is the clickable text, so suppress the
     // heading label openDialog already added.
@@ -227,14 +238,22 @@ function buildImageField(wrap, f) {
     }
     choose.addEventListener("click", function () {
         // The media picker opens above the dialog; the dialog stays put
-        // and shows the chosen image when the picker closes.
+        // and shows the chosen image when the picker closes. The item's
+        // generated thumbnail rides along under "<id>_thumb" for callers
+        // that want it (the post dialogs).
         openPicker("image", function (item) {
             dlgValues[f.id] = item.web;
+            dlgValues[f.id + "_thumb"] = item.thumb || item.web;
             show();
             dlgChanged();
         });
     });
-    clear.addEventListener("click", function () { dlgValues[f.id] = ""; show(); dlgChanged(); });
+    clear.addEventListener("click", function () {
+        dlgValues[f.id] = "";
+        dlgValues[f.id + "_thumb"] = "";
+        show();
+        dlgChanged();
+    });
     row.appendChild(thumb);
     row.appendChild(txt);
     row.appendChild(choose);

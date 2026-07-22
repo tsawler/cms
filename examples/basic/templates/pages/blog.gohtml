@@ -1,0 +1,26 @@
+{{template "base" .}}
+
+{{define "content"}}
+<section class="mx-auto max-w-4xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{.Title}}</h1>
+    <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
+
+    <div class="mt-10 grid gap-8 sm:grid-cols-2">
+        {{range cmsPosts "blog" 12}}
+        <a href="{{.URL}}" class="group block overflow-hidden rounded-xl border border-slate-200 transition-shadow hover:shadow-md">
+            {{with or .ThumbnailURL .HeaderURL}}
+            <img src="{{.}}" alt="" class="h-44 w-full object-cover">
+            {{end}}
+            <div class="p-5">
+                {{if .Draft}}<span class="mb-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Draft</span>{{end}}
+                <h2 class="text-lg font-semibold text-slate-900 group-hover:underline">{{.Title}}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>
+                {{with .Summary}}<p class="mt-2 text-sm text-slate-600">{{.}}</p>{{end}}
+            </div>
+        </a>
+        {{else}}
+        <p class="text-slate-500">No posts yet.</p>
+        {{end}}
+    </div>
+</section>
+{{end}}

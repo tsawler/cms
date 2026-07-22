@@ -335,3 +335,22 @@ a.cms-card:hover { border-color: var(--cms-primary); }
 }
 .cms-badge-ok { color: var(--cms-ok); background: #e8f5ee; border-color: #bfe3d0; }
 .cms-badge-off { color: var(--cms-danger); background: #fbeae8; border-color: #eac5c0; }
+
+/* Feed filter tabs (Blog & News list) */
+.cms-tabs { display: flex; gap: .25rem; margin: 0 0 1rem; }
+.cms-tabs a {
+    padding: .3rem .8rem;
+    border-radius: 999px;
+    text-decoration: none;
+    color: var(--cms-muted);
+    border: 1px solid transparent;
+}
+.cms-tabs a:hover { color: var(--cms-text); }
+.cms-tabs a.cms-active {
+    color: var(--cms-text);
+    background: var(--cms-surface);
+    border-color: var(--cms-border);
+}
+
+/* Read-only form values (e.g. a post's author) */
+.cms-static { margin: 0; color: var(--cms-text); }

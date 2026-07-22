@@ -39,9 +39,16 @@
         <p>Not configured — the host application must set Config.S3.</p>
     </div>
     {{end}}
+    {{if .PostsEnabled}}
+    <a class="cms-card" href="{{.AdminPath}}/posts">
+        <h2>Blog &amp; News</h2>
+        <p>Write and publish blog posts and news items.</p>
+    </a>
+    {{else}}
     <div class="cms-card cms-card-disabled">
         <h2>Blog &amp; News</h2>
-        <p>Coming in phase 6.</p>
+        <p>Not configured — the host application must set Config.PostTemplate.</p>
     </div>
+    {{end}}
 </div>
 {{end}}

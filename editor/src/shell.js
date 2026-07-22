@@ -61,8 +61,14 @@ export function initShell() {
         '<button id="rail-add" title="Add a section">＋<span>Section</span></button>' +
         '<button id="rail-snips" title="Snippets">⧉<span>Snippets</span></button>' +
         '<button id="rail-page" title="New page">⊞<span>Page</span></button>' +
+        '<button id="rail-post" title="New blog or news post">✎<span>Post</span></button>' +
         '<button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button>' +
         "</div>" +
+        // Post pages only, edit mode only: a pinned top-right pill, far
+        // more discoverable than a bar icon for post date/summary/images.
+        '<button class="post-pill" id="post-settings" hidden ' +
+        'title="Edit this post&#39;s date, summary, thumbnail, and header image">' +
+        '⚙<span>Post settings</span></button>' +
         '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
         '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
         "</button>" +

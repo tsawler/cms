@@ -184,7 +184,10 @@ func run(logger *slog.Logger) error {
 			{File: "templates/pages/home.gohtml", Label: "Home page"},
 			{File: "templates/pages/standard.gohtml", Label: "Standard page"},
 			{File: "templates/pages/canvas.gohtml", Label: "Blank canvas"},
+			{File: "templates/pages/blog.gohtml", Label: "Blog listing"},
+			{File: "templates/pages/news.gohtml", Label: "News listing"},
 		},
+		PostTemplate: cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post"},
 		AdminSections: []cms.AdminSection{
 			{Path: "reports", NavLabel: "Reports", Handler: reportsSection(db)},
 		},

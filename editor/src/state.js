@@ -14,6 +14,16 @@ export var csrf = cfg.csrf;
 export var mediaEnabled = cfg.media === "1";
 export var isAdmin = cfg.isAdmin === "1";
 export var isSuperadmin = cfg.isSuperadmin === "1";
+export var postsEnabled = cfg.posts === "1";
+
+// When the current page backs a blog/news post: {id, feed, summary,
+// publishedAt, thumbnailUrl, headerUrl}. Null on ordinary pages. Mutable:
+// the post-settings dialog updates it after a save so reopening shows
+// the saved values.
+export var postInfo = null;
+try {
+    postInfo = JSON.parse(cfg.post || "null");
+} catch (e) { /* no post-settings gear */ }
 
 export var EDITOR_BASE = "/cms/editor/";
 

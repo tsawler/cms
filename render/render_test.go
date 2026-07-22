@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/tsawler/cms/content"
 )
@@ -57,7 +58,7 @@ func TestRenderFillsRegionsAndEscapesText(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en"}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -86,7 +87,7 @@ func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, nil, "en", nil, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
 		t.Fatalf("Render with no blocks: %v", err)
 	}
 	if !strings.Contains(buf.String(), "<div></div>") {
@@ -103,11 +104,11 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := r.Render(&buf, page, blocks, "en", nil, &EditInfo{
+	err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en", Edit: &EditInfo{
 		PageID: 7, AdminPath: "/admin", CSRFToken: "tok123", Locale: "en",
 		Status: "draft", MediaEnabled: true,
 		Styles: []EditorStyle{{Label: "Red", Class: "text-red-600"}},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 
 	// A plain render of the same page must carry no editor artifacts.
 	buf.Reset()
-	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en"}); err != nil {
 		t.Fatalf("plain Render: %v", err)
 	}
 	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath) {
@@ -219,7 +220,7 @@ func TestRenderNav(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, nil, "en", menus, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Menus: menus}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -256,7 +257,7 @@ func TestRenderNav(t *testing.T) {
 
 	// Edit renders mark each item with its id for the in-place editor.
 	buf.Reset()
-	if err := r.Render(&buf, page, nil, "en", menus, &EditInfo{PageID: 1, AdminPath: "/admin"}); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Menus: menus, Edit: &EditInfo{PageID: 1, AdminPath: "/admin"}}); err != nil {
 		t.Fatalf("edit Render: %v", err)
 	}
 	out = buf.String()
@@ -278,7 +279,7 @@ func TestRenderMenu(t *testing.T) {
 		"main": {{Label: "About <x>", URL: "/about", Active: true}},
 	}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, nil, "en", menus, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Menus: menus}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -300,7 +301,7 @@ func TestRenderSections(t *testing.T) {
 	// Plain render: wrapper + container classes from settings, unknown
 	// keys fall back to the first option, no editor attributes.
 	var buf bytes.Buffer
-	if err := r.Render(&buf, page, blocks, "en", nil, nil); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en"}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -316,7 +317,7 @@ func TestRenderSections(t *testing.T) {
 
 	// Edit render: container plus per-section markers with resolved keys.
 	buf.Reset()
-	if err := r.Render(&buf, page, blocks, "en", nil, &EditInfo{PageID: 1, AdminPath: "/admin", CSRFToken: "t", Locale: "en", Status: "draft"}); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en", Edit: &EditInfo{PageID: 1, AdminPath: "/admin", CSRFToken: "t", Locale: "en", Status: "draft"}}); err != nil {
 		t.Fatalf("edit Render: %v", err)
 	}
 	out = buf.String()
@@ -331,5 +332,61 @@ func TestRenderSections(t *testing.T) {
 	}
 	if !strings.Contains(out, "data-section-styles=") {
 		t.Errorf("section styles JSON missing from script tag:\n%s", out)
+	}
+}
+
+func TestRenderPostsData(t *testing.T) {
+	fsys := fstest.MapFS{
+		"pages/post.gohtml": &fstest.MapFile{Data: []byte(
+			`{{with .Post}}<img src="{{.HeaderURL}}"><time>{{.PublishedAt.Format "2006-01-02"}}</time><i>{{.Author}}</i>{{end}}` +
+				`<ul>{{range cmsPosts "blog" 5}}<li{{if .Draft}} class="draft"{{end}}><a href="{{.URL}}">{{.Title}}</a> {{.Summary}}</li>{{end}}</ul>`)},
+	}
+	r, err := New(fsys, nil, []PageTemplate{{File: "pages/post.gohtml", Label: "Post"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	page := &content.Page{ID: 1, TemplateName: "pages/post.gohtml", Title: "Launch"}
+	post := &content.Post{
+		Page:      content.Page{Slug: "blog/launch", Title: "Launch", Description: "We shipped", Status: content.StatusPublished},
+		Feed:      content.FeedBlog,
+		HeaderURL: "/cms/media/header.webp",
+	}
+	post.PublishedAt = time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	post.AuthorName = "Pat Writer"
+
+	lister := func(feed string, limit int) []PostInfo {
+		if feed != "blog" || limit != 5 {
+			t.Errorf("lister called with (%q, %d)", feed, limit)
+		}
+		return []PostInfo{
+			{Title: "Launch", Summary: "We shipped", URL: "/blog/launch"},
+			{Title: "WIP", URL: "/blog/wip", Draft: true},
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Post: PostInfoFor(post), Posts: lister}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`<img src="/cms/media/header.webp">`,
+		`<time>2026-07-01</time>`,
+		`<i>Pat Writer</i>`,
+		`<li><a href="/blog/launch">Launch</a> We shipped</li>`,
+		`<li class="draft"><a href="/blog/wip">WIP</a> </li>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Without a lister (and without post data) the funcs are inert.
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render without post data: %v", err)
+	}
+	if got := buf.String(); got != "<ul></ul>" {
+		t.Errorf("plain render: got %q, want empty list only", got)
 	}
 }

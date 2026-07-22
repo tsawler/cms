@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -43,6 +44,10 @@ type Deps struct {
 	Logger         *slog.Logger
 	AdminPath      string
 	DefaultLocale  string
+
+	// PostTemplate is the template blog and news posts render with; the
+	// zero value disables the Blog & News admin.
+	PostTemplate render.PageTemplate
 
 	// RememberFor is how long a "Remember me" login persists. The zero
 	// value falls back to 24h so a partially-populated Deps (tests,
@@ -138,6 +143,20 @@ func New(d Deps) http.Handler {
 				r.Put("/api/pages/{id}/code", s.apiSavePageCode)
 			})
 
+			// Blog & news, when a post template is configured.
+			if d.PostTemplate.File != "" {
+				r.Get("/posts", s.postsList)
+				r.Get("/posts/new", s.postNew)
+				r.Post("/posts/new", s.postCreate)
+				r.Get("/posts/{id}", s.postEdit)
+				r.Post("/posts/{id}", s.postUpdate)
+				r.Post("/posts/{id}/delete", s.postDelete)
+				r.Post("/posts/{id}/discard", s.postDiscard)
+				r.Get("/posts/{id}/preview", s.postPreview)
+				r.Post("/api/posts", s.apiCreatePost)
+				r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
+			}
+
 			// Snippet management (palette entries) is admin-only.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)
@@ -187,11 +206,11 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "media", "snippets", "snippet_form", "custom"}
+	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
-			"templates/layout.gohtml", "templates/"+page+".gohtml")
+			"templates/layout.gohtml", "templates/form_regions.gohtml", "templates/"+page+".gohtml")
 		if err != nil {
 			panic(fmt.Sprintf("cms admin: parsing template %s: %v", page, err))
 		}
@@ -230,6 +249,15 @@ type templateData struct {
 	Regions       []render.Region
 	BlockContent  map[string]string // draft content keyed by region name
 	HasDraftEdits bool              // draft blocks differ from the published set
+	// RegionsTemplate names the template whose regions the form_regions
+	// partial edits (the page's template, or the post template).
+	RegionsTemplate string
+
+	// Blog & news pages.
+	PostsEnabled bool
+	Posts        []content.Post
+	FormPost     *content.Post
+	FeedFilter   string // active feed filter on the posts list ("", "blog", "news")
 
 	// Media pages.
 	MediaEnabled bool
@@ -273,6 +301,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		CSRFToken:    s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
 		Flash:        s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
 		PagesEnabled: s.deps.Renderer != nil,
+		PostsEnabled: s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
 		MediaEnabled: s.deps.Media != nil,
 
 		RememberHours: int(s.deps.RememberFor.Round(time.Hour) / time.Hour),
@@ -307,6 +336,28 @@ func navSectionsFor(sections []Section, adminPath string, isAdmin bool) []navLin
 // superadmin); used by templates to show admin-only fields.
 func (td templateData) IsAdmin() bool {
 	return td.User != nil && td.User.Role.IsAdmin()
+}
+
+// MediaContains reports whether url is one of the listed media items' web
+// URLs. The post form's image selects use it to keep a stored URL that
+// isn't in the library (an original variant, or a URL set by code) from
+// being silently wiped on the next save.
+func (td templateData) MediaContains(url string) bool {
+	for _, m := range td.Media {
+		if m.WebURL == url {
+			return true
+		}
+	}
+	return false
+}
+
+// PostSlugTail is the post form's editable address portion: the backing
+// page's slug with the feed prefix removed.
+func (td templateData) PostSlugTail() string {
+	if td.FormPost == nil {
+		return ""
+	}
+	return strings.TrimPrefix(td.FormPost.Slug, string(td.FormPost.Feed)+"/")
 }
 
 // TemplateLabel returns the human label for a page template file, for the

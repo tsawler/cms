@@ -3,7 +3,7 @@
  * bar-button visibility rules that reflect it all.
  * ------------------------------------------------------------------ */
 
-import { state, cfg } from "./state.js";
+import { state, cfg, postInfo } from "./state.js";
 import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
@@ -60,6 +60,8 @@ export function setEditing(on) {
     $("edit-label").textContent = on ? "Done" : "Edit";
     $("edit").title = on ? "Finish editing" : "Edit this page in place";
     $("cancel").hidden = !on;
+    // The post-settings gear shows only when editing a post's page.
+    $("post-settings").hidden = !on || !postInfo;
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     $("rail").classList.toggle("on", on);

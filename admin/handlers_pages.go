@@ -89,7 +89,8 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 }()
 
 func (s *server) pagesList(w http.ResponseWriter, r *http.Request) {
-	pages, err := s.deps.Content.All(r.Context(), s.deps.DefaultLocale)
+	// Posts' backing pages are managed under Blog & News, not here.
+	pages, err := s.deps.Content.AllNonPost(r.Context(), s.deps.DefaultLocale)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -354,7 +355,12 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	menus := render.BuildMenus(menuItems, page.Slug, true)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.deps.Renderer.Render(w, page, blocks, s.deps.DefaultLocale, menus, nil); err != nil {
+	if err := s.deps.Renderer.Render(w, render.Input{
+		Page:   page,
+		Blocks: blocks,
+		Locale: s.deps.DefaultLocale,
+		Menus:  menus,
+	}); err != nil {
 		s.serverError(w, err)
 	}
 }
@@ -395,6 +401,8 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 	data.IsNew = isNew
 	data.FormErrors = errs
 	data.PageTemplates = s.deps.Renderer.PageTemplates()
+
+	data.RegionsTemplate = page.TemplateName
 
 	if !isNew {
 		data.Regions = s.deps.Renderer.Regions(page.TemplateName)

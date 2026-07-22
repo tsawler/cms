@@ -48,8 +48,7 @@ module, which keeps the data model and auth simple.
 github.com/tsawler/cms
 ├── cms.go            // Config, New(), the public Handlers
 ├── auth/             // users, passwords, roles, login throttling
-├── content/          // pages, regions, versions, publishing        (phase 2)
-├── blog/             // posts (blog + news as two feeds of one type) (phase 6)
+├── content/          // pages, regions, publishing; posts (blog + news) (phases 2, 6)
 ├── media/            // uploads, S3 client, image variants           (phase 3)
 ├── render/           // template integration, region injection       (phase 2)
 ├── snippets/         // snippet registry                             (phase 5)
@@ -135,7 +134,8 @@ The glue script (vanilla JS, chrome in Shadow DOM) provides two pieces of
 persistent chrome — the **edit bar** (floating bottom pill: status chip,
 Edit toggle, Cancel, Save draft, Publish, admin link, minimize-to-pencil)
 and the **tool rail** (fixed full-height strip on the left, edit mode
-only: Add section, Snippets drawer toggle, New page). Document-level
+only: Add section, Snippets drawer toggle, New page, New post when blog
+& news is configured). Document-level
 actions live in the edit bar; creation tools live in the rail. "New page"
 opens a dialog (name + page type from the host's PageTemplates), creates
 a draft via `POST /api/pages` with a slug derived from the name
@@ -310,6 +310,52 @@ draft state**: they are site-wide, so "publish on which page?" has no
 good answer; changes are live at once. Labels get per-locale variants
 when phase 7 lands.
 
+### 4.3 Blog & news — posts are pages
+
+Requirement 5 could have been a parallel content pipeline (`cms_posts` +
+`cms_post_content` with its own body storage, as the original data-model
+sketch had it). It isn't, because the body of a post wants everything a
+page already has: sections, snippets, in-place TinyMCE editing,
+draft/publish snapshots, sanitization, per-page CSS/JS. All of that
+machinery is keyed to `cms_pages`/`cms_blocks` — so **a post is a page**
+(slug prefixed `blog/` or `news/`, rendered by `Config.PostTemplate`, a
+template parsed like a PageTemplate but hidden from the page-template
+choosers) **plus one `cms_posts` row**: feed, display date, author, and
+optional thumbnail/header image URLs. The page's per-locale title and
+description double as the post's title and summary, so phase 7 gets
+post localization for free.
+
+Consequences fall out rather than being built: the in-place editor works
+on posts unchanged (it only ever sees a page id); publish/discard/preview
+reuse the page endpoints; deleting the backing page cascades away the
+post; menu items may link to posts. The backing pages are hidden from
+the admin Pages list — posts are managed under Blog & News (list with
+feed filter tabs, form with feed/date/summary/images, same
+draft-publish-discard-delete verbs as pages). Posts are created there or
+from the editor tool rail's "Post" button — a dialog taking title, feed,
+summary, date, and an image via the media picker (the image's web
+rendition becomes the header, its generated thumb rendition the
+thumbnail); `POST /api/posts` then navigates straight into the new
+draft, the same shape as New page. On a post's page in edit mode, a
+"⚙ Post settings" pill pinned top-right (discoverable next to the
+title, unlike a bar icon) edits date, summary, thumbnail, and header
+(`PUT /api/posts/{id}`); like menus these have no draft state — they
+describe the post in listings, so saves are live at once. Post creation
+stamps the creating user as the author, fixed thereafter.
+
+Templates see posts two ways: on a post's own page the dot carries
+`.Post` (feed, date, author, image URLs — nil on ordinary pages), and
+any template can call `{{cmsPosts "blog" 12}}` for render-ready listing
+entries (public renders get published posts; editors also get drafts,
+flagged so templates can badge them). Listing pages are just pages using
+a listing template, created wherever the host wants them. RSS is served
+at fixed paths `/blog/rss.xml` and `/news/rss.xml` (dots can't appear in
+page slugs, so the paths are free), taking channel metadata from the
+published listing page at the feed's slug when one exists. The
+`published_at` date orders listings and displays on posts; it is not a
+publishing schedule — visibility is the page's draft/published status.
+Categories/tags are deferred.
+
 - Content tables key on `(page_id, region, locale)` with fallback to `en`
   when a `fr` row doesn't exist.
 - URL strategy: `/` = default locale, `/fr/...` = French (configurable).
@@ -357,8 +403,9 @@ cms_pages         id, slug, template_name, status (draft|published), sort, paren
 cms_page_meta     page_id, locale, title, description            -- SEO per locale
 cms_blocks        id, page_id, region, sort, snippet_key (nullable), html, locale, status
 cms_page_assets   page_id, kind (css|js), inline_content, media_id
-cms_posts         id, type (blog|news), slug, status, published_at, author_id
-cms_post_content  post_id, locale, title, summary, body_html
+cms_posts         id, page_id (unique FK), feed (blog|news), published_at,
+                  author_id, thumbnail_url, header_url
+                  -- slug/status/title/summary live on the backing page (4.3)
 cms_media         id, s3_key, filename, mime, width, height, size, uploaded_by
 cms_media_meta    media_id, locale, alt_text
 cms_snippets      key, name, html, editable_slots, source (code|db)
@@ -419,7 +466,9 @@ the module self-contained and the surface area small.
    (`cmsSections`): add/reorder/delete/settings controls in place,
    curated backgrounds & widths, snippet-seeded new sections,
    multi-block storage with settings JSONB
-6. **Blog & news** — posts, listing/detail helpers, RSS, categories/tags
+6. **Blog & news** ✅ — page-backed posts (two feeds, one engine),
+   thumbnail/header images, Blog & News admin, .Post/cmsPosts template
+   helpers, RSS; categories/tags deferred
 7. **i18n** — locale routing, fallback, in-place locale switching, FR admin
    strings
 8. **Polish** — versioning/undo, sitemap.xml, hooks API, docs

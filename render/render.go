@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tsawler/cms/content"
 )
@@ -126,6 +127,48 @@ type PageData struct {
 	Description string
 	Slug        string
 	Locale      string
+	// Post is set when the page is a blog or news post's backing page —
+	// the post template reads its date, author, and images from here.
+	// Nil on ordinary pages.
+	Post *PostInfo
+}
+
+// PostInfo describes one blog or news post to templates: the dot's .Post
+// on a post page, and the entries {{cmsPosts "blog" 10}} returns for
+// listing pages. Title and Summary are the backing page's title and
+// description for the render's locale.
+type PostInfo struct {
+	ID           int64  // post id, for the editor's settings API
+	Feed         string // "blog" or "news"
+	Title        string
+	Summary      string
+	URL          string // site-relative, e.g. "/blog/launch-day"
+	PublishedAt  time.Time
+	Author       string
+	ThumbnailURL string // "" when no thumbnail was chosen
+	HeaderURL    string // "" when no header image was chosen
+	Draft        bool   // only ever true on editor renders
+}
+
+// PostLister supplies a feed's posts, newest first, for {{cmsPosts}}. A
+// non-positive limit means no limit. Nil disables the func (it returns
+// nothing).
+type PostLister func(feed string, limit int) []PostInfo
+
+// PostInfoFor builds the template-facing view of a stored post.
+func PostInfoFor(p *content.Post) *PostInfo {
+	return &PostInfo{
+		ID:           p.PostID,
+		Feed:         string(p.Feed),
+		Title:        p.Title,
+		Summary:      p.Description,
+		URL:          "/" + p.Slug,
+		PublishedAt:  p.PublishedAt,
+		Author:       p.AuthorName,
+		ThumbnailURL: p.ThumbnailURL,
+		HeaderURL:    p.HeaderURL,
+		Draft:        p.Status != content.StatusPublished,
+	}
 }
 
 // stubFuncs lets templates parse before real, page-bound funcs are attached
@@ -139,6 +182,7 @@ var stubFuncs = template.FuncMap{
 	"cmsNav":      func(string) template.HTML { return "" },
 	"cmsHead":     func() template.HTML { return "" },
 	"cmsScripts":  func() template.HTML { return "" },
+	"cmsPosts":    func(string, int) []PostInfo { return nil },
 }
 
 // EditorScriptPath is the public route the in-place editor script is served
@@ -335,8 +379,14 @@ type EditInfo struct {
 	// IsSuperadmin unlocks the whole-page HTML source view on the
 	// editor's tool rail.
 	IsSuperadmin bool
-	Styles       []EditorStyle  // entries for the editor's Styles menu
-	Sections     *SectionStyles // options for section settings
+	// PostsEnabled shows the tool rail's "New post" button (blog & news
+	// configured on the host).
+	PostsEnabled bool
+	// Post, set when the page backs a post, enables the edit bar's
+	// post-settings gear (date, summary, thumbnail, header image).
+	Post     *PostInfo
+	Styles   []EditorStyle  // entries for the editor's Styles menu
+	Sections *SectionStyles // options for section settings
 }
 
 // Renderer holds one parsed template set per page template: the shared
@@ -355,8 +405,11 @@ type Renderer struct {
 
 // New parses each page template together with the shared globs and returns
 // a Renderer. It fails fast on any template that doesn't parse. A nil
-// sections gets the Tailwind-first defaults.
-func New(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionStyles) (*Renderer, error) {
+// sections gets the Tailwind-first defaults. Hidden templates are parsed
+// like page templates but left out of PageTemplates(), so they never
+// appear in the admin's or editor's template choosers — the post template
+// is one.
+func New(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionStyles, hidden ...PageTemplate) (*Renderer, error) {
 	if len(pages) == 0 {
 		return nil, fmt.Errorf("render: at least one PageTemplate is required")
 	}
@@ -364,11 +417,11 @@ func New(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionSty
 		sections = DefaultSectionStyles()
 	}
 	r := &Renderer{
-		sets:      make(map[string]*template.Template, len(pages)),
+		sets:      make(map[string]*template.Template, len(pages)+len(hidden)),
 		templates: pages,
 		sections:  sections,
 	}
-	for _, pt := range pages {
+	for _, pt := range append(append([]PageTemplate{}, pages...), hidden...) {
 		patterns := append(append([]string{}, shared...), pt.File)
 		set, err := template.New(path.Base(pt.File)).Funcs(stubFuncs).ParseFS(fsys, patterns...)
 		if err != nil {
@@ -407,11 +460,28 @@ func (r *Renderer) contentCSSHref() string {
 	return ""
 }
 
-// Render executes the page's template with the given blocks and menus and
-// writes the result to w. Output is buffered so a template error never
-// sends a partial page. A non-nil edit produces the editable variant of
-// the page; see EditInfo.
-func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Block, locale string, menus map[string][]MenuEntry, edit *EditInfo) error {
+// Input is everything one page render needs. Page, Blocks, and Locale are
+// required; the rest is optional.
+type Input struct {
+	Page   *content.Page
+	Blocks []content.Block
+	Locale string
+	Menus  map[string][]MenuEntry
+	// Edit produces the editable variant of the page; see EditInfo. Nil
+	// for a plain public render.
+	Edit *EditInfo
+	// Post is set when the page backs a blog or news post; it becomes the
+	// template dot's .Post.
+	Post *PostInfo
+	// Posts feeds {{cmsPosts}} on listing templates. Nil makes the func
+	// return nothing.
+	Posts PostLister
+}
+
+// Render executes the page's template and writes the result to w. Output
+// is buffered so a template error never sends a partial page.
+func (r *Renderer) Render(w io.Writer, in Input) error {
+	page, blocks, locale, menus, edit := in.Page, in.Blocks, in.Locale, in.Menus, in.Edit
 	set, ok := r.sets[page.TemplateName]
 	if !ok {
 		return fmt.Errorf("render: page %d uses unknown template %q", page.ID, page.TemplateName)
@@ -467,6 +537,12 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], edit != nil) },
 		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref()) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
+		"cmsPosts": func(feed string, limit int) []PostInfo {
+			if in.Posts == nil {
+				return nil
+			}
+			return in.Posts(feed, limit)
+		},
 	}
 	if edit != nil {
 		// Editable renders wrap region output in marker elements the
@@ -503,6 +579,7 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		Description: page.Description,
 		Slug:        page.Slug,
 		Locale:      locale,
+		Post:        in.Post,
 	}); err != nil {
 		return fmt.Errorf("render: executing %s: %w", page.TemplateName, err)
 	}
@@ -606,6 +683,27 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.IsSuperadmin {
 		superFlag = "1"
 	}
+	postsFlag := "0"
+	if edit.PostsEnabled {
+		postsFlag = "1"
+	}
+	// The post-settings dialog wants the date preformatted for its
+	// <input type="datetime-local">, so this is a bespoke object rather
+	// than a PostInfo marshal.
+	postJSON := ""
+	if edit.Post != nil {
+		b, err := json.Marshal(map[string]any{
+			"id":           edit.Post.ID,
+			"feed":         edit.Post.Feed,
+			"summary":      edit.Post.Summary,
+			"publishedAt":  edit.Post.PublishedAt.Local().Format("2006-01-02T15:04"),
+			"thumbnailUrl": edit.Post.ThumbnailURL,
+			"headerUrl":    edit.Post.HeaderURL,
+		})
+		if err == nil {
+			postJSON = string(b)
+		}
+	}
 	stylesJSON, err := json.Marshal(edit.Styles)
 	if err != nil || edit.Styles == nil {
 		stylesJSON = []byte("[]")
@@ -633,6 +731,8 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
+		` data-posts="` + postsFlag + `"` +
+		` data-post="` + html.EscapeString(postJSON) + `"` +
 		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"` +
 		` data-section-styles="` + html.EscapeString(string(sectionsJSON)) + `"` +
 		` data-page-templates="` + html.EscapeString(string(templatesJSON)) + `"></script>`

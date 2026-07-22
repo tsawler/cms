@@ -3,7 +3,7 @@
  * buttons that open it, and the "new page" dialog on the rail.
  * ------------------------------------------------------------------ */
 
-import { state, pageTemplates } from "./state.js";
+import { state, pageTemplates, postsEnabled, mediaEnabled } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
@@ -12,6 +12,14 @@ import { lockButtons } from "./buttons.js";
 import { createSection } from "./sections.js";
 
 var snippetsLoaded = false;
+
+// datetimeNow formats the current local time for <input type="datetime-local">.
+function datetimeNow() {
+    var d = new Date();
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+        "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
 
 export function openDrawer() {
     $("drawer").classList.add("on");
@@ -210,6 +218,57 @@ export function initSnippets() {
                 body: JSON.stringify({ title: values.input, template: values.template }),
             }).then(function (body) {
                 // The new page is a draft, so only editors see it —
+                // navigate straight into it to start writing.
+                window.location.href = body.url;
+            }).catch(function (err) { setMsg(err.message); });
+        });
+    });
+
+    $("rail-post").hidden = !postsEnabled;
+    $("rail-post").addEventListener("click", function () {
+        var fields = [
+            {
+                id: "feed",
+                label: "Publish under",
+                type: "select",
+                value: "blog",
+                options: [
+                    { value: "blog", label: "Blog" },
+                    { value: "news", label: "News" },
+                ],
+            },
+            { id: "summary", label: "Summary", type: "text",
+                placeholder: "Shown in listings and feeds (optional)" },
+            { id: "date", label: "Date", type: "datetime", value: datetimeNow() },
+        ];
+        if (mediaEnabled) {
+            // The chosen image becomes the header; its generated
+            // thumbnail rendition becomes the listing thumbnail.
+            fields.push({ id: "image", label: "Image", type: "image", value: "" });
+        }
+        openDialog({
+            message: "Create a new post",
+            prompt: true,
+            placeholder: "Post title",
+            required: "Give the post a title.",
+            okLabel: "Create post",
+            fields: fields,
+        }).then(function (values) {
+            if (!values || !values.input) return;
+            setMsg("Creating post…");
+            api("/posts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: values.input,
+                    feed: values.feed,
+                    summary: values.summary || "",
+                    published_at: values.date || "",
+                    header_url: values.image || "",
+                    thumbnail_url: values.image_thumb || "",
+                }),
+            }).then(function (body) {
+                // The new post is a draft, so only editors see it —
                 // navigate straight into it to start writing.
                 window.location.href = body.url;
             }).catch(function (err) { setMsg(err.message); });

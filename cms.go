@@ -120,6 +120,17 @@ type Config struct {
 	// own set, so different pages may define the same block names.
 	PageTemplates []PageTemplate
 
+	// PostTemplate is the page template blog and news posts render with.
+	// A post is an ordinary page underneath — its slug lives under blog/
+	// or news/ and its body is edited in place like any page, sections
+	// and snippets included — so this is parsed like a PageTemplate, but
+	// offered only through the Blog & News admin, never in the page
+	// template choosers. The template's dot gets a non-nil .Post
+	// (render.PostInfo) carrying the post's date, author, and images,
+	// and any template may list posts with {{cmsPosts "blog" 10}}. The
+	// zero value disables blog & news.
+	PostTemplate PageTemplate
+
 	// S3 configures the object store for image uploads. If nil, the
 	// media library is disabled.
 	S3 *S3Config
@@ -271,8 +282,12 @@ func New(cfg Config) (*CMS, error) {
 
 	var renderer *render.Renderer
 	if cfg.TemplateFS != nil {
+		var hidden []render.PageTemplate
+		if cfg.PostTemplate.File != "" {
+			hidden = append(hidden, cfg.PostTemplate)
+		}
 		var err error
-		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates, cfg.SectionStyles)
+		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates, cfg.SectionStyles, hidden...)
 		if err != nil {
 			return nil, err
 		}
@@ -327,6 +342,7 @@ func New(cfg Config) (*CMS, error) {
 		Captcha:        capClient,
 		ConfigSnippets: cfg.Snippets,
 		SectionStyles:  cfg.SectionStyles,
+		PostTemplate:   cfg.PostTemplate,
 		Sections:       cfg.AdminSections,
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
@@ -439,6 +455,15 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	locale := c.cfg.Locales[0]
 	slug := strings.Trim(r.URL.Path, "/")
 
+	// /blog/rss.xml and /news/rss.xml (dots can't appear in page slugs,
+	// so these paths are free).
+	if c.postsEnabled() {
+		if feed, ok := strings.CutSuffix(slug, "/rss.xml"); ok && content.ValidFeed(feed) {
+			c.serveFeed(w, r, content.Feed(feed), locale)
+			return
+		}
+	}
+
 	user := c.sessionUser(r)
 	editing := user != nil
 
@@ -474,6 +499,18 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 	menus := render.BuildMenus(menuItems, page.Slug, editing)
 
+	// When the page backs a blog/news post, hand the template its .Post.
+	var post *render.PostInfo
+	if c.postsEnabled() && (strings.HasPrefix(slug, "blog/") || strings.HasPrefix(slug, "news/")) {
+		p, err := c.content.PostByPageID(r.Context(), page.ID, locale)
+		switch {
+		case err == nil:
+			post = render.PostInfoFor(p)
+		case !errors.Is(err, content.ErrNotFound):
+			c.cfg.Logger.Error("cms: loading post", "slug", slug, "err", err)
+		}
+	}
+
 	var edit *render.EditInfo
 	if editing {
 		csrf, err := sessiondata.EnsureCSRF(r.Context(), c.sessions)
@@ -501,13 +538,23 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			MediaEnabled:   c.media != nil,
 			IsAdmin:        user.Role.IsAdmin(),
 			IsSuperadmin:   user.Role.IsSuperadmin(),
+			PostsEnabled:   c.postsEnabled(),
+			Post:           post,
 			Styles:         c.cfg.EditorStyles,
 			Sections:       c.cfg.SectionStyles,
 		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := c.renderer.Render(w, page, blocks, locale, menus, edit); err != nil {
+	if err := c.renderer.Render(w, render.Input{
+		Page:   page,
+		Blocks: blocks,
+		Locale: locale,
+		Menus:  menus,
+		Edit:   edit,
+		Post:   post,
+		Posts:  c.postLister(r.Context(), locale, editing),
+	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 	}

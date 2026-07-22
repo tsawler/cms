@@ -1,0 +1,27 @@
+{{template "base" .}}
+
+{{define "content"}}
+<section class="mx-auto max-w-3xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{.Title}}</h1>
+    <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
+
+    <div class="mt-10 divide-y divide-slate-200">
+        {{range cmsPosts "news" 20}}
+        <a href="{{.URL}}" class="group flex gap-5 py-6">
+            {{with or .ThumbnailURL .HeaderURL}}
+            <img src="{{.}}" alt="" class="h-20 w-28 flex-none rounded-lg object-cover">
+            {{end}}
+            <div>
+                <p class="text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}
+                    {{if .Draft}}<span class="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Draft</span>{{end}}
+                </p>
+                <h2 class="mt-1 text-lg font-semibold text-slate-900 group-hover:underline">{{.Title}}</h2>
+                {{with .Summary}}<p class="mt-1 text-sm text-slate-600">{{.}}</p>{{end}}
+            </div>
+        </a>
+        {{else}}
+        <p class="py-6 text-slate-500">No news yet.</p>
+        {{end}}
+    </div>
+</section>
+{{end}}
