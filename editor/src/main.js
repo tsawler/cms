@@ -21,6 +21,7 @@ import { initVideoSlots } from "./videos.js";
 import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
+import { initSource } from "./source.js";
 import { initSnippets } from "./snippets.js";
 import { initSections } from "./sections.js";
 import { initMedia } from "./media.js";
@@ -34,6 +35,7 @@ initVideoSlots(); // before initButtons: slot clicks beat snippet chrome
 initButtons();
 initSaving();
 initPageCode();
+initSource(); // the HTML-source modal for snippet blocks and sections
 initBarMin(); // restores the remembered minimized state before first paint
 initSnippets();
 initSections();

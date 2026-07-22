@@ -15,6 +15,8 @@ import { markDirty, markSectionsDirty, hasUnsaved } from "./editing.js";
 import { openPicker } from "./media.js";
 import { unnestSnippets } from "./snippets.js";
 import { chooseVideoInto } from "./videos.js";
+import { openSource, elementSource } from "./source.js";
+import { flash } from "./util.js";
 
 var BTN_SIZES = {
     s: { padding: "6px 14px", fontSize: "13px" },
@@ -728,7 +730,38 @@ export function initButtons() {
         });
     });
 
-    /* ---- snippet chrome actions: delete and drag-to-move ---- */
+    /* ---- snippet chrome actions: edit HTML, delete, drag-to-move ---- */
+
+    $("snip-src").addEventListener("click", function () {
+        if (!activeSnip) return;
+        var el = activeSnip;
+        hideSnipUI(); // the chrome floats above the modal's overlay
+        openSource({
+            title: "Block HTML",
+            hint: "The markup of this block. Applied changes still need Save.",
+            html: elementSource(el),
+        }).then(function (html) {
+            if (html === null) return;
+            if (html.trim() === "") {
+                flash("Nothing to apply — use the trash can to delete the block.");
+                return;
+            }
+            var regionEl = el.closest("[data-cms-region]");
+            var sectionsEl = el.closest("[data-cms-sections]");
+            var ed = findOwningEditor(el);
+            var run = function () {
+                var tpl = document.createElement("template");
+                tpl.innerHTML = html;
+                el.parentNode.replaceChild(tpl.content, el);
+            };
+            if (ed) ed.undoManager.transact(run); else run();
+            unnestSnippets();
+            lockButtons(); // the new markup may contain a button
+            if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
+            else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
+            flash("Block updated");
+        });
+    });
 
     $("snip-del").addEventListener("click", function () {
         if (!activeSnip) return;

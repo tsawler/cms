@@ -65,25 +65,25 @@ box-shadow:0 16px 48px rgba(0,0,0,.4);display:none;flex-direction:column;overflo
 cursor:pointer;border-bottom:2px solid transparent;border-radius:0}
 .ctabs button:hover{color:#1c2128}
 .ctabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
-#code-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;
+#code-close,#src-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
-#code-close:hover{background:#eceef1;color:#1c2128}
+#code-close:hover,#src-close:hover{background:#eceef1;color:#1c2128}
 .clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}
 .clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}
 .clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;
 border:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;
 font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}
 .cbody{flex:1;position:relative;background:#11151c;min-height:0}
-#code-hl,#code-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;
+#code-hl,#code-ta,#src-hl,#src-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;
 font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}
-#code-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}
+#code-hl,#src-hl{color:#d5dbe5;overflow:hidden;pointer-events:none}
 /* The universal reset sets font-family on every element — token
    spans must stay in the editor's monospace or the visible text
    drifts out of alignment with the textarea's caret. */
-#code-hl span{font:inherit}
-#code-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;
+#code-hl span,#src-hl span{font:inherit}
+#code-ta,#src-ta{resize:none;background:transparent;color:transparent;caret-color:#fff;outline:none;
 overflow:auto}
-#code-ta::selection{background:rgba(47,95,224,.45);color:transparent}
+#code-ta::selection,#src-ta::selection{background:rgba(47,95,224,.45);color:transparent}
 .tok-c{color:#7d8799} /* comments */
 .tok-s{color:#9ecbff} /* strings */
 .tok-k{color:#ff7b8a} /* keywords / at-rules */

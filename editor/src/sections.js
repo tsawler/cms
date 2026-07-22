@@ -9,6 +9,8 @@ import { markSectionsDirty } from "./editing.js";
 import { initInlineEditor } from "./richtext.js";
 import { lockButtons } from "./buttons.js";
 import { openDrawer } from "./snippets.js";
+import { openSource } from "./source.js";
+import { flash } from "./util.js";
 
 function sbOpt(list, key) {
     for (var i = 0; i < list.length; i++) {
@@ -145,6 +147,7 @@ function injectSectionToolbar(wrapper) {
     // emoji is also avoided because emoji presentation ignores CSS
     // color and that button must read as red/destructive.
     [["up", "↑", "Move up"], ["down", "↓", "Move down"], ["add", "＋", "Add section below"],
+        ["src", ICONS.code, "Edit the HTML of this section"],
         ["set", ICONS.gear, "Section settings"], ["del", ICONS.trash, "Delete section"]].forEach(function (b) {
         var btn = document.createElement("button");
         btn.type = "button";
@@ -205,6 +208,32 @@ export function initSections() {
                 });
                 wrapper.remove();
                 markSectionsDirty(region);
+            });
+        } else if (act === "src") {
+            var srcContent = wrapper.querySelector("[data-cms-section-content]");
+            if (!srcContent) return;
+            // Through the section's own TinyMCE instance when there is
+            // one: getContent serializes without editor artifacts, and
+            // setContent joins the undo stack.
+            var entry = null;
+            state.sectionEditors.some(function (s) {
+                if (s.el === srcContent) { entry = s; return true; }
+                return false;
+            });
+            openSource({
+                title: "Section HTML",
+                hint: "The markup of this section's content — background and layout live in the section settings (gear). Applied changes still need Save.",
+                html: entry ? entry.ed.getContent() : srcContent.innerHTML,
+            }).then(function (html) {
+                if (html === null) return;
+                if (entry) {
+                    entry.ed.undoManager.transact(function () { entry.ed.setContent(html); });
+                } else {
+                    srcContent.innerHTML = html;
+                }
+                lockButtons(); // the new markup may contain a button
+                markSectionsDirty(region);
+                flash("Section updated");
             });
         } else if (act === "set") {
             var setFields = [

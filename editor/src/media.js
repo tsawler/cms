@@ -6,6 +6,7 @@ import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsPrompt, isDialogOpen, dialogDismiss } from "./dialogs.js";
 import { dismissCodePanel } from "./pagecode.js";
+import { isSourceOpen, dismissSource } from "./source.js";
 import { closeMore } from "./saving.js";
 import { closeDrawer } from "./snippets.js";
 import { isMenuModalOpen, closeMenuModal } from "./menu.js";
@@ -284,6 +285,10 @@ export function initMedia() {
         }
         if (isMenuModalOpen()) {
             closeMenuModal();
+            return;
+        }
+        if (isSourceOpen()) {
+            dismissSource();
             return;
         }
         if ($("code-panel").classList.contains("on")) {

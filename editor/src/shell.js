@@ -24,6 +24,7 @@ export var ICONS = {
     hide: '<svg viewBox="0 0 24 24"><path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z"/></svg>',
     gear: '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
     trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+    code: '<svg viewBox="0 0 24 24"><path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6z"/></svg>',
 };
 
 export var host = null;
@@ -138,6 +139,7 @@ export function initShell() {
         "</div>" +
         '<div class="btnui" id="snip-ui">' +
         '<button id="snip-move" title="Drag to move this block" draggable="true">⠿</button>' +
+        '<button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + "</button>" +
         '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="btnui" id="img-ui">' +
@@ -148,6 +150,19 @@ export function initShell() {
         '<button id="vid-set" title="Change this video">' + ICONS.gear + "</button>" +
         '<button id="vid-del" title="Delete video">' + ICONS.trash + "</button>" +
         "</div>" +
+        '<div class="code-overlay" id="src-overlay"></div>' +
+        '<div class="codepanel" id="src-panel">' +
+        '<div class="chead"><h2 id="src-title">HTML source</h2>' +
+        '<button id="src-close" title="Close" aria-label="Close">×</button></div>' +
+        '<div class="cbody">' +
+        '<pre id="src-hl" aria-hidden="true"></pre>' +
+        '<textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>' +
+        "</div>" +
+        '<div class="cfoot">' +
+        '<span class="chint" id="src-hint"></span>' +
+        '<button class="mbtn" id="src-cancel">Cancel</button>' +
+        '<button class="mbtn primary" id="src-apply">Apply</button>' +
+        "</div></div>" +
         '<div class="dlg-overlay" id="dlg-overlay"></div>' +
         '<div class="dlg" id="dlg" role="dialog" aria-modal="true">' +
         '<p id="dlg-msg"></p>' +
