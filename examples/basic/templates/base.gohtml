@@ -8,7 +8,7 @@
     {{cmsHead}}
 </head>
 <body class="bg-white text-slate-800 antialiased">
-<header class="border-b border-slate-200">
+<header class="relative border-b border-slate-200">
     <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between gap-6">
         <a href="{{if eq .Locale "fr"}}/fr{{else}}/{{end}}" class="text-lg font-bold tracking-tight">Example&nbsp;Site</a>
         {{cmsNav "main"}}
@@ -28,6 +28,33 @@
             .cms-nav-link:hover{color:#0f172a}
             .cms-nav-link.cms-active{color:#0f172a;font-weight:600}
             .cms-nav-sub .cms-nav-link:hover{background:#f1f5f9}
+            /* Mobile: full-width sheet under the header instead of the
+               default anchored dropdown card. The header is position:relative
+               so the panel spans the whole viewport edge to edge. */
+            @media (max-width:768px){
+                /* Put the burger at the right edge of the header, after
+                   the locale switcher. */
+                .cms-nav{position:static;order:1}
+                .cms-nav-list{
+                    left:0;right:0;width:auto;min-width:0;max-width:none;
+                    margin-top:0;padding:.5rem 0 1rem;
+                    background:#fff;border:none;border-top:1px solid #e2e8f0;
+                    border-radius:0;
+                    box-shadow:0 24px 32px -20px rgba(15,23,42,.25);
+                }
+                .cms-nav-list>.cms-nav-item{width:100%}
+                .cms-nav-list .cms-nav-link{
+                    padding:.9rem 1.5rem;font-size:1rem;color:#0f172a;
+                }
+                .cms-nav-list button.cms-nav-toggle{
+                    display:flex;width:100%;align-items:center;
+                    justify-content:space-between;
+                }
+                .cms-nav-sub{padding:0 0 .5rem .75rem}
+                .cms-nav-sub .cms-nav-link{
+                    padding:.55rem 1.5rem;font-size:.95rem;color:#475569;
+                }
+            }
         </style>
     </div>
 </header>
