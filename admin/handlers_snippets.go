@@ -37,6 +37,7 @@ func (s *server) snippetCreate(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.contentChanged()
 	s.flash(r, "Snippet created — it's now available in the editor's palette.")
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
@@ -64,6 +65,7 @@ func (s *server) snippetUpdate(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.contentChanged()
 	s.flash(r, "Snippet saved.")
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
@@ -77,6 +79,7 @@ func (s *server) snippetDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.contentChanged()
 	s.flash(r, "Snippet deleted. Copies already inserted into pages are unchanged.")
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }

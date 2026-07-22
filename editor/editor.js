@@ -3457,6 +3457,35 @@
   }
 
   // ../src/saving.js
+  var cssPollTimer = null;
+  function refreshContentCSS() {
+    var delays = [600, 1500, 3e3, 6e3];
+    var attempt = 0;
+    clearTimeout(cssPollTimer);
+    var tick = function() {
+      fetch("/cms/content-css", { cache: "no-store" }).then(function(res) {
+        return res.ok ? res.json() : null;
+      }).then(function(body) {
+        if (!body || !body.href) return;
+        var link = document.querySelector('link[href^="/cms/content-"]');
+        if (link && link.getAttribute("href") === body.href) {
+          if (attempt < delays.length) {
+            cssPollTimer = setTimeout(tick, delays[attempt++]);
+          }
+          return;
+        }
+        var fresh = document.createElement("link");
+        fresh.rel = "stylesheet";
+        fresh.onload = function() {
+          if (link) link.remove();
+        };
+        fresh.href = body.href;
+        document.head.appendChild(fresh);
+      }).catch(function() {
+      });
+    };
+    tick();
+  }
   function updateChip() {
     var chip = $("chip");
     chip.classList.remove("published", "changes");
@@ -3554,6 +3583,7 @@
       hideButtonUI();
       hideSnipUI();
       hideImgUI();
+      refreshContentCSS();
       flash("Draft saved");
       updateChip();
       updateBarButtons();

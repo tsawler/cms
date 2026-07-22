@@ -1,0 +1,22 @@
+/* Site stylesheet input (Tailwind v4). Compiled to static/site.css by
+ * the standalone CLI — run `go generate .` in examples/basic, or:
+ *
+ *     tailwindcss --input assets/input.css --output static/site.css --minify
+ *
+ * source(none) disables automatic content detection; the @source rules
+ * below name exactly what this build scans. Classes that live only in
+ * CMS content (the database) are NOT covered here — they come from the
+ * CMS's generated stylesheet (Config.Tailwind, see tailwind-content.sh),
+ * served as /cms/content-<hash>.css and linked by {{cmsHead}}. */
+@import "tailwindcss" source(none);
+@plugin "@tailwindcss/typography";
+
+/* The site's own markup. */
+@source "../templates";
+
+/* The classes the CMS editor UI itself applies (Styles menu defaults,
+ * alignment buttons, image gear, video embeds) — the safelist from the
+ * CMS README. The generated content stylesheet also covers these once
+ * content uses them; listing them here keeps the editor styled even
+ * before first save. */
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video");

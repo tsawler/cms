@@ -148,8 +148,22 @@ func run(logger *slog.Logger) error {
 		maxVideoMB = n
 	}
 
+	// Content-driven Tailwind rebuilds: CMS_TAILWIND_COMMAND is a
+	// space-separated argv with {content} and {output} placeholders.
+	// The example's .env points it at tailwind-content.sh, which wraps
+	// the Tailwind v4 standalone CLI (see that script); without it,
+	// classes that exist only in stored content render unstyled.
+	var tailwindCfg *cms.TailwindConfig
+	if cmd := os.Getenv("CMS_TAILWIND_COMMAND"); cmd != "" {
+		tailwindCfg = &cms.TailwindConfig{
+			Command: strings.Fields(cmd),
+			Dir:     os.Getenv("CMS_TAILWIND_DIR"),
+		}
+	}
+
 	c, err := cms.New(cms.Config{
 		DB:               db,
+		Tailwind:         tailwindCfg,
 		Locales:          []string{"en", "fr"},
 		Logger:           logger,
 		ObjectStore:      objects,
@@ -190,6 +204,8 @@ func run(logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
 	mux.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
+	// The compiled site stylesheet (see assets/input.css and gen.go).
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.Handle("/", c.Pages())
 
 	addr := envOr("ADDR", ":4000")

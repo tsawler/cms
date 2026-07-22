@@ -129,9 +129,42 @@ safelist: [
 @source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video");
 ```
 
-(The example site uses the Tailwind Play CDN, which generates CSS in the
-browser and needs no safelist — fine for development, not for
-production.)
+(The example site shows the full production pattern with the Tailwind v4
+standalone CLI: a compiled site stylesheet built from the templates plus
+this safelist — `examples/basic/assets/input.css`, regenerated with
+`go generate .` — and the CMS's generated content stylesheet for classes
+that live only in the database, wired through
+`examples/basic/tailwind-content.sh`; see the next section.)
+
+### Generated CSS for content classes (optional)
+
+The safelist covers the classes the CMS's own UI can emit — but users
+with the superadmin role can type *any* class into content through the
+HTML source views, and no static safelist can cover that. Setting
+`Config.Tailwind` closes the gap: after every content change the CMS
+collects the class tokens from stored content and, when the set actually
+changed, runs your Tailwind CLI over a synthetic file of those classes
+and serves the result as a supplemental stylesheet
+(`/cms/content-<hash>.css`, linked by `{{cmsHead}}` with the hash as the
+cache buster). The stylesheet is stored in the database, so every
+instance of a multi-instance deployment serves the same artifact.
+
+```go
+Tailwind: &cms.TailwindConfig{
+    // {content} = the synthetic class file the CMS writes;
+    // {output} = where the command must write CSS.
+    Command: []string{"tailwindcss", "-i", "assets/input.css",
+        "-o", "{output}", "--content", "{content}"},
+    Dir: "/path/to/site", // where your Tailwind config lives
+},
+```
+
+The command runs your Tailwind (your version, your theme). Builds are
+asynchronous, serialized, and skipped when the class set is unchanged; a
+failed build logs and keeps the previous stylesheet. Setups whose CLI
+can't take an ad-hoc content file (e.g. Tailwind v4 auto-detection) can
+point `Command` at a wrapper script that copies `{content}` where their
+build expects it.
 
 ### Customizing the menu
 

@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -167,6 +168,15 @@ type Config struct {
 	// need safelisting like editor styles do.
 	SectionStyles *SectionStyles
 
+	// Tailwind, when set, makes the CMS rebuild a supplemental
+	// stylesheet whenever stored content's class set changes, by running
+	// the host's Tailwind CLI over a synthetic file of those classes.
+	// Pages then link the result as /cms/content-<hash>.css via
+	// {{cmsHead}}, so classes typed into content (e.g. by superadmins in
+	// the HTML source view) get real CSS without a site redeploy. Nil
+	// disables the feature; see TailwindConfig.
+	Tailwind *TailwindConfig
+
 	// Captcha, when set, protects the admin login form with a
 	// proof-of-work CAPTCHA verified against a self-hosted Cap server
 	// (docker image tiago2/cap). Nil disables the CAPTCHA; the built-in
@@ -186,14 +196,16 @@ type Config struct {
 
 // CMS is the root object of the module. Create one with New.
 type CMS struct {
-	cfg      Config
-	sessions *scs.SessionManager
-	users    *auth.Store
-	content  *content.Store
-	renderer *render.Renderer
-	media    *media.Manager
-	objects  media.ObjectStore
-	admin    http.Handler
+	cfg        Config
+	sessions   *scs.SessionManager
+	users      *auth.Store
+	content    *content.Store
+	renderer   *render.Renderer
+	media      *media.Manager
+	objects    media.ObjectStore
+	admin      http.Handler
+	cssBuilder *cssRebuilder // nil unless Config.Tailwind is set
+	cssOnce    sync.Once     // schedules the initial build on first traffic
 }
 
 // New validates cfg, applies defaults, and returns a ready CMS. It does not
@@ -228,6 +240,9 @@ func New(cfg Config) (*CMS, error) {
 		cfg.SectionStyles = render.DefaultSectionStyles()
 	}
 	if err := admin.ValidateSections(cfg.AdminSections); err != nil {
+		return nil, err
+	}
+	if err := validateTailwindConfig(cfg.Tailwind); err != nil {
 		return nil, err
 	}
 
@@ -297,7 +312,12 @@ func New(cfg Config) (*CMS, error) {
 		media:    mediaManager,
 		objects:  objects,
 	}
+	if cfg.Tailwind != nil {
+		c.cssBuilder = &cssRebuilder{c: c}
+	}
 	c.admin = admin.New(admin.Deps{
+		// Nil-safe: schedule is a no-op when Tailwind isn't configured.
+		ContentChanged: c.cssBuilder.schedule,
 		Sessions:       sessions,
 		Users:          users,
 		Content:        contentStore,
@@ -392,11 +412,30 @@ func (c *CMS) Pages() http.Handler {
 			editorAssets.ServeHTTP(w, r)
 			return
 		}
+		if c.cssBuilder != nil && strings.HasPrefix(r.URL.Path, contentCSSPrefix) {
+			if r.URL.Path == contentCSSCurrentPath {
+				c.serveContentCSSCurrent(w, r)
+				return
+			}
+			if strings.HasSuffix(r.URL.Path, ".css") {
+				c.serveContentCSS(w, r)
+				return
+			}
+		}
 		withSession.ServeHTTP(w, r)
 	})
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
+	if c.cssBuilder != nil {
+		// First traffic covers a cold start (content changed while the
+		// process was down, or the feature was just enabled)...
+		c.cssOnce.Do(c.cssBuilder.schedule)
+		// ...and each render refreshes the {{cmsHead}} link from the
+		// database (TTL-cached), so instances that didn't run a rebuild
+		// still pick it up.
+		c.cssBuilder.current(r.Context())
+	}
 	locale := c.cfg.Locales[0]
 	slug := strings.Trim(r.URL.Path, "/")
 

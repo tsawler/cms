@@ -126,6 +126,7 @@ func (s *server) pageCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), id, form.TemplateName)
+	s.contentChanged()
 
 	s.flash(r, "Page created — now add your content below.")
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
@@ -232,6 +233,7 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.flash(r, "Draft saved. Publish when you're ready to make it live.")
 	}
+	s.contentChanged()
 
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(form.ID, 10), http.StatusSeeOther)
 }
@@ -308,6 +310,7 @@ func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.contentChanged()
 	s.flash(r, "Page deleted.")
 	http.Redirect(w, r, s.deps.AdminPath+"/pages", http.StatusSeeOther)
 }
@@ -328,6 +331,7 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.contentChanged()
 	s.flash(r, "Draft changes discarded — the editor now matches the published page.")
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 }

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tsawler/cms/content"
 )
@@ -346,6 +347,10 @@ type Renderer struct {
 	sets      map[string]*template.Template // keyed by PageTemplate.File
 	templates []PageTemplate
 	sections  *SectionStyles
+	// contentCSS is the href of the CMS-generated content stylesheet
+	// {{cmsHead}} links (see SetContentCSSHref), "" for none. Atomic:
+	// a background rebuild updates it while renders read it.
+	contentCSS atomic.Value
 }
 
 // New parses each page template together with the shared globs and returns
@@ -386,6 +391,20 @@ func (r *Renderer) PageTemplates() []PageTemplate {
 func (r *Renderer) Knows(file string) bool {
 	_, ok := r.sets[file]
 	return ok
+}
+
+// SetContentCSSHref sets (or, with "", clears) the stylesheet link
+// {{cmsHead}} emits for CMS-generated content CSS. Safe to call
+// concurrently with renders.
+func (r *Renderer) SetContentCSSHref(href string) {
+	r.contentCSS.Store(href)
+}
+
+func (r *Renderer) contentCSSHref() string {
+	if v, ok := r.contentCSS.Load().(string); ok {
+		return v
+	}
+	return ""
 }
 
 // Render executes the page's template with the given blocks and menus and
@@ -446,7 +465,7 @@ func (r *Renderer) Render(w io.Writer, page *content.Page, blocks []content.Bloc
 		},
 		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
 		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], edit != nil) },
-		"cmsHead":    func() template.HTML { return headHTML(page) },
+		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref()) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
 	}
 	if edit != nil {
@@ -784,12 +803,20 @@ const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 
 	`figure>a>img:not(.cms-keep-margins){margin-top:0;margin-bottom:0}`
 
 // headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
-// small stylesheet (button hover), the page's meta description, and its
-// per-page CSS. HeadCSS is written raw; editing it is restricted to
-// admins.
-func headHTML(p *content.Page) template.HTML {
+// small stylesheet (button hover), the generated content-CSS link (when
+// the Tailwind rebuild feature is active), the page's meta description,
+// and its per-page CSS. HeadCSS is written raw; editing it is restricted
+// to admins.
+func headHTML(p *content.Page, contentCSS string) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + "</style>\n")
+	// Utilities generated from stored content. Before the page's own
+	// links and inline CSS, so page-specific rules can override them.
+	if contentCSS != "" {
+		sb.WriteString(`<link rel="stylesheet" href="`)
+		sb.WriteString(html.EscapeString(contentCSS))
+		sb.WriteString("\">\n")
+	}
 	// External stylesheets come before the inline CSS so the page's own
 	// rules can override the library's.
 	for _, u := range resourceLinks(p.CSSLinks) {

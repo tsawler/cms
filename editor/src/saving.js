@@ -9,6 +9,42 @@ import { cmsConfirm } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
 import { hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
 
+/* A save may make the server rebuild its generated Tailwind stylesheet
+ * (classes typed into content get compiled CSS). This page's <link> was
+ * rendered before the save, so poll briefly for a new stylesheet URL and
+ * swap the link in place — otherwise freshly typed classes look
+ * unstyled until the next reload. The rebuild is asynchronous, hence
+ * the widening retry delays; an unchanged URL after all attempts just
+ * means the save introduced no new classes. */
+var cssPollTimer = null;
+function refreshContentCSS() {
+    var delays = [600, 1500, 3000, 6000];
+    var attempt = 0;
+    clearTimeout(cssPollTimer);
+    var tick = function () {
+        fetch("/cms/content-css", { cache: "no-store" }).then(function (res) {
+            return res.ok ? res.json() : null;
+        }).then(function (body) {
+            if (!body || !body.href) return; // feature off, or no artifact yet
+            var link = document.querySelector('link[href^="/cms/content-"]');
+            if (link && link.getAttribute("href") === body.href) {
+                if (attempt < delays.length) {
+                    cssPollTimer = setTimeout(tick, delays[attempt++]);
+                }
+                return;
+            }
+            var fresh = document.createElement("link");
+            fresh.rel = "stylesheet";
+            // The old sheet leaves only once the new one has loaded, so
+            // styling never flashes off.
+            fresh.onload = function () { if (link) link.remove(); };
+            fresh.href = body.href;
+            document.head.appendChild(fresh);
+        }).catch(function () { /* transient; the next save polls again */ });
+    };
+    tick();
+}
+
 // The chip has three states: draft (never/no longer live), Live
 // (published and in sync), and "Unpublished edits" (live, but the saved
 // draft differs — the state that makes drafts trustworthy).
@@ -107,6 +143,7 @@ export function save() {
         hideButtonUI();
         hideSnipUI();
         hideImgUI();
+        refreshContentCSS();
         flash("Draft saved");
         updateChip();
         updateBarButtons();

@@ -48,6 +48,21 @@ type Deps struct {
 	// value falls back to 24h so a partially-populated Deps (tests,
 	// direct package use) behaves sensibly.
 	RememberFor time.Duration
+
+	// ContentChanged, when set, is called (without waiting) after any
+	// mutation that can change which CSS classes stored content uses:
+	// region/section saves, publish/discard, page create/delete, and
+	// snippet changes. The CMS uses it to rebuild the generated
+	// Tailwind stylesheet.
+	ContentChanged func()
+}
+
+// contentChanged notifies the host that stored content changed; safe to
+// call whether or not a listener is configured.
+func (s *server) contentChanged() {
+	if s.deps.ContentChanged != nil {
+		s.deps.ContentChanged()
+	}
 }
 
 type server struct {

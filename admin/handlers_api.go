@@ -59,6 +59,7 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
 		return
 	}
+	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -112,6 +113,7 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), page.ID, page.TemplateName)
+	s.contentChanged()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
@@ -315,6 +317,7 @@ func (s *server) apiDeletePage(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Deleting the page failed — try again.")
 		return
 	}
+	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": "/"})
 }
 
@@ -399,6 +402,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
 		return
 	}
+	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -485,6 +489,7 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Publishing failed — try again.")
 		return
 	}
+	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "published"})
 }
 
@@ -505,6 +510,7 @@ func (s *server) apiDiscard(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Discarding failed — try again.")
 		return
 	}
+	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
