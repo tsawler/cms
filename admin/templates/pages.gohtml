@@ -1,32 +1,32 @@
-{{define "title"}}Pages — CMS{{end}}
+{{define "title"}}{{.T "Pages"}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>Pages</h1>
-    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/pages/new">New page</a>
+    <h1>{{.T "Pages"}}</h1>
+    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/pages/new">{{.T "New page"}}</a>
 </div>
 
 <table class="cms-table">
     <thead>
     <tr>
-        <th>Title</th>
-        <th>Address</th>
-        <th>Template</th>
-        <th>Status</th>
+        <th>{{.T "Title"}}</th>
+        <th>{{.T "Address"}}</th>
+        <th>{{.T "Template"}}</th>
+        <th>{{.T "Status"}}</th>
         <th></th>
     </tr>
     </thead>
     <tbody>
     {{range .Pages}}
     <tr>
-        <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">(untitled)</span>{{end}}</td>
+        <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">{{$.T "(untitled)"}}</span>{{end}}</td>
         <td>/{{.Slug}}</td>
         <td>{{$.TemplateLabel .TemplateName}}</td>
-        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">published</span>{{else}}<span class="cms-badge">draft</span>{{end}}</td>
-        <td class="cms-table-actions"><a href="{{$.AdminPath}}/pages/{{.ID}}">Edit</a></td>
+        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">{{$.T "published"}}</span>{{else}}<span class="cms-badge">{{$.T "draft"}}</span>{{end}}</td>
+        <td class="cms-table-actions"><a href="{{$.AdminPath}}/pages/{{.ID}}">{{$.T "Edit"}}</a></td>
     </tr>
     {{else}}
-    <tr><td colspan="5" class="cms-muted">No pages yet — create your first one.</td></tr>
+    <tr><td colspan="5" class="cms-muted">{{.T "No pages yet — create your first one."}}</td></tr>
     {{end}}
     </tbody>
 </table>

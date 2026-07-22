@@ -228,6 +228,9 @@ func New(cfg Config) (*CMS, error) {
 	if len(cfg.Locales) == 0 {
 		cfg.Locales = []string{"en"}
 	}
+	if err := validateLocales(cfg.Locales); err != nil {
+		return nil, err
+	}
 	if cfg.AdminPath == "" {
 		cfg.AdminPath = "/admin"
 	}
@@ -278,7 +281,7 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.Secure = cfg.SecureCookies
 
 	users := auth.NewStore(cfg.DB)
-	contentStore := content.NewStore(cfg.DB)
+	contentStore := content.NewStore(cfg.DB, cfg.Locales[0])
 
 	var renderer *render.Renderer
 	if cfg.TemplateFS != nil {
@@ -347,6 +350,7 @@ func New(cfg Config) (*CMS, error) {
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
 		DefaultLocale:  cfg.Locales[0],
+		Locales:        cfg.Locales,
 		RememberFor:    cfg.RememberFor,
 	})
 	return c, nil
@@ -452,11 +456,14 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		// still pick it up.
 		c.cssBuilder.current(r.Context())
 	}
-	locale := c.cfg.Locales[0]
-	slug := strings.Trim(r.URL.Path, "/")
+	// Locale routing: "/" serves the default locale; "/fr/..." (any
+	// configured non-default locale as first path segment) serves that
+	// locale with the prefix stripped before slug lookup. Locale codes
+	// can't collide with pages — slug validation rejects them.
+	locale, slug := c.splitLocalePath(strings.Trim(r.URL.Path, "/"))
 
 	// /blog/rss.xml and /news/rss.xml (dots can't appear in page slugs,
-	// so these paths are free).
+	// so these paths are free). Localized feeds live under the prefix.
 	if c.postsEnabled() {
 		if feed, ok := strings.CutSuffix(slug, "/rss.xml"); ok && content.ValidFeed(feed) {
 			c.serveFeed(w, r, content.Feed(feed), locale)
@@ -484,7 +491,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	if editing {
 		blockStatus = content.StatusDraft
 	}
-	blocks, err := c.content.BlocksFor(r.Context(), page.ID, locale, blockStatus)
+	blocks, err := c.content.EffectiveBlocks(r.Context(), page.ID, locale, blockStatus)
 	if err != nil {
 		c.cfg.Logger.Error("cms: loading blocks", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
@@ -497,7 +504,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		c.cfg.Logger.Error("cms: loading menus", "err", err)
 		menuItems = nil
 	}
-	menus := render.BuildMenus(menuItems, page.Slug, editing)
+	menus := render.BuildMenus(menuItems, page.Slug, locale, c.cfg.Locales[0], editing)
 
 	// When the page backs a blog/news post, hand the template its .Post.
 	var post *render.PostInfo
@@ -505,7 +512,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		p, err := c.content.PostByPageID(r.Context(), page.ID, locale)
 		switch {
 		case err == nil:
-			post = render.PostInfoFor(p)
+			post = render.PostInfoFor(p, render.LocalePrefix(locale, c.cfg.Locales[0]))
 		case !errors.Is(err, content.ErrNotFound):
 			c.cfg.Logger.Error("cms: loading post", "slug", slug, "err", err)
 		}
@@ -521,7 +528,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		}
 		hasUnpublished := false
 		if page.Status == content.StatusPublished {
-			hasUnpublished, err = c.content.HasUnpublishedChanges(r.Context(), page.ID, locale)
+			hasUnpublished, err = c.content.HasUnpublishedChanges(r.Context(), page.ID)
 			if err != nil {
 				c.cfg.Logger.Error("cms: checking unpublished changes", "slug", slug, "err", err)
 				hasUnpublished = false
@@ -540,6 +547,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			IsSuperadmin:   user.Role.IsSuperadmin(),
 			PostsEnabled:   c.postsEnabled(),
 			Post:           post,
+			Locales:        c.cfg.Locales,
 			Styles:         c.cfg.EditorStyles,
 			Sections:       c.cfg.SectionStyles,
 		}
@@ -547,13 +555,15 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := c.renderer.Render(w, render.Input{
-		Page:   page,
-		Blocks: blocks,
-		Locale: locale,
-		Menus:  menus,
-		Edit:   edit,
-		Post:   post,
-		Posts:  c.postLister(r.Context(), locale, editing),
+		Page:    page,
+		Blocks:  blocks,
+		Locale:  locale,
+		Menus:   menus,
+		Edit:    edit,
+		Post:    post,
+		Posts:   c.postLister(r.Context(), locale, editing),
+		Locales: c.cfg.Locales,
+		BaseURL: siteBaseURL(r),
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)

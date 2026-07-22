@@ -169,7 +169,7 @@ func TestBuildMenus(t *testing.T) {
 
 	// Public render of /about: draft items dropped (top-level and inside
 	// the dropdown), the empty dropdown dropped, Active on About.
-	menus := BuildMenus(items, "about", false)
+	menus := BuildMenus(items, "about", "en", "en", false)
 	main := menus["main"]
 	if len(main) != 4 {
 		t.Fatalf("public main menu = %d items %v, want 4", len(main), main)
@@ -192,7 +192,7 @@ func TestBuildMenus(t *testing.T) {
 	}
 
 	// Editors see draft-page items and empty dropdowns (to fill them).
-	editorMain := BuildMenus(items, "", true)["main"]
+	editorMain := BuildMenus(items, "", "en", "en", true)["main"]
 	if len(editorMain) != 6 {
 		t.Fatalf("editor main menu = %d items %v, want 6", len(editorMain), editorMain)
 	}
@@ -365,7 +365,7 @@ func TestRenderPostsData(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, Input{Page: page, Locale: "en", Post: PostInfoFor(post), Posts: lister}); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Post: PostInfoFor(post, ""), Posts: lister}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -388,5 +388,103 @@ func TestRenderPostsData(t *testing.T) {
 	}
 	if got := buf.String(); got != "<ul></ul>" {
 		t.Errorf("plain render: got %q, want empty list only", got)
+	}
+}
+
+func TestLocaleURLsAndLinks(t *testing.T) {
+	if got := LocalePrefix("en", "en"); got != "" {
+		t.Errorf("LocalePrefix default: got %q", got)
+	}
+	if got := LocalePrefix("fr", "en"); got != "/fr" {
+		t.Errorf("LocalePrefix fr: got %q", got)
+	}
+	cases := []struct{ slug, locale, want string }{
+		{"", "en", "/"},
+		{"", "fr", "/fr"},
+		{"about", "en", "/about"},
+		{"about", "fr", "/fr/about"},
+		{"blog/post", "fr", "/fr/blog/post"},
+	}
+	for _, tc := range cases {
+		if got := localeURL(tc.slug, tc.locale, "en"); got != tc.want {
+			t.Errorf("localeURL(%q, %q) = %q, want %q", tc.slug, tc.locale, got, tc.want)
+		}
+	}
+
+	in := Input{
+		Page:    &content.Page{Slug: "about"},
+		Locale:  "fr",
+		Locales: []string{"en", "fr"},
+	}
+	links := localeLinks(in)
+	if len(links) != 2 || links[0].URL != "/about" || links[0].Active ||
+		links[1].URL != "/fr/about" || !links[1].Active {
+		t.Errorf("localeLinks wrong: %+v", links)
+	}
+	if localeLinks(Input{Page: &content.Page{}, Locales: []string{"en"}}) != nil {
+		t.Error("single-locale site should have no locale links")
+	}
+}
+
+func TestBuildMenusLocale(t *testing.T) {
+	slug := "about"
+	status := content.StatusPublished
+	items := []content.MenuItem{{
+		ID: 1, Menu: "main", Label: "About",
+		Labels:   map[string]string{"fr": "À propos"},
+		PageID:   ptr(int64(7)),
+		PageSlug: &slug, PageStatus: &status,
+	}}
+
+	fr := BuildMenus(items, "about", "fr", "en", false)["main"]
+	if len(fr) != 1 || fr[0].Label != "À propos" || fr[0].URL != "/fr/about" || !fr[0].Active {
+		t.Errorf("fr menu entry wrong: %+v", fr)
+	}
+	en := BuildMenus(items, "about", "en", "en", false)["main"]
+	if len(en) != 1 || en[0].Label != "About" || en[0].URL != "/about" || !en[0].Active {
+		t.Errorf("en menu entry wrong: %+v", en)
+	}
+	// No override falls back to the default label.
+	items[0].Labels = nil
+	fr = BuildMenus(items, "", "fr", "en", false)["main"]
+	if fr[0].Label != "About" || fr[0].Active {
+		t.Errorf("fr fallback label wrong: %+v", fr)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestEditRenderMarksFallbackRegions(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+	blocks := []content.Block{
+		{Region: "tagline", Kind: content.KindText, Locale: "en", Content: "English tagline"},
+		{Region: "main", Kind: content.KindHTML, Locale: "fr", Content: "<p>Bonjour</p>"},
+		{Region: "extra", Kind: content.KindHTML, Locale: "en", Content: "<p>Fallback section</p>"},
+	}
+	var buf bytes.Buffer
+	err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "fr",
+		Edit: &EditInfo{PageID: 1, AdminPath: "/admin", Locale: "fr"}})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `data-cms-region="tagline" data-cms-kind="text" data-cms-fallback="1"`) {
+		t.Errorf("en-fallback text region not marked:\n%s", out)
+	}
+	if strings.Contains(out, `data-cms-region="main" data-cms-kind="html" data-cms-fallback`) {
+		t.Errorf("localized region wrongly marked as fallback:\n%s", out)
+	}
+	if !strings.Contains(out, `data-cms-sections="extra" data-cms-fallback="1"`) {
+		t.Errorf("en-fallback sections region not marked:\n%s", out)
+	}
+
+	// Public render (edit nil) never emits fallback markers.
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "fr"}); err != nil {
+		t.Fatalf("public Render: %v", err)
+	}
+	if strings.Contains(buf.String(), "data-cms-fallback") {
+		t.Error("public render leaked fallback markers")
 	}
 }

@@ -46,11 +46,33 @@ type MenuEntry struct {
 	Children []MenuEntry // one level of dropdown items
 }
 
+// LocalePrefix is the URL path prefix for a locale: "" for the default
+// locale, "/fr" for a non-default "fr". Localized page URLs are
+// prefix + "/" + slug (the prefix alone for the homepage).
+func LocalePrefix(locale, defaultLocale string) string {
+	if locale == "" || locale == defaultLocale {
+		return ""
+	}
+	return "/" + locale
+}
+
+// localeURL builds the site-relative URL of a page slug in a locale.
+func localeURL(slug, locale, defaultLocale string) string {
+	prefix := LocalePrefix(locale, defaultLocale)
+	if slug == "" {
+		if prefix == "" {
+			return "/"
+		}
+		return prefix
+	}
+	return prefix + "/" + slug
+}
+
 // buildEntry converts one stored item, resolving page links from the
 // current slug. ok is false when the item should not render (vanished
 // page, or draft page on a public render).
-func buildEntry(item content.MenuItem, current string, includeDrafts bool) (MenuEntry, bool) {
-	e := MenuEntry{ID: item.ID, Label: item.Label, NewTab: item.NewTab}
+func buildEntry(item content.MenuItem, current, locale, defaultLocale string, includeDrafts bool) (MenuEntry, bool) {
+	e := MenuEntry{ID: item.ID, Label: item.LabelFor(locale), NewTab: item.NewTab}
 	if item.PageID != nil {
 		if item.PageSlug == nil {
 			return e, false // page vanished; FK cascade should prevent this
@@ -58,7 +80,7 @@ func buildEntry(item content.MenuItem, current string, includeDrafts bool) (Menu
 		if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
 			return e, false
 		}
-		e.URL = "/" + *item.PageSlug
+		e.URL = localeURL(*item.PageSlug, locale, defaultLocale)
 		e.Active = e.URL == current
 		return e, true
 	}
@@ -75,8 +97,9 @@ func buildEntry(item content.MenuItem, current string, includeDrafts bool) (Menu
 // Label-only top-level items are dropdown parents holding their Children;
 // on public renders a dropdown with nothing visible in it is dropped,
 // while editors keep it so they can fill it.
-func BuildMenus(items []content.MenuItem, currentSlug string, includeDrafts bool) map[string][]MenuEntry {
-	current := "/" + currentSlug
+// Menu entries carry the locale's labels and locale-prefixed page URLs.
+func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale string, includeDrafts bool) map[string][]MenuEntry {
+	current := localeURL(currentSlug, locale, defaultLocale)
 	menus := map[string][]MenuEntry{}
 	// Rows arrive ordered by sort with children stored after their
 	// parent, so parents are placed before their children attach.
@@ -86,7 +109,7 @@ func BuildMenus(items []content.MenuItem, currentSlug string, includeDrafts bool
 	}
 	parents := map[int64]parentPos{}
 	for _, item := range items {
-		e, ok := buildEntry(item, current, includeDrafts)
+		e, ok := buildEntry(item, current, locale, defaultLocale, includeDrafts)
 		if !ok {
 			continue
 		}
@@ -156,13 +179,14 @@ type PostInfo struct {
 type PostLister func(feed string, limit int) []PostInfo
 
 // PostInfoFor builds the template-facing view of a stored post.
-func PostInfoFor(p *content.Post) *PostInfo {
+// localePrefix ("" or e.g. "/fr", see LocalePrefix) localizes the URL.
+func PostInfoFor(p *content.Post, localePrefix string) *PostInfo {
 	return &PostInfo{
 		ID:           p.PostID,
 		Feed:         string(p.Feed),
 		Title:        p.Title,
 		Summary:      p.Description,
-		URL:          "/" + p.Slug,
+		URL:          localePrefix + "/" + p.Slug,
 		PublishedAt:  p.PublishedAt,
 		Author:       p.AuthorName,
 		ThumbnailURL: p.ThumbnailURL,
@@ -183,6 +207,7 @@ var stubFuncs = template.FuncMap{
 	"cmsHead":     func() template.HTML { return "" },
 	"cmsScripts":  func() template.HTML { return "" },
 	"cmsPosts":    func(string, int) []PostInfo { return nil },
+	"cmsLocales":  func() []LocaleLink { return nil },
 }
 
 // EditorScriptPath is the public route the in-place editor script is served
@@ -382,6 +407,9 @@ type EditInfo struct {
 	// PostsEnabled shows the tool rail's "New post" button (blog & news
 	// configured on the host).
 	PostsEnabled bool
+	// Locales is the site's configured locale list ([0] = default); more
+	// than one entry shows the edit bar's locale switcher.
+	Locales []string
 	// Post, set when the page backs a post, enables the edit bar's
 	// post-settings gear (date, summary, thumbnail, header image).
 	Post     *PostInfo
@@ -476,6 +504,21 @@ type Input struct {
 	// Posts feeds {{cmsPosts}} on listing templates. Nil makes the func
 	// return nothing.
 	Posts PostLister
+	// Locales is the site's configured locale list ([0] = default), for
+	// {{cmsLocales}} and hreflang links. Nil or single-entry disables
+	// both.
+	Locales []string
+	// BaseURL ("scheme://host", no trailing slash) makes hreflang
+	// alternate links absolute; empty omits them.
+	BaseURL string
+}
+
+// LocaleLink is one entry {{cmsLocales}} returns: the current page's URL
+// in each configured locale, for host-rendered language switchers.
+type LocaleLink struct {
+	Code   string // e.g. "en", "fr"
+	URL    string // this page in that locale, e.g. "/fr/about"
+	Active bool   // the locale of the current render
 }
 
 // Render executes the page's template and writes the result to w. Output
@@ -535,7 +578,7 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		},
 		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
 		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], edit != nil) },
-		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref()) },
+		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
 		"cmsPosts": func(feed string, limit int) []PostInfo {
 			if in.Posts == nil {
@@ -543,24 +586,37 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			}
 			return in.Posts(feed, limit)
 		},
+		"cmsLocales": func() []LocaleLink { return localeLinks(in) },
 	}
 	if edit != nil {
 		// Editable renders wrap region output in marker elements the
 		// editor script finds. cmsText escapes its content itself here,
-		// since the wrapper obliges it to return trusted HTML.
+		// since the wrapper obliges it to return trusted HTML. A region
+		// whose blocks came from the default locale rather than the
+		// render's locale is flagged data-cms-fallback so the editor can
+		// badge untranslated content.
+		fallback := func(key string) string {
+			blocks := byRegion[key]
+			if len(blocks) == 0 || blocks[0].Locale == "" || blocks[0].Locale == locale {
+				return ""
+			}
+			return ` data-cms-fallback="1"`
+		}
 		funcs["cmsText"] = func(key string) template.HTML {
 			return template.HTML(`<span data-cms-region="` + html.EscapeString(key) +
-				`" data-cms-kind="text">` + html.EscapeString(text(key)) + `</span>`)
+				`" data-cms-kind="text"` + fallback(key) + `>` + html.EscapeString(text(key)) + `</span>`)
 		}
 		funcs["cmsRegion"] = func(key string) template.HTML {
 			return template.HTML(`<div data-cms-region="` + html.EscapeString(key) +
-				`" data-cms-kind="html">` + region(key) + `</div>`)
+				`" data-cms-kind="html"` + fallback(key) + `>` + region(key) + `</div>`)
 		}
 		funcs["cmsSections"] = func(key string) template.HTML {
 			var sb strings.Builder
 			sb.WriteString(`<div data-cms-sections="`)
 			sb.WriteString(html.EscapeString(key))
-			sb.WriteString(`">`)
+			sb.WriteString(`"`)
+			sb.WriteString(fallback(key))
+			sb.WriteString(`>`)
 			for _, b := range byRegion[key] {
 				if b.Kind != content.KindHTML {
 					continue
@@ -720,6 +776,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if err != nil {
 		templatesJSON = []byte("[]")
 	}
+	localesJSON, err := json.Marshal(edit.Locales)
+	if err != nil || edit.Locales == nil {
+		localesJSON = []byte("[]")
+	}
 	tag := `<script src="` + EditorScriptPath + `" defer` +
 		` data-page-id="` + strconv.FormatInt(edit.PageID, 10) + `"` +
 		` data-slug="` + html.EscapeString(edit.Slug) + `"` +
@@ -728,6 +788,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-status="` + html.EscapeString(edit.Status) + `"` +
 		` data-unpublished="` + unpubFlag + `"` +
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
+		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
@@ -902,14 +963,41 @@ const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 
 	// horizontal centering.
 	`figure>a>img:not(.cms-keep-margins){margin-top:0;margin-bottom:0}`
 
+// localeLinks builds {{cmsLocales}}: the current page's URL in every
+// configured locale. Nil unless more than one locale is configured.
+func localeLinks(in Input) []LocaleLink {
+	if len(in.Locales) < 2 {
+		return nil
+	}
+	def := in.Locales[0]
+	out := make([]LocaleLink, 0, len(in.Locales))
+	for _, code := range in.Locales {
+		out = append(out, LocaleLink{
+			Code:   code,
+			URL:    localeURL(in.Page.Slug, code, def),
+			Active: code == in.Locale,
+		})
+	}
+	return out
+}
+
 // headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
 // small stylesheet (button hover), the generated content-CSS link (when
-// the Tailwind rebuild feature is active), the page's meta description,
-// and its per-page CSS. HeadCSS is written raw; editing it is restricted
-// to admins.
-func headHTML(p *content.Page, contentCSS string) template.HTML {
+// the Tailwind rebuild feature is active), hreflang alternates on
+// multi-locale sites, the page's meta description, and its per-page CSS.
+// HeadCSS is written raw; editing it is restricted to admins.
+func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + "</style>\n")
+	// hreflang alternates need absolute URLs, so they require BaseURL.
+	if in.BaseURL != "" && len(in.Locales) > 1 {
+		for _, l := range localeLinks(in) {
+			sb.WriteString(`<link rel="alternate" hreflang="` + html.EscapeString(l.Code) +
+				`" href="` + html.EscapeString(in.BaseURL+l.URL) + "\">\n")
+		}
+		sb.WriteString(`<link rel="alternate" hreflang="x-default" href="` +
+			html.EscapeString(in.BaseURL+localeURL(p.Slug, in.Locales[0], in.Locales[0])) + "\">\n")
+	}
 	// Utilities generated from stored content. Before the page's own
 	// links and inline CSS, so page-specific rules can override them.
 	if contentCSS != "" {

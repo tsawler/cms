@@ -1,4 +1,4 @@
-{{define "title"}}Log in — CMS{{end}}
+{{define "title"}}{{.T "Log in"}} — CMS{{end}}
 
 {{define "content"}}
 {{if .Captcha}}
@@ -8,16 +8,16 @@
 <script type="module" src="{{.Captcha.ScriptURL}}"></script>
 {{end}}
 <div class="cms-login-card">
-    <h1>Log in</h1>
+    <h1>{{.T "Log in"}}</h1>
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
     <form method="post" action="{{.AdminPath}}/login" novalidate>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="cms-field">
-            <label for="email">Email</label>
+            <label for="email">{{.T "Email"}}</label>
             <input type="email" id="email" name="email" autocomplete="username" required autofocus>
         </div>
         <div class="cms-field">
-            <label for="password">Password</label>
+            <label for="password">{{.T "Password"}}</label>
             <input type="password" id="password" name="password" autocomplete="current-password" required>
         </div>
         {{/* Honeypot: hidden from people, filled in by bots. */}}
@@ -28,7 +28,7 @@
         <div class="cms-field cms-remember">
             <label>
                 <input type="checkbox" name="remember" value="1">
-                Remember me{{if gt .RememberHours 0}} for {{.RememberHours}} hours{{end}}
+                {{.T "Remember me"}}{{if gt .RememberHours 0}} {{.T "for"}} {{.RememberHours}} {{.T "hours"}}{{end}}
             </label>
         </div>
         {{with .Captcha}}
@@ -36,7 +36,7 @@
             <cap-widget data-cap-api-endpoint="{{.Endpoint}}"></cap-widget>
         </div>
         {{end}}
-        <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">Log in</button>
+        <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">{{.T "Log in"}}</button>
     </form>
 </div>
 {{end}}

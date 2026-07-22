@@ -104,3 +104,10 @@ background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.
 .cms-editing .cms-spacer::after{content:'↕ Space · ' attr(data-height) ' — click to adjust';
 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
 font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
+
+/* Untranslated regions in edit mode: content shown is default-language
+   fallback until it is edited in this locale. */
+body.cms-editing [data-cms-fallback] {
+    outline: 2px dashed #f0b429 !important;
+    outline-offset: 3px;
+}

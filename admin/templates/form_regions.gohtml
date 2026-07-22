@@ -4,14 +4,14 @@
 {{if .Regions}}
 <input type="hidden" name="regions_template" value="{{.RegionsTemplate}}">
 <fieldset class="cms-fieldset">
-    <legend>Content</legend>
+    <legend>{{.T "Content"}}</legend>
     {{$content := .BlockContent}}
     {{range .Regions}}
     <div class="cms-field">
         <label for="region-{{.Name}}">{{.Name}}</label>
         {{if eq .Kind "sections"}}
-        <p class="cms-hint">This area is built from sections — open the page on the site and
-        press <strong>Edit</strong> to add, arrange, and edit them directly.</p>
+        <p class="cms-hint">{{$.T "This area is built from sections — open the page on the site and press"}}
+        <strong>{{$.T "Edit"}}</strong> {{$.T "to add, arrange, and edit them directly."}}</p>
         {{else if eq .Kind "text"}}
         <input type="text" id="region-{{.Name}}" name="region-{{.Name}}" value="{{index $content .Name}}">
         {{else if eq .Kind "image"}}
@@ -19,14 +19,14 @@
         {{if $current}}<img src="{{$current}}" alt="" class="cms-image-current">{{end}}
         {{if $.MediaEnabled}}
         <select id="region-{{.Name}}" name="region-{{.Name}}">
-            <option value="">— no image —</option>
+            <option value="">{{$.T "— no image —"}}</option>
             {{range $.Media}}
             <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
             {{end}}
         </select>
-        <p class="cms-hint">Choose from the <a href="{{$.AdminPath}}/media">media library</a>; upload new images there first.</p>
+        <p class="cms-hint">{{$.T "Choose from the"}} <a href="{{$.AdminPath}}/media">{{$.T "media library"}}</a>{{$.T "; upload new images there first."}}</p>
         {{else}}
-        <p class="cms-hint">Image uploads are not configured for this site.</p>
+        <p class="cms-hint">{{$.T "Image uploads are not configured for this site."}}</p>
         <input type="hidden" name="region-{{.Name}}" value="{{$current}}">
         {{end}}
         {{else}}

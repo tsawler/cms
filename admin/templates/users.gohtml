@@ -1,18 +1,18 @@
-{{define "title"}}Users — CMS{{end}}
+{{define "title"}}{{.T "Users"}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>Users</h1>
-    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/users/new">New user</a>
+    <h1>{{.T "Users"}}</h1>
+    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/users/new">{{.T "New user"}}</a>
 </div>
 
 <table class="cms-table">
     <thead>
     <tr>
-        <th>Name</th>
-        <th>Email</th>
-        <th>Role</th>
-        <th>Status</th>
+        <th>{{.T "Name"}}</th>
+        <th>{{.T "Email"}}</th>
+        <th>{{.T "Role"}}</th>
+        <th>{{.T "Status"}}</th>
         <th></th>
     </tr>
     </thead>
@@ -21,12 +21,12 @@
     <tr>
         <td>{{.Name}}</td>
         <td>{{.Email}}</td>
-        <td><span class="cms-badge">{{.Role}}</span></td>
-        <td>{{if .Active}}<span class="cms-badge cms-badge-ok">active</span>{{else}}<span class="cms-badge cms-badge-off">inactive</span>{{end}}</td>
-        <td class="cms-table-actions"><a href="{{$.AdminPath}}/users/{{.ID}}">Edit</a></td>
+        <td><span class="cms-badge">{{$.T (printf "%s" .Role)}}</span></td>
+        <td>{{if .Active}}<span class="cms-badge cms-badge-ok">{{$.T "active"}}</span>{{else}}<span class="cms-badge cms-badge-off">{{$.T "inactive"}}</span>{{end}}</td>
+        <td class="cms-table-actions"><a href="{{$.AdminPath}}/users/{{.ID}}">{{$.T "Edit"}}</a></td>
     </tr>
     {{else}}
-    <tr><td colspan="5" class="cms-muted">No users yet.</td></tr>
+    <tr><td colspan="5" class="cms-muted">{{.T "No users yet."}}</td></tr>
     {{end}}
     </tbody>
 </table>

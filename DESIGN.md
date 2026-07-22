@@ -356,14 +356,50 @@ published listing page at the feed's slug when one exists. The
 publishing schedule — visibility is the page's draft/published status.
 Categories/tags are deferred.
 
-- Content tables key on `(page_id, region, locale)` with fallback to `en`
-  when a `fr` row doesn't exist.
-- URL strategy: `/` = default locale, `/fr/...` = French (configurable).
-- The edit toolbar gets a locale switcher: flip to FR, edit the same page in
-  place, save.
-- Admin UI strings themselves ship in en + fr.
-- Sites that don't want French configure `Locales: []string{"en"}` and none
-  of it surfaces.
+### 5. i18n — prefix routing, region-level fallback, in-place translation
+
+`Config.Locales` lists the site's locales; the first is the default and
+with a single entry none of this surfaces. URLs: `/` serves the default
+locale, `/fr/...` serves French — the prefix is the locale code, resolved
+before slug lookup, and slug validation rejects pages whose first segment
+matches a configured locale code. `{{cmsLocales}}` gives templates the
+current page's URL in every locale for a language switcher, and cmsHead
+emits absolute hreflang alternates on multi-locale sites.
+
+**Fallback is per region, field-level for metadata.** Rendering `fr`
+loads fr blocks; a region with no fr rows uses its en rows wholesale
+(region granularity because a sections region is one ordered document —
+interleaving locales would be nonsense). Page title/description fall
+back field-by-field (`COALESCE(NULLIF(fr,''), en)`), which also covers
+posts (their title/summary are page metadata). Publish and discard
+snapshot every locale at once, so "unpublished changes" is locale-blind.
+
+**Translating happens in place.** The edit bar grows an EN|FR switcher
+(navigate to the same page under the other prefix, confirm if there are
+unsaved edits). On a non-default locale, untranslated regions render the
+default-language fallback with a dashed amber outline and tooltip; the
+badge clears the moment the region is edited, and saving writes that
+locale's rows — the fallback content is the natural starting point for a
+translation. The ⋯ menu gains "Remove this translation" (deletes the
+locale's draft blocks and metadata via `POST
+/api/pages/{id}/revert-locale`, applied live on next publish). All the
+save APIs carry a validated `locale`. The admin page/post forms get
+locale tabs (`?locale=fr`): title/summary and region source are
+per-locale; address, template, feed, date, images, and code stay on the
+default tab.
+
+**Menu labels** ride on the row as a `labels` JSONB map of per-locale
+overrides ({"fr": "À propos"}) — a child table would be wiped by
+ReplaceMenu's wipe-and-reinsert, while the editor round-tripping the
+whole map and editing only its active locale survives it. Nav page links
+and Active detection are locale-prefixed; RSS feeds localize under the
+prefix (`/fr/news/rss.xml`).
+
+**Admin chrome ships in en + fr** (Canadian French): a string table
+keyed by the English text, a per-user cookie toggle in the topbar
+(default sniffed from Accept-Language), shown only when fr is
+configured. The in-place editor's own chrome strings (Edit/Save/dialogs)
+remain English for now — a deliberate deferral, tracked for phase 8.
 
 ### 6. Media serving — proxy by default, direct when possible
 
@@ -469,8 +505,10 @@ the module self-contained and the surface area small.
 6. **Blog & news** ✅ — page-backed posts (two feeds, one engine),
    thumbnail/header images, Blog & News admin, .Post/cmsPosts template
    helpers, RSS; categories/tags deferred
-7. **i18n** — locale routing, fallback, in-place locale switching, FR admin
-   strings
+7. **i18n** ✅ — /fr/ prefix routing, region-level content fallback,
+   in-place locale switcher with untranslated-region badges and
+   per-locale saves, admin form locale tabs, per-locale menu labels,
+   localized RSS, FR admin strings (editor chrome strings deferred)
 8. **Polish** — versioning/undo, sitemap.xml, hooks API, docs
 
 Each phase ends with `examples/basic` exercising the new feature, so there is

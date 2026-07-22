@@ -3,7 +3,7 @@
  * bar-button visibility rules that reflect it all.
  * ------------------------------------------------------------------ */
 
-import { state, cfg, postInfo } from "./state.js";
+import { state, cfg, postInfo, locales, defaultLocale } from "./state.js";
 import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
@@ -62,8 +62,17 @@ export function setEditing(on) {
     $("cancel").hidden = !on;
     // The post-settings gear shows only when editing a post's page.
     $("post-settings").hidden = !on || !postInfo;
+    // Removing a translation only makes sense off the default locale.
+    $("revert-locale").hidden = !on || locales.length < 2 || cfg.locale === defaultLocale;
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
+    // Untranslated regions (showing default-language fallback) get a
+    // tooltip to go with their dashed amber outline.
+    if (on) {
+        document.querySelectorAll("[data-cms-fallback]").forEach(function (el) {
+            el.title = "Not translated yet — showing the default language. Edit to translate.";
+        });
+    }
     $("rail").classList.toggle("on", on);
     setMenuEditing(on);
     if (!on) {
@@ -97,14 +106,27 @@ export function setEditing(on) {
     }
 }
 
+// clearFallbackBadge drops a region's untranslated marker the moment it
+// is edited — the edit is becoming this locale's own content.
+function clearFallbackBadge(selector) {
+    document.querySelectorAll(selector).forEach(function (el) {
+        if (el.hasAttribute("data-cms-fallback")) {
+            el.removeAttribute("data-cms-fallback");
+            el.removeAttribute("title");
+        }
+    });
+}
+
 export function markDirty(name) {
     state.dirty[name] = true;
+    clearFallbackBadge('[data-cms-region="' + CSS.escape(name) + '"]');
     $("save").disabled = false;
     updateBarButtons();
 }
 
 export function markSectionsDirty(region) {
     state.sectionsDirty[region] = true;
+    clearFallbackBadge('[data-cms-sections="' + CSS.escape(region) + '"]');
     $("save").disabled = false;
     updateBarButtons();
 }
@@ -129,7 +151,7 @@ export function updateBarButtons() {
     $("discard").hidden = !(state.pageStatus === "published" && state.hasUnpublished);
     // The separator only earns its place when the destructive group
     // above it has at least one visible item.
-    $("menu-sep").hidden = $("cancel").hidden && $("discard").hidden && $("del-page").hidden;
+    $("menu-sep").hidden = $("cancel").hidden && $("discard").hidden && $("del-page").hidden && $("revert-locale").hidden;
 }
 
 export function initEditing() {

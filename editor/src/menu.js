@@ -15,7 +15,7 @@
  * are the stable handle).
  * ------------------------------------------------------------------ */
 
-import { state } from "./state.js";
+import { state, cfg, defaultLocale } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm } from "./dialogs.js";
@@ -32,6 +32,7 @@ function normalize(items) {
     return (items || []).map(function (it) {
         return {
             label: it.label || "",
+            labels: it.labels || {}, // per-locale overrides, round-tripped
             pageId: it.pageId || 0,
             url: it.url || "",
             newTab: !!it.newTab,
@@ -39,6 +40,15 @@ function normalize(items) {
             children: normalize(it.children),
         };
     });
+}
+
+// labelOf resolves an item's label for the render's locale: its override
+// when one exists, the default-language label otherwise.
+function labelOf(item) {
+    if (cfg.locale !== defaultLocale && item.labels && item.labels[cfg.locale]) {
+        return item.labels[cfg.locale];
+    }
+    return item.label;
 }
 
 function loadData() {
@@ -114,7 +124,11 @@ function pageById(id) {
 function itemURL(item) {
     if (item.pageId) {
         var p = pageById(item.pageId);
-        return p ? "/" + p.slug : null;
+        if (!p) return null;
+        // Page links carry the render's locale prefix, mirroring the
+        // server-rendered nav.
+        var prefix = cfg.locale !== defaultLocale ? "/" + cfg.locale : "";
+        return p.slug ? prefix + "/" + p.slug : (prefix || "/");
     }
     return item.url || null;
 }
@@ -131,7 +145,7 @@ function itemLI(item, top) {
         btn.className = "cms-nav-link cms-nav-toggle";
         btn.setAttribute("aria-expanded", "false");
         btn.setAttribute("aria-haspopup", "true");
-        btn.textContent = item.label;
+        btn.textContent = labelOf(item);
         var caret = document.createElement("span");
         caret.className = "cms-nav-caret";
         caret.setAttribute("aria-hidden", "true");
@@ -157,7 +171,7 @@ function itemLI(item, top) {
         a.target = "_blank";
         a.rel = "noopener";
     }
-    a.textContent = item.label;
+    a.textContent = labelOf(item);
     li.appendChild(a);
     return li;
 }
@@ -312,7 +326,7 @@ function openModal(key, path, parentPath) {
     modal = { key: key, path: path, parentPath: parentPath || null, item: item };
     confirmDropLoss = false;
     $("mm-title").textContent = path ? "Menu item" : "New menu item";
-    $("mm-label").value = item.label;
+    $("mm-label").value = path ? labelOf(item) : "";
     setKind(item.dropdown ? "dropdown" : (item.url && !item.pageId ? "url" : "page"));
     comboSet(item.pageId);
     $("mm-url").value = item.url;
@@ -352,7 +366,16 @@ function modalOK() {
             ", which will be removed with it — press OK again to continue.");
         return;
     }
-    it.label = label;
+    // Off the default locale the modal edits this locale's label
+    // override; the default-language label stays put (a brand-new item
+    // uses the text for both, so it is never label-less).
+    if (cfg.locale !== defaultLocale) {
+        it.labels = it.labels || {};
+        it.labels[cfg.locale] = label;
+        if (!it.label) it.label = label;
+    } else {
+        it.label = label;
+    }
     it.dropdown = kind === "dropdown";
     it.pageId = kind === "page" ? comboPageId : 0;
     it.url = kind === "url" ? url : "";
@@ -411,7 +434,7 @@ function makeGhost(li, item) {
     var g = document.createElement("div");
     g.id = "cms-nav-ghost";
     var label = document.createElement("span");
-    label.textContent = item ? item.label : (li.textContent || "").trim();
+    label.textContent = item ? labelOf(item) : (li.textContent || "").trim();
     g.appendChild(label);
     if (item && item.dropdown) {
         var sub = document.createElement("span");

@@ -1,70 +1,86 @@
-{{define "title"}}{{if .IsNew}}New post{{else}}Edit post{{end}} — CMS{{end}}
+{{define "title"}}{{if .IsNew}}{{.T "New post"}}{{else}}{{.T "Edit post"}}{{end}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>{{if .IsNew}}New post{{else}}Edit post{{end}}</h1>
+    <h1>{{if .IsNew}}{{.T "New post"}}{{else}}{{.T "Edit post"}}{{end}}</h1>
     <div class="cms-actions">
         {{if not .IsNew}}
-        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/posts/{{.FormPost.PostID}}/preview" target="_blank" rel="noopener">Preview draft</a>
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/posts/{{.FormPost.PostID}}/preview{{if not .IsDefaultLocale}}?locale={{.EditLocale}}{{end}}" target="_blank" rel="noopener">{{.T "Preview draft"}}</a>
         {{end}}
-        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/posts">Back to posts</a>
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/posts">{{.T "Back to posts"}}</a>
     </div>
 </div>
+
+{{if and (not .IsNew) (gt (len .Locales) 1)}}
+<p class="cms-tabs cms-locale-tabs">
+    {{$def := index .Locales 0}}
+    {{range .Locales}}
+    <a {{if eq . $.EditLocale}}class="cms-active"{{end}} href="{{$.AdminPath}}/posts/{{$.FormPost.PostID}}{{if ne . $def}}?locale={{.}}{{end}}">{{.}}</a>
+    {{end}}
+</p>
+{{if not .IsDefaultLocale}}<p class="cms-hint">{{.T "Editing translation:"}} <strong>{{.EditLocale}}</strong>.
+{{.T "Fields left matching the default language keep showing it until you change them."}}
+{{.T "Feed, address, date, and images live on the default-language tab."}}</p>{{end}}
+{{end}}
 
 <form class="cms-form cms-form-wide" method="post"
       action="{{if .IsNew}}{{.AdminPath}}/posts/new{{else}}{{.AdminPath}}/posts/{{.FormPost.PostID}}{{end}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="locale" value="{{.EditLocale}}">
 
     <div class="cms-field">
-        <label for="title">Title</label>
+        <label for="title">{{.T "Title"}}</label>
         <input type="text" id="title" name="title" value="{{.FormPost.Title}}" required {{if .IsNew}}data-slug-source{{end}}>
         {{with index .FormErrors "title"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
+    {{if .IsDefaultLocale}}
     <div class="cms-field">
-        <label for="feed">Feed</label>
+        <label for="feed">{{.T "Feed"}}</label>
         <select id="feed" name="feed">
-            <option value="blog" {{if eq .FormPost.Feed "blog"}}selected{{end}}>Blog</option>
-            <option value="news" {{if eq .FormPost.Feed "news"}}selected{{end}}>News</option>
+            <option value="blog" {{if eq .FormPost.Feed "blog"}}selected{{end}}>{{.T "Blog"}}</option>
+            <option value="news" {{if eq .FormPost.Feed "news"}}selected{{end}}>{{.T "News"}}</option>
         </select>
         {{with index .FormErrors "feed"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
-        <label for="slug">Address <span class="cms-muted">(after /blog/ or /news/; leave empty to use the title)</span></label>
-        <input type="text" id="slug" name="slug" value="{{.PostSlugTail}}" placeholder="my-first-post" {{if .IsNew}}data-slug-target{{end}}>
+        <label for="slug">{{.T "Address"}} <span class="cms-muted">{{.T "(after /blog/ or /news/; leave empty to use the title)"}}</span></label>
+        <input type="text" id="slug" name="slug" value="{{.PostSlugTail}}" placeholder="{{.T "my-first-post"}}" {{if .IsNew}}data-slug-target{{end}}>
         {{with index .FormErrors "slug"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
+    {{end}}
 
     <div class="cms-field">
-        <label for="description">Summary <span class="cms-muted">(shown in listings, feeds, and search engines)</span></label>
+        <label for="description">{{.T "Summary"}} <span class="cms-muted">{{.T "(shown in listings, feeds, and search engines)"}}</span></label>
         <input type="text" id="description" name="description" value="{{.FormPost.Description}}">
     </div>
 
+    {{if .IsDefaultLocale}}
     <div class="cms-field">
-        <label for="published_at">Date</label>
+        <label for="published_at">{{.T "Date"}}</label>
         <input type="datetime-local" id="published_at" name="published_at"
                value="{{.FormPost.PublishedAt.Format "2006-01-02T15:04"}}">
         {{with index .FormErrors "published_at"}}<p class="cms-field-error">{{.}}</p>{{end}}
-        <p class="cms-hint">The date shown on the post and used to order listings — newest first.</p>
+        <p class="cms-hint">{{.T "The date shown on the post and used to order listings — newest first."}}</p>
     </div>
 
     {{if not .IsNew}}{{if .FormPost.AuthorName}}
     <div class="cms-field">
-        <label>Author</label>
+        <label>{{.T "Author"}}</label>
         <p class="cms-static">{{.FormPost.AuthorName}}</p>
     </div>
     {{end}}{{end}}
 
     {{if .MediaEnabled}}
     <div class="cms-field">
-        <label for="thumbnail_url">Thumbnail <span class="cms-muted">(optional — shown on listing cards)</span></label>
+        <label for="thumbnail_url">{{.T "Thumbnail"}} <span class="cms-muted">{{.T "(optional — shown on listing cards)"}}</span></label>
         {{with .FormPost.ThumbnailURL}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
         <select id="thumbnail_url" name="thumbnail_url">
-            <option value="">— no thumbnail —</option>
+            <option value="">{{.T "— no thumbnail —"}}</option>
             {{$current := .FormPost.ThumbnailURL}}
             {{if and $current (not ($.MediaContains $current))}}
-            <option value="{{$current}}" selected>(current image)</option>
+            <option value="{{$current}}" selected>{{.T "(current image)"}}</option>
             {{end}}
             {{range .Media}}
             <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
@@ -73,36 +89,37 @@
     </div>
 
     <div class="cms-field">
-        <label for="header_url">Header image <span class="cms-muted">(optional — shown at the top of the post)</span></label>
+        <label for="header_url">{{.T "Header image"}} <span class="cms-muted">{{.T "(optional — shown at the top of the post)"}}</span></label>
         {{with .FormPost.HeaderURL}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
         <select id="header_url" name="header_url">
-            <option value="">— no header image —</option>
+            <option value="">{{.T "— no header image —"}}</option>
             {{$current := .FormPost.HeaderURL}}
             {{if and $current (not ($.MediaContains $current))}}
-            <option value="{{$current}}" selected>(current image)</option>
+            <option value="{{$current}}" selected>{{.T "(current image)"}}</option>
             {{end}}
             {{range .Media}}
             <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
             {{end}}
         </select>
-        <p class="cms-hint">Choose from the <a href="{{.AdminPath}}/media">media library</a>; upload new images there first.</p>
+        <p class="cms-hint">{{.T "Choose from the"}} <a href="{{.AdminPath}}/media">{{.T "media library"}}</a>{{.T "; upload new images there first."}}</p>
     </div>
     {{else}}
     <input type="hidden" name="thumbnail_url" value="{{.FormPost.ThumbnailURL}}">
     <input type="hidden" name="header_url" value="{{.FormPost.HeaderURL}}">
     {{end}}
+    {{end}}
 
     {{template "form_regions" .}}
 
-    {{if and .IsAdmin (not .IsNew)}}
+    {{if and .IsAdmin (not .IsNew) .IsDefaultLocale}}
     <details class="cms-advanced">
-        <summary>Advanced: post-specific CSS and JavaScript</summary>
+        <summary>{{.T "Advanced: post-specific CSS and JavaScript"}}</summary>
         <div class="cms-field">
-            <label for="head_css">Extra CSS <span class="cms-muted">(added to this post's &lt;head&gt;)</span></label>
+            <label for="head_css">{{.T "Extra CSS"}} <span class="cms-muted">{{.T "(added to this post's <head>)"}}</span></label>
             <textarea id="head_css" name="head_css" rows="5" class="cms-code">{{.FormPost.HeadCSS}}</textarea>
         </div>
         <div class="cms-field">
-            <label for="body_js">Extra JavaScript <span class="cms-muted">(added before &lt;/body&gt;)</span></label>
+            <label for="body_js">{{.T "Extra JavaScript"}} <span class="cms-muted">{{.T "(added before </body>)"}}</span></label>
             <textarea id="body_js" name="body_js" rows="5" class="cms-code">{{.FormPost.BodyJS}}</textarea>
         </div>
     </details>
@@ -110,37 +127,37 @@
 
     <div class="cms-actions">
         {{if .IsNew}}
-        <button type="submit" class="cms-btn cms-btn-primary">Create post</button>
+        <button type="submit" class="cms-btn cms-btn-primary">{{.T "Create post"}}</button>
         {{else}}
-        <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">Save draft</button>
-        <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">Save &amp; publish</button>
+        <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">{{.T "Save draft"}}</button>
+        <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">{{.T "Save & publish"}}</button>
         {{if eq .FormPost.Status "published"}}
-        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">Unpublish</button>
+        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">{{.T "Unpublish"}}</button>
         {{end}}
         {{end}}
     </div>
 </form>
 
 {{if not .IsNew}}
-<p class="cms-hint">The post's body is best edited on the site: open
+<p class="cms-hint">{{.T "The post's body is best edited on the site: open"}}
 <a href="/{{.FormPost.Slug}}" target="_blank" rel="noopener">/{{.FormPost.Slug}}</a>
-and press <strong>Edit</strong> to write in place with sections and snippets.</p>
+{{.T "and press"}} <strong>{{.T "Edit"}}</strong> {{.T "to write in place with sections and snippets."}}</p>
 {{end}}
 
-{{if and (not .IsNew) .HasDraftEdits}}
+{{if and (not .IsNew) .HasDraftEdits .IsDefaultLocale}}
 <form method="post" action="{{.AdminPath}}/posts/{{.FormPost.PostID}}/discard" class="cms-discard"
-      data-confirm="Discard your unpublished changes and revert to the published version? This can't be undone.">
+      data-confirm="{{.T "Discard your unpublished changes and revert to the published version? This can't be undone."}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <p class="cms-hint">This post has unpublished draft changes.</p>
-    <button type="submit" class="cms-btn cms-btn-ghost">Discard draft changes</button>
+    <p class="cms-hint">{{.T "This post has unpublished draft changes."}}</p>
+    <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Discard draft changes"}}</button>
 </form>
 {{end}}
 
-{{if not .IsNew}}
+{{if and (not .IsNew) .IsDefaultLocale}}
 <form method="post" action="{{.AdminPath}}/posts/{{.FormPost.PostID}}/delete" class="cms-danger-zone"
-      data-confirm="Delete this post and all of its content? This cannot be undone.">
+      data-confirm="{{.T "Delete this post and all of its content? This cannot be undone."}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit" class="cms-btn cms-btn-danger">Delete post</button>
+    <button type="submit" class="cms-btn cms-btn-danger">{{.T "Delete post"}}</button>
 </form>
 {{end}}
 {{end}}

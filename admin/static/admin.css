@@ -354,3 +354,7 @@ a.cms-card:hover { border-color: var(--cms-primary); }
 
 /* Read-only form values (e.g. a post's author) */
 .cms-static { margin: 0; color: var(--cms-text); }
+
+/* Language tabs on the page/post forms */
+.cms-locale-tabs { margin-bottom: 1.25rem; }
+.cms-locale-tabs a { text-transform: uppercase; font-size: .8rem; letter-spacing: .04em; }

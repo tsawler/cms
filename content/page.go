@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -84,19 +85,33 @@ func ValidSlug(s string) bool {
 	return s == "" || slugRe.MatchString(s)
 }
 
-// Store reads and writes pages and blocks in Postgres.
+// Store reads and writes pages and blocks in Postgres. Reads for a
+// non-default locale fall back to the default locale's values where the
+// requested locale has none.
 type Store struct {
-	db *pgxpool.Pool
+	db            *pgxpool.Pool
+	defaultLocale string
 }
 
-// NewStore returns a Store backed by db.
-func NewStore(db *pgxpool.Pool) *Store {
-	return &Store{db: db}
+// NewStore returns a Store backed by db. defaultLocale is the fallback
+// for per-locale reads (page metadata, blocks); pass the site's first
+// configured locale. Empty defaults to "en".
+func NewStore(db *pgxpool.Pool, defaultLocale string) *Store {
+	if defaultLocale == "" {
+		defaultLocale = "en"
+	}
+	return &Store{db: db, defaultLocale: defaultLocale}
 }
 
+// pageColumns reads metadata from the requested-locale join (m) with
+// field-level fallback to the default-locale join (md): an absent row or
+// an empty field falls back, so a French page with only a title still
+// gets the English description.
 const pageColumns = `p.id, p.slug, p.template_name, p.status, p.head_css, p.body_js,
 	p.css_links, p.js_links,
-	COALESCE(m.title, ''), COALESCE(m.description, ''), p.created_at, p.updated_at`
+	COALESCE(NULLIF(m.title, ''), md.title, ''),
+	COALESCE(NULLIF(m.description, ''), md.description, ''),
+	p.created_at, p.updated_at`
 
 func scanPage(row pgx.Row) (*Page, error) {
 	var p Page
@@ -112,13 +127,20 @@ func scanPage(row pgx.Row) (*Page, error) {
 	return &p, nil
 }
 
+// pageMetaJoins joins page metadata twice: the requested locale ($n) and
+// the default locale ($n+1), for pageColumns' fallback COALESCEs.
+func pageMetaJoins(localeArg, defaultArg int) string {
+	return `
+		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $` + strconv.Itoa(localeArg) + `
+		LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $` + strconv.Itoa(defaultArg)
+}
+
 // GetByID returns the page with the given id, with metadata for locale.
 func (s *Store) GetByID(ctx context.Context, id int64, locale string) (*Page, error) {
 	row := s.db.QueryRow(ctx, `
 		SELECT `+pageColumns+`
-		FROM cms_pages p
-		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $2
-		WHERE p.id = $1`, id, locale)
+		FROM cms_pages p`+pageMetaJoins(2, 3)+`
+		WHERE p.id = $1`, id, locale, s.defaultLocale)
 	return scanPage(row)
 }
 
@@ -127,22 +149,20 @@ func (s *Store) GetByID(ctx context.Context, id int64, locale string) (*Page, er
 func (s *Store) GetBySlug(ctx context.Context, slug, locale string, publishedOnly bool) (*Page, error) {
 	q := `
 		SELECT ` + pageColumns + `
-		FROM cms_pages p
-		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $2
+		FROM cms_pages p` + pageMetaJoins(2, 3) + `
 		WHERE p.slug = $1`
 	if publishedOnly {
 		q += ` AND p.status = 'published'`
 	}
-	return scanPage(s.db.QueryRow(ctx, q, slug, locale))
+	return scanPage(s.db.QueryRow(ctx, q, slug, locale, s.defaultLocale))
 }
 
 // All returns every page with metadata for locale, ordered by slug.
 func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT `+pageColumns+`
-		FROM cms_pages p
-		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1
-		ORDER BY p.slug`, locale)
+		FROM cms_pages p`+pageMetaJoins(1, 2)+`
+		ORDER BY p.slug`, locale, s.defaultLocale)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +238,19 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// UpdateMeta saves only a page's per-locale metadata (title and
+// description) — how non-default-locale admin tabs save, since every
+// other page field is locale-independent.
+func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale, title, description string) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (page_id, locale)
+		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
+		pageID, locale, title, description)
+	return err
 }
 
 // Delete removes a page and (via cascade) its metadata and blocks.

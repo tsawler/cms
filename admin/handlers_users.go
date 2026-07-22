@@ -48,14 +48,14 @@ func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := s.deps.Users.Insert(r.Context(), form); err != nil {
 		if errors.Is(err, auth.ErrDuplicateEmail) {
-			s.renderUserForm(w, r, form, true, map[string]string{"email": "That email address is already in use."})
+			s.renderUserForm(w, r, form, true, map[string]string{"email": s.tr(r, "That email address is already in use.")})
 			return
 		}
 		s.serverError(w, err)
 		return
 	}
 
-	s.flash(r, "User created.")
+	s.flash(r, s.tr(r, "User created."))
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 }
 
@@ -80,10 +80,10 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	// themselves out by deactivating it or dropping the admin role.
 	if self := s.currentUser(r); self != nil && self.ID == existing.ID {
 		if !form.Active {
-			errs["active"] = "You cannot deactivate your own account."
+			errs["active"] = s.tr(r, "You cannot deactivate your own account.")
 		}
 		if !form.Role.IsAdmin() {
-			errs["role"] = "You cannot remove your own admin role."
+			errs["role"] = s.tr(r, "You cannot remove your own admin role.")
 		}
 	}
 
@@ -94,7 +94,7 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Users.Update(r.Context(), form); err != nil {
 		if errors.Is(err, auth.ErrDuplicateEmail) {
-			s.renderUserForm(w, r, form, false, map[string]string{"email": "That email address is already in use."})
+			s.renderUserForm(w, r, form, false, map[string]string{"email": s.tr(r, "That email address is already in use.")})
 			return
 		}
 		s.serverError(w, err)
@@ -113,7 +113,7 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.flash(r, "User updated.")
+	s.flash(r, s.tr(r, "User updated."))
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 }
 
@@ -131,21 +131,21 @@ func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string,
 	password := r.PostFormValue("password")
 
 	if u.Name == "" {
-		errs["name"] = "Name is required."
+		errs["name"] = s.tr(r, "Name is required.")
 	}
 	if u.Email == "" {
-		errs["email"] = "Email is required."
+		errs["email"] = s.tr(r, "Email is required.")
 	} else if _, err := mail.ParseAddress(u.Email); err != nil {
-		errs["email"] = "That doesn't look like a valid email address."
+		errs["email"] = s.tr(r, "That doesn't look like a valid email address.")
 	}
 	if !u.Role.Valid() {
-		errs["role"] = "Choose a role."
+		errs["role"] = s.tr(r, "Choose a role.")
 	}
 	if isNew && password == "" {
-		errs["password"] = "Password is required."
+		errs["password"] = s.tr(r, "Password is required.")
 	}
 	if password != "" && len(password) < minPasswordLength {
-		errs["password"] = "Password must be at least 8 characters."
+		errs["password"] = s.tr(r, "Password must be at least 8 characters.")
 	}
 
 	return u, password, errs

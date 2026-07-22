@@ -50,7 +50,7 @@ func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
 	id, err := s.deps.Content.InsertPost(r.Context(), form, s.deps.DefaultLocale)
 	if err != nil {
 		if errors.Is(err, content.ErrDuplicateSlug) {
-			s.renderPostForm(w, r, form, true, map[string]string{"slug": "That address is already used by another page or post."})
+			s.renderPostForm(w, r, form, true, map[string]string{"slug": s.tr(r, "That address is already used by another page or post.")})
 			return
 		}
 		s.serverError(w, err)
@@ -60,7 +60,7 @@ func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
 	s.seedStarterSections(r.Context(), form.ID, form.TemplateName)
 	s.contentChanged()
 
-	s.flash(r, "Post created — now add your content below, or open it on the site to edit in place.")
+	s.flash(r, s.tr(r, "Post created — now add your content below, or open it on the site to edit in place."))
 	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
@@ -75,6 +75,30 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 	existing, ok := s.postFromURL(w, r)
 	if !ok {
+		return
+	}
+	locale := s.formLocale(r)
+
+	// Non-default locale tabs edit only the per-locale data: title,
+	// summary, and region content. Feed, address, date, and images are
+	// locale-independent and live on the default tab.
+	if locale != s.deps.DefaultLocale {
+		title := strings.TrimSpace(r.PostFormValue("title"))
+		if title == "" {
+			s.renderPostForm(w, r, existing, false, map[string]string{"title": s.tr(r, "Title is required.")})
+			return
+		}
+		desc := strings.TrimSpace(r.PostFormValue("description"))
+		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, title, desc); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		if err := s.saveRegionContent(r, &existing.Page, locale); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		s.finishContentSave(w, r, existing.ID, "Post",
+			"posts/"+strconv.FormatInt(existing.PostID, 10), locale)
 		return
 	}
 
@@ -104,37 +128,20 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Content.UpdatePost(r.Context(), form, s.deps.DefaultLocale); err != nil {
 		if errors.Is(err, content.ErrDuplicateSlug) {
-			s.renderPostForm(w, r, form, false, map[string]string{"slug": "That address is already used by another page or post."})
+			s.renderPostForm(w, r, form, false, map[string]string{"slug": s.tr(r, "That address is already used by another page or post.")})
 			return
 		}
 		s.serverError(w, err)
 		return
 	}
 
-	if err := s.saveRegionContent(r, &form.Page); err != nil {
+	if err := s.saveRegionContent(r, &form.Page, s.deps.DefaultLocale); err != nil {
 		s.serverError(w, err)
 		return
 	}
 
-	switch r.PostFormValue("action") {
-	case "publish":
-		if err := s.deps.Content.Publish(r.Context(), form.ID); err != nil {
-			s.serverError(w, err)
-			return
-		}
-		s.flash(r, "Post published.")
-	case "unpublish":
-		if err := s.deps.Content.Unpublish(r.Context(), form.ID); err != nil {
-			s.serverError(w, err)
-			return
-		}
-		s.flash(r, "Post unpublished — it is no longer visible on the site.")
-	default:
-		s.flash(r, "Draft saved. Publish when you're ready to make it live.")
-	}
-	s.contentChanged()
-
-	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(form.PostID, 10), http.StatusSeeOther)
+	s.finishContentSave(w, r, form.ID, "Post",
+		"posts/"+strconv.FormatInt(form.PostID, 10), s.deps.DefaultLocale)
 }
 
 func (s *server) postDelete(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +155,7 @@ func (s *server) postDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Post deleted.")
+	s.flash(r, s.tr(r, "Post deleted."))
 	http.Redirect(w, r, s.deps.AdminPath+"/posts", http.StatusSeeOther)
 }
 
@@ -158,7 +165,7 @@ func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if post.Status != content.StatusPublished {
-		s.flash(r, "There are no published changes to revert to — this post hasn't been published yet.")
+		s.flash(r, s.tr(r, "There are no published changes to revert to — this post hasn't been published yet."))
 		http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
 		return
 	}
@@ -167,7 +174,7 @@ func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Draft changes discarded — the editor now matches the published post.")
+	s.flash(r, s.tr(r, "Draft changes discarded — the editor now matches the published post."))
 	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
 }
 
@@ -178,7 +185,8 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	blocks, err := s.deps.Content.BlocksFor(r.Context(), post.ID, s.deps.DefaultLocale, content.StatusDraft)
+	locale := s.formLocale(r)
+	blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), post.ID, locale, content.StatusDraft)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -187,14 +195,15 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		menuItems = nil
 	}
-	menus := render.BuildMenus(menuItems, post.Slug, true)
+	menus := render.BuildMenus(menuItems, post.Slug, locale, s.deps.DefaultLocale, true)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	err = s.deps.Renderer.Render(w, render.Input{
-		Page:   &post.Page,
-		Blocks: blocks,
-		Locale: s.deps.DefaultLocale,
-		Menus:  menus,
-		Post:   render.PostInfoFor(post),
+		Page:    &post.Page,
+		Blocks:  blocks,
+		Locale:  locale,
+		Menus:   menus,
+		Post:    render.PostInfoFor(post, render.LocalePrefix(locale, s.deps.DefaultLocale)),
+		Locales: s.deps.Locales,
 	})
 	if err != nil {
 		s.serverError(w, err)
@@ -214,7 +223,7 @@ func (s *server) parsePostMeta(r *http.Request) (*content.Post, map[string]strin
 
 	feed := r.PostFormValue("feed")
 	if !content.ValidFeed(feed) {
-		errs["feed"] = "Choose Blog or News."
+		errs["feed"] = s.tr(r, "Choose Blog or News.")
 		feed = string(content.FeedBlog)
 	}
 	p.Feed = content.Feed(feed)
@@ -225,17 +234,17 @@ func (s *server) parsePostMeta(r *http.Request) (*content.Post, map[string]strin
 		tail = content.Slugify(p.Title)
 	}
 	if p.Title == "" {
-		errs["title"] = "Title is required."
+		errs["title"] = s.tr(r, "Title is required.")
 	}
 	if tail == "" || !content.ValidSlug(tail) {
-		errs["slug"] = "Use only lowercase letters, numbers, and hyphens, e.g. my-first-post."
+		errs["slug"] = s.tr(r, "Use only lowercase letters, numbers, and hyphens, e.g. my-first-post.")
 	}
 	p.Slug = feed + "/" + tail
 
 	if v := strings.TrimSpace(r.PostFormValue("published_at")); v != "" {
 		t, err := time.ParseInLocation(datetimeLocalFormat, v, time.Local)
 		if err != nil {
-			errs["published_at"] = "Enter a valid date and time."
+			errs["published_at"] = s.tr(r, "Enter a valid date and time.")
 		} else {
 			p.PublishedAt = t
 		}
@@ -262,10 +271,11 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 	data.IsNew = isNew
 	data.FormErrors = errs
 	data.RegionsTemplate = s.deps.PostTemplate.File
+	data.EditLocale = s.formLocale(r)
 
 	if !isNew {
 		data.Regions = s.deps.Renderer.Regions(s.deps.PostTemplate.File)
-		blocks, err := s.deps.Content.BlocksFor(r.Context(), post.ID, s.deps.DefaultLocale, content.StatusDraft)
+		blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), post.ID, data.EditLocale, content.StatusDraft)
 		if err != nil {
 			s.serverError(w, err)
 			return
@@ -276,7 +286,7 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 		}
 
 		if post.Status == content.StatusPublished {
-			changed, err := s.deps.Content.HasUnpublishedChanges(r.Context(), post.ID, s.deps.DefaultLocale)
+			changed, err := s.deps.Content.HasUnpublishedChanges(r.Context(), post.ID)
 			if err != nil {
 				s.serverError(w, err)
 				return
@@ -316,16 +326,16 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the request — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
 		return
 	}
 	title := strings.TrimSpace(body.Title)
 	if title == "" {
-		jsonError(w, http.StatusUnprocessableEntity, "Give the post a title.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Give the post a title."))
 		return
 	}
 	if !content.ValidFeed(body.Feed) {
-		jsonError(w, http.StatusBadRequest, "Choose Blog or News.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Choose Blog or News."))
 		return
 	}
 
@@ -364,12 +374,12 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 		}
 		if !errors.Is(err, content.ErrDuplicateSlug) {
 			s.deps.Logger.Error("cms admin: api creating post", "err", err)
-			jsonError(w, http.StatusInternalServerError, "Creating the post failed — try again.")
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Creating the post failed — try again."))
 			return
 		}
 	}
 	if err != nil {
-		jsonError(w, http.StatusUnprocessableEntity, "Too many posts already use that name.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Too many posts already use that name."))
 		return
 	}
 
@@ -402,7 +412,7 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the request — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
 		return
 	}
 
@@ -410,7 +420,7 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(body.PublishedAt); v != "" {
 		t, err := time.ParseInLocation(datetimeLocalFormat, v, time.Local)
 		if err != nil {
-			jsonError(w, http.StatusUnprocessableEntity, "Enter a valid date and time.")
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Enter a valid date and time."))
 			return
 		}
 		post.PublishedAt = t
@@ -424,7 +434,7 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Content.UpdatePost(r.Context(), post, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api updating post settings", "post", post.PostID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Saving the post settings failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the post settings failed — try again."))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -438,7 +448,7 @@ func (s *server) postFromURL(w http.ResponseWriter, r *http.Request) (*content.P
 		http.NotFound(w, r)
 		return nil, false
 	}
-	post, err := s.deps.Content.PostByID(r.Context(), id, s.deps.DefaultLocale)
+	post, err := s.deps.Content.PostByID(r.Context(), id, s.formLocale(r))
 	if errors.Is(err, content.ErrNotFound) {
 		http.NotFound(w, r)
 		return nil, false

@@ -21,8 +21,8 @@ func (s *server) uploadLimit() int64 {
 	return limit
 }
 
-func (s *server) uploadTooLargeMsg() string {
-	return fmt.Sprintf("That file is too large — images and documents must be under %d MB, videos under %d MB.",
+func (s *server) uploadTooLargeMsg(r *http.Request) string {
+	return fmt.Sprintf(s.tr(r, "That file is too large — images and documents must be under %d MB, videos under %d MB."),
 		media.MaxImageDocBytes>>20, s.deps.Media.MaxVideoBytes()>>20)
 }
 
@@ -89,10 +89,10 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 			return
 		}
-		s.renderMediaList(w, r, http.StatusUnprocessableEntity, "Choose a file to upload.")
+		s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, "Choose a file to upload."))
 		return
 	}
 	defer file.Close()
@@ -103,9 +103,9 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, media.ErrTooLarge):
-			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image"):
-			s.renderMediaList(w, r, http.StatusUnprocessableEntity, unsupportedTypeMsg)
+			s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.serverError(w, err)
 		}
@@ -122,11 +122,11 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 
 	switch md.Kind {
 	case media.KindVideo:
-		s.flash(r, "Video uploaded.")
+		s.flash(r, s.tr(r, "Video uploaded."))
 	case media.KindFile:
-		s.flash(r, "Document uploaded.")
+		s.flash(r, s.tr(r, "Document uploaded."))
 	default:
-		s.flash(r, "Image uploaded.")
+		s.flash(r, s.tr(r, "Image uploaded."))
 	}
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
@@ -141,7 +141,7 @@ func (s *server) mediaUpdateAlt(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, "Description saved.")
+	s.flash(r, s.tr(r, "Description saved."))
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 
@@ -159,7 +159,7 @@ func (s *server) mediaDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, "Media deleted.")
+	s.flash(r, s.tr(r, "Media deleted."))
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 
@@ -185,14 +185,14 @@ func (s *server) mediaMove(w http.ResponseWriter, r *http.Request) {
 func (s *server) mediaFolderCreate(w http.ResponseWriter, r *http.Request) {
 	_, err := s.deps.Media.CreateFolder(r.Context(), r.PostFormValue("name"))
 	if errors.Is(err, media.ErrDuplicateFolder) || errors.Is(err, media.ErrBadFolderName) {
-		s.renderMediaList(w, r, http.StatusUnprocessableEntity, friendlyFolderError(err))
+		s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, friendlyFolderError(err)))
 		return
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, "Folder created.")
+	s.flash(r, s.tr(r, "Folder created."))
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 
@@ -207,7 +207,7 @@ func (s *server) mediaFolderDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, "Folder deleted — its files are now unfiled.")
+	s.flash(r, s.tr(r, "Folder deleted — its files are now unfiled."))
 	http.Redirect(w, r, s.deps.AdminPath+"/media", http.StatusSeeOther)
 }
 

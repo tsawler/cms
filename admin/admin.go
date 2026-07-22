@@ -44,6 +44,7 @@ type Deps struct {
 	Logger         *slog.Logger
 	AdminPath      string
 	DefaultLocale  string
+	Locales        []string // all configured locales, [0] = DefaultLocale
 
 	// PostTemplate is the template blog and news posts render with; the
 	// zero value disables the Blog & News admin.
@@ -60,6 +61,36 @@ type Deps struct {
 	// snippet changes. The CMS uses it to rebuild the generated
 	// Tailwind stylesheet.
 	ContentChanged func()
+}
+
+// requestLocale validates a submitted locale code against the configured
+// list, falling back to the default for anything unknown or empty.
+func (s *server) requestLocale(l string) string {
+	for _, code := range s.deps.Locales {
+		if l == code {
+			return l
+		}
+	}
+	return s.deps.DefaultLocale
+}
+
+// formLocale is requestLocale over the request's "locale" query or form
+// value — how the admin forms and preview select their editing locale.
+func (s *server) formLocale(r *http.Request) string {
+	return s.requestLocale(r.FormValue("locale"))
+}
+
+// localeSlugCollision reports whether a page slug's first segment matches
+// a configured non-default locale code, which would make the page
+// unreachable (the URL prefix wins).
+func (s *server) localeSlugCollision(slug string) bool {
+	first, _, _ := strings.Cut(slug, "/")
+	for _, code := range s.deps.Locales[1:] {
+		if first == code {
+			return true
+		}
+	}
+	return false
 }
 
 // contentChanged notifies the host that stored content changed; safe to
@@ -81,6 +112,12 @@ type server struct {
 func New(d Deps) http.Handler {
 	if d.RememberFor <= 0 {
 		d.RememberFor = 24 * time.Hour
+	}
+	if len(d.Locales) == 0 {
+		if d.DefaultLocale == "" {
+			d.DefaultLocale = "en"
+		}
+		d.Locales = []string{d.DefaultLocale}
 	}
 	s := &server{
 		deps:     d,
@@ -113,6 +150,7 @@ func New(d Deps) http.Handler {
 		r.Use(s.requireUser)
 		r.Get("/", s.dashboard)
 		r.Post("/logout", s.logout)
+		r.Post("/lang", s.setLang)
 
 		if d.Renderer != nil {
 			r.Get("/pages", s.pagesList)
@@ -132,6 +170,7 @@ func New(d Deps) http.Handler {
 			r.Put("/api/menu", s.apiSaveMenu)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
+			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
 			r.Post("/api/pages/{id}/discard", s.apiDiscard)
 			r.Get("/api/snippets", s.apiSnippetsList)
@@ -228,6 +267,13 @@ type templateData struct {
 	Flash     string
 	Error     string // form-level error message
 
+	// AdminLang is the admin UI language for this request ("en" or "fr");
+	// templates translate their strings through T with it. LangToggle is
+	// the language the topbar toggle switches to — empty when the site has
+	// no French locale configured, which hides the toggle.
+	AdminLang  string
+	LangToggle string
+
 	// Captcha is set when login CAPTCHA is configured; the login page
 	// embeds the Cap widget with it.
 	Captcha *captchaInfo
@@ -252,6 +298,11 @@ type templateData struct {
 	// RegionsTemplate names the template whose regions the form_regions
 	// partial edits (the page's template, or the post template).
 	RegionsTemplate string
+	// EditLocale is the locale tab the page/post form is editing;
+	// Locales lists every configured locale ([0] = default). Tabs render
+	// only when there is more than one.
+	EditLocale string
+	Locales    []string
 
 	// Blog & news pages.
 	PostsEnabled bool
@@ -303,8 +354,18 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		PagesEnabled: s.deps.Renderer != nil,
 		PostsEnabled: s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
 		MediaEnabled: s.deps.Media != nil,
+		Locales:      s.deps.Locales,
+		EditLocale:   s.deps.DefaultLocale,
 
 		RememberHours: int(s.deps.RememberFor.Round(time.Hour) / time.Hour),
+	}
+	td.AdminLang = s.adminLang(r)
+	if s.frEnabled() {
+		if td.AdminLang == "fr" {
+			td.LangToggle = "en"
+		} else {
+			td.LangToggle = "fr"
+		}
 	}
 	if s.deps.Captcha != nil {
 		td.Captcha = &captchaInfo{
@@ -336,6 +397,13 @@ func navSectionsFor(sections []Section, adminPath string, isAdmin bool) []navLin
 // superadmin); used by templates to show admin-only fields.
 func (td templateData) IsAdmin() bool {
 	return td.User != nil && td.User.Role.IsAdmin()
+}
+
+// IsDefaultLocale reports whether the form is on its default-locale tab,
+// where the locale-independent fields (address, template, feed, ...) are
+// editable.
+func (td templateData) IsDefaultLocale() bool {
+	return len(td.Locales) == 0 || td.EditLocale == td.Locales[0]
 }
 
 // MediaContains reports whether url is one of the listed media items' web

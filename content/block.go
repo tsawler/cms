@@ -52,18 +52,86 @@ func (s *Store) BlocksFor(ctx context.Context, pageID int64, locale string, stat
 	})
 }
 
+// EffectiveBlocks returns a page's blocks for locale with region-level
+// fallback to the store's default locale: regions with no rows in the
+// requested locale use the default locale's rows wholesale. Region-level
+// (not per-block) because a sections region is one ordered document —
+// interleaving two locales' section lists would be nonsense. Callers can
+// tell fallback content apart by the blocks' Locale field.
+func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string, status Status) ([]Block, error) {
+	if locale == s.defaultLocale {
+		return s.BlocksFor(ctx, pageID, locale, status)
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT id, page_id, region, locale, status, sort, kind, snippet_key, content, settings
+		FROM cms_blocks
+		WHERE page_id = $1 AND locale IN ($2, $3) AND status = $4
+		ORDER BY region, sort`, pageID, locale, s.defaultLocale, status)
+	if err != nil {
+		return nil, err
+	}
+	all, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Block, error) {
+		var b Block
+		err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
+			&b.Kind, &b.SnippetKey, &b.Content, &b.Settings)
+		return b, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	localized := map[string]bool{}
+	for _, b := range all {
+		if b.Locale == locale {
+			localized[b.Region] = true
+		}
+	}
+	out := all[:0]
+	for _, b := range all {
+		if b.Locale == locale || !localized[b.Region] {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
 // HasUnpublishedChanges reports whether a page's draft blocks differ from
 // its published blocks in any way (content, order, settings, or blocks
-// added/removed) for the locale.
-func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64, locale string) (bool, error) {
-	const blockSet = `SELECT region, sort, kind, coalesce(snippet_key, ''), content, settings::text
-		FROM cms_blocks WHERE page_id = $1 AND locale = $2 AND status = `
+// added/removed) in any locale. Locale-blind because Publish snapshots
+// every locale at once.
+func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, error) {
+	const blockSet = `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, settings::text
+		FROM cms_blocks WHERE page_id = $1 AND status = `
 	var changed bool
 	err := s.db.QueryRow(ctx, `
 		SELECT EXISTS ((`+blockSet+`'draft') EXCEPT (`+blockSet+`'published'))
 		    OR EXISTS ((`+blockSet+`'published') EXCEPT (`+blockSet+`'draft'))`,
-		pageID, locale).Scan(&changed)
+		pageID).Scan(&changed)
 	return changed, err
+}
+
+// DeleteLocaleContent removes a page's draft blocks and its metadata row
+// for one (non-default) locale, so the page reverts to default-locale
+// fallback. Draft-side only for blocks: like any edit it goes live on the
+// next Publish. Metadata has no draft state, so the title/description
+// revert is immediate.
+func (s *Store) DeleteLocaleContent(ctx context.Context, pageID int64, locale string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM cms_blocks WHERE page_id = $1 AND locale = $2 AND status = 'draft'`,
+		pageID, locale); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM cms_page_meta WHERE page_id = $1 AND locale = $2`,
+		pageID, locale); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // SectionInput is one section supplied to ReplaceDraftSections.

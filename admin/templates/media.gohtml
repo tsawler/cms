@@ -1,8 +1,8 @@
-{{define "title"}}Media — CMS{{end}}
+{{define "title"}}{{.T "Media"}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>Media</h1>
+    <h1>{{.T "Media"}}</h1>
 </div>
 
 {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
@@ -11,33 +11,35 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <div class="cms-upload-row">
         <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,.mp4,.webm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
-        <input type="text" name="alt" placeholder="Description (alt text, for images)">
+        <input type="text" name="alt" placeholder="{{.T "Description (alt text, for images)"}}">
         <select name="folder">
-            <option value="">No folder</option>
+            <option value="">{{.T "No folder"}}</option>
             {{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
         </select>
-        <button type="submit" class="cms-btn cms-btn-primary">Upload</button>
+        <button type="submit" class="cms-btn cms-btn-primary">{{.T "Upload"}}</button>
     </div>
-    <p class="cms-hint">Images (JPEG, PNG, GIF, WebP — resized automatically), videos (MP4, WebM — stored as uploaded), PDFs, office documents, text/CSV, or ZIP. Images and documents up to 25&nbsp;MB; videos up to {{.MaxVideoMB}}&nbsp;MB. Everything is stored on your site's bucket.</p>
+    <p class="cms-hint">{{.T "Images (JPEG, PNG, GIF, WebP — resized automatically), videos (MP4, WebM — stored as uploaded), PDFs, office documents, text/CSV, or ZIP."}}
+        {{.T "Images and documents up to 25 MB; videos up to"}} {{.MaxVideoMB}}&nbsp;{{.T "MB."}}
+        {{.T "Everything is stored on your site's bucket."}}</p>
 </form>
 
 <div class="cms-filter-bar">
     <form method="get" action="{{.AdminPath}}/media" class="cms-filter-form">
-        <input type="search" name="q" value="{{.MediaQuery}}" placeholder="Search by name…">
+        <input type="search" name="q" value="{{.MediaQuery}}" placeholder="{{.T "Search by name…"}}">
         <select name="folder">
-            <option value="">All folders</option>
-            <option value="root" {{if eq .MediaFolder "root"}}selected{{end}}>Unfiled</option>
+            <option value="">{{.T "All folders"}}</option>
+            <option value="root" {{if eq .MediaFolder "root"}}selected{{end}}>{{.T "Unfiled"}}</option>
             {{range .Folders}}
             <option value="{{.ID}}" {{if eq $.MediaFolder (printf "%d" .ID)}}selected{{end}}>{{.Name}} ({{.Count}})</option>
             {{end}}
         </select>
-        <button type="submit" class="cms-btn cms-btn-ghost">Filter</button>
-        {{if or .MediaQuery .MediaFolder}}<a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/media">Clear</a>{{end}}
+        <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Filter"}}</button>
+        {{if or .MediaQuery .MediaFolder}}<a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/media">{{.T "Clear"}}</a>{{end}}
     </form>
     <form method="post" action="{{.AdminPath}}/media/folders/new" class="cms-filter-form">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="text" name="name" placeholder="New folder name" required maxlength="60">
-        <button type="submit" class="cms-btn cms-btn-ghost">Add folder</button>
+        <input type="text" name="name" placeholder="{{.T "New folder name"}}" required maxlength="60">
+        <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Add folder"}}</button>
     </form>
 </div>
 
@@ -52,34 +54,34 @@
             <p class="cms-muted cms-media-dims">{{.Width}}×{{.Height}}</p>
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/alt" class="cms-media-alt">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <input type="text" name="alt" value="{{.Alt}}" placeholder="Description (alt text)">
-                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">Save</button>
+                <input type="text" name="alt" value="{{.Alt}}" placeholder="{{$.T "Description (alt text)"}}">
+                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{$.T "Save"}}</button>
             </form>
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move" class="cms-media-move">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="Folder">
-                    <option value="">No folder</option>
+                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
+                    <option value="">{{$.T "No folder"}}</option>
                     {{$current := .FolderIDValue}}
                     {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
                 </select>
             </form>
             <div class="cms-media-actions">
-                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.WebURL}}">Copy link</button>
+                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.WebURL}}">{{$.T "Copy link"}}</button>
                 <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                      data-confirm="Delete this image? Pages still using it will show a broken picture.">
+                      data-confirm="{{$.T "Delete this image? Pages still using it will show a broken picture."}}">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
                 </form>
             </div>
         </div>
     </div>
     {{else}}
-    <p class="cms-muted">No images yet — upload your first one above.</p>
+    <p class="cms-muted">{{.T "No images yet — upload your first one above."}}</p>
     {{end}}
 </div>
 
 {{if .Videos}}
-<h2 class="cms-section-head">Videos</h2>
+<h2 class="cms-section-head">{{.T "Videos"}}</h2>
 <div class="cms-media-grid">
     {{range .Videos}}
     <div class="cms-media-card">
@@ -95,18 +97,18 @@
             <p class="cms-muted cms-media-dims">{{if .Width}}{{.Width}}×{{.Height}} · {{end}}{{.SizeHuman}}</p>
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move" class="cms-media-move">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="Folder">
-                    <option value="">No folder</option>
+                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
+                    <option value="">{{$.T "No folder"}}</option>
                     {{$current := .FolderIDValue}}
                     {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
                 </select>
             </form>
             <div class="cms-media-actions">
-                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">Copy link</button>
+                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">{{$.T "Copy link"}}</button>
                 <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                      data-confirm="Delete this video? Pages still using it will show a broken player.">
+                      data-confirm="{{$.T "Delete this video? Pages still using it will show a broken player."}}">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
                 </form>
             </div>
         </div>
@@ -115,13 +117,13 @@
 </div>
 {{end}}
 
-<h2 class="cms-section-head">Documents</h2>
+<h2 class="cms-section-head">{{.T "Documents"}}</h2>
 <table class="cms-table">
     <thead>
     <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Size</th>
+        <th>{{.T "Name"}}</th>
+        <th>{{.T "Type"}}</th>
+        <th>{{.T "Size"}}</th>
         <th></th>
     </tr>
     </thead>
@@ -134,30 +136,30 @@
         <td class="cms-table-actions cms-actions">
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="Folder">
-                    <option value="">No folder</option>
+                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
+                    <option value="">{{$.T "No folder"}}</option>
                     {{$current := .FolderIDValue}}
                     {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
                 </select>
             </form>
-            <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">Copy link</button>
+            <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">{{$.T "Copy link"}}</button>
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                  data-confirm="Delete this document? Pages that link to it will have a broken link.">
+                  data-confirm="{{$.T "Delete this document? Pages that link to it will have a broken link."}}">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
             </form>
         </td>
     </tr>
     {{else}}
-    <tr><td colspan="4" class="cms-muted">No documents yet.</td></tr>
+    <tr><td colspan="4" class="cms-muted">{{.T "No documents yet."}}</td></tr>
     {{end}}
     </tbody>
 </table>
 
 {{if .Folders}}
-<h2 class="cms-section-head">Folders</h2>
+<h2 class="cms-section-head">{{.T "Folders"}}</h2>
 <table class="cms-table">
-    <thead><tr><th>Name</th><th>Files</th><th></th></tr></thead>
+    <thead><tr><th>{{.T "Name"}}</th><th>{{.T "Files"}}</th><th></th></tr></thead>
     <tbody>
     {{range .Folders}}
     <tr>
@@ -165,9 +167,9 @@
         <td>{{.Count}}</td>
         <td class="cms-table-actions">
             <form method="post" action="{{$.AdminPath}}/media/folders/{{.ID}}/delete"
-                  data-confirm="Delete this folder? Its files will be kept and become unfiled.">
+                  data-confirm="{{$.T "Delete this folder? Its files will be kept and become unfiled."}}">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">Delete</button>
+                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
             </form>
         </td>
     </tr>

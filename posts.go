@@ -24,6 +24,7 @@ func (c *CMS) postLister(ctx context.Context, locale string, editing bool) rende
 	if !c.postsEnabled() {
 		return nil
 	}
+	prefix := render.LocalePrefix(locale, c.cfg.Locales[0])
 	return func(feed string, limit int) []render.PostInfo {
 		if !content.ValidFeed(feed) {
 			return nil
@@ -35,7 +36,7 @@ func (c *CMS) postLister(ctx context.Context, locale string, editing bool) rende
 		}
 		out := make([]render.PostInfo, 0, len(posts))
 		for i := range posts {
-			out = append(out, *render.PostInfoFor(&posts[i]))
+			out = append(out, *render.PostInfoFor(&posts[i], prefix))
 		}
 		return out
 	}
@@ -75,7 +76,7 @@ func (c *CMS) serveFeed(w http.ResponseWriter, r *http.Request, feed content.Fee
 		return
 	}
 
-	base := siteBaseURL(r)
+	base := siteBaseURL(r) + render.LocalePrefix(locale, c.cfg.Locales[0])
 	ch := rssChannel{
 		Title: r.Host + " — " + string(feed),
 		Link:  base + "/" + string(feed),

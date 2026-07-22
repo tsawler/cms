@@ -16,6 +16,14 @@ export var isAdmin = cfg.isAdmin === "1";
 export var isSuperadmin = cfg.isSuperadmin === "1";
 export var postsEnabled = cfg.posts === "1";
 
+// Configured site locales ([0] = default). More than one shows the edit
+// bar's language switcher; the current render's locale is cfg.locale.
+export var locales = [];
+try {
+    locales = JSON.parse(cfg.locales || "[]") || [];
+} catch (e) { /* no switcher */ }
+export var defaultLocale = locales[0] || cfg.locale || "en";
+
 // When the current page backs a blog/news post: {id, feed, summary,
 // publishedAt, thumbnailUrl, headerUrl}. Null on ordinary pages. Mutable:
 // the post-settings dialog updates it after a save so reopening shows

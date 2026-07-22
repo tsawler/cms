@@ -1,9 +1,9 @@
-{{define "title"}}{{if .IsNew}}New snippet{{else}}Edit snippet{{end}} — CMS{{end}}
+{{define "title"}}{{if .IsNew}}{{.T "New snippet"}}{{else}}{{.T "Edit snippet"}}{{end}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>{{if .IsNew}}New snippet{{else}}Edit snippet{{end}}</h1>
-    <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/snippets">Back to snippets</a>
+    <h1>{{if .IsNew}}{{.T "New snippet"}}{{else}}{{.T "Edit snippet"}}{{end}}</h1>
+    <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/snippets">{{.T "Back to snippets"}}</a>
 </div>
 
 <form class="cms-form cms-form-wide" method="post"
@@ -11,27 +11,26 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
     <div class="cms-field">
-        <label for="name">Name</label>
+        <label for="name">{{.T "Name"}}</label>
         <input type="text" id="name" name="name" value="{{.FormSnippet.Name}}" required>
         {{with index .FormErrors "name"}}<p class="cms-field-error">{{.}}</p>{{end}}
-        <p class="cms-hint">Shown in the editor's palette, e.g. "Pricing card".</p>
+        <p class="cms-hint">{{.T "Shown in the editor's palette, e.g. \"Pricing card\"."}}</p>
     </div>
 
     <div class="cms-field">
-        <label for="kind">Type</label>
+        <label for="kind">{{.T "Type"}}</label>
         <select id="kind" name="kind" data-preset-toggle>
-            <option value="block" {{if not .FormSnippet.Settings}}selected{{end}}>Inline block — inserted into existing content</option>
-            <option value="preset" {{if .FormSnippet.Settings}}selected{{end}}>Section preset — starting point for a whole section</option>
+            <option value="block" {{if not .FormSnippet.Settings}}selected{{end}}>{{.T "Inline block — inserted into existing content"}}</option>
+            <option value="preset" {{if .FormSnippet.Settings}}selected{{end}}>{{.T "Section preset — starting point for a whole section"}}</option>
         </select>
-        <p class="cms-hint">A section preset appears only in the editor's "Add a section"
-        chooser and creates the section with the settings below already applied.</p>
+        <p class="cms-hint">{{.T "A section preset appears only in the editor's \"Add a section\" chooser and creates the section with the settings below already applied."}}</p>
     </div>
 
     {{$set := .FormSnippet.Settings}}
     <fieldset class="cms-field" id="preset-settings" {{if not .FormSnippet.Settings}}hidden{{end}}>
-        <legend>Section settings</legend>
+        <legend>{{.T "Section settings"}}</legend>
         <div class="cms-field">
-            <label for="set_bg">Background style</label>
+            <label for="set_bg">{{.T "Background style"}}</label>
             <select id="set_bg" name="set_bg">
                 {{range .SectionStyles.Backgrounds}}
                 <option value="{{.Key}}" {{if eq .Key (index $set "bg")}}selected{{end}}>{{.Label}}</option>
@@ -39,7 +38,7 @@
             </select>
         </div>
         <div class="cms-field">
-            <label for="set_width">Content width</label>
+            <label for="set_width">{{.T "Content width"}}</label>
             <select id="set_width" name="set_width">
                 {{range .SectionStyles.Widths}}
                 <option value="{{.Key}}" {{if eq .Key (index $set "width")}}selected{{end}}>{{.Label}}</option>
@@ -47,35 +46,32 @@
             </select>
         </div>
         <div class="cms-field">
-            <label for="set_height">Section height</label>
+            <label for="set_height">{{.T "Section height"}}</label>
             <select id="set_height" name="set_height">
-                <option value="auto">Auto (fits the content)</option>
-                <option value="50" {{if eq (index $set "height") "50"}}selected{{end}}>50% of the screen</option>
-                <option value="75" {{if eq (index $set "height") "75"}}selected{{end}}>75% of the screen</option>
-                <option value="100" {{if eq (index $set "height") "100"}}selected{{end}}>Full screen</option>
+                <option value="auto">{{.T "Auto (fits the content)"}}</option>
+                <option value="50" {{if eq (index $set "height") "50"}}selected{{end}}>{{.T "50% of the screen"}}</option>
+                <option value="75" {{if eq (index $set "height") "75"}}selected{{end}}>{{.T "75% of the screen"}}</option>
+                <option value="100" {{if eq (index $set "height") "100"}}selected{{end}}>{{.T "Full screen"}}</option>
             </select>
         </div>
         <div class="cms-field">
-            <label for="set_valign">Vertical alignment</label>
+            <label for="set_valign">{{.T "Vertical alignment"}}</label>
             <select id="set_valign" name="set_valign">
-                <option value="top">Top</option>
-                <option value="center" {{if eq (index $set "valign") "center"}}selected{{end}}>Center</option>
-                <option value="bottom" {{if eq (index $set "valign") "bottom"}}selected{{end}}>Bottom</option>
+                <option value="top">{{.T "Top"}}</option>
+                <option value="center" {{if eq (index $set "valign") "center"}}selected{{end}}>{{.T "Center"}}</option>
+                <option value="bottom" {{if eq (index $set "valign") "bottom"}}selected{{end}}>{{.T "Bottom"}}</option>
             </select>
         </div>
-        <p class="cms-hint">The editor's per-section ⚙ dialog can still change all of these
-        after the section is created.</p>
+        <p class="cms-hint">{{.T "The editor's per-section ⚙ dialog can still change all of these after the section is created."}}</p>
     </fieldset>
 
     <div class="cms-field">
         <label for="html">HTML</label>
         <textarea id="html" name="html" rows="14" class="cms-code">{{.FormSnippet.HTML}}</textarea>
         {{with index .FormErrors "html"}}<p class="cms-field-error">{{.}}</p>{{end}}
-        <p class="cms-hint">Use the site's CSS classes (with Tailwind, remember to safelist any
-        class that appears only in snippets). Avoid scripts and SVG — they are removed when
-        editor-role users save a page.</p>
+        <p class="cms-hint">{{.T "Use the site's CSS classes (with Tailwind, remember to safelist any class that appears only in snippets). Avoid scripts and SVG — they are removed when editor-role users save a page."}}</p>
     </div>
 
-    <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}Create snippet{{else}}Save changes{{end}}</button>
+    <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}{{.T "Create snippet"}}{{else}}{{.T "Save changes"}}{{end}}</button>
 </form>
 {{end}}

@@ -119,7 +119,7 @@ func (s *server) pageCreate(w http.ResponseWriter, r *http.Request) {
 	id, err := s.deps.Content.Insert(r.Context(), form, s.deps.DefaultLocale)
 	if err != nil {
 		if errors.Is(err, content.ErrDuplicateSlug) {
-			s.renderPageForm(w, r, form, true, map[string]string{"slug": "That address is already used by another page."})
+			s.renderPageForm(w, r, form, true, map[string]string{"slug": s.tr(r, "That address is already used by another page.")})
 			return
 		}
 		s.serverError(w, err)
@@ -129,7 +129,7 @@ func (s *server) pageCreate(w http.ResponseWriter, r *http.Request) {
 	s.seedStarterSections(r.Context(), id, form.TemplateName)
 	s.contentChanged()
 
-	s.flash(r, "Page created — now add your content below.")
+	s.flash(r, s.tr(r, "Page created — now add your content below."))
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
@@ -180,6 +180,30 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	locale := s.formLocale(r)
+
+	// Non-default locale tabs edit only per-locale data: metadata and
+	// region content. Slug, template, and code fields belong to the
+	// default tab (they are locale-independent).
+	if locale != s.deps.DefaultLocale {
+		title := strings.TrimSpace(r.PostFormValue("title"))
+		if title == "" {
+			s.renderPageForm(w, r, existing, false, map[string]string{"title": s.tr(r, "Title is required.")})
+			return
+		}
+		desc := strings.TrimSpace(r.PostFormValue("description"))
+		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, title, desc); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		if err := s.saveRegionContent(r, existing, locale); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		s.finishContentSave(w, r, existing.ID, "Page",
+			"pages/"+strconv.FormatInt(existing.ID, 10), locale)
+		return
+	}
 
 	form, errs := s.parsePageMeta(r)
 	form.ID = existing.ID
@@ -206,43 +230,63 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Content.Update(r.Context(), form, s.deps.DefaultLocale); err != nil {
 		if errors.Is(err, content.ErrDuplicateSlug) {
-			s.renderPageForm(w, r, form, false, map[string]string{"slug": "That address is already used by another page."})
+			s.renderPageForm(w, r, form, false, map[string]string{"slug": s.tr(r, "That address is already used by another page.")})
 			return
 		}
 		s.serverError(w, err)
 		return
 	}
 
-	if err := s.saveRegionContent(r, form); err != nil {
+	if err := s.saveRegionContent(r, form, s.deps.DefaultLocale); err != nil {
 		s.serverError(w, err)
 		return
 	}
 
+	s.finishContentSave(w, r, form.ID, "Page", "pages/"+strconv.FormatInt(form.ID, 10), s.deps.DefaultLocale)
+}
+
+// finishContentSave applies the page/post form's submit action
+// (save/publish/unpublish), sets the flash, and redirects back to the
+// form, keeping a non-default editing locale's tab selected.
+func (s *server) finishContentSave(w http.ResponseWriter, r *http.Request, pageID int64, noun, formPath, locale string) {
+	// Full sentences are the translation keys, so the noun switches
+	// between complete messages rather than being concatenated.
+	published := s.tr(r, "Page published.")
+	unpublished := s.tr(r, "Page unpublished — it is no longer visible on the site.")
+	if noun == "Post" {
+		published = s.tr(r, "Post published.")
+		unpublished = s.tr(r, "Post unpublished — it is no longer visible on the site.")
+	}
 	switch r.PostFormValue("action") {
 	case "publish":
-		if err := s.deps.Content.Publish(r.Context(), form.ID); err != nil {
+		if err := s.deps.Content.Publish(r.Context(), pageID); err != nil {
 			s.serverError(w, err)
 			return
 		}
-		s.flash(r, "Page published.")
+		s.flash(r, published)
 	case "unpublish":
-		if err := s.deps.Content.Unpublish(r.Context(), form.ID); err != nil {
+		if err := s.deps.Content.Unpublish(r.Context(), pageID); err != nil {
 			s.serverError(w, err)
 			return
 		}
-		s.flash(r, "Page unpublished — it is no longer visible on the site.")
+		s.flash(r, unpublished)
 	default:
-		s.flash(r, "Draft saved. Publish when you're ready to make it live.")
+		s.flash(r, s.tr(r, "Draft saved. Publish when you're ready to make it live."))
 	}
 	s.contentChanged()
 
-	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(form.ID, 10), http.StatusSeeOther)
+	url := s.deps.AdminPath + "/" + formPath
+	if locale != s.deps.DefaultLocale {
+		url += "?locale=" + locale
+	}
+	http.Redirect(w, r, url, http.StatusSeeOther)
 }
 
-// saveRegionContent stores the submitted region fields as draft blocks. The
-// regions_template hidden field names the template whose regions the form
-// displayed, which may differ from a newly selected template.
-func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
+// saveRegionContent stores the submitted region fields as draft blocks
+// for the given locale. The regions_template hidden field names the
+// template whose regions the form displayed, which may differ from a
+// newly selected template.
+func (s *server) saveRegionContent(r *http.Request, page *content.Page, locale string) error {
 	regionsTemplate := r.PostFormValue("regions_template")
 	if !s.deps.Renderer.Knows(regionsTemplate) {
 		return nil
@@ -252,7 +296,7 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
 		values[region.Name] = r.PostFormValue("region-" + region.Name)
 	}
 	isAdmin := s.currentUser(r).Role.IsAdmin()
-	return s.saveRegions(r.Context(), page.ID, regionsTemplate, values, isAdmin)
+	return s.saveRegions(r.Context(), page.ID, regionsTemplate, values, isAdmin, locale)
 }
 
 // saveRegions writes region values as draft blocks. Only regions the
@@ -261,7 +305,7 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page) error {
 // raw (escaped at render time), image URLs are validated, and HTML from
 // non-admins is sanitized. Shared by the page form and the in-place editor
 // API.
-func (s *server) saveRegions(ctx context.Context, pageID int64, templateName string, values map[string]string, isAdmin bool) error {
+func (s *server) saveRegions(ctx context.Context, pageID int64, templateName string, values map[string]string, isAdmin bool, locale string) error {
 	for _, region := range s.deps.Renderer.Regions(templateName) {
 		value, ok := values[region.Name]
 		if !ok {
@@ -284,7 +328,7 @@ func (s *server) saveRegions(ctx context.Context, pageID int64, templateName str
 			value = editorHTMLPolicy.Sanitize(value)
 		}
 		if err := s.deps.Content.UpsertDraftBlock(ctx, pageID, region.Name,
-			s.deps.DefaultLocale, kind, value); err != nil {
+			locale, kind, value); err != nil {
 			return err
 		}
 	}
@@ -303,7 +347,7 @@ func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Slug == "" {
-		s.flash(r, "The home page can't be deleted.")
+		s.flash(r, s.tr(r, "The home page can't be deleted."))
 		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 		return
 	}
@@ -312,7 +356,7 @@ func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Page deleted.")
+	s.flash(r, s.tr(r, "Page deleted."))
 	http.Redirect(w, r, s.deps.AdminPath+"/pages", http.StatusSeeOther)
 }
 
@@ -324,7 +368,7 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Status != content.StatusPublished {
-		s.flash(r, "There are no published changes to revert to — this page hasn't been published yet.")
+		s.flash(r, s.tr(r, "There are no published changes to revert to — this page hasn't been published yet."))
 		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 		return
 	}
@@ -333,7 +377,7 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Draft changes discarded — the editor now matches the published page.")
+	s.flash(r, s.tr(r, "Draft changes discarded — the editor now matches the published page."))
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 }
 
@@ -344,7 +388,8 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	blocks, err := s.deps.Content.BlocksFor(r.Context(), page.ID, s.deps.DefaultLocale, content.StatusDraft)
+	locale := s.formLocale(r)
+	blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), page.ID, locale, content.StatusDraft)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -353,13 +398,14 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		menuItems = nil
 	}
-	menus := render.BuildMenus(menuItems, page.Slug, true)
+	menus := render.BuildMenus(menuItems, page.Slug, locale, s.deps.DefaultLocale, true)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.deps.Renderer.Render(w, render.Input{
-		Page:   page,
-		Blocks: blocks,
-		Locale: s.deps.DefaultLocale,
-		Menus:  menus,
+		Page:    page,
+		Blocks:  blocks,
+		Locale:  locale,
+		Menus:   menus,
+		Locales: s.deps.Locales,
 	}); err != nil {
 		s.serverError(w, err)
 	}
@@ -378,13 +424,15 @@ func (s *server) parsePageMeta(r *http.Request) (*content.Page, map[string]strin
 	}
 
 	if p.Title == "" {
-		errs["title"] = "Title is required."
+		errs["title"] = s.tr(r, "Title is required.")
 	}
 	if !content.ValidSlug(p.Slug) {
-		errs["slug"] = "Use only lowercase letters, numbers, and hyphens, e.g. about-us."
+		errs["slug"] = s.tr(r, "Use only lowercase letters, numbers, and hyphens, e.g. about-us.")
+	} else if s.localeSlugCollision(p.Slug) {
+		errs["slug"] = s.tr(r, "That address starts with a language code, which is reserved for translated pages.")
 	}
 	if !s.deps.Renderer.Knows(p.TemplateName) {
-		errs["template_name"] = "Choose a template."
+		errs["template_name"] = s.tr(r, "Choose a template.")
 	}
 
 	return p, errs
@@ -401,12 +449,13 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 	data.IsNew = isNew
 	data.FormErrors = errs
 	data.PageTemplates = s.deps.Renderer.PageTemplates()
+	data.EditLocale = s.formLocale(r)
 
 	data.RegionsTemplate = page.TemplateName
 
 	if !isNew {
 		data.Regions = s.deps.Renderer.Regions(page.TemplateName)
-		blocks, err := s.deps.Content.BlocksFor(r.Context(), page.ID, s.deps.DefaultLocale, content.StatusDraft)
+		blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), page.ID, data.EditLocale, content.StatusDraft)
 		if err != nil {
 			s.serverError(w, err)
 			return
@@ -418,7 +467,7 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 
 		// A published page whose draft differs can revert to what's live.
 		if page.Status == content.StatusPublished {
-			changed, err := s.deps.Content.HasUnpublishedChanges(r.Context(), page.ID, s.deps.DefaultLocale)
+			changed, err := s.deps.Content.HasUnpublishedChanges(r.Context(), page.ID)
 			if err != nil {
 				s.serverError(w, err)
 				return
@@ -453,7 +502,7 @@ func (s *server) pageFromURL(w http.ResponseWriter, r *http.Request) (*content.P
 		http.NotFound(w, r)
 		return nil, false
 	}
-	page, err := s.deps.Content.GetByID(r.Context(), id, s.deps.DefaultLocale)
+	page, err := s.deps.Content.GetByID(r.Context(), id, s.formLocale(r))
 	if errors.Is(err, content.ErrNotFound) {
 		http.NotFound(w, r)
 		return nil, false

@@ -40,6 +40,7 @@ export function initShell() {
         "<style>" + shadowCss + "</style>" +
         '<div class="bar" id="bar">' +
         '<span class="chip" id="chip"></span>' +
+        '<span class="locs" id="locs"></span>' +
         '<span class="msg" id="msg" hidden></span>' +
         '<button id="edit" title="Edit this page in place">' +
         '<span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button>' +
@@ -49,6 +50,7 @@ export function initShell() {
         '<button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>' +
         '<div class="menu" id="more-menu">' +
         '<button id="cancel" hidden>Revert unsaved changes</button>' +
+        '<button id="revert-locale" class="dngr" hidden>Remove this translation…</button>' +
         '<button id="discard" class="dngr" hidden>Discard draft…</button>' +
         '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
         '<hr id="menu-sep">' +

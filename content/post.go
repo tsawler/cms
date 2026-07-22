@@ -48,6 +48,7 @@ const postJoins = `
 	FROM cms_posts po
 	JOIN cms_pages p ON p.id = po.page_id
 	LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1
+	LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $2
 	LEFT JOIN cms_users u ON u.id = po.author_id`
 
 func scanPost(row pgx.Row) (*Post, error) {
@@ -155,14 +156,16 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 // PostByID returns the post with the given post id, with page metadata for
 // locale.
 func (s *Store) PostByID(ctx context.Context, id int64, locale string) (*Post, error) {
-	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.id = $2`, locale, id)
+	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.id = $3`,
+		locale, s.defaultLocale, id)
 	return scanPost(row)
 }
 
 // PostByPageID returns the post backed by the given page, or ErrNotFound
 // when the page is not a post.
 func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string) (*Post, error) {
-	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.page_id = $2`, locale, pageID)
+	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.page_id = $3`,
+		locale, s.defaultLocale, pageID)
 	return scanPost(row)
 }
 
@@ -171,14 +174,14 @@ func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string) (
 // publishedOnly, draft posts are omitted (the public view); without,
 // editors see drafts too. A non-positive limit returns everything.
 func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOnly bool, limit int) ([]Post, error) {
-	q := `SELECT ` + postColumns + postJoins + ` WHERE ($2 = '' OR po.feed = $2)`
+	q := `SELECT ` + postColumns + postJoins + ` WHERE ($3 = '' OR po.feed = $3)`
 	if publishedOnly {
 		q += ` AND p.status = 'published'`
 	}
 	q += ` ORDER BY po.published_at DESC, po.id DESC`
-	args := []any{locale, feed}
+	args := []any{locale, s.defaultLocale, feed}
 	if limit > 0 {
-		q += ` LIMIT $3`
+		q += ` LIMIT $4`
 		args = append(args, limit)
 	}
 	rows, err := s.db.Query(ctx, q, args...)
@@ -200,10 +203,9 @@ func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOn
 func (s *Store) AllNonPost(ctx context.Context, locale string) ([]Page, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT `+pageColumns+`
-		FROM cms_pages p
-		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1
+		FROM cms_pages p`+pageMetaJoins(1, 2)+`
 		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)
-		ORDER BY p.slug`, locale)
+		ORDER BY p.slug`, locale, s.defaultLocale)
 	if err != nil {
 		return nil, err
 	}

@@ -1,53 +1,53 @@
-{{define "title"}}Dashboard — CMS{{end}}
+{{define "title"}}{{.T "Dashboard"}} — CMS{{end}}
 
 {{define "content"}}
-<h1>Dashboard</h1>
-<p class="cms-muted">Welcome back, {{.User.Name}}.</p>
+<h1>{{.T "Dashboard"}}</h1>
+<p class="cms-muted">{{.T "Welcome back,"}} {{.User.Name}}.</p>
 
 <div class="cms-cards">
     {{if .PagesEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/pages">
-        <h2>Pages</h2>
-        <p>Create and edit the pages on your site.</p>
+        <h2>{{.T "Pages"}}</h2>
+        <p>{{.T "Create and edit the pages on your site."}}</p>
     </a>
     {{else}}
     <div class="cms-card cms-card-disabled">
-        <h2>Pages</h2>
-        <p>Not configured — the host application must set TemplateFS and PageTemplates.</p>
+        <h2>{{.T "Pages"}}</h2>
+        <p>{{.T "Not configured — the host application must set TemplateFS and PageTemplates."}}</p>
     </div>
     {{end}}
     {{if and .PagesEnabled (eq .User.Role "admin")}}
     <a class="cms-card" href="{{.AdminPath}}/snippets">
-        <h2>Snippets</h2>
-        <p>Ready-made blocks editors can drop into pages.</p>
+        <h2>{{.T "Snippets"}}</h2>
+        <p>{{.T "Ready-made blocks editors can drop into pages."}}</p>
     </a>
     {{end}}
     {{if eq .User.Role "admin"}}
     <a class="cms-card" href="{{.AdminPath}}/users">
-        <h2>Users</h2>
-        <p>Add and manage the people who can edit this site.</p>
+        <h2>{{.T "Users"}}</h2>
+        <p>{{.T "Add and manage the people who can edit this site."}}</p>
     </a>
     {{end}}
     {{if .MediaEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/media">
-        <h2>Media</h2>
-        <p>Upload and manage the images used on your site.</p>
+        <h2>{{.T "Media"}}</h2>
+        <p>{{.T "Upload and manage the images used on your site."}}</p>
     </a>
     {{else}}
     <div class="cms-card cms-card-disabled">
-        <h2>Media</h2>
-        <p>Not configured — the host application must set Config.S3.</p>
+        <h2>{{.T "Media"}}</h2>
+        <p>{{.T "Not configured — the host application must set Config.S3."}}</p>
     </div>
     {{end}}
     {{if .PostsEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/posts">
-        <h2>Blog &amp; News</h2>
-        <p>Write and publish blog posts and news items.</p>
+        <h2>{{.T "Blog & News"}}</h2>
+        <p>{{.T "Write and publish blog posts and news items."}}</p>
     </a>
     {{else}}
     <div class="cms-card cms-card-disabled">
-        <h2>Blog &amp; News</h2>
-        <p>Not configured — the host application must set Config.PostTemplate.</p>
+        <h2>{{.T "Blog & News"}}</h2>
+        <p>{{.T "Not configured — the host application must set Config.PostTemplate."}}</p>
     </div>
     {{end}}
 </div>

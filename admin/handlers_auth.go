@@ -32,7 +32,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 
 	throttleKey := strings.ToLower(email) + "|" + remoteIP(r)
 	if s.throttle.Blocked(throttleKey) {
-		fail(http.StatusTooManyRequests, "Too many failed attempts. Please wait a few minutes and try again.")
+		fail(http.StatusTooManyRequests, s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."))
 		return
 	}
 
@@ -40,14 +40,14 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	// filled the form. Answer exactly like a wrong password would.
 	if r.PostFormValue("website") != "" {
 		s.throttle.Fail(throttleKey)
-		fail(http.StatusUnprocessableEntity, "That email and password combination didn't work.")
+		fail(http.StatusUnprocessableEntity, s.tr(r, "That email and password combination didn't work."))
 		return
 	}
 
 	if s.deps.Captcha != nil {
 		token := r.PostFormValue(captcha.FieldName)
 		if token == "" {
-			fail(http.StatusUnprocessableEntity, "Please complete the verification challenge.")
+			fail(http.StatusUnprocessableEntity, s.tr(r, "Please complete the verification challenge."))
 			return
 		}
 		ok, err := s.deps.Captcha.Verify(r.Context(), token)
@@ -57,7 +57,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 			// blunts password guessing.
 			s.deps.Logger.Warn("cms admin: captcha unavailable, skipping check", "err", err)
 		} else if !ok {
-			fail(http.StatusUnprocessableEntity, "Verification failed. Please try again.")
+			fail(http.StatusUnprocessableEntity, s.tr(r, "Verification failed. Please try again."))
 			return
 		}
 	}
@@ -65,7 +65,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	u, err := s.deps.Users.Authenticate(r.Context(), email, password)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
 		s.throttle.Fail(throttleKey)
-		fail(http.StatusUnprocessableEntity, "That email and password combination didn't work.")
+		fail(http.StatusUnprocessableEntity, s.tr(r, "That email and password combination didn't work."))
 		return
 	}
 	if err != nil {

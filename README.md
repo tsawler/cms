@@ -445,6 +445,37 @@ twenty newest published posts, with the channel title and description
 taken from the published listing page at `/blog` or `/news` when one
 exists.
 
+## French & multilingual content
+
+Configure the site's languages and everything else follows:
+
+```go
+Locales: []string{"en", "fr"}, // first entry is the default
+```
+
+With one locale none of this surfaces. With more, the default language
+lives at `/about` and the others under their code — `/fr/about`, `/fr`
+for the French homepage, `/fr/news/rss.xml` for a localized feed. Put
+`{{cmsLocales}}` in a template for a language switcher (each entry has
+`.Code`, `.URL`, `.Active` — see the example site's header), and
+`{{cmsHead}}` emits `hreflang` alternates automatically.
+
+**Translating is in-place editing.** The edit bar shows an EN | FR
+switcher; flip to FR and the page renders with English fallback wherever
+no French exists yet — those regions get a dashed amber outline in edit
+mode. Edit them (the English text is your starting point), save, and the
+French version now exists; anything you don't touch keeps following the
+English original, region by region. Publish applies to all languages at
+once. The ⋯ menu's "Remove this translation" reverts the current
+language back to fallback. Menu labels are translated the same way:
+right-click a nav item while on the French site and the label you type
+is the French override.
+
+In the admin, the page and post forms grow EN/FR tabs — title, summary,
+and region source are per-language; address, template, feed, date, and
+images live on the default tab. The admin UI itself speaks English and
+(Canadian) French: a toggle by the logout button switches per user.
+
 ## Navigation menus
 
 Drop `{{cmsNav "main"}}` into a template and the CMS renders the whole

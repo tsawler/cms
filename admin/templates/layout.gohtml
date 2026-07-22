@@ -1,5 +1,5 @@
 {{define "layout"}}<!doctype html>
-<html lang="en">
+<html lang="{{.AdminLang}}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,19 +13,29 @@
 <header class="cms-topbar">
     <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
     <nav class="cms-nav">
-        <a href="{{.AdminPath}}/">Dashboard</a>
-        {{if .PagesEnabled}}<a href="{{.AdminPath}}/pages">Pages</a>{{end}}
-        {{if .PostsEnabled}}<a href="{{.AdminPath}}/posts">Blog &amp; News</a>{{end}}
-        {{if .MediaEnabled}}<a href="{{.AdminPath}}/media">Media</a>{{end}}
-        {{if and .PagesEnabled (eq .User.Role "admin")}}<a href="{{.AdminPath}}/snippets">Snippets</a>{{end}}
-        {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">Users</a>{{end}}
+        <a href="{{.AdminPath}}/">{{.T "Dashboard"}}</a>
+        {{if .PagesEnabled}}<a href="{{.AdminPath}}/pages">{{.T "Pages"}}</a>{{end}}
+        {{if .PostsEnabled}}<a href="{{.AdminPath}}/posts">{{.T "Blog & News"}}</a>{{end}}
+        {{if .MediaEnabled}}<a href="{{.AdminPath}}/media">{{.T "Media"}}</a>{{end}}
+        {{if and .PagesEnabled (eq .User.Role "admin")}}<a href="{{.AdminPath}}/snippets">{{.T "Snippets"}}</a>{{end}}
+        {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">{{.T "Users"}}</a>{{end}}
         {{range .NavSections}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
     </nav>
     <div class="cms-topbar-right">
         <span class="cms-whoami">{{.User.Name}}</span>
+        {{if .LangToggle}}
+        <form method="post" action="{{.AdminPath}}/lang">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <input type="hidden" name="to" value="{{.LangToggle}}">
+            <button type="submit" class="cms-btn cms-btn-ghost cms-lang-toggle"
+                    title="{{if eq .LangToggle "fr"}}Passer au français{{else}}Switch to English{{end}}">
+                {{if eq .LangToggle "fr"}}FR{{else}}EN{{end}}
+            </button>
+        </form>
+        {{end}}
         <form method="post" action="{{.AdminPath}}/logout">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <button type="submit" class="cms-btn cms-btn-ghost">Log out</button>
+            <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Log out"}}</button>
         </form>
     </div>
 </header>

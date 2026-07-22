@@ -41,11 +41,12 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Locale  string            `json:"locale"`
 		Regions map[string]string `json:"regions"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the edit — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
 		return
 	}
 	if len(body.Regions) == 0 {
@@ -54,9 +55,10 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isAdmin := s.currentUser(r).Role.IsAdmin()
-	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, body.Regions, isAdmin); err != nil {
+	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, body.Regions, isAdmin,
+		s.requestLocale(body.Locale)); err != nil {
 		s.deps.Logger.Error("cms admin: api saving regions", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 		return
 	}
 	s.contentChanged()
@@ -74,22 +76,26 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the request — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
 		return
 	}
 	title := strings.TrimSpace(body.Title)
 	if title == "" {
-		jsonError(w, http.StatusUnprocessableEntity, "Give the page a name.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Give the page a name."))
 		return
 	}
 	if !s.deps.Renderer.Knows(body.Template) {
-		jsonError(w, http.StatusBadRequest, "Choose a page type.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Choose a page type."))
 		return
 	}
 
 	base := content.Slugify(title)
 	if base == "" {
 		base = "page"
+	}
+	// A slug that starts like a locale prefix would be unreachable.
+	if s.localeSlugCollision(base) {
+		base += "-page"
 	}
 	page := &content.Page{Title: title, TemplateName: body.Template, Slug: base}
 	var err error
@@ -103,12 +109,12 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 		}
 		if !errors.Is(err, content.ErrDuplicateSlug) {
 			s.deps.Logger.Error("cms admin: api creating page", "err", err)
-			jsonError(w, http.StatusInternalServerError, "Creating the page failed — try again.")
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Creating the page failed — try again."))
 			return
 		}
 	}
 	if err != nil {
-		jsonError(w, http.StatusUnprocessableEntity, "Too many pages already use that name.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Too many pages already use that name."))
 		return
 	}
 
@@ -123,6 +129,36 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiRevertLocale deletes a page's draft content and metadata for one
+// non-default locale, so the page falls back to the default language.
+// Like any edit, the block-side effect goes live on the next Publish.
+// POST /api/pages/{id}/revert-locale  body: {"locale": "fr"}
+func (s *server) apiRevertLocale(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Locale string `json:"locale"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
+		return
+	}
+	if body.Locale == s.deps.DefaultLocale || s.requestLocale(body.Locale) != body.Locale {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Choose a translation language to revert."))
+		return
+	}
+	if err := s.deps.Content.DeleteLocaleContent(r.Context(), page.ID, body.Locale); err != nil {
+		s.deps.Logger.Error("cms admin: api reverting locale", "page", page.ID, "locale", body.Locale, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Reverting failed — try again."))
+		return
+	}
+	s.contentChanged()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // apiListPages returns every page for the editor's pickers (menu items,
 // etc.): id, title, slug, and status.
 // GET /api/pages
@@ -130,7 +166,7 @@ func (s *server) apiListPages(w http.ResponseWriter, r *http.Request) {
 	pages, err := s.deps.Content.All(r.Context(), s.deps.DefaultLocale)
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api listing pages", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not load the pages.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the pages."))
 		return
 	}
 	type pageJSON struct {
@@ -149,11 +185,15 @@ func (s *server) apiListPages(w http.ResponseWriter, r *http.Request) {
 var menuKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 type menuItemJSON struct {
-	ID     int64  `json:"id,omitempty"` // stable handle for the editor's menu UI
-	Label  string `json:"label"`
-	PageID int64  `json:"pageId"` // 0 = custom URL item or dropdown parent
-	URL    string `json:"url"`
-	NewTab bool   `json:"newTab"`
+	ID    int64  `json:"id,omitempty"` // stable handle for the editor's menu UI
+	Label string `json:"label"`        // default-locale label
+	// Labels holds per-locale overrides, e.g. {"fr": "À propos"}. The
+	// editor round-trips the whole map and edits only its active locale,
+	// so a save made in one language never loses the others.
+	Labels map[string]string `json:"labels,omitempty"`
+	PageID int64             `json:"pageId"` // 0 = custom URL item or dropdown parent
+	URL    string            `json:"url"`
+	NewTab bool              `json:"newTab"`
 	// Dropdown marks a label-only parent whose Children render as a
 	// one-level submenu. Stored as a row with no page and no URL.
 	Dropdown bool           `json:"dropdown,omitempty"`
@@ -169,19 +209,19 @@ func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 		menu = "main"
 	}
 	if !menuKeyRe.MatchString(menu) {
-		jsonError(w, http.StatusBadRequest, "Unknown menu.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown menu."))
 		return
 	}
 	items, err := s.deps.Content.MenuItems(r.Context(), menu)
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api loading menu", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not load the menu.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the menu."))
 		return
 	}
 	out := []menuItemJSON{}
 	byID := map[int64]int{} // item id -> index in out, for attaching children
 	for _, item := range items {
-		j := menuItemJSON{ID: item.ID, Label: item.Label, URL: item.URL, NewTab: item.NewTab}
+		j := menuItemJSON{ID: item.ID, Label: item.Label, Labels: item.Labels, URL: item.URL, NewTab: item.NewTab}
 		if item.PageID != nil {
 			j.PageID = *item.PageID
 		}
@@ -211,12 +251,20 @@ func validMenuURL(u string) bool {
 // menuItemInput validates one submitted menu item and converts it for
 // the store. Dropdown parents are label-only; everything else needs a
 // page or a valid URL. Returns a user-facing error message, or "".
-func menuItemInput(item menuItemJSON) (content.MenuItemInput, string) {
+func (s *server) menuItemInput(item menuItemJSON) (content.MenuItemInput, string) {
 	label := strings.TrimSpace(item.Label)
 	if label == "" {
 		return content.MenuItemInput{}, "Every menu item needs a label."
 	}
-	in := content.MenuItemInput{Label: label, NewTab: item.NewTab}
+	// Keep only configured non-default locales' overrides; empty values
+	// mean "no override" and are dropped.
+	labels := map[string]string{}
+	for _, code := range s.deps.Locales[1:] {
+		if l := strings.TrimSpace(item.Labels[code]); l != "" {
+			labels[code] = l
+		}
+	}
+	in := content.MenuItemInput{Label: label, Labels: labels, NewTab: item.NewTab}
 	if item.Dropdown {
 		return in, ""
 	}
@@ -246,11 +294,11 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the menu — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the menu — try again."))
 		return
 	}
 	if !menuKeyRe.MatchString(body.Menu) {
-		jsonError(w, http.StatusBadRequest, "Unknown menu.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown menu."))
 		return
 	}
 	total := 0
@@ -258,29 +306,29 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 		total += 1 + len(item.Children)
 	}
 	if total > 100 {
-		jsonError(w, http.StatusBadRequest, "Too many menu items.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Too many menu items."))
 		return
 	}
 
 	inputs := make([]content.MenuItemInput, len(body.Items))
 	for i, item := range body.Items {
-		in, msg := menuItemInput(item)
+		in, msg := s.menuItemInput(item)
 		if msg != "" {
-			jsonError(w, http.StatusUnprocessableEntity, msg)
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, msg))
 			return
 		}
 		if len(item.Children) > 0 && !item.Dropdown {
-			jsonError(w, http.StatusBadRequest, "Only dropdown items can hold other items.")
+			jsonError(w, http.StatusBadRequest, s.tr(r, "Only dropdown items can hold other items."))
 			return
 		}
 		for _, child := range item.Children {
 			if child.Dropdown || len(child.Children) > 0 {
-				jsonError(w, http.StatusBadRequest, "Dropdown menus can only go one level deep.")
+				jsonError(w, http.StatusBadRequest, s.tr(r, "Dropdown menus can only go one level deep."))
 				return
 			}
-			cin, msg := menuItemInput(child)
+			cin, msg := s.menuItemInput(child)
 			if msg != "" {
-				jsonError(w, http.StatusUnprocessableEntity, msg)
+				jsonError(w, http.StatusUnprocessableEntity, s.tr(r, msg))
 				return
 			}
 			in.Children = append(in.Children, cin)
@@ -290,11 +338,11 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Content.ReplaceMenu(r.Context(), body.Menu, inputs); err != nil {
 		if pgutil.IsForeignKeyViolation(err) {
-			jsonError(w, http.StatusUnprocessableEntity, "One of the linked pages no longer exists — reload and try again.")
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "One of the linked pages no longer exists — reload and try again."))
 			return
 		}
 		s.deps.Logger.Error("cms admin: api saving menu", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Saving the menu failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the menu failed — try again."))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -309,12 +357,12 @@ func (s *server) apiDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Slug == "" {
-		jsonError(w, http.StatusUnprocessableEntity, "The home page can't be deleted.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The home page can't be deleted."))
 		return
 	}
 	if err := s.deps.Content.Delete(r.Context(), page.ID); err != nil {
 		s.deps.Logger.Error("cms admin: api deleting page", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Deleting the page failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Deleting the page failed — try again."))
 		return
 	}
 	s.contentChanged()
@@ -332,6 +380,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Locale   string `json:"locale"`
 		Region   string `json:"region"`
 		Sections []struct {
 			BG      string `json:"bg"`
@@ -345,11 +394,11 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the edit — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
 		return
 	}
 	if len(body.Sections) > 100 {
-		jsonError(w, http.StatusBadRequest, "Too many sections on one page.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Too many sections on one page."))
 		return
 	}
 
@@ -363,7 +412,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !valid {
-		jsonError(w, http.StatusBadRequest, "Unknown sections area.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown sections area."))
 		return
 	}
 
@@ -397,9 +446,9 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		inputs[i] = content.SectionInput{Content: html, Settings: settings}
 	}
 
-	if err := s.deps.Content.ReplaceDraftSections(r.Context(), page.ID, body.Region, s.deps.DefaultLocale, inputs); err != nil {
+	if err := s.deps.Content.ReplaceDraftSections(r.Context(), page.ID, body.Region, s.requestLocale(body.Locale), inputs); err != nil {
 		s.deps.Logger.Error("cms admin: api saving sections", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 		return
 	}
 	s.contentChanged()
@@ -462,7 +511,7 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the edit — try again.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
 		return
 	}
 	page.HeadCSS = unwrapCodeTag(body.CSS, styleWrapRe)
@@ -471,7 +520,7 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 	page.JSLinks = cleanResourceLinks(body.JSLinks)
 	if err := s.deps.Content.Update(r.Context(), page, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api saving page code", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Saving failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -486,7 +535,7 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.deps.Content.Publish(r.Context(), page.ID); err != nil {
 		s.deps.Logger.Error("cms admin: api publishing", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Publishing failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Publishing failed — try again."))
 		return
 	}
 	s.contentChanged()
@@ -502,12 +551,12 @@ func (s *server) apiDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Status != content.StatusPublished {
-		jsonError(w, http.StatusConflict, "There are no published changes to revert to — this page hasn't been published yet.")
+		jsonError(w, http.StatusConflict, s.tr(r, "There are no published changes to revert to — this page hasn't been published yet."))
 		return
 	}
 	if err := s.deps.Content.DiscardDraft(r.Context(), page.ID); err != nil {
 		s.deps.Logger.Error("cms admin: api discarding draft", "page", page.ID, "err", err)
-		jsonError(w, http.StatusInternalServerError, "Discarding failed — try again.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Discarding failed — try again."))
 		return
 	}
 	s.contentChanged()
@@ -549,7 +598,7 @@ func toMediaJSON(v media.View) mediaJSON {
 func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 	kind := media.Kind(r.URL.Query().Get("kind"))
 	if kind != "" && kind != media.KindImage && kind != media.KindFile && kind != media.KindVideo {
-		jsonError(w, http.StatusBadRequest, "Unknown media kind.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown media kind."))
 		return
 	}
 	folderID, unfiled := parseFolderParam(r.URL.Query().Get("folder"))
@@ -561,7 +610,7 @@ func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api listing media", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not load the media library.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the media library."))
 		return
 	}
 	views := s.deps.Media.Views(items)
@@ -581,10 +630,10 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 			return
 		}
-		jsonError(w, http.StatusUnprocessableEntity, "Choose a file to upload.")
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Choose a file to upload."))
 		return
 	}
 	defer file.Close()
@@ -605,12 +654,12 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, media.ErrTooLarge):
-			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg())
+			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsupportedType):
-			jsonError(w, http.StatusUnprocessableEntity, unsupportedTypeMsg)
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.deps.Logger.Error("cms admin: api media upload", "err", err)
-			jsonError(w, http.StatusUnprocessableEntity, "That file could not be processed.")
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
 		}
 		return
 	}
@@ -625,7 +674,7 @@ func (s *server) apiFoldersList(w http.ResponseWriter, r *http.Request) {
 	folders, err := s.deps.Media.Folders(r.Context())
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api listing folders", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not load folders.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load folders."))
 		return
 	}
 	type folderJSON struct {
@@ -647,17 +696,17 @@ func (s *server) apiFolderCreate(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		jsonError(w, http.StatusBadRequest, "Could not read the folder name.")
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the folder name."))
 		return
 	}
 	f, err := s.deps.Media.CreateFolder(r.Context(), body.Name)
 	if errors.Is(err, media.ErrDuplicateFolder) || errors.Is(err, media.ErrBadFolderName) {
-		jsonError(w, http.StatusUnprocessableEntity, friendlyFolderError(err))
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, friendlyFolderError(err)))
 		return
 	}
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api creating folder", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not create the folder.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not create the folder."))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true,

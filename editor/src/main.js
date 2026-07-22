@@ -25,6 +25,7 @@ import { initSource } from "./source.js";
 import { initPageSource } from "./pagesource.js";
 import { initSnippets } from "./snippets.js";
 import { initPostSettings } from "./postsettings.js";
+import { initLocales } from "./locales.js";
 import { initSections } from "./sections.js";
 import { initMedia } from "./media.js";
 import { initMenu } from "./menu.js";
@@ -42,6 +43,7 @@ initPageSource(); // whole-page HTML view on the rail (superadmin only)
 initBarMin(); // restores the remembered minimized state before first paint
 initSnippets();
 initPostSettings();
+initLocales();
 initSections();
 initMedia();
 initMenu();

@@ -12,7 +12,8 @@ type MenuItem struct {
 	ID       int64
 	Menu     string
 	Sort     int
-	Label    string
+	Label    string            // default-locale label
+	Labels   map[string]string // per-locale overrides, e.g. {"fr": "À propos"}
 	PageID   *int64
 	URL      string
 	NewTab   bool
@@ -22,11 +23,20 @@ type MenuItem struct {
 	PageStatus *Status
 }
 
+// LabelFor returns the item's label for locale, falling back to the
+// default-locale label when no override exists.
+func (m MenuItem) LabelFor(locale string) string {
+	if l, ok := m.Labels[locale]; ok && l != "" {
+		return l
+	}
+	return m.Label
+}
+
 // MenuItems returns menu items ordered by menu and sort. An empty menu
 // returns items for every menu (for rendering, which may need several).
 func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) {
 	q := `
-		SELECT mi.id, mi.menu, mi.sort, mi.label, mi.page_id, mi.url, mi.new_tab, mi.parent_id,
+		SELECT mi.id, mi.menu, mi.sort, mi.label, mi.labels, mi.page_id, mi.url, mi.new_tab, mi.parent_id,
 		       p.slug, p.status
 		FROM cms_menu_items mi
 		LEFT JOIN cms_pages p ON p.id = mi.page_id`
@@ -42,7 +52,7 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (MenuItem, error) {
 		var m MenuItem
-		err := row.Scan(&m.ID, &m.Menu, &m.Sort, &m.Label, &m.PageID, &m.URL, &m.NewTab,
+		err := row.Scan(&m.ID, &m.Menu, &m.Sort, &m.Label, &m.Labels, &m.PageID, &m.URL, &m.NewTab,
 			&m.ParentID, &m.PageSlug, &m.PageStatus)
 		return m, err
 	})
@@ -52,7 +62,8 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 // (no page, no URL) is a dropdown parent; Children go one level deep and
 // may not have children of their own.
 type MenuItemInput struct {
-	Label    string
+	Label    string            // default-locale label
+	Labels   map[string]string // per-locale overrides; nil stores {}
 	PageID   *int64
 	URL      string
 	NewTab   bool
@@ -73,21 +84,27 @@ func (s *Store) ReplaceMenu(ctx context.Context, menu string, items []MenuItemIn
 	}
 	// Children share the parent's sort sequence; ordering within a level
 	// is what matters, and (menu, sort) stays unique per row for sanity.
+	labelsOf := func(in MenuItemInput) map[string]string {
+		if in.Labels == nil {
+			return map[string]string{}
+		}
+		return in.Labels
+	}
 	sort := 0
 	for _, item := range items {
 		var parentID int64
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO cms_menu_items (menu, sort, label, page_id, url, new_tab)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			menu, sort, item.Label, item.PageID, item.URL, item.NewTab).Scan(&parentID); err != nil {
+			INSERT INTO cms_menu_items (menu, sort, label, labels, page_id, url, new_tab)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+			menu, sort, item.Label, labelsOf(item), item.PageID, item.URL, item.NewTab).Scan(&parentID); err != nil {
 			return err
 		}
 		sort++
 		for _, child := range item.Children {
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO cms_menu_items (menu, sort, label, page_id, url, new_tab, parent_id)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				menu, sort, child.Label, child.PageID, child.URL, child.NewTab, parentID); err != nil {
+				INSERT INTO cms_menu_items (menu, sort, label, labels, page_id, url, new_tab, parent_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				menu, sort, child.Label, labelsOf(child), child.PageID, child.URL, child.NewTab, parentID); err != nil {
 				return err
 			}
 			sort++

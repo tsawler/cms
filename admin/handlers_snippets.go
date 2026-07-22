@@ -38,7 +38,7 @@ func (s *server) snippetCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Snippet created — it's now available in the editor's palette.")
+	s.flash(r, s.tr(r, "Snippet created — it's now available in the editor's palette."))
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
 
@@ -66,7 +66,7 @@ func (s *server) snippetUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Snippet saved.")
+	s.flash(r, s.tr(r, "Snippet saved."))
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
 
@@ -80,7 +80,7 @@ func (s *server) snippetDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.contentChanged()
-	s.flash(r, "Snippet deleted. Copies already inserted into pages are unchanged.")
+	s.flash(r, s.tr(r, "Snippet deleted. Copies already inserted into pages are unchanged."))
 	http.Redirect(w, r, s.deps.AdminPath+"/snippets", http.StatusSeeOther)
 }
 
@@ -95,10 +95,10 @@ func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[strin
 		HTML: strings.TrimSpace(r.PostFormValue("html")),
 	}
 	if sn.Name == "" {
-		errs["name"] = "Name is required."
+		errs["name"] = s.tr(r, "Name is required.")
 	}
 	if sn.HTML == "" {
-		errs["html"] = "The snippet needs some HTML."
+		errs["html"] = s.tr(r, "The snippet needs some HTML.")
 	}
 	if r.PostFormValue("kind") == "preset" {
 		// bg and width are always stored so the map is never empty (an
@@ -156,7 +156,7 @@ func (s *server) apiSnippetsList(w http.ResponseWriter, r *http.Request) {
 	stored, err := s.deps.Snippets.All(r.Context())
 	if err != nil {
 		s.deps.Logger.Error("cms admin: api listing snippets", "err", err)
-		jsonError(w, http.StatusInternalServerError, "Could not load snippets.")
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load snippets."))
 		return
 	}
 	type snippetJSON struct {

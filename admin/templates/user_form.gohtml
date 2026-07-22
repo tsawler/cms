@@ -1,9 +1,9 @@
-{{define "title"}}{{if .IsNew}}New user{{else}}Edit user{{end}} — CMS{{end}}
+{{define "title"}}{{if .IsNew}}{{.T "New user"}}{{else}}{{.T "Edit user"}}{{end}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>{{if .IsNew}}New user{{else}}Edit user{{end}}</h1>
-    <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/users">Back to users</a>
+    <h1>{{if .IsNew}}{{.T "New user"}}{{else}}{{.T "Edit user"}}{{end}}</h1>
+    <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/users">{{.T "Back to users"}}</a>
 </div>
 
 <form class="cms-form" method="post" novalidate
@@ -11,29 +11,29 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
     <div class="cms-field">
-        <label for="name">Name</label>
+        <label for="name">{{.T "Name"}}</label>
         <input type="text" id="name" name="name" value="{{.FormUser.Name}}" required>
         {{with index .FormErrors "name"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
-        <label for="email">Email</label>
+        <label for="email">{{.T "Email"}}</label>
         <input type="email" id="email" name="email" value="{{.FormUser.Email}}" autocomplete="off" required>
         {{with index .FormErrors "email"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
-        <label for="password">{{if .IsNew}}Password{{else}}New password <span class="cms-muted">(leave blank to keep current)</span>{{end}}</label>
+        <label for="password">{{if .IsNew}}{{.T "Password"}}{{else}}{{.T "New password"}} <span class="cms-muted">{{.T "(leave blank to keep current)"}}</span>{{end}}</label>
         <input type="password" id="password" name="password" autocomplete="new-password" {{if .IsNew}}required{{end}}>
         {{with index .FormErrors "password"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
-        <label for="role">Role</label>
+        <label for="role">{{.T "Role"}}</label>
         <select id="role" name="role">
-            <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>Editor — can edit content</option>
-            <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>Admin — can also manage users</option>
-            <option value="superadmin" {{if eq .FormUser.Role "superadmin"}}selected{{end}}>Superadmin — can also edit raw page HTML</option>
+            <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>{{.T "Editor — can edit content"}}</option>
+            <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>{{.T "Admin — can also manage users"}}</option>
+            <option value="superadmin" {{if eq .FormUser.Role "superadmin"}}selected{{end}}>{{.T "Superadmin — can also edit raw page HTML"}}</option>
         </select>
         {{with index .FormErrors "role"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
@@ -41,11 +41,11 @@
     <div class="cms-field cms-field-check">
         <label>
             <input type="checkbox" name="active" {{if .FormUser.Active}}checked{{end}}>
-            Active — inactive users cannot log in
+            {{.T "Active — inactive users cannot log in"}}
         </label>
         {{with index .FormErrors "active"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
-    <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}Create user{{else}}Save changes{{end}}</button>
+    <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}{{.T "Create user"}}{{else}}{{.T "Save changes"}}{{end}}</button>
 </form>
 {{end}}

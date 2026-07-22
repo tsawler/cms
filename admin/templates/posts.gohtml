@@ -1,40 +1,40 @@
-{{define "title"}}Blog &amp; News — CMS{{end}}
+{{define "title"}}{{.T "Blog & News"}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>Blog &amp; News</h1>
-    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/posts/new">New post</a>
+    <h1>{{.T "Blog & News"}}</h1>
+    <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/posts/new">{{.T "New post"}}</a>
 </div>
 
 <p class="cms-tabs">
-    <a {{if not .FeedFilter}}class="cms-active"{{end}} href="{{.AdminPath}}/posts">All</a>
-    <a {{if eq .FeedFilter "blog"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=blog">Blog</a>
-    <a {{if eq .FeedFilter "news"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=news">News</a>
+    <a {{if not .FeedFilter}}class="cms-active"{{end}} href="{{.AdminPath}}/posts">{{.T "All"}}</a>
+    <a {{if eq .FeedFilter "blog"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=blog">{{.T "Blog"}}</a>
+    <a {{if eq .FeedFilter "news"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=news">{{.T "News"}}</a>
 </p>
 
 <table class="cms-table">
     <thead>
     <tr>
-        <th>Title</th>
-        <th>Feed</th>
-        <th>Date</th>
-        <th>Author</th>
-        <th>Status</th>
+        <th>{{.T "Title"}}</th>
+        <th>{{.T "Feed"}}</th>
+        <th>{{.T "Date"}}</th>
+        <th>{{.T "Author"}}</th>
+        <th>{{.T "Status"}}</th>
         <th></th>
     </tr>
     </thead>
     <tbody>
     {{range .Posts}}
     <tr>
-        <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">(untitled)</span>{{end}}</td>
-        <td>{{.Feed}}</td>
+        <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">{{$.T "(untitled)"}}</span>{{end}}</td>
+        <td>{{$.T (printf "%s" .Feed)}}</td>
         <td>{{.PublishedAt.Format "Jan 2, 2006"}}</td>
         <td>{{if .AuthorName}}{{.AuthorName}}{{else}}<span class="cms-muted">—</span>{{end}}</td>
-        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">published</span>{{else}}<span class="cms-badge">draft</span>{{end}}</td>
-        <td class="cms-table-actions"><a href="{{$.AdminPath}}/posts/{{.PostID}}">Edit</a></td>
+        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">{{$.T "published"}}</span>{{else}}<span class="cms-badge">{{$.T "draft"}}</span>{{end}}</td>
+        <td class="cms-table-actions"><a href="{{$.AdminPath}}/posts/{{.PostID}}">{{$.T "Edit"}}</a></td>
     </tr>
     {{else}}
-    <tr><td colspan="6" class="cms-muted">No posts yet — write your first one.</td></tr>
+    <tr><td colspan="6" class="cms-muted">{{.T "No posts yet — write your first one."}}</td></tr>
     {{end}}
     </tbody>
 </table>

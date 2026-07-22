@@ -277,3 +277,8 @@ background:#1c2128;color:#fff;border:none;border-radius:999px;padding:9px 15px;f
 line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.3)}
 .post-pill:hover{background:#2b323d}
 .post-pill[hidden]{display:none}
+.locs{display:flex;gap:2px;align-items:center}
+.locs .loc{font-size:11px;letter-spacing:.04em;padding:4px 7px;border-radius:999px;
+border:1px solid transparent;opacity:.6}
+.locs .loc.on{border-color:rgba(255,255,255,.4);opacity:1;cursor:default}
+.locs .loc:hover{opacity:1}

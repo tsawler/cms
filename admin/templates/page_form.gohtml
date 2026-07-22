@@ -1,39 +1,55 @@
-{{define "title"}}{{if .IsNew}}New page{{else}}Edit page{{end}} — CMS{{end}}
+{{define "title"}}{{if .IsNew}}{{.T "New page"}}{{else}}{{.T "Edit page"}}{{end}} — CMS{{end}}
 
 {{define "content"}}
 <div class="cms-page-head">
-    <h1>{{if .IsNew}}New page{{else}}Edit page{{end}}</h1>
+    <h1>{{if .IsNew}}{{.T "New page"}}{{else}}{{.T "Edit page"}}{{end}}</h1>
     <div class="cms-actions">
         {{if not .IsNew}}
-        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages/{{.FormPage.ID}}/preview" target="_blank" rel="noopener">Preview draft</a>
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages/{{.FormPage.ID}}/preview{{if not .IsDefaultLocale}}?locale={{.EditLocale}}{{end}}" target="_blank" rel="noopener">{{.T "Preview draft"}}</a>
         {{end}}
-        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages">Back to pages</a>
+        <a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/pages">{{.T "Back to pages"}}</a>
     </div>
 </div>
+
+{{if and (not .IsNew) (gt (len .Locales) 1)}}
+<p class="cms-tabs cms-locale-tabs">
+    {{$def := index .Locales 0}}
+    {{range .Locales}}
+    <a {{if eq . $.EditLocale}}class="cms-active"{{end}} href="{{$.AdminPath}}/pages/{{$.FormPage.ID}}{{if ne . $def}}?locale={{.}}{{end}}">{{.}}</a>
+    {{end}}
+</p>
+{{if not .IsDefaultLocale}}<p class="cms-hint">{{.T "Editing translation:"}} <strong>{{.EditLocale}}</strong>.
+{{.T "Fields left matching the default language keep showing it until you change them."}}
+{{.T "Address, template, and code settings live on the default-language tab."}}</p>{{end}}
+{{end}}
 
 <form class="cms-form cms-form-wide" method="post"
       action="{{if .IsNew}}{{.AdminPath}}/pages/new{{else}}{{.AdminPath}}/pages/{{.FormPage.ID}}{{end}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="locale" value="{{.EditLocale}}">
 
     <div class="cms-field">
-        <label for="title">Title</label>
+        <label for="title">{{.T "Title"}}</label>
         <input type="text" id="title" name="title" value="{{.FormPage.Title}}" required {{if .IsNew}}data-slug-source{{end}}>
         {{with index .FormErrors "title"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
+    {{if .IsDefaultLocale}}
     <div class="cms-field">
-        <label for="slug">Address <span class="cms-muted">(leave empty for the homepage)</span></label>
-        <input type="text" id="slug" name="slug" value="{{.FormPage.Slug}}" placeholder="about-us" {{if .IsNew}}data-slug-target{{end}}>
+        <label for="slug">{{.T "Address"}} <span class="cms-muted">{{.T "(leave empty for the homepage)"}}</span></label>
+        <input type="text" id="slug" name="slug" value="{{.FormPage.Slug}}" placeholder="{{.T "about-us"}}" {{if .IsNew}}data-slug-target{{end}}>
         {{with index .FormErrors "slug"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
+    {{end}}
 
     <div class="cms-field">
-        <label for="description">Description <span class="cms-muted">(for search engines)</span></label>
+        <label for="description">{{.T "Description"}} <span class="cms-muted">{{.T "(for search engines)"}}</span></label>
         <input type="text" id="description" name="description" value="{{.FormPage.Description}}">
     </div>
 
+    {{if .IsDefaultLocale}}
     <div class="cms-field">
-        <label for="template_name">Template</label>
+        <label for="template_name">{{.T "Template"}}</label>
         <select id="template_name" name="template_name">
             {{$current := .FormPage.TemplateName}}
             {{range .PageTemplates}}
@@ -41,20 +57,21 @@
             {{end}}
         </select>
         {{with index .FormErrors "template_name"}}<p class="cms-field-error">{{.}}</p>{{end}}
-        {{if not .IsNew}}<p class="cms-hint">Changing the template takes effect after saving; the content fields below will update to match.</p>{{end}}
+        {{if not .IsNew}}<p class="cms-hint">{{.T "Changing the template takes effect after saving; the content fields below will update to match."}}</p>{{end}}
     </div>
+    {{end}}
 
     {{template "form_regions" .}}
 
-    {{if and .IsAdmin (not .IsNew)}}
+    {{if and .IsAdmin (not .IsNew) .IsDefaultLocale}}
     <details class="cms-advanced">
-        <summary>Advanced: page-specific CSS and JavaScript</summary>
+        <summary>{{.T "Advanced: page-specific CSS and JavaScript"}}</summary>
         <div class="cms-field">
-            <label for="head_css">Extra CSS <span class="cms-muted">(added to this page's &lt;head&gt;)</span></label>
+            <label for="head_css">{{.T "Extra CSS"}} <span class="cms-muted">{{.T "(added to this page's <head>)"}}</span></label>
             <textarea id="head_css" name="head_css" rows="5" class="cms-code">{{.FormPage.HeadCSS}}</textarea>
         </div>
         <div class="cms-field">
-            <label for="body_js">Extra JavaScript <span class="cms-muted">(added before &lt;/body&gt;)</span></label>
+            <label for="body_js">{{.T "Extra JavaScript"}} <span class="cms-muted">{{.T "(added before </body>)"}}</span></label>
             <textarea id="body_js" name="body_js" rows="5" class="cms-code">{{.FormPage.BodyJS}}</textarea>
         </div>
     </details>
@@ -62,31 +79,31 @@
 
     <div class="cms-actions">
         {{if .IsNew}}
-        <button type="submit" class="cms-btn cms-btn-primary">Create page</button>
+        <button type="submit" class="cms-btn cms-btn-primary">{{.T "Create page"}}</button>
         {{else}}
-        <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">Save draft</button>
-        <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">Save &amp; publish</button>
+        <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">{{.T "Save draft"}}</button>
+        <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">{{.T "Save & publish"}}</button>
         {{if eq .FormPage.Status "published"}}
-        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">Unpublish</button>
+        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">{{.T "Unpublish"}}</button>
         {{end}}
         {{end}}
     </div>
 </form>
 
-{{if and (not .IsNew) .HasDraftEdits}}
+{{if and (not .IsNew) .HasDraftEdits .IsDefaultLocale}}
 <form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/discard" class="cms-discard"
-      data-confirm="Discard your unpublished changes and revert to the published version? This can't be undone.">
+      data-confirm="{{.T "Discard your unpublished changes and revert to the published version? This can't be undone."}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <p class="cms-hint">This page has unpublished draft changes.</p>
-    <button type="submit" class="cms-btn cms-btn-ghost">Discard draft changes</button>
+    <p class="cms-hint">{{.T "This page has unpublished draft changes."}}</p>
+    <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Discard draft changes"}}</button>
 </form>
 {{end}}
 
-{{if and (not .IsNew) .FormPage.Slug}}
+{{if and (not .IsNew) .FormPage.Slug .IsDefaultLocale}}
 <form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/delete" class="cms-danger-zone"
-      data-confirm="Delete this page and all of its content? This cannot be undone.">
+      data-confirm="{{.T "Delete this page and all of its content? This cannot be undone."}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit" class="cms-btn cms-btn-danger">Delete page</button>
+    <button type="submit" class="cms-btn cms-btn-danger">{{.T "Delete page"}}</button>
 </form>
 {{end}}
 {{end}}
