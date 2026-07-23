@@ -1,19 +1,21 @@
-/* Small shared helpers: the status message in the bar, and the JSON API
- * wrapper every request goes through. */
+/* Small shared helpers: the status toast, and the JSON API wrapper
+ * every request goes through. */
 
 import { $ } from "./shell.js";
 import { adminPath, csrf } from "./state.js";
 
 var msgTimer = null;
 
+// setMsg shows a toast above the bar and leaves it up until it's
+// replaced or cleared — used for progress ("Saving…") and errors.
 export function setMsg(text) {
     clearTimeout(msgTimer);
-    $("msg").textContent = text || "";
-    $("msg").hidden = !text;
+    var toast = $("toast");
+    if (text) toast.textContent = text;
+    toast.classList.toggle("on", !!text);
 }
 
-// flash shows a short confirmation that clears itself, so the bar
-// doesn't hold on to stale status text (and stale width).
+// flash shows a short confirmation toast that dismisses itself.
 export function flash(text) {
     setMsg(text);
     msgTimer = setTimeout(function () { setMsg(""); }, 4000);

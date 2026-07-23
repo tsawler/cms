@@ -25,7 +25,14 @@ transition:transform .25s ease,opacity .25s ease}
 .chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}
 .chip.published{background:#1e7e4e}
 .chip.changes{background:#b45309;text-transform:none}
-.msg{opacity:.75;font-size:12px;max-width:14em;overflow:hidden;text-overflow:ellipsis}
+/* ---- toast: status and confirmation messages, floated above the bar
+   so they're visible even when the bar is busy or minimized ---- */
+.toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(8px);
+z-index:2147483001;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
+font-size:13px;line-height:1.4;max-width:min(28em,90vw);text-align:center;
+box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;visibility:hidden;
+transition:transform .2s ease,opacity .2s ease,visibility .2s}
+.toast.on{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
 .bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);
 border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}

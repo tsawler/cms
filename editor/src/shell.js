@@ -41,7 +41,6 @@ export function initShell() {
         '<div class="bar" id="bar">' +
         '<span class="chip" id="chip"></span>' +
         '<span class="locs" id="locs"></span>' +
-        '<span class="msg" id="msg" hidden></span>' +
         '<button id="edit" title="Edit this page in place">' +
         '<span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button>' +
         '<button id="save" disabled hidden title="Save your changes as a draft">Save</button>' +
@@ -71,6 +70,7 @@ export function initShell() {
         '<button class="post-pill" id="post-settings" hidden ' +
         'title="Edit this post&#39;s date, summary, thumbnail, and header image">' +
         '⚙<span>Post settings</span></button>' +
+        '<div class="toast" id="toast" role="status" aria-live="polite"></div>' +
         '<button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools">' +
         '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>' +
         "</button>" +
