@@ -114,6 +114,8 @@ func run(logger *slog.Logger) error {
 	// Login CAPTCHA against the Cap container from docker-compose.yml.
 	// Create a site key in the Cap dashboard (http://localhost:3000) and
 	// set CAP_URL, CAP_SITE_KEY, and CAP_SECRET; unset means no CAPTCHA.
+	// The challenge is solved invisibly by default; CAP_WIDGET=visible
+	// shows Cap's checkbox widget on the login form instead.
 	var capCfg *cms.CaptchaConfig
 	if os.Getenv("CAP_URL") != "" {
 		capCfg = &cms.CaptchaConfig{
@@ -121,6 +123,7 @@ func run(logger *slog.Logger) error {
 			InternalURL: os.Getenv("CAP_INTERNAL_URL"), // optional
 			SiteKey:     os.Getenv("CAP_SITE_KEY"),
 			Secret:      os.Getenv("CAP_SECRET"),
+			Visible:     os.Getenv("CAP_WIDGET") == "visible",
 		}
 	} else {
 		logger.Warn("CAP_URL not set — login CAPTCHA disabled")

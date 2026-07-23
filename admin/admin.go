@@ -343,6 +343,7 @@ type navLink struct {
 type captchaInfo struct {
 	ScriptURL string // widget script, served by the Cap server
 	Endpoint  string // data-cap-api-endpoint value
+	Visible   bool   // show the checkbox widget instead of solving invisibly
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
@@ -371,6 +372,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		td.Captcha = &captchaInfo{
 			ScriptURL: s.deps.Captcha.ScriptURL(),
 			Endpoint:  s.deps.Captcha.WidgetEndpoint(),
+			Visible:   s.deps.Captcha.Visible(),
 		}
 	}
 	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin())

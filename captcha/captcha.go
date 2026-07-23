@@ -3,10 +3,12 @@
 // The CMS uses it to protect the admin login form; host applications may
 // reuse the client for their own forms.
 //
-// Cap has two halves: a widget that runs the challenge in the browser and
-// puts the resulting token in a hidden cap-token form field, and a server
-// that issues challenges and verifies solutions. The widget script itself is
-// served by the Cap server, so no third-party CDN is involved.
+// Cap has two halves: a browser side that solves the challenge and puts the
+// resulting token in a hidden cap-token form field — either the visible
+// <cap-widget> checkbox or, by default here, the invisible programmatic mode
+// (see Config.Visible) — and a server that issues challenges and verifies
+// solutions. The browser script itself is served by the Cap server, so no
+// third-party CDN is involved.
 package captcha
 
 import (
@@ -42,6 +44,13 @@ type Config struct {
 
 	// Secret authorizes siteverify calls for the site key. Required.
 	Secret string
+
+	// Visible renders Cap's interactive checkbox widget on the login
+	// form. The default (false) uses Cap's programmatic mode instead:
+	// the login page solves the challenge invisibly in the background
+	// and submits the token with the form, so users never see a
+	// CAPTCHA at all.
+	Visible bool
 }
 
 // Client verifies Cap tokens and produces the URLs the login page needs to
@@ -103,6 +112,12 @@ func (c *Client) WasmURL() string {
 // Content-Security-Policy that admits the widget.
 func (c *Client) Origin() string {
 	return c.origin
+}
+
+// Visible reports whether the login form should show Cap's interactive
+// checkbox widget rather than solving the challenge invisibly.
+func (c *Client) Visible() bool {
+	return c.cfg.Visible
 }
 
 // Verify checks a widget token with the Cap server. It returns (false, nil)

@@ -516,6 +516,10 @@ Captcha: &cms.CaptchaConfig{
 },
 ```
 
+By default the challenge is solved invisibly in the background — users
+never see a CAPTCHA. Add `Visible: true` to show Cap's checkbox widget
+on the form instead.
+
 ### Custom admin pages
 
 Reports, imports, settings — register plain handlers and they're mounted

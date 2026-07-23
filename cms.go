@@ -190,8 +190,10 @@ type Config struct {
 
 	// Captcha, when set, protects the admin login form with a
 	// proof-of-work CAPTCHA verified against a self-hosted Cap server
-	// (docker image tiago2/cap). Nil disables the CAPTCHA; the built-in
-	// login throttle and honeypot still apply.
+	// (docker image tiago2/cap). The challenge is solved invisibly in
+	// the background by default; set CaptchaConfig.Visible for Cap's
+	// checkbox widget. Nil disables the CAPTCHA; the built-in login
+	// throttle and honeypot still apply.
 	Captcha *CaptchaConfig
 
 	// AdminSections are deployment-specific admin pages: each is an

@@ -124,8 +124,9 @@ func TestLoginHoneypot(t *testing.T) {
 	}
 }
 
-// With CAPTCHA configured, the login page embeds the widget and a POST
-// without a token is rejected before credentials are checked.
+// With CAPTCHA configured (invisible by default), the login page wires up
+// the programmatic solver and a POST without a token is rejected before
+// credentials are checked.
 func TestLoginCaptchaRequired(t *testing.T) {
 	cap, err := captcha.New(captcha.Config{URL: "http://cap.invalid:3000", SiteKey: "site1", Secret: "s"})
 	if err != nil {
@@ -134,8 +135,17 @@ func TestLoginCaptchaRequired(t *testing.T) {
 	srv, client := newLoginTestServer(t, cap)
 
 	csrfToken, page := getLogin(t, srv, client)
-	if !strings.Contains(page, `<cap-widget data-cap-api-endpoint="http://cap.invalid:3000/site1/">`) {
-		t.Errorf("login page missing cap widget:\n%s", page)
+	if strings.Contains(page, "<cap-widget") {
+		t.Errorf("invisible mode should not render the cap widget:\n%s", page)
+	}
+	if !strings.Contains(page, `data-cap-endpoint="http://cap.invalid:3000/site1/"`) {
+		t.Errorf("login form missing data-cap-endpoint:\n%s", page)
+	}
+	if !strings.Contains(page, `<input type="hidden" name="cap-token" value="">`) {
+		t.Errorf("login form missing hidden cap-token field:\n%s", page)
+	}
+	if !strings.Contains(page, `src="/admin/static/login-captcha.js"`) {
+		t.Errorf("login page missing invisible solver script:\n%s", page)
 	}
 	if !strings.Contains(page, `src="http://cap.invalid:3000/assets/widget.js"`) {
 		t.Errorf("login page missing widget script:\n%s", page)
@@ -164,6 +174,27 @@ func TestLoginCaptchaRequired(t *testing.T) {
 	}
 	if !strings.Contains(body, "complete the verification") {
 		t.Errorf("expected missing-captcha message:\n%s", body)
+	}
+}
+
+// With Visible set, the login page embeds the checkbox widget instead of
+// the invisible solver.
+func TestLoginCaptchaVisibleWidget(t *testing.T) {
+	cap, err := captcha.New(captcha.Config{URL: "http://cap.invalid:3000", SiteKey: "site1", Secret: "s", Visible: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, client := newLoginTestServer(t, cap)
+
+	_, page := getLogin(t, srv, client)
+	if !strings.Contains(page, `<cap-widget data-cap-api-endpoint="http://cap.invalid:3000/site1/">`) {
+		t.Errorf("login page missing cap widget:\n%s", page)
+	}
+	if strings.Contains(page, "data-cap-endpoint=") {
+		t.Errorf("visible mode should not mark the form for invisible solving:\n%s", page)
+	}
+	if strings.Contains(page, "login-captcha.js") {
+		t.Errorf("visible mode should not load the invisible solver script:\n%s", page)
 	}
 }
 

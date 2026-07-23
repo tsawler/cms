@@ -666,13 +666,19 @@ c, err := cms.New(cms.Config{
         Secret:  "your-secret",
         // InternalURL: "http://cap:3000", // optional: server-to-server
         //                                 // address, e.g. inside Docker
+        // Visible: true,                  // optional: show Cap's checkbox
+        //                                 // widget instead of solving the
+        //                                 // challenge invisibly (default)
     },
 })
 ```
 
-With `Captcha` set, the login page renders the Cap widget (the admin CSP
-is extended to admit exactly that origin), and the login handler
-verifies the submitted token server-side before checking credentials. If
+With `Captcha` set, the login page solves the challenge invisibly in the
+background (Cap's programmatic mode) — users never see a CAPTCHA. Set
+`Visible: true` to show Cap's interactive checkbox widget instead. Either
+way the admin CSP is extended to admit exactly the Cap origin, and the
+login handler verifies the submitted token server-side before checking
+credentials. If
 the Cap server rejects the token, the login fails; if the Cap server is
 *unreachable*, the login proceeds with a logged warning — an outage of
 the CAPTCHA backend shouldn't lock admins out, and the throttle still
@@ -691,6 +697,8 @@ To try the login CAPTCHA: open <http://localhost:3300>, log in with the
 `ADMIN_KEY` from `docker-compose.yml`, create a site key, and set
 `CAP_URL=http://localhost:3300`, `CAP_SITE_KEY`, and `CAP_SECRET` in the
 environment or `.env`. Without them the example runs without CAPTCHA.
+The challenge is solved invisibly by default; `CAP_WIDGET=visible` shows
+the checkbox widget instead.
 
 The example reads S3 credentials from a `.env` file at the repo root
 (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET`, optional

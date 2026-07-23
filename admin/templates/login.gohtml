@@ -6,11 +6,16 @@
      server instead of a CDN the CSP blocks. */}}
 <script src="{{.AdminPath}}/captcha.js"></script>
 <script type="module" src="{{.Captcha.ScriptURL}}"></script>
+{{if not .Captcha.Visible}}
+{{/* Invisible mode: solve the challenge in the background and fill the
+     hidden cap-token field — no widget is shown. */}}
+<script defer src="{{.AdminPath}}/static/login-captcha.js"></script>
+{{end}}
 {{end}}
 <div class="cms-login-card">
     <h1>{{.T "Log in"}}</h1>
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
-    <form method="post" action="{{.AdminPath}}/login" novalidate>
+    <form method="post" action="{{.AdminPath}}/login" novalidate{{if and .Captcha (not .Captcha.Visible)}} data-cap-endpoint="{{.Captcha.Endpoint}}"{{end}}>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="cms-field">
             <label for="email">{{.T "Email"}}</label>
@@ -32,9 +37,13 @@
             </label>
         </div>
         {{with .Captcha}}
+        {{if .Visible}}
         <div class="cms-field">
             <cap-widget data-cap-api-endpoint="{{.Endpoint}}"></cap-widget>
         </div>
+        {{else}}
+        <input type="hidden" name="cap-token" value="">
+        {{end}}
         {{end}}
         <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">{{.T "Log in"}}</button>
     </form>
