@@ -13,37 +13,78 @@
         <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,.svg,video/mp4,video/webm,.mp4,.webm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
         <input type="text" name="alt" placeholder="{{.T "Description (alt text, for images)"}}">
         <select name="folder">
+            {{- /* Uploads land in the folder being browsed unless changed. */}}
             <option value="">{{.T "No folder"}}</option>
-            {{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+            {{range .Folders}}<option value="{{.ID}}" {{if and $.CurrentFolder (eq $.CurrentFolder.ID .ID)}}selected{{end}}>{{.Name}}</option>{{end}}
         </select>
         <button type="submit" class="cms-btn cms-btn-primary">{{.T "Upload"}}</button>
     </div>
-    <p class="cms-hint">{{.T "Images (JPEG, PNG, GIF, WebP — resized automatically), videos (MP4, WebM — stored as uploaded), PDFs, office documents, text/CSV, or ZIP."}}
+    <p class="cms-hint">{{.T "Images (JPEG, PNG, GIF, WebP — resized automatically; SVG), videos (MP4, WebM — stored as uploaded), PDFs, office documents, text/CSV, or ZIP."}}
         {{.T "Images and documents up to 25 MB; videos up to"}} {{.MaxVideoMB}}&nbsp;{{.T "MB."}}
         {{.T "Everything is stored on your site's bucket."}}</p>
 </form>
 
 <div class="cms-filter-bar">
+    {{- /* Searching spans every folder; results list flat. */}}
     <form method="get" action="{{.AdminPath}}/media" class="cms-filter-form">
-        <input type="search" name="q" value="{{.MediaQuery}}" placeholder="{{.T "Search by name…"}}">
-        <select name="folder">
-            <option value="">{{.T "All folders"}}</option>
-            <option value="root" {{if eq .MediaFolder "root"}}selected{{end}}>{{.T "Unfiled"}}</option>
-            {{range .Folders}}
-            <option value="{{.ID}}" {{if eq $.MediaFolder (printf "%d" .ID)}}selected{{end}}>{{.Name}} ({{.Count}})</option>
-            {{end}}
-        </select>
-        <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Filter"}}</button>
-        {{if or .MediaQuery .MediaFolder}}<a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/media">{{.T "Clear"}}</a>{{end}}
+        <input type="hidden" name="tab" value="{{.MediaTab}}">
+        <input type="search" name="q" value="{{.MediaQuery}}" placeholder="{{.T "Search all folders by name…"}}">
+        <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Search"}}</button>
+        {{if .MediaQuery}}<a class="cms-btn cms-btn-ghost" href="{{.AdminPath}}/media?tab={{.MediaTab}}">{{.T "Clear"}}</a>{{end}}
     </form>
     <form method="post" action="{{.AdminPath}}/media/folders/new" class="cms-filter-form">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        {{- /* New folders belong to the tab they were created on. */}}
+        <input type="hidden" name="tab" value="{{.MediaTab}}">
         <input type="text" name="name" placeholder="{{.T "New folder name"}}" required maxlength="60">
         <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Add folder"}}</button>
     </form>
 </div>
 
+{{- /* Tab links keep a search but never the folder — folders belong to
+       one kind, so another tab opens at its own root. */}}
+<div class="cms-tabs-row">
+    <p class="cms-tabs">
+        <a {{if eq .MediaTab "images"}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/media?tab=images{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Images"}} ({{len .Media}})</a>
+        <a {{if eq .MediaTab "documents"}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/media?tab=documents{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Documents"}} ({{len .Documents}})</a>
+        <a {{if eq .MediaTab "videos"}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/media?tab=videos{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Videos"}} ({{len .Videos}})</a>
+    </p>
+    {{- /* Documents are already a table; the toggle applies to the card views. */}}
+    {{if ne .MediaTab "documents"}}
+    <div class="cms-view-toggle" data-view-toggle>
+        <button type="button" data-view="grid" title="{{.T "Grid view"}}" aria-label="{{.T "Grid view"}}">▦</button>
+        <button type="button" data-view="list" title="{{.T "List view"}}" aria-label="{{.T "List view"}}">≡</button>
+    </div>
+    {{end}}
+</div>
+
+{{if .CurrentFolder}}
+{{- /* Browsing one folder: breadcrumb back to the root, plus the folder's own actions. */}}
+<div class="cms-crumbs">
+    <a href="{{.AdminPath}}/media?tab={{.MediaTab}}">{{.T "All media"}}</a>
+    <span class="cms-crumb-sep" aria-hidden="true">/</span>
+    <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+    <strong>{{.CurrentFolder.Name}}</strong>
+    <span class="cms-muted">({{.CurrentFolder.Count}})</span>
+    <form method="post" action="{{.AdminPath}}/media/folders/{{.CurrentFolder.ID}}/delete" class="cms-crumb-delete"
+          data-confirm="{{.T "Delete this folder? Its files will be kept and become unfiled."}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="tab" value="{{.MediaTab}}">
+        <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{.T "Delete folder"}}</button>
+    </form>
+</div>
+{{end}}
+
+{{- /* Folders list as entries inside each tab's listing, Finder-style,
+       at the root of a browse (never during a search). */}}
+{{$showFolders := and (not .CurrentFolder) (not .MediaQuery) (gt (len .Folders) 0)}}
+
+{{if eq .MediaTab "images"}}
 <div class="cms-media-grid">
+    {{if $showFolders}}{{template "media_folder_cards" .}}{{end}}
     {{range .Media}}
     <div class="cms-media-card">
         <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
@@ -76,14 +117,16 @@
             </div>
         </div>
     </div>
-    {{else}}
+    {{end}}
+    {{if and (not .Media) (not $showFolders)}}
     <p class="cms-muted">{{.T "No images yet — upload your first one above."}}</p>
     {{end}}
 </div>
+{{end}}
 
-{{if .Videos}}
-<h2 class="cms-section-head">{{.T "Videos"}}</h2>
+{{if eq .MediaTab "videos"}}
 <div class="cms-media-grid">
+    {{if $showFolders}}{{template "media_folder_cards" .}}{{end}}
     {{range .Videos}}
     <div class="cms-media-card">
         <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
@@ -115,10 +158,13 @@
         </div>
     </div>
     {{end}}
+    {{if and (not .Videos) (not $showFolders)}}
+    <p class="cms-muted">{{.T "No videos yet — upload an MP4 or WebM above."}}</p>
+    {{end}}
 </div>
 {{end}}
 
-<h2 class="cms-section-head">{{.T "Documents"}}</h2>
+{{if eq .MediaTab "documents"}}
 <table class="cms-table">
     <thead>
     <tr>
@@ -129,6 +175,18 @@
     </tr>
     </thead>
     <tbody>
+    {{if $showFolders}}
+    {{range .Folders}}
+    <tr>
+        <td><a class="cms-folder-link" href="{{$.AdminPath}}/media?tab=documents&folder={{.ID}}">
+            <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            {{.Name}}</a></td>
+        <td><span class="cms-badge">{{$.T "folder"}}</span></td>
+        <td>{{if eq .Count 1}}1 {{$.T "file"}}{{else}}{{.Count}} {{$.T "files"}}{{end}}</td>
+        <td></td>
+    </tr>
+    {{end}}
+    {{end}}
     {{range .Documents}}
     <tr>
         <td><a href="{{.OriginalURL}}" target="_blank" rel="noopener">{{.Filename}}</a></td>
@@ -151,31 +209,28 @@
             </form>
         </td>
     </tr>
-    {{else}}
+    {{end}}
+    {{if and (not .Documents) (not $showFolders)}}
     <tr><td colspan="4" class="cms-muted">{{.T "No documents yet."}}</td></tr>
     {{end}}
     </tbody>
 </table>
+{{end}}
 
-{{if .Folders}}
-<h2 class="cms-section-head">{{.T "Folders"}}</h2>
-<table class="cms-table">
-    <thead><tr><th>{{.T "Name"}}</th><th>{{.T "Files"}}</th><th></th></tr></thead>
-    <tbody>
-    {{range .Folders}}
-    <tr>
-        <td>{{.Name}}</td>
-        <td>{{.Count}}</td>
-        <td class="cms-table-actions">
-            <form method="post" action="{{$.AdminPath}}/media/folders/{{.ID}}/delete"
-                  data-confirm="{{$.T "Delete this folder? Its files will be kept and become unfiled."}}">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
-            </form>
-        </td>
-    </tr>
-    {{end}}
-    </tbody>
-</table>
+{{end}}
+
+{{- /* One folder entry per folder, shaped like a media card so the grid
+       and list views style it exactly like the files it sits among. */}}
+{{define "media_folder_cards"}}
+{{range .Folders}}
+<a class="cms-media-card cms-folder-card" href="{{$.AdminPath}}/media?tab={{$.MediaTab}}&folder={{.ID}}">
+    <span class="cms-folder-thumb">
+        <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+    </span>
+    <div class="cms-media-body">
+        <p class="cms-media-name" title="{{.Name}}">{{.Name}}</p>
+        <p class="cms-muted cms-media-dims">{{if eq .Count 1}}1 {{$.T "file"}}{{else}}{{.Count}} {{$.T "files"}}{{end}}</p>
+    </div>
+</a>
 {{end}}
 {{end}}

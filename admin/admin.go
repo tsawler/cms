@@ -318,8 +318,13 @@ type templateData struct {
 	Videos       []media.View
 	Documents    []media.View // files (PDFs, office docs, ...)
 	Folders      []media.Folder
+	// CurrentFolder is the folder being browsed, nil at the root (which
+	// lists unfiled items and the folder tiles) and during a search.
+	CurrentFolder *media.Folder
 	MediaQuery   string // active search filter
 	MediaFolder  string // active folder filter ("", "root", or an id)
+	MediaTab     string // active media tab ("images", "documents", "videos")
+	MediaKind    string // the tab's media kind ("image", "file", "video")
 	MaxVideoMB   int64  // video upload cap, for the upload hint
 
 	// Snippet pages.

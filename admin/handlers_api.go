@@ -729,8 +729,9 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "media": toMediaJSON(view)})
 }
 
-// apiFoldersList returns all media folders with item counts.
-// GET /api/media/folders
+// apiFoldersList returns media folders with item counts, filtered to one
+// kind when the picker asks for it.
+// GET /api/media/folders?kind=image|file|video
 func (s *server) apiFoldersList(w http.ResponseWriter, r *http.Request) {
 	folders, err := s.deps.Media.Folders(r.Context())
 	if err != nil {
@@ -738,29 +739,39 @@ func (s *server) apiFoldersList(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load folders."))
 		return
 	}
+	kind := media.Kind(r.URL.Query().Get("kind"))
 	type folderJSON struct {
 		ID    int64  `json:"id"`
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 	}
-	out := make([]folderJSON, len(folders))
-	for i, f := range folders {
-		out[i] = folderJSON{ID: f.ID, Name: f.Name, Count: f.Count}
+	out := []folderJSON{}
+	for _, f := range folders {
+		if kind != "" && f.Kind != kind {
+			continue
+		}
+		out = append(out, folderJSON{ID: f.ID, Name: f.Name, Count: f.Count})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
 }
 
-// apiFolderCreate makes a folder from the editor's picker.
-// POST /api/media/folders  body: {"name": "..."}
+// apiFolderCreate makes a folder from the editor's picker, in the kind
+// the picker is browsing.
+// POST /api/media/folders  body: {"name": "...", "kind": "image"}
 func (s *server) apiFolderCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
+		Kind string `json:"kind"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the folder name."))
 		return
 	}
-	f, err := s.deps.Media.CreateFolder(r.Context(), body.Name)
+	f, err := s.deps.Media.CreateFolder(r.Context(), body.Name, media.Kind(body.Kind))
+	if errors.Is(err, media.ErrBadFolderKind) {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Unknown media kind."))
+		return
+	}
 	if errors.Is(err, media.ErrDuplicateFolder) || errors.Is(err, media.ErrBadFolderName) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, friendlyFolderError(err)))
 		return

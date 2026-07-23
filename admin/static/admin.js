@@ -39,6 +39,28 @@
         });
     });
 
+    // Media grid/list view toggle, remembered per browser. The list view
+    // is the same cards restyled as rows (.cms-media-list).
+    var viewToggle = document.querySelector("[data-view-toggle]");
+    if (viewToggle) {
+        var applyMediaView = function (v) {
+            document.querySelectorAll(".cms-media-grid").forEach(function (g) {
+                g.classList.toggle("cms-media-list", v === "list");
+            });
+            viewToggle.querySelectorAll("button").forEach(function (b) {
+                b.classList.toggle("cms-active", b.getAttribute("data-view") === v);
+            });
+            try { window.localStorage.setItem("cms-admin-media-view", v); } catch (e) { /* private mode */ }
+        };
+        viewToggle.addEventListener("click", function (e) {
+            var btn = e.target.closest("button[data-view]");
+            if (btn) applyMediaView(btn.getAttribute("data-view"));
+        });
+        var stored = null;
+        try { stored = window.localStorage.getItem("cms-admin-media-view"); } catch (e) { /* private mode */ }
+        applyMediaView(stored === "list" ? "list" : "grid");
+    }
+
     // Slug suggestion on the new-page form: fill [data-slug-target] from
     // [data-slug-source] until the user edits the slug themselves.
     var source = document.querySelector("[data-slug-source]");

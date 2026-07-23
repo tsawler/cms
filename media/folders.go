@@ -9,48 +9,61 @@ import (
 	"github.com/tsawler/cms/internal/pgutil"
 )
 
-// Folder is a flat organizational bucket for media. Folders live entirely
-// in Postgres; the object store's keys are untouched by foldering.
+// Folder is a flat organizational bucket for media, scoped to one media
+// kind — a folder made among the images exists only there. Folders live
+// entirely in Postgres; the object store's keys are untouched by
+// foldering.
 type Folder struct {
 	ID    int64
+	Kind  Kind
 	Name  string
 	Count int // number of media items in the folder
 }
 
 var (
-	// ErrDuplicateFolder is returned by CreateFolder for a taken name.
+	// ErrDuplicateFolder is returned by CreateFolder for a name already
+	// used within the same kind.
 	ErrDuplicateFolder = errors.New("media: a folder with that name already exists")
 	// ErrBadFolderName is returned for empty or over-long names.
 	ErrBadFolderName = errors.New("media: folder names must be 1-60 characters")
+	// ErrBadFolderKind is returned for a kind that isn't image, file, or
+	// video.
+	ErrBadFolderKind = errors.New("media: unknown folder kind")
 )
 
-// Folders returns all folders with their item counts, sorted by name.
+// Folders returns all folders — every kind — with their item counts,
+// sorted by name. Callers filter to the kind they present.
 func (m *Manager) Folders(ctx context.Context) ([]Folder, error) {
 	rows, err := m.db.Query(ctx, `
-		SELECT f.id, f.name, count(md.id)
+		SELECT f.id, f.kind, f.name, count(md.id)
 		FROM cms_media_folders f
 		LEFT JOIN cms_media md ON md.folder_id = f.id
-		GROUP BY f.id, f.name
+		GROUP BY f.id, f.kind, f.name
 		ORDER BY f.name`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Folder, error) {
 		var f Folder
-		err := row.Scan(&f.ID, &f.Name, &f.Count)
+		err := row.Scan(&f.ID, &f.Kind, &f.Name, &f.Count)
 		return f, err
 	})
 }
 
-// CreateFolder makes a new folder and returns it.
-func (m *Manager) CreateFolder(ctx context.Context, name string) (*Folder, error) {
+// CreateFolder makes a new folder of the given kind and returns it.
+func (m *Manager) CreateFolder(ctx context.Context, name string, kind Kind) (*Folder, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 60 {
 		return nil, ErrBadFolderName
 	}
-	f := &Folder{Name: name}
+	switch kind {
+	case KindImage, KindFile, KindVideo:
+	default:
+		return nil, ErrBadFolderKind
+	}
+	f := &Folder{Name: name, Kind: kind}
 	err := m.db.QueryRow(ctx,
-		"INSERT INTO cms_media_folders (name) VALUES ($1) RETURNING id", name,
+		"INSERT INTO cms_media_folders (name, kind) VALUES ($1, $2) RETURNING id", name, kind,
 	).Scan(&f.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return nil, ErrDuplicateFolder

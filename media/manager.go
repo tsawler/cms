@@ -279,6 +279,19 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		}
 	}
 
+	// Folders hold one kind only. An upload aimed at a folder of another
+	// kind — e.g. a PDF uploaded while browsing an image folder, which
+	// preselects it — lands unfiled instead, where it stays visible. A
+	// folder deleted mid-upload is handled the same way.
+	if md.FolderID != nil {
+		var folderKind Kind
+		err := m.db.QueryRow(ctx,
+			"SELECT kind FROM cms_media_folders WHERE id = $1", *md.FolderID).Scan(&folderKind)
+		if err != nil || folderKind != md.Kind {
+			md.FolderID = nil
+		}
+	}
+
 	err = m.db.QueryRow(ctx, `
 		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)

@@ -3210,7 +3210,7 @@
     renderItems(lastItems);
   }
   function loadFolders() {
-    api("/media/folders", { method: "GET" }).then(function(body) {
+    api("/media/folders?kind=" + pickerKind, { method: "GET" }).then(function(body) {
       renderFolders(body.folders || []);
     }).catch(function() {
       renderFolders([]);
@@ -3251,7 +3251,7 @@
         api("/media/folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name })
+          body: JSON.stringify({ name, kind: pickerKind })
         }).then(function(body) {
           pickerFolder = String(body.folder.id);
           loadFolders();

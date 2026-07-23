@@ -74,7 +74,7 @@ func TestFrStringsWellFormed(t *testing.T) {
 	// Terms French keeps as-is (or that are identical by design).
 	identical := map[string]bool{
 		"Pages": true, "Description": true, "Date": true, "Type": true,
-		"Documents": true, "admin": true, "superadmin": true,
+		"Documents": true, "Images": true, "admin": true, "superadmin": true,
 	}
 	for k, v := range frStrings {
 		if strings.TrimSpace(k) == "" {

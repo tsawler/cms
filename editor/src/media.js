@@ -58,7 +58,8 @@ function setView(v) {
 }
 
 function loadFolders() {
-    api("/media/folders", { method: "GET" }).then(function (body) {
+    // Folders are per-kind: the image picker sees only image folders.
+    api("/media/folders?kind=" + pickerKind, { method: "GET" }).then(function (body) {
         renderFolders(body.folders || []);
     }).catch(function () {
         renderFolders([]);
@@ -99,7 +100,7 @@ function renderFolders(folders) {
             api("/media/folders", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name }),
+                body: JSON.stringify({ name: name, kind: pickerKind }),
             }).then(function (body) {
                 pickerFolder = String(body.folder.id);
                 loadFolders();
