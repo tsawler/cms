@@ -537,6 +537,30 @@ dropdown parents (whose own `URL` is empty):
 Hand-rolled navs render the same data but aren't right-click editable —
 the in-place menu editor only attaches to `cmsNav` markup.
 
+## Site settings: brand & menu alignment
+
+The wrench menu's **Site settings** entry lets editors set the site
+name, an optional logo, and the nav's alignment without touching
+templates. Put `{{cmsBrand "Fallback Name"}}` where your header shows
+the brand (typically inside your logo link):
+
+```html
+<a href="/">{{cmsBrand "Example Site"}}</a>
+```
+
+It renders a `span.cms-brand` holding the stored logo
+(`img.cms-brand-logo`, sized to `1.6em` unless your CSS says otherwise)
+and/or the stored site name (`span.cms-brand-text`). Save a logo and
+clear the name for a logo-only brand; the fallback argument shows until
+either is set. Saves are live immediately — like menus, there is no
+draft state.
+
+Menu alignment (left / center / right) adds a `cms-nav-left` /
+`cms-nav-center` / `cms-nav-right` class to `cmsNav` markup, which makes
+the nav grow (`flex:1`) inside your header's flexbox and justifies the
+items within it. "Theme default" adds no class and leaves your layout
+alone.
+
 ## Custom admin pages
 
 Deployments often need admin pages the CMS doesn't ship — reports,

@@ -399,6 +399,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		menuItems = nil
 	}
 	menus := render.BuildMenus(menuItems, page.Slug, locale, s.deps.DefaultLocale, true)
+	site, _ := s.deps.Content.SiteSettings(r.Context()) // preview renders fine with defaults
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.deps.Renderer.Render(w, render.Input{
 		Page:    page,
@@ -406,6 +407,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		Locale:  locale,
 		Menus:   menus,
 		Locales: s.deps.Locales,
+		Site:    site,
 	}); err != nil {
 		s.serverError(w, err)
 	}

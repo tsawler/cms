@@ -204,6 +204,7 @@ var stubFuncs = template.FuncMap{
 	"cmsSections": func(string) template.HTML { return "" },
 	"cmsMenu":     func(string) []MenuEntry { return nil },
 	"cmsNav":      func(string) template.HTML { return "" },
+	"cmsBrand":    func(...string) template.HTML { return "" },
 	"cmsHead":     func() template.HTML { return "" },
 	"cmsScripts":  func() template.HTML { return "" },
 	"cmsPosts":    func(string, int) []PostInfo { return nil },
@@ -511,6 +512,9 @@ type Input struct {
 	// BaseURL ("scheme://host", no trailing slash) makes hreflang
 	// alternate links absolute; empty omits them.
 	BaseURL string
+	// Site is the stored site-wide settings ({{cmsBrand}}, nav
+	// alignment). The zero value means "all defaults".
+	Site content.SiteSettings
 }
 
 // LocaleLink is one entry {{cmsLocales}} returns: the current page's URL
@@ -577,7 +581,8 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			return template.HTML(sb.String())
 		},
 		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
-		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], edit != nil) },
+		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil) },
+		"cmsBrand":   func(fallback ...string) template.HTML { return brandHTML(in.Site, fallback) },
 		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
 		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
 		"cmsPosts": func(feed string, limit int) []PostInfo {
@@ -818,9 +823,14 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
 // client-side after a menu save (editor/src/menu.js) — keep the two in
 // sync.
-func navHTML(key string, entries []MenuEntry, edit bool) template.HTML {
+func navHTML(key string, entries []MenuEntry, align string, edit bool) template.HTML {
+	cls := "cms-nav"
+	switch align {
+	case "left", "center", "right":
+		cls += " cms-nav-" + align
+	}
 	var sb strings.Builder
-	sb.WriteString(`<nav class="cms-nav" data-cms-menu="`)
+	sb.WriteString(`<nav class="` + cls + `" data-cms-menu="`)
 	sb.WriteString(html.EscapeString(key))
 	sb.WriteString(`"><button type="button" class="cms-nav-burger" aria-expanded="false" aria-label="Menu">`)
 	sb.WriteString(`<span class="cms-nav-burger-bar" aria-hidden="true"></span></button>`)
@@ -865,6 +875,42 @@ func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
 	sb.WriteString(`>` + html.EscapeString(e.Label) + `</a></li>`)
 }
 
+// brandHTML renders {{cmsBrand}}: the stored site logo and/or site name
+// inside a span.cms-brand the host styles and the editor's site-settings
+// dialog updates in place after a save. The optional fallback argument
+// shows until a name or logo has been saved; it rides along in a data
+// attribute so the editor can restore it when both are cleared.
+func brandHTML(site content.SiteSettings, fallback []string) template.HTML {
+	name := site.SiteName
+	logo := ValidBackgroundURL(site.LogoURL)
+	def := ""
+	if len(fallback) > 0 {
+		def = fallback[0]
+	}
+	if name == "" && logo == "" {
+		name = def
+	}
+	var sb strings.Builder
+	sb.WriteString(`<span class="cms-brand"`)
+	if def != "" {
+		sb.WriteString(` data-cms-default="` + html.EscapeString(def) + `"`)
+	}
+	sb.WriteString(`>`)
+	if logo != "" {
+		alt := name
+		if alt == "" {
+			alt = def
+		}
+		sb.WriteString(`<img class="cms-brand-logo" src="` + html.EscapeString(logo) +
+			`" alt="` + html.EscapeString(alt) + `">`)
+	}
+	if name != "" {
+		sb.WriteString(`<span class="cms-brand-text">` + html.EscapeString(name) + `</span>`)
+	}
+	sb.WriteString(`</span>`)
+	return template.HTML(sb.String())
+}
+
 // navCSS is the functional minimum for cmsNav markup: horizontal list,
 // hidden dropdown panels shown on .cms-open, a neutral panel look, and
 // — under 768px — a hamburger toggle (.cms-nav-burger, hidden on
@@ -872,6 +918,21 @@ func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
 // nav. Everything is plain classes the host stylesheet can override.
 const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
 	`.cms-nav-list{display:flex;flex-wrap:wrap;align-items:center;gap:.25em 1.25em}` +
+	// Alignment classes from the site settings. flex-grow makes the nav
+	// claim the free space in the host's header flexbox so the list has
+	// room to justify within; without a class nothing changes and the
+	// host layout stays in charge. The margins align the mobile burger
+	// the same way (it is the nav's only visible block child then).
+	`.cms-nav-left,.cms-nav-center,.cms-nav-right{flex:1 1 auto}` +
+	`.cms-nav-center .cms-nav-list{justify-content:center}` +
+	`.cms-nav-right .cms-nav-list{justify-content:flex-end}` +
+	`.cms-nav-center .cms-nav-burger{margin-left:auto;margin-right:auto}` +
+	`.cms-nav-right .cms-nav-burger{margin-left:auto}` +
+	// The brand emitted by {{cmsBrand}}: logo and text sit on one line;
+	// the logo scales to the surrounding text size unless the host
+	// styles .cms-brand-logo itself.
+	`.cms-brand{display:inline-flex;align-items:center;gap:.5em}` +
+	`.cms-brand-logo{height:1.6em;width:auto}` +
 	`.cms-nav-item{position:relative}` +
 	`button.cms-nav-toggle{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}` +
 	`.cms-nav-caret::before{content:'';display:inline-block;margin-left:.4em;vertical-align:.15em;` +

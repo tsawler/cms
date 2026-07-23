@@ -10,7 +10,7 @@
 <body class="bg-white text-slate-800 antialiased">
 <header class="relative border-b border-slate-200">
     <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between gap-6">
-        <a href="{{if eq .Locale "fr"}}/fr{{else}}/{{end}}" class="text-lg font-bold tracking-tight">Example&nbsp;Site</a>
+        <a href="{{if eq .Locale "fr"}}/fr{{else}}/{{end}}" class="text-lg font-bold tracking-tight">{{cmsBrand "Example Site"}}</a>
         {{cmsNav "main"}}
         {{with cmsLocales}}
         <span class="flex gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">

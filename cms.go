@@ -508,6 +508,12 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 	menus := render.BuildMenus(menuItems, page.Slug, locale, c.cfg.Locales[0], editing)
 
+	site, err := c.content.SiteSettings(r.Context())
+	if err != nil {
+		// Like menus: settings failing shouldn't take the page down.
+		c.cfg.Logger.Error("cms: loading site settings", "err", err)
+	}
+
 	// When the page backs a blog/news post, hand the template its .Post.
 	var post *render.PostInfo
 	if c.postsEnabled() && (strings.HasPrefix(slug, "blog/") || strings.HasPrefix(slug, "news/")) {
@@ -566,6 +572,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		Posts:   c.postLister(r.Context(), locale, editing),
 		Locales: c.cfg.Locales,
 		BaseURL: siteBaseURL(r),
+		Site:    site,
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)

@@ -168,6 +168,8 @@ func New(d Deps) http.Handler {
 			r.Delete("/api/pages/{id}", s.apiDeletePage)
 			r.Get("/api/menu", s.apiGetMenu)
 			r.Put("/api/menu", s.apiSaveMenu)
+			r.Get("/api/settings", s.apiGetSettings)
+			r.Put("/api/settings", s.apiSaveSettings)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)

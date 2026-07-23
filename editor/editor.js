@@ -2035,6 +2035,86 @@
     });
   }
 
+  // ../src/settings.js
+  var ALIGNS = ["left", "center", "right"];
+  function applySettings(s) {
+    document.querySelectorAll("nav[data-cms-menu]").forEach(function(nav) {
+      ALIGNS.forEach(function(a) {
+        nav.classList.remove("cms-nav-" + a);
+      });
+      if (ALIGNS.indexOf(s.menuAlign) !== -1) nav.classList.add("cms-nav-" + s.menuAlign);
+    });
+    document.querySelectorAll(".cms-brand").forEach(function(el) {
+      el.textContent = "";
+      var name = s.siteName || (s.logoUrl ? "" : el.dataset.cmsDefault || "");
+      if (s.logoUrl) {
+        var img = document.createElement("img");
+        img.className = "cms-brand-logo";
+        img.src = s.logoUrl;
+        img.alt = name || el.dataset.cmsDefault || "";
+        el.appendChild(img);
+      }
+      if (name) {
+        var txt = document.createElement("span");
+        txt.className = "cms-brand-text";
+        txt.textContent = name;
+        el.appendChild(txt);
+      }
+    });
+  }
+  function openSiteSettings() {
+    api("/settings").then(function(s) {
+      var fields = [
+        {
+          id: "siteName",
+          label: "Site name",
+          type: "text",
+          value: s.siteName,
+          placeholder: "Shown where the template places the brand"
+        }
+      ];
+      if (mediaEnabled) {
+        fields.push({ id: "logo", label: "Logo", type: "image", value: s.logoUrl });
+      }
+      fields.push({
+        id: "menuAlign",
+        label: "Menu alignment",
+        type: "select",
+        value: s.menuAlign,
+        options: [
+          { value: "", label: "Theme default" },
+          { value: "left", label: "Left" },
+          { value: "center", label: "Center" },
+          { value: "right", label: "Right" }
+        ]
+      });
+      openDialog({
+        message: "Site settings",
+        okLabel: "Save",
+        fields
+      }).then(function(values) {
+        if (!values) return;
+        var next = {
+          menuAlign: values.menuAlign,
+          siteName: values.siteName.trim(),
+          logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || ""
+        };
+        api("/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next)
+        }).then(function() {
+          applySettings(next);
+          flash("Site settings saved.");
+        }).catch(function(err) {
+          setMsg(err.message);
+        });
+      });
+    }).catch(function(err) {
+      setMsg(err.message);
+    });
+  }
+
   // ../src/admintools.js
   var WRENCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>';
   function logout() {
@@ -2085,6 +2165,7 @@
       }));
     }
     if (menu.children.length) menu.appendChild(document.createElement("hr"));
+    menu.appendChild(item(tools, "Site settings", openSiteSettings));
     var admin = document.createElement("a");
     admin.href = adminPath + "/";
     admin.textContent = "Admin panel";

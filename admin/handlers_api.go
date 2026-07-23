@@ -348,6 +348,65 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// apiGetSettings returns the site-wide settings for the editor's
+// site-settings dialog.
+// GET /api/settings
+func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
+	site, err := s.deps.Content.SiteSettings(r.Context())
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api loading site settings", "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the site settings."))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"menuAlign": site.MenuAlign,
+		"siteName":  site.SiteName,
+		"logoUrl":   site.LogoURL,
+	})
+}
+
+// apiSaveSettings stores the site-wide settings. Like menus they have no
+// draft state: the change is live immediately.
+// PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl"}
+func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MenuAlign string `json:"menuAlign"`
+		SiteName  string `json:"siteName"`
+		LogoURL   string `json:"logoUrl"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
+		return
+	}
+	switch body.MenuAlign {
+	case "", "left", "center", "right":
+	default:
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Unknown menu alignment."))
+		return
+	}
+	name := strings.TrimSpace(body.SiteName)
+	if len(name) > 200 {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site name is too long."))
+		return
+	}
+	logo := strings.TrimSpace(body.LogoURL)
+	if !validImageURL(logo) {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The logo needs to be an uploaded image or a web address."))
+		return
+	}
+	if err := s.deps.Content.SaveSiteSettings(r.Context(), content.SiteSettings{
+		MenuAlign: body.MenuAlign,
+		SiteName:  name,
+		LogoURL:   logo,
+	}); err != nil {
+		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // apiDeletePage removes a page and all of its content. The home page
 // (empty slug) is not deletable — a site must always answer at /.
 // DELETE /api/pages/{id}
