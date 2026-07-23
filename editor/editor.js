@@ -231,8 +231,8 @@
             icon: "image",
             tooltip: "Insert image",
             onAction: function() {
-              openPicker("image", function(item) {
-                ed.insertContent('<img src="' + escapeAttr(item.web) + '" alt="' + escapeAttr(item.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr(item.web) + '" data-cms-orig="' + escapeAttr(item.original) + '">');
+              openPicker("image", function(item2) {
+                ed.insertContent('<img src="' + escapeAttr(item2.web) + '" alt="' + escapeAttr(item2.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr(item2.web) + '" data-cms-orig="' + escapeAttr(item2.original) + '">');
                 onDirty();
               });
             }
@@ -241,8 +241,8 @@
             icon: "embed",
             tooltip: "Insert video",
             onAction: function() {
-              openPicker("video", function(item) {
-                ed.insertContent('<video controls preload="metadata" src="' + escapeAttr(item.original) + '"' + (item.poster ? ' poster="' + escapeAttr(item.poster) + '"' : "") + "></video>");
+              openPicker("video", function(item2) {
+                ed.insertContent('<video controls preload="metadata" src="' + escapeAttr(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr(item2.poster) + '"' : "") + "></video>");
                 onDirty();
               });
             }
@@ -255,13 +255,13 @@
             icon: "cms-paperclip",
             tooltip: "Link to a document",
             onAction: function() {
-              openPicker("file", function(item) {
-                var url = item.original;
+              openPicker("file", function(item2) {
+                var url = item2.original;
                 var selected = ed.selection.getContent({ format: "text" });
                 if (selected && selected.trim() !== "") {
                   ed.execCommand("mceInsertLink", false, url);
                 } else {
-                  ed.insertContent('<a href="' + escapeAttr(url) + '">' + escapeText(item.filename) + "</a>");
+                  ed.insertContent('<a href="' + escapeAttr(url) + '">' + escapeText(item2.filename) + "</a>");
                 }
                 onDirty();
               });
@@ -1088,89 +1088,94 @@
       openDrawer();
     });
     $("rail-page").hidden = pageTemplates.length === 0;
-    $("rail-page").addEventListener("click", function() {
-      if (!pageTemplates.length) return;
-      openDialog({
-        message: "Create a new page",
-        prompt: true,
-        placeholder: "Page name",
-        required: "Give the page a name.",
-        okLabel: "Create page",
-        selects: [{
-          id: "template",
-          label: "Page type",
-          value: pageTemplates[0].file,
-          options: pageTemplates.map(function(t) {
-            return { value: t.file, label: t.label };
-          })
-        }]
-      }).then(function(values) {
-        if (!values || !values.input) return;
-        setMsg("Creating page\u2026");
-        api("/pages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: values.input, template: values.template })
-        }).then(function(body) {
-          window.location.href = body.url;
-        }).catch(function(err) {
-          setMsg(err.message);
-        });
-      });
-    });
+    $("rail-page").addEventListener("click", newPageDialog);
     $("rail-post").hidden = !postsEnabled;
     $("rail-post").addEventListener("click", function() {
-      var fields = [
-        {
-          id: "feed",
-          label: "Publish under",
-          type: "select",
-          value: "blog",
-          options: [
-            { value: "blog", label: "Blog" },
-            { value: "news", label: "News" }
-          ]
-        },
-        {
-          id: "summary",
-          label: "Summary",
-          type: "text",
-          placeholder: "Shown in listings and feeds (optional)"
-        },
-        { id: "date", label: "Date", type: "datetime", value: datetimeNow() }
-      ];
-      if (mediaEnabled) {
-        fields.push({ id: "image", label: "Image", type: "image", value: "" });
-      }
-      openDialog({
-        message: "Create a new post",
-        prompt: true,
-        placeholder: "Post title",
-        required: "Give the post a title.",
-        okLabel: "Create post",
-        fields
-      }).then(function(values) {
-        if (!values || !values.input) return;
-        setMsg("Creating post\u2026");
-        api("/posts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: values.input,
-            feed: values.feed,
-            summary: values.summary || "",
-            published_at: values.date || "",
-            header_url: values.image || "",
-            thumbnail_url: values.image_thumb || ""
-          })
-        }).then(function(body) {
-          window.location.href = body.url;
-        }).catch(function(err) {
-          setMsg(err.message);
-        });
-      });
+      newPostDialog("blog");
     });
     $("drawer-close").addEventListener("click", closeDrawer);
+  }
+  function newPageDialog() {
+    if (!pageTemplates.length) return;
+    openDialog({
+      message: "Create a new page",
+      prompt: true,
+      placeholder: "Page name",
+      required: "Give the page a name.",
+      okLabel: "Create page",
+      selects: [{
+        id: "template",
+        label: "Page type",
+        value: pageTemplates[0].file,
+        options: pageTemplates.map(function(t) {
+          return { value: t.file, label: t.label };
+        })
+      }]
+    }).then(function(values) {
+      if (!values || !values.input) return;
+      setMsg("Creating page\u2026");
+      api("/pages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: values.input, template: values.template })
+      }).then(function(body) {
+        window.location.href = body.url;
+      }).catch(function(err) {
+        setMsg(err.message);
+      });
+    });
+  }
+  function newPostDialog(feed) {
+    if (!postsEnabled) return;
+    var fields = [
+      {
+        id: "feed",
+        label: "Publish under",
+        type: "select",
+        value: feed === "news" ? "news" : "blog",
+        options: [
+          { value: "blog", label: "Blog" },
+          { value: "news", label: "News" }
+        ]
+      },
+      {
+        id: "summary",
+        label: "Summary",
+        type: "text",
+        placeholder: "Shown in listings and feeds (optional)"
+      },
+      { id: "date", label: "Date", type: "datetime", value: datetimeNow() }
+    ];
+    if (mediaEnabled) {
+      fields.push({ id: "image", label: "Image", type: "image", value: "" });
+    }
+    openDialog({
+      message: "Create a new post",
+      prompt: true,
+      placeholder: "Post title",
+      required: "Give the post a title.",
+      okLabel: "Create post",
+      fields
+    }).then(function(values) {
+      if (!values || !values.input) return;
+      setMsg("Creating post\u2026");
+      api("/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: values.input,
+          feed: values.feed,
+          summary: values.summary || "",
+          published_at: values.date || "",
+          header_url: values.image || "",
+          thumbnail_url: values.image_thumb || ""
+        })
+      }).then(function(body) {
+        window.location.href = body.url;
+      }).catch(function(err) {
+        setMsg(err.message);
+      });
+    });
   }
 
   // ../src/videos.js
@@ -1213,8 +1218,8 @@
     else if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
   }
   function fillFromLibrary(el) {
-    openPicker("video", function(item) {
-      replaceEl(el, '<video controls preload="metadata" class="w-full rounded-lg" src="' + escapeAttr2(item.original) + '"' + (item.poster ? ' poster="' + escapeAttr2(item.poster) + '"' : "") + "></video>");
+    openPicker("video", function(item2) {
+      replaceEl(el, '<video controls preload="metadata" class="w-full rounded-lg" src="' + escapeAttr2(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr2(item2.poster) + '"' : "") + "></video>");
     });
   }
   function fillFromURL(el) {
@@ -2014,10 +2019,10 @@
       e.preventDefault();
       e.stopPropagation();
       var name = img.getAttribute("data-cms-image");
-      openPicker("image", function(item) {
-        img.src = item.web;
-        if (item.alt) img.alt = item.alt;
-        state.imageValues[name] = item.web;
+      openPicker("image", function(item2) {
+        img.src = item2.web;
+        if (item2.alt) img.alt = item2.alt;
+        state.imageValues[name] = item2.web;
         markDirty(name);
       });
     }, true);
@@ -2027,6 +2032,98 @@
         e.returnValue = "";
       }
     });
+  }
+
+  // ../src/admintools.js
+  var WRENCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>';
+  function logout() {
+    var form = document.createElement("form");
+    form.method = "post";
+    form.action = adminPath + "/logout";
+    var token = document.createElement("input");
+    token.type = "hidden";
+    token.name = "csrf_token";
+    token.value = csrf;
+    form.appendChild(token);
+    document.body.appendChild(form);
+    form.submit();
+  }
+  function item(tools, label, onClick) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", function() {
+      tools.classList.remove("cms-open");
+      onClick();
+    });
+    return b;
+  }
+  function initAdminTools() {
+    var tools = document.createElement("div");
+    tools.id = "cms-admin-tools";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "cms-admin-tools-btn";
+    btn.title = "Admin tools";
+    btn.setAttribute("aria-label", "Admin tools");
+    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-expanded", "false");
+    btn.innerHTML = WRENCH;
+    tools.appendChild(btn);
+    var menu = document.createElement("div");
+    menu.className = "cms-admin-menu";
+    if (pageTemplates.length) {
+      menu.appendChild(item(tools, "Add page", newPageDialog));
+    }
+    if (postsEnabled) {
+      menu.appendChild(item(tools, "Add news item", function() {
+        newPostDialog("news");
+      }));
+      menu.appendChild(item(tools, "Add blog post", function() {
+        newPostDialog("blog");
+      }));
+    }
+    if (menu.children.length) menu.appendChild(document.createElement("hr"));
+    var admin = document.createElement("a");
+    admin.href = adminPath + "/";
+    admin.textContent = "Admin panel";
+    menu.appendChild(admin);
+    menu.appendChild(item(tools, "Log out", logout));
+    tools.appendChild(menu);
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      var open = !tools.classList.contains("cms-open");
+      tools.classList.toggle(
+        "cms-align-right",
+        tools.getBoundingClientRect().left + 200 > window.innerWidth
+      );
+      tools.classList.toggle("cms-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    var close = function() {
+      tools.classList.remove("cms-open");
+      btn.setAttribute("aria-expanded", "false");
+    };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") close();
+    });
+    holder = document.createElement("li");
+    holder.className = "cms-admin-li";
+    holder.appendChild(tools);
+    mountAdminTools();
+  }
+  var holder = null;
+  function mountAdminTools() {
+    if (!holder) return;
+    var list = document.querySelector("nav[data-cms-menu] .cms-nav-list");
+    if (list) {
+      list.appendChild(holder);
+    } else if (!holder.parentNode) {
+      holder.firstChild.classList.add("cms-fixed");
+      document.body.appendChild(holder.firstChild);
+      holder = null;
+    }
   }
 
   // ../src/menu.js
@@ -2050,11 +2147,11 @@
       };
     });
   }
-  function labelOf(item) {
-    if (cfg.locale !== defaultLocale && item.labels && item.labels[cfg.locale]) {
-      return item.labels[cfg.locale];
+  function labelOf(item2) {
+    if (cfg.locale !== defaultLocale && item2.labels && item2.labels[cfg.locale]) {
+      return item2.labels[cfg.locale];
     }
-    return item.label;
+    return item2.label;
   }
   function loadData() {
     if (loadPromise) return loadPromise;
@@ -2118,26 +2215,26 @@
     }
     return null;
   }
-  function itemURL(item) {
-    if (item.pageId) {
-      var p = pageById(item.pageId);
+  function itemURL(item2) {
+    if (item2.pageId) {
+      var p = pageById(item2.pageId);
       if (!p) return null;
       var prefix = cfg.locale !== defaultLocale ? "/" + cfg.locale : "";
       return p.slug ? prefix + "/" + p.slug : prefix || "/";
     }
-    return item.url || null;
+    return item2.url || null;
   }
-  function itemLI(item, top) {
+  function itemLI(item2, top) {
     var li = document.createElement("li");
     li.className = "cms-nav-item";
-    if (item.dropdown && top) {
+    if (item2.dropdown && top) {
       li.className += " cms-nav-drop";
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "cms-nav-link cms-nav-toggle";
       btn.setAttribute("aria-expanded", "false");
       btn.setAttribute("aria-haspopup", "true");
-      btn.textContent = labelOf(item);
+      btn.textContent = labelOf(item2);
       var caret = document.createElement("span");
       caret.className = "cms-nav-caret";
       caret.setAttribute("aria-hidden", "true");
@@ -2145,7 +2242,7 @@
       li.appendChild(btn);
       var sub = document.createElement("ul");
       sub.className = "cms-nav-sub";
-      item.children.forEach(function(c) {
+      item2.children.forEach(function(c) {
         sub.appendChild(itemLI(c, false));
       });
       if (state.editing) sub.appendChild(addChip());
@@ -2154,18 +2251,18 @@
     }
     var a = document.createElement("a");
     a.className = "cms-nav-link";
-    var url = itemURL(item);
+    var url = itemURL(item2);
     a.href = url || "#";
     if (state.editing) a.draggable = false;
     if (url && url.indexOf("http") !== 0 && url === window.location.pathname) {
       a.className += " cms-active";
       a.setAttribute("aria-current", "page");
     }
-    if (item.newTab) {
+    if (item2.newTab) {
       a.target = "_blank";
       a.rel = "noopener";
     }
-    a.textContent = labelOf(item);
+    a.textContent = labelOf(item2);
     li.appendChild(a);
     return li;
   }
@@ -2204,13 +2301,14 @@
     burger.appendChild(bar);
     var ul = document.createElement("ul");
     ul.className = "cms-nav-list";
-    menus[key].forEach(function(item) {
-      ul.appendChild(itemLI(item, true));
+    menus[key].forEach(function(item2) {
+      ul.appendChild(itemLI(item2, true));
     });
     if (state.editing) ul.appendChild(addChip());
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);
+    mountAdminTools();
     openIdx.forEach(function(i) {
       var li = ul.children[i];
       if (li && li.classList.contains("cms-nav-drop")) openDrop(li);
@@ -2295,7 +2393,7 @@
     list.hidden = false;
   }
   function openModal(key, path, parentPath) {
-    var item = path ? itemAt(key, path) : {
+    var item2 = path ? itemAt(key, path) : {
       label: "",
       pageId: 0,
       url: "",
@@ -2303,15 +2401,15 @@
       dropdown: false,
       children: []
     };
-    if (!item) return;
-    modal = { key, path, parentPath: parentPath || null, item };
+    if (!item2) return;
+    modal = { key, path, parentPath: parentPath || null, item: item2 };
     confirmDropLoss = false;
     $("mm-title").textContent = path ? "Menu item" : "New menu item";
-    $("mm-label").value = path ? labelOf(item) : "";
-    setKind(item.dropdown ? "dropdown" : item.url && !item.pageId ? "url" : "page");
-    comboSet(item.pageId);
-    $("mm-url").value = item.url;
-    $("mm-newtab").checked = item.newTab;
+    $("mm-label").value = path ? labelOf(item2) : "";
+    setKind(item2.dropdown ? "dropdown" : item2.url && !item2.pageId ? "url" : "page");
+    comboSet(item2.pageId);
+    $("mm-url").value = item2.url;
+    $("mm-newtab").checked = item2.newTab;
     $("mm-kind-drop-row").hidden = path ? path.length === 2 : !!parentPath;
     $("mm-remove").hidden = !path;
     mmError("");
@@ -2387,16 +2485,16 @@
   function hideIndicator() {
     if (indEl) indEl.style.display = "none";
   }
-  function makeGhost(li, item) {
+  function makeGhost(li, item2) {
     var g = document.createElement("div");
     g.id = "cms-nav-ghost";
     var label = document.createElement("span");
-    label.textContent = item ? labelOf(item) : (li.textContent || "").trim();
+    label.textContent = item2 ? labelOf(item2) : (li.textContent || "").trim();
     g.appendChild(label);
-    if (item && item.dropdown) {
+    if (item2 && item2.dropdown) {
       var sub = document.createElement("span");
       sub.className = "sub";
-      sub.textContent = "\u25BE " + item.children.length + (item.children.length === 1 ? " item" : " items");
+      sub.textContent = "\u25BE " + item2.children.length + (item2.children.length === 1 ? " item" : " items");
       g.appendChild(sub);
     }
     document.body.appendChild(g);
@@ -2506,12 +2604,12 @@
     showLineIndicator(list, tIdx, false);
   }
   function applyDrop(d) {
-    var item = itemAt(d.key, d.path);
-    if (!item) return;
+    var item2 = itemAt(d.key, d.path);
+    if (!item2) return;
     var before = JSON.stringify(menus[d.key]);
     removeAt(d.key, d.path);
-    if (d.drop.parentItem) d.drop.parentItem.children.splice(d.drop.index, 0, item);
-    else menus[d.key].splice(d.drop.index, 0, item);
+    if (d.drop.parentItem) d.drop.parentItem.children.splice(d.drop.index, 0, item2);
+    else menus[d.key].splice(d.drop.index, 0, item2);
     if (JSON.stringify(menus[d.key]) === before) {
       renderAll();
       return;
@@ -3099,25 +3197,25 @@
       grid.appendChild(span);
     });
   }
-  function docBadge(item, forList) {
+  function docBadge(item2, forList) {
     var doc = document.createElement("div");
     doc.className = "doc";
-    doc.textContent = item.kind === "video" ? "\u{1F3AC}" : "\u{1F4C4}";
+    doc.textContent = item2.kind === "video" ? "\u{1F3AC}" : "\u{1F4C4}";
     if (!forList) {
       var ext = document.createElement("span");
-      ext.textContent = item.filename.split(".").pop();
+      ext.textContent = item2.filename.split(".").pop();
       doc.appendChild(ext);
     }
     return doc;
   }
-  function itemPreview(item, forList) {
-    if (item.thumb) {
+  function itemPreview(item2, forList) {
+    if (item2.thumb) {
       var img = document.createElement("img");
-      img.src = item.thumb;
-      img.alt = item.alt || "";
+      img.src = item2.thumb;
+      img.alt = item2.alt || "";
       return img;
     }
-    return docBadge(item, forList);
+    return docBadge(item2, forList);
   }
   function renderItems(items) {
     var grid = $("grid");
@@ -3126,35 +3224,35 @@
       grid.innerHTML = '<span class="empty">Nothing here \u2014 upload a file above, or pick another folder.</span>';
       return;
     }
-    items.forEach(function(item) {
+    items.forEach(function(item2) {
       var el;
       if (pickerView === "list") {
         el = document.createElement("div");
         el.className = "row";
-        el.appendChild(itemPreview(item, true));
+        el.appendChild(itemPreview(item2, true));
         var nm = document.createElement("span");
         nm.className = "nm";
-        nm.textContent = item.filename;
+        nm.textContent = item2.filename;
         var sz = document.createElement("span");
         sz.className = "sz";
-        sz.textContent = item.kind === "image" ? item.width + "\xD7" + item.height : item.size;
+        sz.textContent = item2.kind === "image" ? item2.width + "\xD7" + item2.height : item2.size;
         el.appendChild(nm);
         el.appendChild(sz);
       } else {
         el = document.createElement("figure");
-        el.appendChild(itemPreview(item, false));
+        el.appendChild(itemPreview(item2, false));
         var cap = document.createElement("figcaption");
-        cap.textContent = item.filename + (item.kind === "image" ? "" : " \xB7 " + item.size);
+        cap.textContent = item2.filename + (item2.kind === "image" ? "" : " \xB7 " + item2.size);
         el.appendChild(cap);
       }
       el.addEventListener("click", function() {
-        pick(item);
+        pick(item2);
       });
       grid.appendChild(el);
     });
   }
-  function pick(item) {
-    if (pickerHandler) pickerHandler(item);
+  function pick(item2) {
+    if (pickerHandler) pickerHandler(item2);
     closePicker();
   }
   function capturePoster(file) {
@@ -3498,9 +3596,9 @@
       clear.hidden = !v;
     }
     choose.addEventListener("click", function() {
-      openPicker("image", function(item) {
-        dlgValues[f.id] = item.web;
-        dlgValues[f.id + "_thumb"] = item.thumb || item.web;
+      openPicker("image", function(item2) {
+        dlgValues[f.id] = item2.web;
+        dlgValues[f.id + "_thumb"] = item2.thumb || item2.web;
         show();
         dlgChanged();
       });
@@ -4140,6 +4238,31 @@ border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
 .cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
 .cms-editing .cms-snippet:hover{outline-style:solid!important}
 
+/* Admin tools (admintools.js): a wrench button appended to the site
+ * nav's item list, so it spaces like one more menu item (pinned
+ * top-left on pages without a nav) with the everyday admin actions.
+ * Light DOM, so every rule is explicit \u2014 host CSS (Tailwind preflight
+ * etc.) must not restyle it. */
+.cms-admin-li{list-style:none;display:flex;align-items:center;margin:0;padding:0}
+#cms-admin-tools{position:relative;display:inline-flex;line-height:0}
+#cms-admin-tools.cms-fixed{position:fixed;top:12px;left:12px;z-index:2147482996}
+#cms-admin-tools-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
+padding:0;border:none;border-radius:50%;background:#1c2128;color:#fff;cursor:pointer;
+box-shadow:0 2px 8px rgba(0,0,0,.25)}
+#cms-admin-tools-btn:hover{background:#2a3140}
+#cms-admin-tools-btn svg{width:14px;height:14px;fill:currentColor}
+#cms-admin-tools .cms-admin-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:2147482997;
+display:none;flex-direction:column;background:#242a33;border-radius:12px;padding:6px;
+min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,.4);text-align:left}
+#cms-admin-tools.cms-open .cms-admin-menu{display:flex}
+#cms-admin-tools.cms-align-right .cms-admin-menu{left:auto;right:0}
+#cms-admin-tools .cms-admin-menu button,#cms-admin-tools .cms-admin-menu a{
+font:13px/1.4 system-ui,sans-serif;color:#fff;background:none;border:none;border-radius:8px;
+padding:8px 12px;margin:0;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
+#cms-admin-tools .cms-admin-menu button:hover,#cms-admin-tools .cms-admin-menu a:hover{
+background:rgba(255,255,255,.1);color:#fff}
+#cms-admin-tools .cms-admin-menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}
+
 /* Site menus ({{cmsNav}}): while editing, clicking an item (long-press
  * on touch) opens its settings and drag rearranges; "\uFF0B" chips add
  * items. A mouse click on a dropdown toggle edits the dropdown itself,
@@ -4501,4 +4624,5 @@ body.cms-editing [data-cms-fallback] {
   initSections();
   initMedia();
   initMenu();
+  initAdminTools();
 })();

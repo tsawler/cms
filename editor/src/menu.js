@@ -19,6 +19,7 @@ import { state, cfg, defaultLocale } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm } from "./dialogs.js";
+import { mountAdminTools } from "./admintools.js";
 
 var menus = null; // menu key -> [{label,pageId,url,newTab,dropdown,children}]
 var pages = null; // [{id, title, slug, status}]
@@ -221,6 +222,7 @@ function renderNav(nav) {
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);
+    mountAdminTools(); // the re-render dropped the admin-tools <li>
     openIdx.forEach(function (i) {
         var li = ul.children[i];
         if (li && li.classList.contains("cms-nav-drop")) openDrop(li);

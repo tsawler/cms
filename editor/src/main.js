@@ -29,6 +29,7 @@ import { initLocales } from "./locales.js";
 import { initSections } from "./sections.js";
 import { initMedia } from "./media.js";
 import { initMenu } from "./menu.js";
+import { initAdminTools } from "./admintools.js";
 
 initShell(); // shadow-DOM chrome first: everything else looks up $(...)
 initDialogs();
@@ -47,3 +48,4 @@ initLocales();
 initSections();
 initMedia();
 initMenu();
+initAdminTools(); // the wrench menu beside the site nav

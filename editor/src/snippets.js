@@ -195,85 +195,96 @@ export function initSnippets() {
         openDrawer();
     });
     $("rail-page").hidden = pageTemplates.length === 0;
-    $("rail-page").addEventListener("click", function () {
-        if (!pageTemplates.length) return;
-        openDialog({
-            message: "Create a new page",
-            prompt: true,
-            placeholder: "Page name",
-            required: "Give the page a name.",
-            okLabel: "Create page",
-            selects: [{
-                id: "template",
-                label: "Page type",
-                value: pageTemplates[0].file,
-                options: pageTemplates.map(function (t) { return { value: t.file, label: t.label }; }),
-            }],
-        }).then(function (values) {
-            if (!values || !values.input) return;
-            setMsg("Creating page…");
-            api("/pages", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: values.input, template: values.template }),
-            }).then(function (body) {
-                // The new page is a draft, so only editors see it —
-                // navigate straight into it to start writing.
-                window.location.href = body.url;
-            }).catch(function (err) { setMsg(err.message); });
-        });
-    });
+    $("rail-page").addEventListener("click", newPageDialog);
 
     $("rail-post").hidden = !postsEnabled;
-    $("rail-post").addEventListener("click", function () {
-        var fields = [
-            {
-                id: "feed",
-                label: "Publish under",
-                type: "select",
-                value: "blog",
-                options: [
-                    { value: "blog", label: "Blog" },
-                    { value: "news", label: "News" },
-                ],
-            },
-            { id: "summary", label: "Summary", type: "text",
-                placeholder: "Shown in listings and feeds (optional)" },
-            { id: "date", label: "Date", type: "datetime", value: datetimeNow() },
-        ];
-        if (mediaEnabled) {
-            // The chosen image becomes the header; its generated
-            // thumbnail rendition becomes the listing thumbnail.
-            fields.push({ id: "image", label: "Image", type: "image", value: "" });
-        }
-        openDialog({
-            message: "Create a new post",
-            prompt: true,
-            placeholder: "Post title",
-            required: "Give the post a title.",
-            okLabel: "Create post",
-            fields: fields,
-        }).then(function (values) {
-            if (!values || !values.input) return;
-            setMsg("Creating post…");
-            api("/posts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    title: values.input,
-                    feed: values.feed,
-                    summary: values.summary || "",
-                    published_at: values.date || "",
-                    header_url: values.image || "",
-                    thumbnail_url: values.image_thumb || "",
-                }),
-            }).then(function (body) {
-                // The new post is a draft, so only editors see it —
-                // navigate straight into it to start writing.
-                window.location.href = body.url;
-            }).catch(function (err) { setMsg(err.message); });
-        });
-    });
+    $("rail-post").addEventListener("click", function () { newPostDialog("blog"); });
 
     $("drawer-close").addEventListener("click", closeDrawer);
+}
+
+// newPageDialog collects a name and template for a new page, creates it,
+// and navigates into the draft. Shared by the tool rail and the admin
+// tools menu.
+export function newPageDialog() {
+    if (!pageTemplates.length) return;
+    openDialog({
+        message: "Create a new page",
+        prompt: true,
+        placeholder: "Page name",
+        required: "Give the page a name.",
+        okLabel: "Create page",
+        selects: [{
+            id: "template",
+            label: "Page type",
+            value: pageTemplates[0].file,
+            options: pageTemplates.map(function (t) { return { value: t.file, label: t.label }; }),
+        }],
+    }).then(function (values) {
+        if (!values || !values.input) return;
+        setMsg("Creating page…");
+        api("/pages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: values.input, template: values.template }),
+        }).then(function (body) {
+            // The new page is a draft, so only editors see it —
+            // navigate straight into it to start writing.
+            window.location.href = body.url;
+        }).catch(function (err) { setMsg(err.message); });
+    });
+}
+
+// newPostDialog collects the details for a new blog or news post with the
+// "Publish under" select preset to feed, creates it, and navigates into
+// the draft. Shared by the tool rail and the admin tools menu.
+export function newPostDialog(feed) {
+    if (!postsEnabled) return;
+    var fields = [
+        {
+            id: "feed",
+            label: "Publish under",
+            type: "select",
+            value: feed === "news" ? "news" : "blog",
+            options: [
+                { value: "blog", label: "Blog" },
+                { value: "news", label: "News" },
+            ],
+        },
+        { id: "summary", label: "Summary", type: "text",
+            placeholder: "Shown in listings and feeds (optional)" },
+        { id: "date", label: "Date", type: "datetime", value: datetimeNow() },
+    ];
+    if (mediaEnabled) {
+        // The chosen image becomes the header; its generated
+        // thumbnail rendition becomes the listing thumbnail.
+        fields.push({ id: "image", label: "Image", type: "image", value: "" });
+    }
+    openDialog({
+        message: "Create a new post",
+        prompt: true,
+        placeholder: "Post title",
+        required: "Give the post a title.",
+        okLabel: "Create post",
+        fields: fields,
+    }).then(function (values) {
+        if (!values || !values.input) return;
+        setMsg("Creating post…");
+        api("/posts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                title: values.input,
+                feed: values.feed,
+                summary: values.summary || "",
+                published_at: values.date || "",
+                header_url: values.image || "",
+                thumbnail_url: values.image_thumb || "",
+            }),
+        }).then(function (body) {
+            // The new post is a draft, so only editors see it —
+            // navigate straight into it to start writing.
+            window.location.href = body.url;
+        }).catch(function (err) { setMsg(err.message); });
+    });
 }
