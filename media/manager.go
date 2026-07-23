@@ -119,9 +119,12 @@ func (m *Manager) Upload(ctx context.Context, filename string, data []byte, uplo
 
 // UploadFrom validates and stores an upload, sniffing its leading bytes to
 // pick the pipeline. Images are buffered and stored untouched alongside
-// resized WebP web and thumb variants; whitelisted documents (PDF, office
-// formats, text/CSV, ZIP) are buffered and stored as-is; videos (MP4,
-// WebM) are streamed to the object store as uploaded — no transcoding.
+// resized WebP web and thumb variants; SVGs (selected by extension —
+// sniffing can't identify them) are validated as script-free and stored
+// as their own variants, since vectors need no resizing; whitelisted
+// documents (PDF, office formats, text/CSV, ZIP) are buffered and stored
+// as-is; videos (MP4, WebM) are streamed to the object store as uploaded
+// — no transcoding.
 // size is the upload's byte length (multipart.FileHeader.Size). poster
 // optionally carries a client-captured still image for videos, processed
 // into the same web/thumb variants images get; it is ignored for other
@@ -197,6 +200,35 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		}
 		if err := put(prefix+"/original"+ext, contentType, src); err != nil {
 			return nil, err
+		}
+	} else if isSVGFilename(filename) {
+		// SVG never sniffs as image/*; the extension selects the
+		// pipeline and processSVG requires a real, script-free SVG.
+		if size > MaxImageDocBytes {
+			return nil, ErrTooLarge
+		}
+		data, err := io.ReadAll(src)
+		if err != nil {
+			return nil, err
+		}
+		p, err := processSVG(data)
+		if err != nil {
+			return nil, err
+		}
+		md.Kind = KindImage
+		md.S3Key = prefix
+		md.Mime = svgContentType
+		md.Ext = p.Ext
+		md.VariantExt = p.VariantExt
+		md.Width, md.Height = p.Width, p.Height
+
+		if err := put(prefix+"/original"+p.Ext, svgContentType, bytes.NewReader(data)); err != nil {
+			return nil, err
+		}
+		for _, v := range p.Variants {
+			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
+				return nil, err
+			}
 		}
 	} else if strings.HasPrefix(sniffed, "image/") {
 		if size > MaxImageDocBytes {

@@ -653,6 +653,12 @@ func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	if strings.HasPrefix(contentType, "image/svg") {
+		// Viewed directly, an SVG is a document on this origin; block any
+		// scripting the upload-time scan might have missed. Inline styles
+		// stay allowed so the graphic still renders fully.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if length >= 0 {

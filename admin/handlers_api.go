@@ -714,7 +714,9 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, media.ErrTooLarge):
 			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
-		case errors.Is(err, media.ErrUnsupportedType):
+		case errors.Is(err, media.ErrUnsafeSVG):
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, unsafeSVGMsg))
+		case errors.Is(err, media.ErrUnsupportedType), strings.Contains(err.Error(), "parsing svg"):
 			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.deps.Logger.Error("cms admin: api media upload", "err", err)

@@ -26,7 +26,9 @@ func (s *server) uploadTooLargeMsg(r *http.Request) string {
 		media.MaxImageDocBytes>>20, s.deps.Media.MaxVideoBytes()>>20)
 }
 
-const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), video (MP4, WebM), PDF, office document, text/CSV, or ZIP."
+const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP."
+
+const unsafeSVGMsg = "That SVG can't be used — it contains scripts or other active content."
 
 func (s *server) mediaList(w http.ResponseWriter, r *http.Request) {
 	s.renderMediaList(w, r, http.StatusOK, "")
@@ -104,7 +106,10 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, media.ErrTooLarge):
 			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
-		case errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image"):
+		case errors.Is(err, media.ErrUnsafeSVG):
+			s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, unsafeSVGMsg))
+		case errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image") ||
+			strings.Contains(err.Error(), "parsing svg"):
 			s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.serverError(w, err)

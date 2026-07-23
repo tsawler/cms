@@ -344,7 +344,8 @@ var frStrings = map[string]string{
 
 	// Media handlers.
 	"That file is too large — images and documents must be under %d MB, videos under %d MB.":                                          "Ce fichier est trop volumineux — les images et documents doivent faire moins de %d Mo, les vidéos moins de %d Mo.",
-	"That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP), video (MP4, WebM), PDF, office document, text/CSV, or ZIP.": "Ce type de fichier n'est pas pris en charge. Utilisez une image (JPEG, PNG, GIF, WebP), une vidéo (MP4, WebM), un PDF, un document bureautique, du texte/CSV ou un ZIP.",
+	"That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP.": "Ce type de fichier n'est pas pris en charge. Utilisez une image (JPEG, PNG, GIF, WebP, SVG), une vidéo (MP4, WebM), un PDF, un document bureautique, du texte/CSV ou un ZIP.",
+	"That SVG can't be used — it contains scripts or other active content.":                                                                "Ce SVG ne peut pas être utilisé — il contient des scripts ou d'autres contenus actifs.",
 	"Choose a file to upload.": "Choisissez un fichier à téléverser.",
 	"Video uploaded.":          "Vidéo téléversée.",
 	"Document uploaded.":       "Document téléversé.",

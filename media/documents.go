@@ -15,8 +15,10 @@ type docType struct {
 }
 
 // docTypes is the whitelist of non-image uploads. Deliberately absent:
-// HTML, SVG, XML, JS — anything a browser would execute — because media is
-// served from the site's own origin when proxied.
+// HTML, XML, JS — anything a browser would execute — because media is
+// served from the site's own origin when proxied. SVG, equally
+// executable, is the one exception: it goes through the image pipeline,
+// which admits it only after a scripting-vector scan (see svg.go).
 var docTypes = map[string]docType{
 	".pdf":  {"application/pdf", []string{"application/pdf"}},
 	".doc":  {"application/msword", []string{"application/x-ole-storage", "application/octet-stream"}},

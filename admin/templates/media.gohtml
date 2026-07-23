@@ -10,7 +10,7 @@
 <form class="cms-upload" method="post" action="{{.AdminPath}}/media/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <div class="cms-upload-row">
-        <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,.mp4,.webm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
+        <input type="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,.svg,video/mp4,video/webm,.mp4,.webm,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.zip" required>
         <input type="text" name="alt" placeholder="{{.T "Description (alt text, for images)"}}">
         <select name="folder">
             <option value="">{{.T "No folder"}}</option>
@@ -51,7 +51,8 @@
         </a>
         <div class="cms-media-body">
             <p class="cms-media-name" title="{{.Filename}}">{{.Filename}}</p>
-            <p class="cms-muted cms-media-dims">{{.Width}}×{{.Height}}</p>
+            {{- /* SVGs may have no intrinsic size; skip the 0×0 */}}
+            <p class="cms-muted cms-media-dims">{{if .Width}}{{.Width}}×{{.Height}}{{else}}&nbsp;{{end}}</p>
             <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/alt" class="cms-media-alt">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                 <input type="text" name="alt" value="{{.Alt}}" placeholder="{{$.T "Description (alt text)"}}">

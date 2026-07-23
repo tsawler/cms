@@ -8,7 +8,8 @@ architecture and build plan.
 **Status: phase 6 (blog & news).** Auth, user management, page CRUD with
 draft/publish, public rendering through the host's own templates, the
 media library (any S3-compatible bucket, automatic image resizing,
-MP4/WebM video, folders and search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
+SVG with script-stripping validation, MP4/WebM video, folders and
+search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
 self-hosted), the curated Styles menu, the snippet palette, editor-composable
 sections, and blog & news posts (page-backed, edited in place, with RSS)
 are all working: log in, browse the site, click Edit, change text and
@@ -814,6 +815,15 @@ overwritten by the next build (and marked `linguist-generated`).
   host app.
 - `Migrate` is safe to run on every startup and from multiple instances
   concurrently.
+- SVG uploads are accepted as images (they act as their own web and
+  thumbnail renditions — no rasterizing). Because an SVG viewed directly
+  is a document that can run scripts, uploads are rejected unless they
+  are free of active content (`<script>`, `<foreignObject>`, `on*`
+  attributes, `javascript:`/non-image `data:` hrefs, DTD internal
+  subsets), and the media proxy serves `image/svg+xml` with a
+  script-blocking `Content-Security-Policy`. If you serve media straight
+  from a public bucket/CDN instead of the proxy, that header is in your
+  hands — configure it there if SVG uploads concern you.
 - Set `Config.SecureCookies = true` in production (HTTPS).
 - `Config.AdminPath` must match wherever you mount `Admin()`; it defaults
   to `/admin`.
