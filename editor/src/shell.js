@@ -53,6 +53,8 @@ export function initShell() {
         '<button id="discard" class="dngr" hidden>Discard draft…</button>' +
         '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
         '<hr id="menu-sep">' +
+        '<button id="dup-page" hidden>Duplicate page…</button>' +
+        '<button id="vis-btn" hidden>Make page private…</button>' +
         '<button id="code-btn" hidden>Page CSS &amp; JS…</button>' +
         '<a id="admin" href="#">Open admin</a>' +
         "</div></span>" +

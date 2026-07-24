@@ -19,8 +19,9 @@ type MenuItem struct {
 	NewTab   bool
 	ParentID *int64
 
-	PageSlug   *string // nil when the item is a literal URL
-	PageStatus *Status
+	PageSlug       *string // nil when the item is a literal URL
+	PageStatus     *Status
+	PageVisibility *Visibility
 }
 
 // LabelFor returns the item's label for locale, falling back to the
@@ -37,7 +38,7 @@ func (m MenuItem) LabelFor(locale string) string {
 func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) {
 	q := `
 		SELECT mi.id, mi.menu, mi.sort, mi.label, mi.labels, mi.page_id, mi.url, mi.new_tab, mi.parent_id,
-		       p.slug, p.status
+		       p.slug, p.status, p.visibility
 		FROM cms_menu_items mi
 		LEFT JOIN cms_pages p ON p.id = mi.page_id`
 	args := []any{}
@@ -53,7 +54,7 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (MenuItem, error) {
 		var m MenuItem
 		err := row.Scan(&m.ID, &m.Menu, &m.Sort, &m.Label, &m.Labels, &m.PageID, &m.URL, &m.NewTab,
-			&m.ParentID, &m.PageSlug, &m.PageStatus)
+			&m.ParentID, &m.PageSlug, &m.PageStatus, &m.PageVisibility)
 		return m, err
 	})
 }

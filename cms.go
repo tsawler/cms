@@ -488,6 +488,12 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		return
 	}
+	// Private pages are served only to logged-in users. A 404 rather than
+	// a 403, so anonymous visitors can't tell the page exists.
+	if page.Visibility == content.VisibilityPrivate && user == nil {
+		c.notFound(w)
+		return
+	}
 
 	blockStatus := content.StatusPublished
 	if editing {
@@ -549,6 +555,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			CSRFToken:      csrf,
 			Locale:         locale,
 			Status:         string(page.Status),
+			Visibility:     string(page.Visibility),
 			HasUnpublished: hasUnpublished,
 			MediaEnabled:   c.media != nil,
 			IsAdmin:        user.Role.IsAdmin(),

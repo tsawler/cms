@@ -382,6 +382,14 @@ func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]M
 	})
 }
 
+// Count returns how many media items exist across every kind — the number
+// the admin shows beside its Media nav entry.
+func (m *Manager) Count(ctx context.Context) (int, error) {
+	var n int
+	err := m.db.QueryRow(ctx, "SELECT count(*) FROM cms_media").Scan(&n)
+	return n, err
+}
+
 // UpdateAlt sets the alt text for one media record and locale.
 func (m *Manager) UpdateAlt(ctx context.Context, id int64, locale, alt string) error {
 	_, err := m.db.Exec(ctx, `

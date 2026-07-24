@@ -423,6 +423,12 @@ func (s *server) parsePageMeta(r *http.Request) (*content.Page, map[string]strin
 		Description:  strings.TrimSpace(r.PostFormValue("description")),
 		Slug:         content.NormalizeSlug(r.PostFormValue("slug")),
 		TemplateName: r.PostFormValue("template_name"),
+		Visibility:   content.Visibility(r.PostFormValue("visibility")),
+	}
+	// The form offers exactly two visibilities; anything else (including a
+	// missing field) falls back to the safe default.
+	if !content.ValidVisibility(string(p.Visibility)) {
+		p.Visibility = content.VisibilityPublic
 	}
 
 	if p.Title == "" {

@@ -20,9 +20,9 @@
     {{range .Pages}}
     <tr>
         <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">{{$.T "(untitled)"}}</span>{{end}}</td>
-        <td>/{{.Slug}}</td>
-        <td>{{$.TemplateLabel .TemplateName}}</td>
-        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">{{$.T "published"}}</span>{{else}}<span class="cms-badge">{{$.T "draft"}}</span>{{end}}</td>
+        <td class="cms-slug">/{{.Slug}}</td>
+        <td class="cms-muted">{{$.TemplateLabel .TemplateName}}</td>
+        <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">{{$.T "published"}}</span>{{else}}<span class="cms-badge cms-badge-draft">{{$.T "draft"}}</span>{{end}}{{if eq .Visibility "private"}} <span class="cms-badge">{{$.T "private"}}</span>{{end}}</td>
         <td class="cms-table-actions"><a href="{{$.AdminPath}}/pages/{{.ID}}">{{$.T "Edit"}}</a></td>
     </tr>
     {{else}}

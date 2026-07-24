@@ -46,14 +46,20 @@ func TestNavSectionsFor(t *testing.T) {
 		{Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: noopHandler},
 	}
 
-	editor := navSectionsFor(sections, "/admin", false)
+	editor := navSectionsFor(sections, "/admin", false, "/")
 	if len(editor) != 1 || editor[0].Label != "Reports" || editor[0].URL != "/admin/x/reports/" {
 		t.Errorf("editor nav = %+v, want only Reports at /admin/x/reports/", editor)
 	}
 
-	admin := navSectionsFor(sections, "/admin", true)
+	admin := navSectionsFor(sections, "/admin", true, "/")
 	if len(admin) != 2 || admin[1].Label != "Billing" || admin[1].URL != "/admin/x/billing/" {
 		t.Errorf("admin nav = %+v, want Reports then Billing", admin)
+	}
+
+	// Viewing a section marks its own link, and only its own, active.
+	viewing := navSectionsFor(sections, "/admin", true, "/x/billing/subpage")
+	if viewing[0].Active || !viewing[1].Active {
+		t.Errorf("active flags = %+v, want only Billing active", viewing)
 	}
 }
 
@@ -119,10 +125,11 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 	html := out.String()
 
 	for _, want := range []string{
-		`<p class="host">42 visits</p>`,           // body inserted unescaped
-		`<title>Reports — CMS</title>`,            // title block
-		`<a href="/admin/x/reports/">Reports</a>`, // nav link
-		`href="/admin/static/admin.css"`,          // standard chrome
+		`<p class="host">42 visits</p>`,  // body inserted unescaped
+		`<title>Reports — CMS</title>`,   // title block
+		`href="/admin/x/reports/"`,       // nav link target
+		`<span class="cms-nav-label">Reports</span>`, // nav link label
+		`href="/admin/static/admin.css"`, // standard chrome
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered page missing %q:\n%s", want, html)

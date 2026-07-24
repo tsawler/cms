@@ -77,6 +77,7 @@ try {
 
 export var state = {
     pageStatus: cfg.status || "draft",
+    visibility: cfg.visibility || "public",
     // True when a published page's saved draft differs from what's live.
     hasUnpublished: cfg.unpublished === "1",
 

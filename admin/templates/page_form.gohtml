@@ -59,6 +59,15 @@
         {{with index .FormErrors "template_name"}}<p class="cms-field-error">{{.}}</p>{{end}}
         {{if not .IsNew}}<p class="cms-hint">{{.T "Changing the template takes effect after saving; the content fields below will update to match."}}</p>{{end}}
     </div>
+
+    <div class="cms-field">
+        <label for="visibility">{{.T "Visibility"}}</label>
+        <select id="visibility" name="visibility">
+            <option value="public" {{if ne .FormPage.Visibility "private"}}selected{{end}}>{{.T "Public — anyone can view"}}</option>
+            <option value="private" {{if eq .FormPage.Visibility "private"}}selected{{end}}>{{.T "Private — only logged-in users can view"}}</option>
+        </select>
+        <p class="cms-hint">{{.T "Private pages stay hidden from visitors who aren't logged in, even when published."}}</p>
+    </div>
     {{end}}
 
     {{template "form_regions" .}}

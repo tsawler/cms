@@ -153,9 +153,11 @@ func TestBuildMenus(t *testing.T) {
 	pid := func(id int64) *int64 { return &id }
 	slug := func(s string) *string { return &s }
 	status := func(s content.Status) *content.Status { return &s }
+	private := content.VisibilityPrivate
 
 	items := []content.MenuItem{
 		{ID: 1, Menu: "main", Label: "Home", PageID: pid(1), PageSlug: slug(""), PageStatus: status(content.StatusPublished)},
+		{ID: 10, Menu: "main", Label: "Members", PageID: pid(5), PageSlug: slug("members"), PageStatus: status(content.StatusPublished), PageVisibility: &private},
 		{ID: 2, Menu: "main", Label: "About", PageID: pid(2), PageSlug: slug("about"), PageStatus: status(content.StatusPublished)},
 		{ID: 3, Menu: "main", Label: "Secret", PageID: pid(3), PageSlug: slug("secret"), PageStatus: status(content.StatusDraft)},
 		{ID: 4, Menu: "main", Label: "Docs", URL: "https://example.com/docs", NewTab: true},
@@ -167,8 +169,8 @@ func TestBuildMenus(t *testing.T) {
 		{ID: 9, Menu: "footer", Label: "Privacy", PageID: pid(4), PageSlug: slug("privacy"), PageStatus: status(content.StatusPublished)},
 	}
 
-	// Public render of /about: draft items dropped (top-level and inside
-	// the dropdown), the empty dropdown dropped, Active on About.
+	// Public render of /about: draft and private items dropped (top-level
+	// and inside the dropdown), the empty dropdown dropped, Active on About.
 	menus := BuildMenus(items, "about", "en", "en", false)
 	main := menus["main"]
 	if len(main) != 4 {
@@ -191,19 +193,23 @@ func TestBuildMenus(t *testing.T) {
 		t.Errorf("footer menu missing: %v", menus["footer"])
 	}
 
-	// Editors see draft-page items and empty dropdowns (to fill them).
+	// Editors see draft-page and private-page items and empty dropdowns
+	// (to fill them).
 	editorMain := BuildMenus(items, "", "en", "en", true)["main"]
-	if len(editorMain) != 6 {
-		t.Fatalf("editor main menu = %d items %v, want 6", len(editorMain), editorMain)
+	if len(editorMain) != 7 {
+		t.Fatalf("editor main menu = %d items %v, want 7", len(editorMain), editorMain)
 	}
 	if !editorMain[0].Active {
 		t.Error("home entry should be active when rendering the home page")
 	}
-	if len(editorMain[4].Children) != 2 {
-		t.Errorf("editor dropdown should keep its draft child: %+v", editorMain[4])
+	if editorMain[1].Label != "Members" || editorMain[1].URL != "/members" {
+		t.Errorf("editor should keep the private-page entry: %+v", editorMain[1])
 	}
-	if editorMain[5].Label != "Empty" || len(editorMain[5].Children) != 0 {
-		t.Errorf("editor should keep the empty dropdown: %+v", editorMain[5])
+	if len(editorMain[5].Children) != 2 {
+		t.Errorf("editor dropdown should keep its draft child: %+v", editorMain[5])
+	}
+	if editorMain[6].Label != "Empty" || len(editorMain[6].Children) != 0 {
+		t.Errorf("editor should keep the empty dropdown: %+v", editorMain[6])
 	}
 }
 

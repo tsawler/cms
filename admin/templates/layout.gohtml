@@ -8,37 +8,59 @@
     <link rel="stylesheet" href="{{.AdminPath}}/static/admin.css">
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
 </head>
-<body class="cms-admin">
+<body class="cms-admin{{if .User}} cms-has-sidebar{{end}}">
 {{if .User}}
-<header class="cms-topbar">
+<aside class="cms-sidebar">
     <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+    <p class="cms-contents-label">{{.T "Contents"}}</p>
     <nav class="cms-nav">
-        <a href="{{.AdminPath}}/">{{.T "Dashboard"}}</a>
-        {{if .PagesEnabled}}<a href="{{.AdminPath}}/pages">{{.T "Pages"}}</a>{{end}}
-        {{if .PostsEnabled}}<a href="{{.AdminPath}}/posts">{{.T "Blog & News"}}</a>{{end}}
-        {{if .MediaEnabled}}<a href="{{.AdminPath}}/media">{{.T "Media"}}</a>{{end}}
-        {{if and .PagesEnabled (eq .User.Role "admin")}}<a href="{{.AdminPath}}/snippets">{{.T "Snippets"}}</a>{{end}}
-        {{if eq .User.Role "admin"}}<a href="{{.AdminPath}}/users">{{.T "Users"}}</a>{{end}}
-        {{range .NavSections}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
-    </nav>
-    <div class="cms-topbar-right">
-        <span class="cms-whoami">{{.User.Name}}</span>
-        {{if .LangToggle}}
-        <form method="post" action="{{.AdminPath}}/lang">
-            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <input type="hidden" name="to" value="{{.LangToggle}}">
-            <button type="submit" class="cms-btn cms-btn-ghost cms-lang-toggle"
-                    title="{{if eq .LangToggle "fr"}}Passer au français{{else}}Switch to English{{end}}">
-                {{if eq .LangToggle "fr"}}FR{{else}}EN{{end}}
-            </button>
-        </form>
+        <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
+            <span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
+        {{if .PagesEnabled}}
+        <a {{if eq .NavCurrent "pages"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/pages">
+            <span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
         {{end}}
-        <form method="post" action="{{.AdminPath}}/logout">
-            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Log out"}}</button>
-        </form>
+        {{if .PostsEnabled}}
+        <a {{if eq .NavCurrent "posts"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/posts">
+            <span class="cms-nav-label">{{.T "Blog & News"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Posts}}</span></a>
+        {{end}}
+        {{if .MediaEnabled}}
+        <a {{if eq .NavCurrent "media"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/media">
+            <span class="cms-nav-label">{{.T "Media"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Media}}</span></a>
+        {{end}}
+        {{if and .PagesEnabled .IsAdmin}}
+        <a {{if eq .NavCurrent "snippets"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/snippets">
+            <span class="cms-nav-label">{{.T "Snippets"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Snippets}}</span></a>
+        {{end}}
+        {{if .IsAdmin}}
+        <a {{if eq .NavCurrent "users"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/users">
+            <span class="cms-nav-label">{{.T "Users"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Users}}</span></a>
+        {{end}}
+        {{range .NavSections}}
+        <a {{if .Active}}class="cms-active" aria-current="page"{{end}} href="{{.URL}}">
+            <span class="cms-nav-label">{{.Label}}</span></a>
+        {{end}}
+    </nav>
+    <div class="cms-sidebar-foot">
+        <span class="cms-whoami">{{.User.Name}}</span>
+        <div class="cms-sidebar-actions">
+            {{if .LangToggle}}
+            <form method="post" action="{{.AdminPath}}/lang">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <input type="hidden" name="to" value="{{.LangToggle}}">
+                <button type="submit" class="cms-btn cms-btn-ghost cms-lang-toggle"
+                        title="{{if eq .LangToggle "fr"}}Passer au français{{else}}Switch to English{{end}}">
+                    {{if eq .LangToggle "fr"}}FR{{else}}EN{{end}}
+                </button>
+            </form>
+            {{end}}
+            <form method="post" action="{{.AdminPath}}/logout">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Log out"}}</button>
+            </form>
+        </div>
     </div>
-</header>
+</aside>
 {{end}}
 <main class="cms-main">
     {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}

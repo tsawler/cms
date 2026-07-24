@@ -129,6 +129,85 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiDuplicatePage copies a page — template, per-page CSS/JS, every
+// locale's metadata and draft blocks — as a new draft page named title.
+// The slug is derived from the title, with a numeric suffix when taken;
+// title becomes the copy's title in the given locale.
+// POST /api/pages/{id}/duplicate  body: {"title": "...", "locale": "en"}
+func (s *server) apiDuplicatePage(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Title  string `json:"title"`
+		Locale string `json:"locale"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Give the page a name."))
+		return
+	}
+	// Posts are more than their backing page (feed, date, author…);
+	// duplicating just the page would strand a half-post.
+	if _, err := s.deps.Content.PostByPageID(r.Context(), page.ID, s.deps.DefaultLocale); err == nil {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Posts can't be duplicated."))
+		return
+	} else if !errors.Is(err, content.ErrNotFound) {
+		s.deps.Logger.Error("cms admin: api duplicating page", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Duplicating the page failed — try again."))
+		return
+	}
+	locale := s.requestLocale(body.Locale)
+
+	base := content.Slugify(title)
+	if base == "" {
+		base = "page"
+	}
+	// A slug that starts like a locale prefix would be unreachable.
+	if s.localeSlugCollision(base) {
+		base += "-page"
+	}
+	slug := base
+	var id int64
+	var err error
+	for i := 1; i <= 50; i++ {
+		if i > 1 {
+			slug = base + "-" + strconv.Itoa(i)
+		}
+		id, err = s.deps.Content.Duplicate(r.Context(), page.ID, slug, title, locale)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, content.ErrDuplicateSlug) {
+			s.deps.Logger.Error("cms admin: api duplicating page", "page", page.ID, "err", err)
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Duplicating the page failed — try again."))
+			return
+		}
+	}
+	if err != nil {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Too many pages already use that name."))
+		return
+	}
+	s.contentChanged()
+
+	url := "/" + slug
+	if locale != s.deps.DefaultLocale {
+		url = "/" + locale + url
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"id":   id,
+		"slug": slug,
+		"url":  url,
+	})
+}
+
 // apiRevertLocale deletes a page's draft content and metadata for one
 // non-default locale, so the page falls back to the default language.
 // Like any edit, the block-side effect goes live on the next Publish.
@@ -599,6 +678,29 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "published"})
+}
+
+// apiSetVisibility changes who may view the page on the public site.
+// PUT /api/pages/{id}/visibility  body: {"visibility": "public" | "private"}
+func (s *server) apiSetVisibility(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Visibility string `json:"visibility"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil || !content.ValidVisibility(body.Visibility) {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
+		return
+	}
+	if err := s.deps.Content.SetVisibility(r.Context(), page.ID, content.Visibility(body.Visibility)); err != nil {
+		s.deps.Logger.Error("cms admin: api setting visibility", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
+		return
+	}
+	s.contentChanged()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "visibility": body.Visibility})
 }
 
 // apiDiscard throws away the page's unpublished draft edits, reverting its

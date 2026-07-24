@@ -217,6 +217,14 @@ func (s *Store) All(ctx context.Context) ([]Snippet, error) {
 	})
 }
 
+// Count returns how many stored snippets exist — the admin adds the
+// host-registered ones and shows the total beside its Snippets nav entry.
+func (s *Store) Count(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRow(ctx, "SELECT count(*) FROM cms_snippets").Scan(&n)
+	return n, err
+}
+
 // GetByID returns one stored snippet, or ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id int64) (*Snippet, error) {
 	return scanSnippet(s.db.QueryRow(ctx,

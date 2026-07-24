@@ -537,7 +537,9 @@ disappears if the page is deleted) or a web address, open it in a new
 tab, or turn a top-level item into a dropdown — a label-only item that
 holds other items, one level deep. "＋" chips add items, and dragging
 rearranges them, including into and out of a dropdown. Items linking to
-draft pages show only for logged-in editors until the page is published.
+draft pages show only for logged-in editors until the page is published,
+and items linking to private pages (visibility "Private" in the page
+form) stay editor-only even after publishing.
 Menu changes have no draft state — every change applies to the whole
 site immediately.
 

@@ -27,6 +27,30 @@ const (
 	StatusPublished Status = "published"
 )
 
+// Visibility is who may view a page on the public site, independent of its
+// publication status: a private page goes through the same draft/publish
+// workflow but is only served to logged-in users once published.
+type Visibility string
+
+const (
+	VisibilityPublic  Visibility = "public"
+	VisibilityPrivate Visibility = "private"
+)
+
+// ValidVisibility reports whether s names a known visibility.
+func ValidVisibility(s string) bool {
+	return s == string(VisibilityPublic) || s == string(VisibilityPrivate)
+}
+
+// orPublic maps a zero Visibility to the public default, so callers that
+// never set the field write a valid value.
+func (v Visibility) orPublic() Visibility {
+	if v == "" {
+		return VisibilityPublic
+	}
+	return v
+}
+
 // Page is a site page. Title and Description are the metadata for the
 // locale the page was loaded with.
 type Page struct {
@@ -34,6 +58,7 @@ type Page struct {
 	Slug         string // "" is the homepage; otherwise e.g. "about" or "about/team"
 	TemplateName string // template file within the host's TemplateFS
 	Status       Status
+	Visibility   Visibility
 	HeadCSS      string // extra per-page CSS, injected by cmsHead
 	BodyJS       string // extra per-page JS, injected by cmsScripts
 	CSSLinks     string // external stylesheet URLs, one per line
@@ -107,7 +132,7 @@ func NewStore(db *pgxpool.Pool, defaultLocale string) *Store {
 // field-level fallback to the default-locale join (md): an absent row or
 // an empty field falls back, so a French page with only a title still
 // gets the English description.
-const pageColumns = `p.id, p.slug, p.template_name, p.status, p.head_css, p.body_js,
+const pageColumns = `p.id, p.slug, p.template_name, p.status, p.visibility, p.head_css, p.body_js,
 	p.css_links, p.js_links,
 	COALESCE(NULLIF(m.title, ''), md.title, ''),
 	COALESCE(NULLIF(m.description, ''), md.description, ''),
@@ -115,7 +140,7 @@ const pageColumns = `p.id, p.slug, p.template_name, p.status, p.head_css, p.body
 
 func scanPage(row pgx.Row) (*Page, error) {
 	var p Page
-	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.HeadCSS, &p.BodyJS,
+	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.CSSLinks, &p.JSLinks,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -175,6 +200,17 @@ func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	})
 }
 
+// Counts returns how many non-post pages and how many posts exist — the
+// numbers the admin shows beside its Pages and Blog & News nav entries.
+func (s *Store) Counts(ctx context.Context) (pages, posts int, err error) {
+	err = s.db.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM cms_pages p
+			 WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)),
+			(SELECT count(*) FROM cms_posts)`).Scan(&pages, &posts)
+	return pages, posts, err
+}
+
 // Insert stores a new page and its metadata for locale, returning its id.
 // New pages always start as drafts.
 func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, error) {
@@ -185,10 +221,10 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js, css_links, js_links)
-		VALUES ($1, $2, 'draft', $3, $4, $5, $6)
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js, css_links, js_links)
+		VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7)
 		RETURNING id`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks,
 	).Scan(&p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
@@ -205,6 +241,58 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	return p.ID, tx.Commit(ctx)
 }
 
+// Duplicate copies the page srcID under a new slug: the page row itself
+// (template, per-page CSS/JS), its metadata for every locale, and its
+// draft blocks. title becomes the copy's title for locale; other locales
+// keep the source's titles. The copy always starts as a draft, so the
+// source's published blocks are not copied — the copy's first Publish
+// snapshots the duplicated draft. Returns the new page's id,
+// ErrDuplicateSlug when slug is taken, or ErrNotFound when the source
+// page doesn't exist.
+func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale string) (int64, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var id int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js, css_links, js_links)
+		SELECT $2, template_name, 'draft', visibility, head_css, body_js, css_links, js_links
+		FROM cms_pages WHERE id = $1
+		RETURNING id`, srcID, slug).Scan(&id)
+	if pgutil.IsUniqueViolation(err) {
+		return 0, ErrDuplicateSlug
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		SELECT $1, locale, title, description
+		FROM cms_page_meta WHERE page_id = $2`, id, srcID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		VALUES ($1, $2, $3, '')
+		ON CONFLICT (page_id, locale)
+		DO UPDATE SET title = EXCLUDED.title`, id, locale, title); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content, settings)
+		SELECT $1, region, locale, 'draft', sort, kind, snippet_key, content, settings
+		FROM cms_blocks WHERE page_id = $2 AND status = 'draft'`, id, srcID); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit(ctx)
+}
+
 // Update saves a page's fields and its metadata for locale. It does not
 // change publication status; use Publish and Unpublish for that.
 func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
@@ -216,10 +304,10 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages
-		SET slug = $1, template_name = $2, head_css = $3, body_js = $4,
-			css_links = $5, js_links = $6, updated_at = now()
-		WHERE id = $7`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks, p.ID)
+		SET slug = $1, template_name = $2, visibility = $3, head_css = $4, body_js = $5,
+			css_links = $6, js_links = $7, updated_at = now()
+		WHERE id = $8`,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks, p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
@@ -317,6 +405,21 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// SetVisibility changes who may view the page on the public site. It does
+// not touch publication status or content.
+func (s *Store) SetVisibility(ctx context.Context, pageID int64, v Visibility) error {
+	tag, err := s.db.Exec(ctx,
+		"UPDATE cms_pages SET visibility = $2, updated_at = now() WHERE id = $1",
+		pageID, v.orPublic())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Unpublish takes a page off the public site. Draft and published content

@@ -173,8 +173,10 @@ func New(d Deps) http.Handler {
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
+			r.Post("/api/pages/{id}/duplicate", s.apiDuplicatePage)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
 			r.Post("/api/pages/{id}/discard", s.apiDiscard)
+			r.Put("/api/pages/{id}/visibility", s.apiSetVisibility)
 			r.Get("/api/snippets", s.apiSnippetsList)
 
 			// Per-page CSS/JS is written raw into pages: admin-only.
@@ -321,11 +323,11 @@ type templateData struct {
 	// CurrentFolder is the folder being browsed, nil at the root (which
 	// lists unfiled items and the folder tiles) and during a search.
 	CurrentFolder *media.Folder
-	MediaQuery   string // active search filter
-	MediaFolder  string // active folder filter ("", "root", or an id)
-	MediaTab     string // active media tab ("images", "documents", "videos")
-	MediaKind    string // the tab's media kind ("image", "file", "video")
-	MaxVideoMB   int64  // video upload cap, for the upload hint
+	MediaQuery    string // active search filter
+	MediaFolder   string // active folder filter ("", "root", or an id)
+	MediaTab      string // active media tab ("images", "documents", "videos")
+	MediaKind     string // the tab's media kind ("image", "file", "video")
+	MaxVideoMB    int64  // video upload cap, for the upload hint
 
 	// Snippet pages.
 	Snippets       []snippets.Snippet // admin-created
@@ -338,12 +340,27 @@ type templateData struct {
 	NavSections []navLink
 	Title       string
 	Body        template.HTML
+
+	// NavCounts holds the item totals the sidebar's contents list shows
+	// beside each section; zero-valued when nobody is logged in.
+	// NavCurrent names the built-in nav entry the request falls under
+	// ("dashboard", "pages", ... — empty on host-registered section
+	// pages, which carry their own Active flag).
+	NavCounts  navCounts
+	NavCurrent string
 }
 
-// navLink is one host-registered section's entry in the admin top bar.
+// navLink is one host-registered section's entry in the admin sidebar.
 type navLink struct {
-	URL   string
-	Label string
+	URL    string
+	Label  string
+	Active bool
+}
+
+// navCounts is the sidebar's table-of-contents numbers: how many items
+// each admin section currently holds.
+type navCounts struct {
+	Pages, Posts, Media, Snippets, Users int
 }
 
 // captchaInfo is what the login template needs to embed the Cap widget.
@@ -382,24 +399,82 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 			Visible:   s.deps.Captcha.Visible(),
 		}
 	}
-	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin())
+	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin(), r.URL.Path)
+	if td.User != nil {
+		td.NavCounts = s.navCounts(r, td.IsAdmin())
+		td.NavCurrent = navCurrent(r.URL.Path)
+	}
 	return td
 }
 
-// navSectionsFor returns the top-bar links for the host-registered sections
-// a user with the given role may see.
-func navSectionsFor(sections []Section, adminPath string, isAdmin bool) []navLink {
+// navSectionsFor returns the sidebar links for the host-registered sections
+// a user with the given role may see. reqPath is the request's path within
+// the admin, for marking the section being viewed.
+func navSectionsFor(sections []Section, adminPath string, isAdmin bool, reqPath string) []navLink {
 	var links []navLink
 	for _, sec := range sections {
 		if sec.NavLabel == "" || (sec.AdminOnly && !isAdmin) {
 			continue
 		}
+		prefix := SectionPathPrefix + "/" + sec.Path
 		links = append(links, navLink{
-			URL:   adminPath + SectionPathPrefix + "/" + sec.Path + "/",
-			Label: sec.NavLabel,
+			URL:    adminPath + prefix + "/",
+			Label:  sec.NavLabel,
+			Active: reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
 		})
 	}
 	return links
+}
+
+// navCurrent names the built-in sidebar entry a request path (within the
+// admin) falls under. Host-registered sections are matched per-link in
+// navSectionsFor instead.
+func navCurrent(path string) string {
+	seg := strings.TrimPrefix(path, "/")
+	if i := strings.IndexByte(seg, '/'); i >= 0 {
+		seg = seg[:i]
+	}
+	switch seg {
+	case "":
+		return "dashboard"
+	case "pages", "posts", "media", "snippets", "users":
+		return seg
+	}
+	return ""
+}
+
+// navCounts gathers the sidebar's table-of-contents numbers. A failed
+// count is logged and rendered as zero rather than failing the page.
+func (s *server) navCounts(r *http.Request, isAdmin bool) navCounts {
+	ctx := r.Context()
+	var c navCounts
+	if s.deps.Renderer != nil && s.deps.Content != nil {
+		var err error
+		if c.Pages, c.Posts, err = s.deps.Content.Counts(ctx); err != nil {
+			s.deps.Logger.Error("cms admin: counting pages and posts", "err", err)
+		}
+	}
+	if s.deps.Renderer != nil && s.deps.Snippets != nil {
+		c.Snippets = len(s.deps.ConfigSnippets)
+		if n, err := s.deps.Snippets.Count(ctx); err != nil {
+			s.deps.Logger.Error("cms admin: counting snippets", "err", err)
+		} else {
+			c.Snippets += n
+		}
+	}
+	if s.deps.Media != nil {
+		var err error
+		if c.Media, err = s.deps.Media.Count(ctx); err != nil {
+			s.deps.Logger.Error("cms admin: counting media", "err", err)
+		}
+	}
+	if isAdmin && s.deps.Users != nil {
+		var err error
+		if c.Users, err = s.deps.Users.Count(ctx); err != nil {
+			s.deps.Logger.Error("cms admin: counting users", "err", err)
+		}
+	}
+	return c
 }
 
 // IsAdmin reports whether the logged-in user has admin powers (admin or

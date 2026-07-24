@@ -53,7 +53,7 @@ const postJoins = `
 
 func scanPost(row pgx.Row) (*Post, error) {
 	var p Post
-	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.HeadCSS, &p.BodyJS,
+	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.CSSLinks, &p.JSLinks,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
 		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
@@ -171,12 +171,12 @@ func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string) (
 
 // Posts returns a feed's posts newest first, with page metadata for locale.
 // An empty feed returns both feeds (the admin's combined list). With
-// publishedOnly, draft posts are omitted (the public view); without,
-// editors see drafts too. A non-positive limit returns everything.
+// publishedOnly, draft and private posts are omitted (the public view);
+// without, editors see everything. A non-positive limit returns everything.
 func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOnly bool, limit int) ([]Post, error) {
 	q := `SELECT ` + postColumns + postJoins + ` WHERE ($3 = '' OR po.feed = $3)`
 	if publishedOnly {
-		q += ` AND p.status = 'published'`
+		q += ` AND p.status = 'published' AND p.visibility = 'public'`
 	}
 	q += ` ORDER BY po.published_at DESC, po.id DESC`
 	args := []any{locale, s.defaultLocale, feed}

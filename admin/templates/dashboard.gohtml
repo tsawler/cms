@@ -7,6 +7,7 @@
 <div class="cms-cards">
     {{if .PagesEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/pages">
+        <span class="cms-card-count">{{.NavCounts.Pages}}</span>
         <h2>{{.T "Pages"}}</h2>
         <p>{{.T "Create and edit the pages on your site."}}</p>
     </a>
@@ -16,20 +17,23 @@
         <p>{{.T "Not configured — the host application must set TemplateFS and PageTemplates."}}</p>
     </div>
     {{end}}
-    {{if and .PagesEnabled (eq .User.Role "admin")}}
+    {{if and .PagesEnabled .IsAdmin}}
     <a class="cms-card" href="{{.AdminPath}}/snippets">
+        <span class="cms-card-count">{{.NavCounts.Snippets}}</span>
         <h2>{{.T "Snippets"}}</h2>
         <p>{{.T "Ready-made blocks editors can drop into pages."}}</p>
     </a>
     {{end}}
-    {{if eq .User.Role "admin"}}
+    {{if .IsAdmin}}
     <a class="cms-card" href="{{.AdminPath}}/users">
+        <span class="cms-card-count">{{.NavCounts.Users}}</span>
         <h2>{{.T "Users"}}</h2>
         <p>{{.T "Add and manage the people who can edit this site."}}</p>
     </a>
     {{end}}
     {{if .MediaEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/media">
+        <span class="cms-card-count">{{.NavCounts.Media}}</span>
         <h2>{{.T "Media"}}</h2>
         <p>{{.T "Upload and manage the images used on your site."}}</p>
     </a>
@@ -41,6 +45,7 @@
     {{end}}
     {{if .PostsEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/posts">
+        <span class="cms-card-count">{{.NavCounts.Posts}}</span>
         <h2>{{.T "Blog & News"}}</h2>
         <p>{{.T "Write and publish blog posts and news items."}}</p>
     </a>

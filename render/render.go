@@ -70,7 +70,7 @@ func localeURL(slug, locale, defaultLocale string) string {
 
 // buildEntry converts one stored item, resolving page links from the
 // current slug. ok is false when the item should not render (vanished
-// page, or draft page on a public render).
+// page, or draft or private page on a public render).
 func buildEntry(item content.MenuItem, current, locale, defaultLocale string, includeDrafts bool) (MenuEntry, bool) {
 	e := MenuEntry{ID: item.ID, Label: item.LabelFor(locale), NewTab: item.NewTab}
 	if item.PageID != nil {
@@ -78,6 +78,9 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 			return e, false // page vanished; FK cascade should prevent this
 		}
 		if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
+			return e, false
+		}
+		if !includeDrafts && item.PageVisibility != nil && *item.PageVisibility == content.VisibilityPrivate {
 			return e, false
 		}
 		e.URL = localeURL(*item.PageSlug, locale, defaultLocale)
@@ -92,8 +95,9 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 
 // BuildMenus turns stored menu items into render-ready entries grouped by
 // menu key. Page-linked items resolve their URL from the page's current
-// slug; items pointing at unpublished pages are dropped unless
-// includeDrafts (editors see draft pages, so they see their menu items).
+// slug; items pointing at unpublished or private pages are dropped unless
+// includeDrafts (editors see draft and private pages, so they see their
+// menu items).
 // Label-only top-level items are dropdown parents holding their Children;
 // on public renders a dropdown with nothing visible in it is dropped,
 // while editors keep it so they can fill it.
@@ -398,7 +402,8 @@ type EditInfo struct {
 	AdminPath string
 	CSRFToken string
 	Locale    string
-	Status    string // "draft" or "published"
+	Status     string // "draft" or "published"
+	Visibility string // "public" or "private" — who may view the page
 	// HasUnpublished is true when a published page's draft content
 	// differs from what is live — the editor shows "Unpublished changes"
 	// and keeps Publish available.
@@ -796,6 +801,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-admin-path="` + html.EscapeString(edit.AdminPath) + `"` +
 		` data-csrf="` + html.EscapeString(edit.CSRFToken) + `"` +
 		` data-status="` + html.EscapeString(edit.Status) + `"` +
+		` data-visibility="` + html.EscapeString(edit.Visibility) + `"` +
 		` data-unpublished="` + unpubFlag + `"` +
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
 		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +

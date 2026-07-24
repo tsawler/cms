@@ -5,7 +5,7 @@
 import { state, cfg, pageId } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
-import { cmsConfirm } from "./dialogs.js";
+import { cmsConfirm, openDialog } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
 import { hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
 
@@ -47,7 +47,8 @@ function refreshContentCSS() {
 
 // The chip has three states: draft (never/no longer live), Live
 // (published and in sync), and "Unpublished edits" (live, but the saved
-// draft differs — the state that makes drafts trustworthy).
+// draft differs — the state that makes drafts trustworthy). A private
+// page carries a marker on top of whichever state it's in.
 export function updateChip() {
     var chip = $("chip");
     chip.classList.remove("published", "changes");
@@ -63,6 +64,16 @@ export function updateChip() {
         chip.textContent = state.pageStatus;
         chip.title = "Only editors can see this page until it's published";
     }
+    if (state.visibility === "private") {
+        chip.textContent += " · private";
+        chip.title += ". Private: only logged-in users can see this page on the site.";
+    }
+}
+
+// The ⋯ menu's visibility item always names the action, not the state.
+function updateVisBtn() {
+    $("vis-btn").textContent =
+        state.visibility === "private" ? "Make page public…" : "Make page private…";
 }
 
 function collect() {
@@ -193,6 +204,7 @@ export function closeMore() {
 }
 
 export function initSaving() {
+    updateVisBtn();
     $("edit").addEventListener("click", function () { setEditing(!state.editing); });
     $("cancel").addEventListener("click", function () {
         var discard = function () {
@@ -226,6 +238,53 @@ export function initSaving() {
                 state.dirty = {};
                 state.sectionsDirty = {};
                 window.location.href = body.url || "/";
+            }).catch(function (err) { setMsg(err.message); });
+        });
+    });
+    $("dup-page").addEventListener("click", function () {
+        openDialog({
+            message: "Duplicate this page",
+            prompt: true,
+            placeholder: "Name for the new page",
+            required: "Give the new page a name.",
+            okLabel: "Duplicate",
+        }).then(function (name) {
+            // A field-less prompt resolves with the entered text itself,
+            // or null when dismissed.
+            if (!name) return;
+            setMsg("Duplicating…");
+            // Save first so the copy matches what's on screen, not the
+            // last saved draft.
+            var ready = hasUnsaved() ? save() : Promise.resolve();
+            ready.then(function () {
+                return api("/pages/" + pageId + "/duplicate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: name, locale: cfg.locale }),
+                });
+            }).then(function (body) {
+                // The duplicate is a draft, so only editors see it —
+                // navigate straight into it to start writing.
+                window.location.href = body.url;
+            }).catch(function (err) { setMsg(err.message); });
+        });
+    });
+    $("vis-btn").addEventListener("click", function () {
+        var toPrivate = state.visibility !== "private";
+        var msg = toPrivate
+            ? "Make this page private? Only logged-in users will be able to see it on the site, even after publishing."
+            : "Make this page public? Anyone will be able to see it once it's published.";
+        cmsConfirm(msg, toPrivate ? "Make private" : "Make public").then(function (yes) {
+            if (!yes) return;
+            api("/pages/" + pageId + "/visibility", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ visibility: toPrivate ? "private" : "public" }),
+            }).then(function (body) {
+                state.visibility = body.visibility;
+                updateVisBtn();
+                updateChip();
+                flash(toPrivate ? "Page is now private" : "Page is now public");
             }).catch(function (err) { setMsg(err.message); });
         });
     });

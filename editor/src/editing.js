@@ -70,6 +70,12 @@ export function setEditing(on) {
     $("locs").hidden = !on || locales.length < 2;
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
+    // Posts are more than their backing page, so only plain pages
+    // offer Duplicate.
+    $("dup-page").hidden = !on || !!postInfo;
+    // Visibility follows the same rule: posts belong to their feed's
+    // listings, so they stay managed as a whole from the admin.
+    $("vis-btn").hidden = !on || !!postInfo;
     // Untranslated regions (showing default-language fallback) get a
     // tooltip to go with their dashed amber outline.
     if (on) {
