@@ -198,6 +198,22 @@
     }
     swapTokens(c, TBL_CELL_TOKENS, add);
   }
+  var TBL_WRAP = "cms-table-wrap";
+  function wrapTables(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("table"), function(t) {
+      if (t.closest("." + TBL_WRAP)) return;
+      if (t.parentElement && t.parentElement.closest("table")) return;
+      var w = root.ownerDocument.createElement("div");
+      w.className = TBL_WRAP + " overflow-x-auto";
+      t.parentNode.insertBefore(w, t);
+      w.appendChild(t);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("div." + TBL_WRAP), function(w) {
+      if (w.querySelector("table")) return;
+      while (w.firstChild) w.parentNode.insertBefore(w.firstChild, w);
+      w.parentNode.removeChild(w);
+    });
+  }
   function stampTable(t, opt) {
     opt = opt || tableStyleOptions(t);
     swapTokens(t, ["w-full", "w-auto"], opt.width === "fit" ? "w-auto" : "w-full");
@@ -392,6 +408,10 @@
         });
         ed.on("TableModified", function(e) {
           if (e.table) stampTable(e.table);
+          wrapTables(ed.getBody());
+        });
+        ed.on("init change SetContent undo redo", function() {
+          wrapTables(ed.getBody());
         });
         ed.ui.registry.addButton("cmstablegear", {
           icon: "table-classes",

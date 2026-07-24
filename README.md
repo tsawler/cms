@@ -114,8 +114,11 @@ does the image gear's display-width and roundness settings (`w-full`,
 toolbar's table button (`w-full` on the table, `border-b-2
 border-slate-300 p-2 text-left font-semibold` on header cells,
 `border-b border-slate-200 p-2 align-top` on body cells, and the table
-gear's variants: `border`, `p-1`, `p-4`, `w-auto`, `odd:bg-slate-50`) —
-so safelist those regardless of which Styles menu you ship. (The gear's Shadow presets apply the CMS's own
+gear's variants: `border`, `p-1`, `p-4`, `w-auto`, `odd:bg-slate-50`;
+each table is also wrapped in a `<div class="cms-table-wrap
+overflow-x-auto">` so wide tables scroll in place on phones instead of
+widening the page) — so safelist those regardless of which Styles menu
+you ship. (The gear's Shadow presets apply the CMS's own
 `cms-shadow-subtle`/`cms-shadow-strong` classes, styled by CSS that
 `{{cmsHead}}` ships — no safelisting needed, and overridable by your
 stylesheet.) For the default menu plus alignment and the image gear:
@@ -132,7 +135,7 @@ safelist: [
     "rounded-lg", "rounded-2xl", "rounded-full", "aspect-video",
     "border", "border-b", "border-b-2", "border-slate-200", "border-slate-300",
     "p-1", "p-2", "p-4", "align-top", "font-semibold", "w-auto",
-    "odd:bg-slate-50",
+    "odd:bg-slate-50", "overflow-x-auto",
 ],
 ```
 

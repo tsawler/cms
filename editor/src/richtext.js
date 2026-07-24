@@ -113,6 +113,31 @@ function stampCell(c, opt) {
     swapTokens(c, TBL_CELL_TOKENS, add);
 }
 
+// Tables scroll inside their own box on narrow screens instead of
+// dragging the whole page wider: every top-level table lives in a
+// <div class="cms-table-wrap overflow-x-auto">. The marker class keeps
+// the sweep from touching host markup that happens to use the same
+// utility; a wrapper whose table is gone (deleted) is dropped. A div
+// wrapper (not display:block on the table) preserves the table's
+// semantics for screen readers.
+var TBL_WRAP = "cms-table-wrap";
+
+function wrapTables(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("table"), function (t) {
+        if (t.closest("." + TBL_WRAP)) return;
+        if (t.parentElement && t.parentElement.closest("table")) return; // nested
+        var w = root.ownerDocument.createElement("div");
+        w.className = TBL_WRAP + " overflow-x-auto";
+        t.parentNode.insertBefore(w, t);
+        w.appendChild(t);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("div." + TBL_WRAP), function (w) {
+        if (w.querySelector("table")) return;
+        while (w.firstChild) w.parentNode.insertBefore(w.firstChild, w);
+        w.parentNode.removeChild(w);
+    });
+}
+
 // stampTable rewrites a whole table to the given settings (or freshens
 // its current ones); structural operations funnel through here via the
 // TableModified event.
@@ -352,6 +377,14 @@ export function initInlineEditor(el, onDirty, register) {
             });
             ed.on("TableModified", function (e) {
                 if (e.table) stampTable(e.table);
+                wrapTables(ed.getBody());
+            });
+            // Keep wrappers in step with edits the table events don't
+            // cover: inserts (change fires right after), deletions by
+            // command or keyboard, undo/redo, and pre-existing content
+            // when the editor attaches.
+            ed.on("init change SetContent undo redo", function () {
+                wrapTables(ed.getBody());
             });
             // The gear on the in-table toolbar: curated Tailwind looks
             // for the table under the cursor.
