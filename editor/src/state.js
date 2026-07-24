@@ -37,14 +37,25 @@ export var EDITOR_BASE = "/cms/editor/";
 
 // The Styles menu: named, on-brand styles configured on the server.
 // Each applies CSS classes, so the site's stylesheet stays in charge.
+// Entries sharing a group fold into a submenu, placed where the
+// group's first member appears among the ungrouped entries.
 export var styleFormats = [];
 try {
+    var styleGroups = {}; // group title -> its {title, items} submenu
     (JSON.parse(cfg.styles || "[]") || []).forEach(function (s) {
         if (!s || !s.label || !s.class) return;
         var f = { title: s.label, classes: s.class.split(/\s+/) };
         if (s.block) f.block = s.block;
         else f.inline = "span";
-        styleFormats.push(f);
+        if (s.group) {
+            if (!styleGroups[s.group]) {
+                styleGroups[s.group] = { title: s.group, items: [] };
+                styleFormats.push(styleGroups[s.group]);
+            }
+            styleGroups[s.group].items.push(f);
+        } else {
+            styleFormats.push(f);
+        }
     });
 } catch (e) { /* malformed config: no Styles menu */ }
 

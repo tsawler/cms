@@ -64,6 +64,10 @@ export function setEditing(on) {
     $("post-settings").hidden = !on || !postInfo;
     // Removing a translation only makes sense off the default locale.
     $("revert-locale").hidden = !on || locales.length < 2 || cfg.locale === defaultLocale;
+    // The language chips matter while editing (the nav is the menu
+    // editor then, so its own language links don't navigate); outside
+    // edit mode the site's navigation handles language switching.
+    $("locs").hidden = !on || locales.length < 2;
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     // Untranslated regions (showing default-language fallback) get a

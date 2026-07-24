@@ -72,29 +72,32 @@ UI discovers them automatically:
 
 ## The Styles menu (Tailwind-first)
 
-The in-place editor's toolbar starts with a **Styles** dropdown: a short
-list of named, on-brand text styles editors can apply to a selection.
-There is deliberately no free color picker and no font-family menu — every
-style applies CSS **classes**, so your stylesheet stays the single source
-of design truth, and a later redesign restyles existing content by
-changing the CSS rather than hunting down baked-in inline styles.
+The in-place editor's toolbar starts with a **Styles** dropdown: a
+built-in **Headings** submenu (Headings 2–4 — h1 stays reserved for
+the page title), followed by a short list of named,
+on-brand text styles editors can apply to a selection. There is
+deliberately no free color picker and no font-family menu — every
+style applies CSS **classes**, so your stylesheet stays the single
+source of design truth, and a later redesign restyles existing content
+by changing the CSS rather than hunting down baked-in inline styles.
 
 ### The defaults
 
-With no configuration, the menu ships a Tailwind-flavored default set:
+With no configuration, the menu ships a Tailwind-flavored default set
+(the five colors fold into a "Color" submenu):
 
-| Label          | Classes                  | Applies to |
-|----------------|--------------------------|------------|
-| Muted          | `text-slate-500`         | selection  |
-| Red            | `text-red-600`           | selection  |
-| Green          | `text-emerald-600`       | selection  |
-| Blue           | `text-blue-600`          | selection  |
-| White          | `text-white`             | selection  |
-| Highlight      | `bg-yellow-200`          | selection  |
-| Serif          | `font-serif`             | selection  |
-| Monospace      | `font-mono`              | selection  |
-| Lead paragraph | `text-lg text-slate-600` | whole `<p>` |
-| Small print    | `text-sm text-slate-500` | selection  |
+| Label          | Classes                  | Applies to  | Group |
+|----------------|--------------------------|-------------|-------|
+| Muted          | `text-slate-500`         | selection   | Color |
+| Red            | `text-red-600`           | selection   | Color |
+| Green          | `text-emerald-600`       | selection   | Color |
+| Blue           | `text-blue-600`          | selection   | Color |
+| White          | `text-white`             | selection   | Color |
+| Highlight      | `bg-yellow-200`          | selection   |       |
+| Serif          | `font-serif`             | selection   |       |
+| Monospace      | `font-mono`              | selection   |       |
+| Lead paragraph | `text-lg text-slate-600` | whole `<p>` |       |
+| Small print    | `text-sm text-slate-500` | selection   |       |
 
 ### Safelist the classes (important)
 
@@ -187,6 +190,11 @@ c, err := cms.New(cms.Config{
         // Fonts are styles too: name the *role*, not the typeface. The
         // template must already load any webfont the class uses.
         {Label: "Display type", Class: "font-display"},
+        // Entries sharing a Group fold into a submenu with that title,
+        // placed where the group's first member appears. Handy once a
+        // palette grows past a handful of entries.
+        {Label: "Warning", Class: "text-amber-600", Group: "Callouts"},
+        {Label: "Success", Class: "text-emerald-600", Group: "Callouts"},
     },
 })
 ```
@@ -200,8 +208,9 @@ Rules of thumb:
   using Tailwind). Custom classes like `text-brand-600` come from your
   Tailwind theme; bespoke-CSS sites can point entries at their own
   classes — the mechanism doesn't require Tailwind.
-- `EditorStyles: []cms.EditorStyle{}` (empty, non-nil) removes the Styles
-  dropdown altogether.
+- `EditorStyles: []cms.EditorStyle{}` (empty, non-nil) removes the custom
+  entries; the dropdown itself stays, since it also carries the built-in
+  Headings submenu.
 
 ## Snippets
 

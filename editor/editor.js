@@ -23,15 +23,25 @@
   var EDITOR_BASE = "/cms/editor/";
   var styleFormats = [];
   try {
+    styleGroups = {};
     (JSON.parse(cfg.styles || "[]") || []).forEach(function(s) {
       if (!s || !s.label || !s.class) return;
       var f = { title: s.label, classes: s.class.split(/\s+/) };
       if (s.block) f.block = s.block;
       else f.inline = "span";
-      styleFormats.push(f);
+      if (s.group) {
+        if (!styleGroups[s.group]) {
+          styleGroups[s.group] = { title: s.group, items: [] };
+          styleFormats.push(styleGroups[s.group]);
+        }
+        styleGroups[s.group].items.push(f);
+      } else {
+        styleFormats.push(f);
+      }
     });
   } catch (e) {
   }
+  var styleGroups;
   var sectionStyles = {
     backgrounds: [{ key: "default", label: "Default", class: "" }],
     widths: [{ key: "normal", label: "Normal", class: "" }]
@@ -171,10 +181,14 @@
       target: el,
       inline: true,
       menubar: false,
+      // Dark chrome, matching the section toolbars and the shell's
+      // own UI. Content styles are unaffected: the dark skin's
+      // content.inline.css is identical to the light one's.
+      skin: "oxide-dark",
       // In inline mode the toolbar floats docked to the region
       // as soon as it gains focus — a click is enough, no text
       // selection needed.
-      toolbar: (styleFormats.length ? "styles | " : "") + "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
+      toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
       fixed_toolbar_container: "#cms-mce-toolbar",
       plugins: "lists link autolink",
       // Paste and drag-drop of image data still upload through
@@ -191,6 +205,13 @@
       // their own rules: under Tailwind's preflight an <img> is a
       // block element, so text-align on its parent can never move it.
       formats: {
+        // Semantic tags instead of TinyMCE's span-with-inline-style
+        // defaults: the sanitizer strips every inline style except
+        // text-align, so the default forms would vanish from
+        // non-admin saves (including via the always-on Cmd+U/
+        // Cmd+Shift+S shortcuts).
+        underline: { inline: "u" },
+        strikethrough: { inline: "s" },
         alignleft: [
           { selector: alignBlocks, classes: "text-left" },
           { selector: "img", classes: "float-left mr-6" }
@@ -218,6 +239,23 @@
           state.lastEditorDirty = onDirty;
         });
         ed.on("PreInit", function() {
+          var getCssText = ed.formatter.getCssText;
+          ed.formatter.getCssText = function(format) {
+            var css = getCssText.call(ed.formatter, format).replace(
+              /background-color:\s*(?:transparent|rgba\([^)]*,\s*0\s*\))\s*;?/g,
+              ""
+            );
+            if (css && css.charAt(css.length - 1) !== ";") css += ";";
+            if (css.indexOf("background-color") === -1) {
+              var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
+              if (m) {
+                css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
+              }
+              css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
+            }
+            css += "padding:2px 8px;border-radius:4px;";
+            return css;
+          };
           ed.serializer.addAttributeFilter("contenteditable", function(nodes) {
             for (var i = 0; i < nodes.length; i++) {
               var n = nodes[i];
@@ -274,9 +312,15 @@
         });
       }
     };
-    if (styleFormats.length) {
-      opts.style_formats = styleFormats;
-    }
+    opts.style_formats = [{
+      title: "Headings",
+      items: [
+        { title: "Heading 2", block: "h2" },
+        { title: "Heading 3", block: "h3" },
+        { title: "Heading 4", block: "h4" },
+        { title: "Paragraph", block: "p" }
+      ]
+    }].concat(styleFormats);
     window.tinymce.init(opts);
   }
   function removeRichEditors() {
@@ -2892,6 +2936,7 @@
     $("cancel").hidden = !on;
     $("post-settings").hidden = !on || !postInfo;
     $("revert-locale").hidden = !on || locales.length < 2 || cfg.locale === defaultLocale;
+    $("locs").hidden = !on || locales.length < 2;
     $("del-page").hidden = !on || (cfg.slug || "") === "";
     if (on) {
       document.querySelectorAll("[data-cms-fallback]").forEach(function(el) {
@@ -4678,6 +4723,7 @@ body.cms-editing [data-cms-fallback] {
       });
       locs.appendChild(b);
     });
+    locs.hidden = true;
     $("revert-locale").addEventListener("click", function() {
       cmsConfirm("Remove the " + cfg.locale.toUpperCase() + " translation of this page? It goes back to showing the default language. Like other edits, the removal is applied to the live site when you publish.", "Remove", true).then(function(ok) {
         if (!ok) return;

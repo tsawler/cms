@@ -43,6 +43,9 @@ export function initLocales() {
         });
         locs.appendChild(b);
     });
+    // Shown only while editing (setEditing): outside edit mode the
+    // site's own navigation works normally for switching languages.
+    locs.hidden = true;
 
     // Remove-this-translation lives in the ⋯ menu, non-default locales
     // only (visibility is handled with the other menu items).

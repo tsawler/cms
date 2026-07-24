@@ -226,6 +226,11 @@ type EditorStyle struct {
 	// to this element ("p", "h2", ...). Empty applies the style inline
 	// to the selected text.
 	Block string `json:"block,omitempty"`
+	// Group nests the entry in a submenu with this title. Entries
+	// sharing a Group are folded together; the submenu sits where its
+	// first member appears, among any ungrouped top-level entries.
+	// Empty keeps the entry at the top level.
+	Group string `json:"group,omitempty"`
 }
 
 // SectionOption is one choice in a section setting (a background or a
@@ -371,11 +376,11 @@ func ValidSectionVAlign(s string) string {
 // the database, which Tailwind's source scanner never sees.
 func DefaultEditorStyles() []EditorStyle {
 	return []EditorStyle{
-		{Label: "Muted", Class: "text-slate-500"},
-		{Label: "Red", Class: "text-red-600"},
-		{Label: "Green", Class: "text-emerald-600"},
-		{Label: "Blue", Class: "text-blue-600"},
-		{Label: "White", Class: "text-white"},
+		{Label: "Muted", Class: "text-slate-500", Group: "Color"},
+		{Label: "Red", Class: "text-red-600", Group: "Color"},
+		{Label: "Green", Class: "text-emerald-600", Group: "Color"},
+		{Label: "Blue", Class: "text-blue-600", Group: "Color"},
+		{Label: "White", Class: "text-white", Group: "Color"},
 		{Label: "Highlight", Class: "bg-yellow-200"},
 		{Label: "Serif", Class: "font-serif"},
 		{Label: "Monospace", Class: "font-mono"},

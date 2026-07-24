@@ -78,11 +78,14 @@ export function initInlineEditor(el, onDirty, register) {
         target: el,
         inline: true,
         menubar: false,
+        // Dark chrome, matching the section toolbars and the shell's
+        // own UI. Content styles are unaffected: the dark skin's
+        // content.inline.css is identical to the light one's.
+        skin: "oxide-dark",
         // In inline mode the toolbar floats docked to the region
         // as soon as it gains focus — a click is enough, no text
         // selection needed.
-        toolbar: (styleFormats.length ? "styles | " : "") +
-            "bold italic | h2 h3 | alignleft aligncenter alignright | bullist numlist | blockquote | link unlink" +
+        toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr | link unlink" +
             (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
         fixed_toolbar_container: "#cms-mce-toolbar",
         plugins: "lists link autolink",
@@ -100,6 +103,13 @@ export function initInlineEditor(el, onDirty, register) {
         // their own rules: under Tailwind's preflight an <img> is a
         // block element, so text-align on its parent can never move it.
         formats: {
+            // Semantic tags instead of TinyMCE's span-with-inline-style
+            // defaults: the sanitizer strips every inline style except
+            // text-align, so the default forms would vanish from
+            // non-admin saves (including via the always-on Cmd+U/
+            // Cmd+Shift+S shortcuts).
+            underline: { inline: "u" },
+            strikethrough: { inline: "s" },
             alignleft: [
                 { selector: alignBlocks, classes: "text-left" },
                 { selector: "img", classes: "float-left mr-6" },
@@ -128,6 +138,39 @@ export function initInlineEditor(el, onDirty, register) {
             // the gear dialog only. Strip the lock attribute at
             // serialization so it never reaches saved content.
             ed.on("PreInit", function () {
+                // The Styles menu previews each entry with inline styles
+                // computed against the page: the page's own text color
+                // when a format sets none, plus an explicit transparent
+                // background. On the dark menu that makes dark previews
+                // (Serif, Monospace, …) illegible — the same failure the
+                // light menu had with White. Rewrite each preview into a
+                // dark-mode badge: keep the entry's hue but lift its
+                // lightness to read on the dark menu, over a faint pill
+                // tinted from the same color. The lift can't be phrased
+                // as `color: … from currentColor` — a later color
+                // declaration makes currentColor resolve to the menu's
+                // inherited color, not the entry's — so the entry color
+                // is extracted and inlined. Formats with a background of
+                // their own (e.g. Highlight) keep their exact colors.
+                // Engines without relative color keep the plain menu.
+                var getCssText = ed.formatter.getCssText;
+                ed.formatter.getCssText = function (format) {
+                    var css = getCssText.call(ed.formatter, format).replace(
+                        /background-color:\s*(?:transparent|rgba\([^)]*,\s*0\s*\))\s*;?/g, "");
+                    // The theme runs this through dom.parseStyle, which
+                    // reads ";;" as part of the next property name and
+                    // then drops it — never produce empty declarations.
+                    if (css && css.charAt(css.length - 1) !== ";") css += ";";
+                    if (css.indexOf("background-color") === -1) {
+                        var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
+                        if (m) {
+                            css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
+                        }
+                        css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
+                    }
+                    css += "padding:2px 8px;border-radius:4px;";
+                    return css;
+                };
                 ed.serializer.addAttributeFilter("contenteditable", function (nodes) {
                     for (var i = 0; i < nodes.length; i++) {
                         var n = nodes[i];
@@ -206,9 +249,20 @@ export function initInlineEditor(el, onDirty, register) {
             });
         },
     };
-    if (styleFormats.length) {
-        opts.style_formats = styleFormats; // replaces TinyMCE's default menu
-    }
+    // The dropdown replaces TinyMCE's default menu: a built-in Headings
+    // submenu (headings are structure, not host-configurable styles —
+    // h1 stays reserved for the page title), then the host's entries.
+    // Paragraph is the way back down: the menu applies block formats
+    // without a toggle, so reverting a heading needs its own entry.
+    opts.style_formats = [{
+        title: "Headings",
+        items: [
+            { title: "Heading 2", block: "h2" },
+            { title: "Heading 3", block: "h3" },
+            { title: "Heading 4", block: "h4" },
+            { title: "Paragraph", block: "p" },
+        ],
+    }].concat(styleFormats);
     window.tinymce.init(opts);
 }
 
