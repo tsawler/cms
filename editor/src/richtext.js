@@ -6,6 +6,7 @@ import { state, styleFormats, mediaEnabled, EDITOR_BASE } from "./state.js";
 import { api } from "./util.js";
 import { markDirty, markSectionsDirty, htmlRegions } from "./editing.js";
 import { openPicker } from "./media.js";
+import { openDialog } from "./dialogs.js";
 
 var tinyLoading = null;
 
@@ -40,6 +41,90 @@ function uploadImage(blobInfo) {
 // alignBlocks are the elements the alignment buttons act on when the
 // selection is not an image (mirrors TinyMCE's default list, minus img).
 var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
+
+/* ---- tables ------------------------------------------------------
+ * Editor-inserted tables are styled with utility classes, like the
+ * alignment buttons: content carries classes, the host's CSS stays in
+ * charge, and the sanitizer (which strips inline styles) is happy.
+ * The classes are also the state — the gear dialog reads its current
+ * values off the table and rewrites them, and cells created later by
+ * row/column operations are stamped from the same reading. Nothing is
+ * stored anywhere else. Every class here must be safelisted in the
+ * site's Tailwind build (see README). */
+
+var TBL_LINES = {
+    rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
+    grid: { th: "border border-slate-300", td: "border border-slate-200" },
+    none: { th: "", td: "" },
+};
+var TBL_PAD = { compact: "p-1", normal: "p-2", spacious: "p-4" };
+var TBL_STRIPE = "odd:bg-slate-50";
+// The tokens the stamps own. Anything else on a cell (an alignment
+// class, a hand-written class from the source view) is left alone.
+var TBL_CELL_TOKENS = ["border", "border-b", "border-b-2", "border-slate-200",
+    "border-slate-300", "p-1", "p-2", "p-4", "align-top", "font-semibold"];
+
+// tableStyleOptions reads the curated settings off a table's classes.
+// A cell without even a padding token has never been stamped (the
+// table is mid-insert) and reads as the defaults.
+function tableStyleOptions(t) {
+    var cell = t.querySelector("td") || t.querySelector("th");
+    var cls = cell ? " " + cell.className + " " : "";
+    var has = function (tok) { return cls.indexOf(" " + tok + " ") !== -1; };
+    var virgin = !has("p-1") && !has("p-2") && !has("p-4");
+    var striped = false;
+    Array.prototype.forEach.call(t.rows, function (row) {
+        if (row.parentNode.nodeName !== "THEAD" &&
+            (" " + row.className + " ").indexOf(" " + TBL_STRIPE + " ") !== -1) {
+            striped = true;
+        }
+    });
+    return {
+        lines: has("border") ? "grid"
+            : has("border-b") || has("border-b-2") || virgin ? "rows" : "none",
+        density: has("p-1") ? "compact" : has("p-4") ? "spacious" : "normal",
+        striped: striped,
+        width: (" " + t.className + " ").indexOf(" w-auto ") !== -1 ? "fit" : "full",
+    };
+}
+
+// swapTokens rewrites the owned part of an element's class list: the
+// `remove` tokens go, `add` (space-separated) comes first, everything
+// else stays.
+function swapTokens(el, remove, add) {
+    var addToks = add ? add.split(" ") : [];
+    var keep = (el.className || "").split(/\s+/).filter(function (tok) {
+        return tok && remove.indexOf(tok) === -1 && addToks.indexOf(tok) === -1;
+    });
+    var cls = addToks.concat(keep).join(" ");
+    if (cls) el.className = cls;
+    else el.removeAttribute("class");
+}
+
+function stampCell(c, opt) {
+    var th = c.nodeName === "TH";
+    var add = (TBL_LINES[opt.lines][th ? "th" : "td"] + " " + TBL_PAD[opt.density] +
+        (th ? " font-semibold" : " align-top")).trim();
+    // Header cells center by browser default; text-left restores flow.
+    // Never override an alignment the alignment buttons applied.
+    if (th && !/(^|\s)text-(center|right)(\s|$)/.test(c.className || "")) {
+        add += " text-left";
+    }
+    swapTokens(c, TBL_CELL_TOKENS, add);
+}
+
+// stampTable rewrites a whole table to the given settings (or freshens
+// its current ones); structural operations funnel through here via the
+// TableModified event.
+function stampTable(t, opt) {
+    opt = opt || tableStyleOptions(t);
+    swapTokens(t, ["w-full", "w-auto"], opt.width === "fit" ? "w-auto" : "w-full");
+    Array.prototype.forEach.call(t.rows, function (row) {
+        var body = row.parentNode.nodeName !== "THEAD";
+        swapTokens(row, [TBL_STRIPE], body && opt.striped ? TBL_STRIPE : "");
+        Array.prototype.forEach.call(row.cells, function (c) { stampCell(c, opt); });
+    });
+}
 
 function escapeAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -85,10 +170,23 @@ export function initInlineEditor(el, onDirty, register) {
         // In inline mode the toolbar floats docked to the region
         // as soon as it gains focus — a click is enough, no text
         // selection needed.
-        toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr | link unlink" +
+        toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" +
             (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
         fixed_toolbar_container: "#cms-mce-toolbar",
-        plugins: "lists link autolink",
+        plugins: "lists link autolink table",
+        // Tables are structural only: no properties dialogs, no
+        // drag-resizing, no colgroups — every path that would write
+        // inline styles or width attributes is off. The look comes
+        // from the utility classes stampTable applies; the floating
+        // toolbar inside a table offers row/column/header operations.
+        table_default_styles: {},
+        table_default_attributes: {},
+        table_use_colgroups: false,
+        table_resize_bars: false,
+        object_resizing: "img",
+        table_header_type: "sectionCells",
+        table_toolbar: "tablerowheader | tableinsertrowbefore tableinsertrowafter tabledeleterow | " +
+            "tableinsertcolbefore tableinsertcolafter tabledeletecol | cmstablegear tabledelete",
         // Paste and drag-drop of image data still upload through
         // the media API (these are core editor features, not part
         // of the image-dialog plugin, which we don't use).
@@ -244,6 +342,59 @@ export function initInlineEditor(el, onDirty, register) {
                     },
                 });
             }
+            // Stamp the table's current look onto every cell the table
+            // model creates (initial grid, added rows/columns), and
+            // re-walk the table after structural changes — the header
+            // toggle renames td<->th without a NewCell event.
+            ed.on("NewCell", function (e) {
+                var t = e.node.closest ? e.node.closest("table") : null;
+                if (t) stampCell(e.node, tableStyleOptions(t));
+            });
+            ed.on("TableModified", function (e) {
+                if (e.table) stampTable(e.table);
+            });
+            // The gear on the in-table toolbar: curated Tailwind looks
+            // for the table under the cursor.
+            ed.ui.registry.addButton("cmstablegear", {
+                icon: "table-classes",
+                tooltip: "Table style",
+                onAction: function () {
+                    var t = ed.dom.getParent(ed.selection.getStart(), "table");
+                    if (!t) return;
+                    var cur = tableStyleOptions(t);
+                    openDialog({
+                        message: "Table style",
+                        okLabel: "Apply",
+                        selects: [
+                            { id: "lines", label: "Lines", value: cur.lines, options: [
+                                { value: "rows", label: "Row dividers" },
+                                { value: "grid", label: "Full grid" },
+                                { value: "none", label: "No lines" },
+                            ] },
+                            { id: "striped", label: "Striped rows", value: cur.striped ? "yes" : "no", options: [
+                                { value: "no", label: "Off" },
+                                { value: "yes", label: "On" },
+                            ] },
+                            { id: "density", label: "Density", value: cur.density, options: [
+                                { value: "compact", label: "Compact" },
+                                { value: "normal", label: "Normal" },
+                                { value: "spacious", label: "Spacious" },
+                            ] },
+                            { id: "width", label: "Width", value: cur.width, options: [
+                                { value: "full", label: "Full width" },
+                                { value: "fit", label: "Fit content" },
+                            ] },
+                        ],
+                    }).then(function (v) {
+                        if (!v) return;
+                        ed.undoManager.transact(function () {
+                            stampTable(t, { lines: v.lines, density: v.density,
+                                striped: v.striped === "yes", width: v.width });
+                        });
+                        onDirty();
+                    });
+                },
+            });
             ed.on("input change undo redo SetContent", function () {
                 if (ed.isDirty()) onDirty();
             });
