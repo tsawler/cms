@@ -4248,10 +4248,12 @@ border-radius:8px;padding:7px 12px;cursor:pointer}
 .combo-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:5;background:#fff;
 border:1px solid #d9dce1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);
 max-height:180px;overflow-y:auto;padding:4px}
-.combo-list button{display:block;width:100%;text-align:left;border:none;background:none;
+/* .dlg over .combo-list: outranks the later generic .dlg button rule,
+   which would otherwise restyle the suggestions as bordered buttons. */
+.dlg .combo-list button{display:block;width:100%;text-align:left;border:none;background:none;
 padding:7px 10px;border-radius:6px;font-size:13px;white-space:nowrap;overflow:hidden;
 text-overflow:ellipsis}
-.combo-list button:hover{background:#e8edfb;color:#2149b8}
+.dlg .combo-list button:hover{background:#e8edfb;color:#2149b8}
 .combo-list .none{padding:7px 10px;font-size:12px;color:#667085}
 .dlg .acts .rm{margin-right:auto;color:#c0392b;border-color:#eac3bd}
 .dlg .acts .rm:hover{background:#fdf2f0}
