@@ -438,12 +438,14 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"menuAlign":  site.MenuAlign,
-		"siteName":   site.SiteName,
-		"logoUrl":    site.LogoURL,
-		"loginInNav": site.LoginInNav,
-		"siteCss":    site.SiteCSS,
-		"siteJs":     site.SiteJS,
+		"menuAlign":    site.MenuAlign,
+		"siteName":     site.SiteName,
+		"logoUrl":      site.LogoURL,
+		"loginInNav":   site.LoginInNav,
+		"siteCss":      site.SiteCSS,
+		"siteJs":       site.SiteJS,
+		"siteCssLinks": site.SiteCSSLinks,
+		"siteJsLinks":  site.SiteJSLinks,
 	})
 }
 
@@ -456,15 +458,17 @@ const maxSiteCodeLen = 100_000
 // written raw into every page, so only admins may change it — a non-admin
 // editor's request keeps whatever is already stored.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "loginInNav", "siteCss", "siteJs"}
+// "loginInNav", "siteCss", "siteJs", "siteCssLinks", "siteJsLinks"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		MenuAlign  string `json:"menuAlign"`
-		SiteName   string `json:"siteName"`
-		LogoURL    string `json:"logoUrl"`
-		LoginInNav bool   `json:"loginInNav"`
-		SiteCSS    string `json:"siteCss"`
-		SiteJS     string `json:"siteJs"`
+		MenuAlign    string `json:"menuAlign"`
+		SiteName     string `json:"siteName"`
+		LogoURL      string `json:"logoUrl"`
+		LoginInNav   bool   `json:"loginInNav"`
+		SiteCSS      string `json:"siteCss"`
+		SiteJS       string `json:"siteJs"`
+		SiteCSSLinks string `json:"siteCssLinks"`
+		SiteJSLinks  string `json:"siteJsLinks"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -490,8 +494,12 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	// Site-wide CSS/JS is injected raw, so it stays admin-only just like
 	// per-page code. Non-admins can still change the other settings; their
 	// request carries the stored code through unchanged.
-	css := unwrapCodeTag(body.SiteCSS, styleWrapRe)
-	js := unwrapCodeTag(body.SiteJS, scriptWrapRe)
+	cssCode, cssTagURLs := extractEmbedLines(body.SiteCSS, stylesheetURL)
+	jsCode, jsTagURLs := extractEmbedLines(body.SiteJS, scriptSrcURL)
+	css := unwrapCodeTag(cssCode, styleWrapRe)
+	js := unwrapCodeTag(jsCode, scriptWrapRe)
+	cssLinks := cleanResourceLinks(joinLinkLines(body.SiteCSSLinks, cssTagURLs))
+	jsLinks := cleanResourceLinks(joinLinkLines(body.SiteJSLinks, jsTagURLs))
 	if u := s.currentUser(r); u == nil || !u.Role.IsAdmin() {
 		current, err := s.deps.Content.SiteSettings(r.Context())
 		if err != nil {
@@ -500,17 +508,20 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		css, js = current.SiteCSS, current.SiteJS
+		cssLinks, jsLinks = current.SiteCSSLinks, current.SiteJSLinks
 	} else if len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
 		return
 	}
 	if err := s.deps.Content.SaveSiteSettings(r.Context(), content.SiteSettings{
-		MenuAlign:  body.MenuAlign,
-		SiteName:   name,
-		LogoURL:    logo,
-		LoginInNav: body.LoginInNav,
-		SiteCSS:    css,
-		SiteJS:     js,
+		MenuAlign:    body.MenuAlign,
+		SiteName:     name,
+		LogoURL:      logo,
+		LoginInNav:   body.LoginInNav,
+		SiteCSS:      css,
+		SiteJS:       js,
+		SiteCSSLinks: cssLinks,
+		SiteJSLinks:  jsLinks,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
@@ -639,15 +650,103 @@ func (s *server) apiGetPageCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cleanResourceLinks keeps only the lines that are valid resource URLs.
+// cleanResourceLinks keeps only the lines that are valid resource URLs,
+// dropping repeats — loading the same script twice tends to break it.
+// A full embed tag pasted where a URL belongs still means its URL.
 func cleanResourceLinks(raw string) string {
 	var out []string
-	for _, line := range strings.Split(raw, "\n") {
-		if u := render.ValidResourceURL(strings.TrimSpace(line)); u != "" {
+	seen := map[string]bool{}
+	for line := range strings.SplitSeq(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if u := embedTagURL(line); u != "" {
+			line = u
+		}
+		if u := render.ValidResourceURL(line); u != "" && !seen[u] {
+			seen[u] = true
 			out = append(out, u)
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// CDNs hand out full embed tags — <script src="…"></script>,
+// <link rel="stylesheet" href="…"> — and pasting one wholesale is
+// common. Stored as code such a tag would be discarded by the wrapper
+// unwrap (its body is empty) or written into the page as text, so a
+// line that is exactly one such tag moves its URL to the external-links
+// list instead. Tags embedded in real code (a string literal, say)
+// never sit alone on a line and pass through untouched.
+var (
+	scriptSrcLineRe  = regexp.MustCompile(`(?i)^<script\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>\s*</script\s*>$`)
+	stylesheetLineRe = regexp.MustCompile(`(?i)^<link\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>$`)
+	relStylesheetRe  = regexp.MustCompile(`(?i)\brel\s*=\s*["']?stylesheet\b`)
+)
+
+// scriptSrcURL returns the URL when line is exactly one external-script
+// tag, "" otherwise.
+func scriptSrcURL(line string) string {
+	return firstGroup(scriptSrcLineRe.FindStringSubmatch(line))
+}
+
+// stylesheetURL returns the URL when line is exactly one stylesheet
+// link tag, "" otherwise. Other link tags (preconnect, icon) are not
+// resource links and pass through.
+func stylesheetURL(line string) string {
+	if !relStylesheetRe.MatchString(line) {
+		return ""
+	}
+	return firstGroup(stylesheetLineRe.FindStringSubmatch(line))
+}
+
+func embedTagURL(line string) string {
+	if u := scriptSrcURL(line); u != "" {
+		return u
+	}
+	return stylesheetURL(line)
+}
+
+func firstGroup(m []string) string {
+	if m == nil {
+		return ""
+	}
+	for _, g := range m[1:] {
+		if g != "" {
+			return g
+		}
+	}
+	return ""
+}
+
+// extractEmbedLines walks code line by line: a line that is exactly one
+// embed tag (per extract) moves to urls, the rest stays code.
+func extractEmbedLines(code string, extract func(string) string) (string, []string) {
+	if !strings.Contains(code, "<") {
+		return code, nil
+	}
+	var urls, kept []string
+	for line := range strings.SplitSeq(code, "\n") {
+		if u := extract(strings.TrimSpace(line)); u != "" {
+			urls = append(urls, u)
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(urls) == 0 {
+		return code, nil
+	}
+	return strings.Join(kept, "\n"), urls
+}
+
+// joinLinkLines appends URLs pulled out of a code field to the link
+// list the save already carries.
+func joinLinkLines(raw string, extra []string) string {
+	if len(extra) == 0 {
+		return raw
+	}
+	if strings.TrimSpace(raw) == "" {
+		return strings.Join(extra, "\n")
+	}
+	return raw + "\n" + strings.Join(extra, "\n")
 }
 
 // Pasted-in wrappers are a footgun: a nested <style> tag stops the CSS
@@ -685,10 +784,12 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
 		return
 	}
-	page.HeadCSS = unwrapCodeTag(body.CSS, styleWrapRe)
-	page.BodyJS = unwrapCodeTag(body.JS, scriptWrapRe)
-	page.CSSLinks = cleanResourceLinks(body.CSSLinks)
-	page.JSLinks = cleanResourceLinks(body.JSLinks)
+	cssCode, cssTagURLs := extractEmbedLines(body.CSS, stylesheetURL)
+	jsCode, jsTagURLs := extractEmbedLines(body.JS, scriptSrcURL)
+	page.HeadCSS = unwrapCodeTag(cssCode, styleWrapRe)
+	page.BodyJS = unwrapCodeTag(jsCode, scriptWrapRe)
+	page.CSSLinks = cleanResourceLinks(joinLinkLines(body.CSSLinks, cssTagURLs))
+	page.JSLinks = cleanResourceLinks(joinLinkLines(body.JSLinks, jsTagURLs))
 	if err := s.deps.Content.Update(r.Context(), page, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api saving page code", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))

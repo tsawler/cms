@@ -3,7 +3,8 @@
  * top nav, shown whenever the editor is present (i.e. the user is
  * logged in). It offers the everyday admin actions without a trip to
  * the admin area: add page, add news item, add blog post, site
- * settings, open the admin panel, and log out.
+ * settings, site-wide CSS/JS (admins), open the admin panel, and log
+ * out.
  *
  * The button lives in the light DOM as an extra <li> at the end of the
  * first {{cmsNav}} nav's item list, so it spaces like one more menu
@@ -13,9 +14,10 @@
  * re-render to put it back.
  * ------------------------------------------------------------------ */
 
-import { adminPath, csrf, pageTemplates, postsEnabled } from "./state.js";
+import { adminPath, csrf, isAdmin, pageTemplates, postsEnabled } from "./state.js";
 import { newPageDialog, newPostDialog } from "./snippets.js";
 import { openSiteSettings } from "./settings.js";
+import { openSiteCode } from "./pagecode.js";
 
 var WRENCH =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>';
@@ -71,6 +73,10 @@ export function initAdminTools() {
     }
     if (menu.children.length) menu.appendChild(document.createElement("hr"));
     menu.appendChild(item(tools, "Site settings", openSiteSettings));
+    // Site-wide code is written raw into every page, so the editor is
+    // admin-only — matching the server, which ignores these fields in
+    // a settings save from anyone else.
+    if (isAdmin) menu.appendChild(item(tools, "Site CSS & JS", openSiteCode));
     var admin = document.createElement("a");
     admin.href = adminPath + "/";
     admin.textContent = "Admin panel";

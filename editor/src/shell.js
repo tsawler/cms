@@ -123,13 +123,13 @@ export function initShell() {
         "</div></div>" +
         '<div class="code-overlay" id="code-overlay"></div>' +
         '<div class="codepanel" id="code-panel">' +
-        '<div class="chead"><h2>Page CSS &amp; JS</h2>' +
+        '<div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2>' +
         '<div class="ctabs">' +
         '<button id="code-tab-css" class="on">CSS</button>' +
         '<button id="code-tab-js">JavaScript</button>' +
         "</div>" +
         '<button id="code-close" title="Close" aria-label="Close">×</button></div>' +
-        '<div class="clinks">' +
+        '<div class="clinks" id="code-links-row">' +
         '<label for="code-links" id="code-links-label">External stylesheets — one URL per line</label>' +
         '<textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off"' +
         ' placeholder="https://cdn.example.com/library.css"></textarea>' +
@@ -139,8 +139,8 @@ export function initShell() {
         '<textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>' +
         "</div>" +
         '<div class="cfoot">' +
-        '<span class="chint">This page only. Enter plain code — no &lt;style&gt; or &lt;script&gt; tags; ' +
-        "CSS goes into &lt;head&gt;, JavaScript runs before &lt;/body&gt;.</span>" +
+        // Filled in by pagecode.js per scope (page vs. site-wide).
+        '<span class="chint" id="code-hint"></span>' +
         '<button class="mbtn" id="code-cancel">Cancel</button>' +
         '<button class="mbtn primary" id="code-save">Save</button>' +
         "</div></div>" +

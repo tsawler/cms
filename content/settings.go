@@ -16,16 +16,23 @@ type SiteSettings struct {
 	// cmsHead/cmsScripts). Editing them is admin-only, like per-page code.
 	SiteCSS string
 	SiteJS  string
+	// SiteCSSLinks and SiteJSLinks are external stylesheet/script URLs,
+	// one per line, loaded on every public page before the inline
+	// SiteCSS/SiteJS. Admin-only, like the inline code.
+	SiteCSSLinks string
+	SiteJSLinks  string
 }
 
 // Keys the settings are stored under in cms_settings.
 const (
-	settingMenuAlign  = "menu_align"
-	settingSiteName   = "site_name"
-	settingLogoURL    = "logo_url"
-	settingLoginInNav = "login_in_nav"
-	settingSiteCSS    = "site_css"
-	settingSiteJS     = "site_js"
+	settingMenuAlign    = "menu_align"
+	settingSiteName     = "site_name"
+	settingLogoURL      = "logo_url"
+	settingLoginInNav   = "login_in_nav"
+	settingSiteCSS      = "site_css"
+	settingSiteJS       = "site_js"
+	settingSiteCSSLinks = "site_css_links"
+	settingSiteJSLinks  = "site_js_links"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -55,6 +62,10 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteCSS = v
 		case settingSiteJS:
 			out.SiteJS = v
+		case settingSiteCSSLinks:
+			out.SiteCSSLinks = v
+		case settingSiteJSLinks:
+			out.SiteJSLinks = v
 		}
 	}
 	return out, rows.Err()
@@ -73,12 +84,14 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		loginInNav = "1"
 	}
 	for k, v := range map[string]string{
-		settingMenuAlign:  in.MenuAlign,
-		settingSiteName:   in.SiteName,
-		settingLogoURL:    in.LogoURL,
-		settingLoginInNav: loginInNav,
-		settingSiteCSS:    in.SiteCSS,
-		settingSiteJS:     in.SiteJS,
+		settingMenuAlign:    in.MenuAlign,
+		settingSiteName:     in.SiteName,
+		settingLogoURL:      in.LogoURL,
+		settingLoginInNav:   loginInNav,
+		settingSiteCSS:      in.SiteCSS,
+		settingSiteJS:       in.SiteJS,
+		settingSiteCSSLinks: in.SiteCSSLinks,
+		settingSiteJSLinks:  in.SiteJSLinks,
 	} {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cms_settings (key, value) VALUES ($1, $2)

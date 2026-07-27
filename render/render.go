@@ -397,11 +397,11 @@ func DefaultEditorStyles() []EditorStyle {
 // marker elements and the in-place editor script is injected before
 // </body>. Pass nil for a plain public render.
 type EditInfo struct {
-	PageID    int64
-	Slug      string // "" identifies the home page (not deletable)
-	AdminPath string
-	CSRFToken string
-	Locale    string
+	PageID     int64
+	Slug       string // "" identifies the home page (not deletable)
+	AdminPath  string
+	CSRFToken  string
+	Locale     string
 	Status     string // "draft" or "published"
 	Visibility string // "public" or "private" — who may view the page
 	// HasUnpublished is true when a published page's draft content
@@ -594,7 +594,7 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			}
 			return template.HTML(sb.String())
 		},
-		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
+		"cmsMenu": func(key string) []MenuEntry { return menus[key] },
 		"cmsNav": func(key string) template.HTML {
 			// The login link shows only to logged-out visitors (edit == nil)
 			// when the setting is on and an admin path is known.
@@ -1097,7 +1097,13 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 		sb.WriteString("\">\n")
 	}
 	// External stylesheets come before the inline CSS so the page's own
-	// rules can override the library's.
+	// rules can override the library's; site-wide ones come before the
+	// page's for the same reason.
+	for _, u := range resourceLinks(in.Site.SiteCSSLinks) {
+		sb.WriteString(`<link rel="stylesheet" href="`)
+		sb.WriteString(html.EscapeString(u))
+		sb.WriteString("\">\n")
+	}
 	for _, u := range resourceLinks(p.CSSLinks) {
 		sb.WriteString(`<link rel="stylesheet" href="`)
 		sb.WriteString(html.EscapeString(u))
@@ -1139,6 +1145,13 @@ var (
 func scriptsHTML(p *content.Page, site content.SiteSettings) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
+	// Site-wide external scripts load before the page's, and all external
+	// scripts before the inline code that may build on them.
+	for _, u := range resourceLinks(site.SiteJSLinks) {
+		sb.WriteString(`<script src="`)
+		sb.WriteString(html.EscapeString(u))
+		sb.WriteString("\"></script>\n")
+	}
 	for _, u := range resourceLinks(p.JSLinks) {
 		sb.WriteString(`<script src="`)
 		sb.WriteString(html.EscapeString(u))

@@ -1,7 +1,12 @@
 /* ------------------------------------------------------------------ *
- * Page CSS & JS panel (admin-only): a wide two-tab code editor.
+ * CSS & JS panel (admin-only): a wide two-tab code editor.
  * Highlighting uses the classic trick of a transparent-text textarea
  * stacked over a <pre> that holds the colored tokens.
+ *
+ * One panel, two scopes: "page" (the bar's more menu) edits this
+ * page's code via /pages/:id/code; "site" (the wrench menu) edits the
+ * site-wide CSS/JS and external links stored in the settings via
+ * /settings.
  * ------------------------------------------------------------------ */
 
 import { isAdmin, pageId } from "./state.js";
@@ -11,7 +16,7 @@ import { cmsConfirm } from "./dialogs.js";
 import { hasUnsaved } from "./editing.js";
 
 var codeState = { css: "", js: "", cssLinks: "", jsLinks: "",
-    tab: "css", loaded: false, dirty: false };
+    tab: "css", loaded: false, dirty: false, scope: "page" };
 
 function escHTML(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -76,7 +81,21 @@ function setCodeTab(tab) {
     ta.focus();
 }
 
-function openCodePanel() {
+function openCodePanel(scope) {
+    // The two scopes share the panel and its cached state; switching
+    // drops the other scope's cache so its content is refetched. Only
+    // saved content can be cached here — the panel never closes dirty.
+    if (codeState.scope !== scope) {
+        codeState.scope = scope;
+        codeState.loaded = false;
+        codeState.dirty = false;
+    }
+    var site = scope === "site";
+    $("code-title").textContent = site ? "Site CSS & JS" : "Page CSS & JS";
+    $("code-hint").textContent = (site
+        ? "Every public page. Enter plain code — no <style> or <script> tags; "
+        : "This page only. Enter plain code — no <style> or <script> tags; ") +
+        "CSS goes into <head>, JavaScript runs before </body>.";
     $("code-overlay").classList.add("on");
     $("code-panel").classList.add("on");
     if (codeState.loaded) {
@@ -86,7 +105,13 @@ function openCodePanel() {
     $("code-ta").value = "";
     $("code-links").value = "";
     renderCode();
-    api("/pages/" + pageId + "/code", { method: "GET" }).then(function (body) {
+    var load = site
+        ? api("/settings").then(function (s) {
+            return { css: s.siteCss, js: s.siteJs,
+                cssLinks: s.siteCssLinks, jsLinks: s.siteJsLinks };
+        })
+        : api("/pages/" + pageId + "/code", { method: "GET" });
+    load.then(function (body) {
         codeState.css = body.css || "";
         codeState.js = body.js || "";
         codeState.cssLinks = body.cssLinks || "";
@@ -130,10 +155,15 @@ export function dismissCodePanel() {
         });
 }
 
+// openSiteCode is the wrench menu's "Site CSS & JS" entry.
+export function openSiteCode() {
+    openCodePanel("site");
+}
+
 export function initPageCode() {
     $("code-btn").hidden = !isAdmin;
 
-    $("code-btn").addEventListener("click", openCodePanel);
+    $("code-btn").addEventListener("click", function () { openCodePanel("page"); });
     $("code-tab-css").addEventListener("click", function () { setCodeTab("css"); });
     $("code-tab-js").addEventListener("click", function () { setCodeTab("js"); });
     $("code-close").addEventListener("click", dismissCodePanel);
@@ -168,13 +198,34 @@ export function initPageCode() {
     $("code-save").addEventListener("click", function () {
         stashCode();
         setMsg("Saving…");
-        api("/pages/" + pageId + "/code", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ css: codeState.css, js: codeState.js,
-                cssLinks: codeState.cssLinks, jsLinks: codeState.jsLinks }),
-        }).then(function () {
+        // Site scope: the settings PUT carries the full settings object,
+        // so re-fetch the rest at save time — a stale copy would clobber
+        // settings-dialog edits made while this panel sat open.
+        var put = codeState.scope === "site"
+            ? api("/settings").then(function (s) {
+                return api("/settings", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ menuAlign: s.menuAlign,
+                        siteName: s.siteName, logoUrl: s.logoUrl,
+                        loginInNav: s.loginInNav,
+                        siteCss: codeState.css, siteJs: codeState.js,
+                        siteCssLinks: codeState.cssLinks,
+                        siteJsLinks: codeState.jsLinks }),
+                });
+            })
+            : api("/pages/" + pageId + "/code", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ css: codeState.css, js: codeState.js,
+                    cssLinks: codeState.cssLinks, jsLinks: codeState.jsLinks }),
+            });
+        put.then(function () {
             codeState.dirty = false;
+            // The server may normalize what was saved (pasted embed
+            // tags move to the link lists, wrapper tags unwrap), so
+            // drop the cache and refetch on the next open.
+            codeState.loaded = false;
             closeCodePanel();
             // The CSS/JS only take effect on a fresh render. Reload for
             // it unless that would throw away unsaved content edits.
