@@ -746,21 +746,44 @@ environment or `.env`. Without them the example runs without CAPTCHA.
 The challenge is solved invisibly by default; `CAP_WIDGET=visible` shows
 the checkbox widget instead.
 
-The example reads S3 credentials from a `.env` file at the repo root
-(`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET`, optional
-`S3_REGION` and `S3_KEY_PREFIX`); without one, the media library is
-simply disabled. `CMS_MEDIA_WEBP_QUALITY` (a value in (0, 1], e.g.
-`0.5`) overrides the WebP quality used for image variants; unset uses
-the default 0.3. `CMS_MEDIA_MAX_VIDEO_MB` overrides the video upload
-cap; unset allows 512 MB.
-
 Then open <http://localhost:4000/admin/> and log in with
 `admin@example.com` / `password123` (development defaults; override with
 `CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
 
 Login sessions end when the browser closes unless "Remember me" is
-ticked, which keeps the login for `cms.Config.RememberFor` (default 24h;
-the example maps `CMS_REMEMBER_HOURS` onto it).
+ticked, which keeps the login for `cms.Config.RememberFor`. The library
+default is 24h; the example sets it from `CMS_REMEMBER_DAYS` (measured
+in days), defaulting to 30 days when unset.
+
+### Environment variables
+
+The example loads variables from a `.env` file — `examples/basic/.env`
+first, falling back to one at the repo root — without overriding
+anything already set in the real environment. Everything it reads:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | `postgres://cms:cms@localhost:5433/cms?sslmode=disable` | Postgres connection string (matches `docker-compose.yml`). |
+| `ADDR` | `:4000` | HTTP listen address. |
+| `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
+| `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
+| `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive values fall back to the default. |
+| `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
+| `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
+| `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: a space-separated argv with `{content}` and `{output}` placeholders (see [Generated CSS for content classes](#generated-css-for-content-classes-optional) and `tailwind-content.sh`). |
+| `CMS_TAILWIND_DIR` | unset | Working directory for `CMS_TAILWIND_COMMAND`. |
+| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
+| `S3_BUCKET` | — | Bucket for uploaded media. |
+| `S3_ACCESS_KEY` | — | Object-store access key. |
+| `S3_SECRET` | — | Object-store secret key. |
+| `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
+| `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. |
+| `S3_APPLY_PUBLIC_POLICY` | unset | Set to `1` to apply a public-read bucket policy at startup (one-time setup). |
+| `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA and makes the other `CAP_*` variables relevant. |
+| `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |
+| `CAP_SECRET` | — | Secret for that site key. |
+| `CAP_INTERNAL_URL` | unset (uses `CAP_URL`) | Server-to-server Cap address, e.g. inside Docker. |
+| `CAP_WIDGET` | unset (invisible challenge) | Set to `visible` to show Cap's checkbox widget on the login form. |
 
 ## Working on the in-place editor
 

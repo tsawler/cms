@@ -129,11 +129,10 @@ func run(logger *slog.Logger) error {
 		logger.Warn("CAP_URL not set — login CAPTCHA disabled")
 	}
 
-	// "Remember me" duration in hours; unset or invalid falls back to
-	// the CMS default (24h).
-	var rememberFor time.Duration
-	if h, err := strconv.Atoi(os.Getenv("CMS_REMEMBER_HOURS")); err == nil && h > 0 {
-		rememberFor = time.Duration(h) * time.Hour
+	// "Remember me" duration in days; unset or invalid falls back to 30.
+	rememberFor := 30 * 24 * time.Hour
+	if d, err := strconv.Atoi(os.Getenv("CMS_REMEMBER_DAYS")); err == nil && d > 0 {
+		rememberFor = time.Duration(d) * 24 * time.Hour
 	}
 
 	// Lossy WebP quality for image variants, in (0, 1]; unset falls back
