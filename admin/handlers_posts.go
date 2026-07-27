@@ -109,8 +109,7 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 	form.AuthorID = existing.AuthorID
 	form.AuthorName = existing.AuthorName
 
-	// Same rules as pages: per-page CSS/JS is admin-only, and external
-	// resource URLs belong to the in-place editor's code panel.
+	// Same rules as pages: per-page CSS/JS is admin-only.
 	if s.currentUser(r).Role.IsAdmin() {
 		form.HeadCSS = r.PostFormValue("head_css")
 		form.BodyJS = r.PostFormValue("body_js")
@@ -118,8 +117,6 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 		form.HeadCSS = existing.HeadCSS
 		form.BodyJS = existing.BodyJS
 	}
-	form.CSSLinks = existing.CSSLinks
-	form.JSLinks = existing.JSLinks
 
 	if len(errs) > 0 {
 		s.renderPostForm(w, r, form, false, errs)

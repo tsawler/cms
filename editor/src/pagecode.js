@@ -5,8 +5,9 @@
  *
  * One panel, two scopes: "page" (the bar's more menu) edits this
  * page's code via /pages/:id/code; "site" (the wrench menu) edits the
- * site-wide CSS/JS and external links stored in the settings via
- * /settings.
+ * site-wide CSS/JS stored in the settings via /settings. Each field
+ * takes plain code or full markup — <style>, <link>, and <script>
+ * tags are written into the page as-is.
  * ------------------------------------------------------------------ */
 
 import { isAdmin, pageId } from "./state.js";
@@ -15,7 +16,7 @@ import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm } from "./dialogs.js";
 import { hasUnsaved } from "./editing.js";
 
-var codeState = { css: "", js: "", cssLinks: "", jsLinks: "",
+var codeState = { css: "", js: "",
     tab: "css", loaded: false, dirty: false, scope: "page" };
 
 function escHTML(s) {
@@ -56,7 +57,6 @@ function renderCode() {
 
 function stashCode() {
     codeState[codeState.tab] = $("code-ta").value;
-    codeState[codeState.tab + "Links"] = $("code-links").value;
 }
 
 function setCodeTab(tab) {
@@ -64,13 +64,6 @@ function setCodeTab(tab) {
     codeState.tab = tab;
     $("code-tab-css").classList.toggle("on", tab === "css");
     $("code-tab-js").classList.toggle("on", tab === "js");
-    $("code-links-label").textContent = tab === "css"
-        ? "External stylesheets — one URL per line"
-        : "External scripts — one URL per line";
-    $("code-links").placeholder = tab === "css"
-        ? "https://cdn.example.com/library.css"
-        : "https://cdn.example.com/library.js";
-    $("code-links").value = codeState[tab + "Links"];
     var ta = $("code-ta");
     ta.value = codeState[tab];
     ta.scrollTop = 0;
@@ -93,9 +86,11 @@ function openCodePanel(scope) {
     var site = scope === "site";
     $("code-title").textContent = site ? "Site CSS & JS" : "Page CSS & JS";
     $("code-hint").textContent = (site
-        ? "Every public page. Enter plain code — no <style> or <script> tags; "
-        : "This page only. Enter plain code — no <style> or <script> tags; ") +
-        "CSS goes into <head>, JavaScript runs before </body>.";
+        ? "Every public page. "
+        : "This page only. ") +
+        "Plain code works, and so do full <style>, <link>, and <script> " +
+        "tags — they go into the page as-is. CSS lands in <head>, " +
+        "JavaScript before </body>.";
     $("code-overlay").classList.add("on");
     $("code-panel").classList.add("on");
     if (codeState.loaded) {
@@ -103,28 +98,22 @@ function openCodePanel(scope) {
         return;
     }
     $("code-ta").value = "";
-    $("code-links").value = "";
     renderCode();
     var load = site
         ? api("/settings").then(function (s) {
-            return { css: s.siteCss, js: s.siteJs,
-                cssLinks: s.siteCssLinks, jsLinks: s.siteJsLinks };
+            return { css: s.siteCss, js: s.siteJs };
         })
         : api("/pages/" + pageId + "/code", { method: "GET" });
     load.then(function (body) {
         codeState.css = body.css || "";
         codeState.js = body.js || "";
-        codeState.cssLinks = body.cssLinks || "";
-        codeState.jsLinks = body.jsLinks || "";
         codeState.loaded = true;
         codeState.dirty = false;
         // Show whichever tab has content first; CSS wins a tie.
-        codeState.tab = !codeState.css && !codeState.cssLinks &&
-            (codeState.js || codeState.jsLinks) ? "js" : "css";
-        // Sync the inputs before setCodeTab: its stash of the
-        // still-empty fields must not wipe the fetched values.
+        codeState.tab = !codeState.css && codeState.js ? "js" : "css";
+        // Sync the input before setCodeTab: its stash of the
+        // still-empty field must not wipe the fetched values.
         $("code-ta").value = codeState[codeState.tab];
-        $("code-links").value = codeState[codeState.tab + "Links"];
         setCodeTab(codeState.tab);
     }).catch(function (err) {
         closeCodePanel();
@@ -175,10 +164,6 @@ export function initPageCode() {
         stashCode();
         renderCode();
     });
-    $("code-links").addEventListener("input", function () {
-        codeState.dirty = true;
-        stashCode();
-    });
     $("code-ta").addEventListener("scroll", function () {
         $("code-hl").scrollTop = $("code-ta").scrollTop;
         $("code-hl").scrollLeft = $("code-ta").scrollLeft;
@@ -209,22 +194,17 @@ export function initPageCode() {
                     body: JSON.stringify({ menuAlign: s.menuAlign,
                         siteName: s.siteName, logoUrl: s.logoUrl,
                         loginInNav: s.loginInNav,
-                        siteCss: codeState.css, siteJs: codeState.js,
-                        siteCssLinks: codeState.cssLinks,
-                        siteJsLinks: codeState.jsLinks }),
+                        siteCss: codeState.css, siteJs: codeState.js }),
                 });
             })
             : api("/pages/" + pageId + "/code", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ css: codeState.css, js: codeState.js,
-                    cssLinks: codeState.cssLinks, jsLinks: codeState.jsLinks }),
+                body: JSON.stringify({ css: codeState.css, js: codeState.js }),
             });
         put.then(function () {
             codeState.dirty = false;
-            // The server may normalize what was saved (pasted embed
-            // tags move to the link lists, wrapper tags unwrap), so
-            // drop the cache and refetch on the next open.
+            // Drop the cache so the next open refetches saved state.
             codeState.loaded = false;
             closeCodePanel();
             // The CSS/JS only take effect on a fresh render. Reload for

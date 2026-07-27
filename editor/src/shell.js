@@ -129,11 +129,6 @@ export function initShell() {
         '<button id="code-tab-js">JavaScript</button>' +
         "</div>" +
         '<button id="code-close" title="Close" aria-label="Close">×</button></div>' +
-        '<div class="clinks" id="code-links-row">' +
-        '<label for="code-links" id="code-links-label">External stylesheets — one URL per line</label>' +
-        '<textarea id="code-links" rows="1" spellcheck="false" autocapitalize="off"' +
-        ' placeholder="https://cdn.example.com/library.css"></textarea>' +
-        "</div>" +
         '<div class="cbody">' +
         '<pre id="code-hl" aria-hidden="true"></pre>' +
         '<textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>' +

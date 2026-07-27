@@ -218,11 +218,6 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 		form.HeadCSS = existing.HeadCSS
 		form.BodyJS = existing.BodyJS
 	}
-	// External resource URLs are managed by the in-place editor's code
-	// panel only; the admin form must not wipe them.
-	form.CSSLinks = existing.CSSLinks
-	form.JSLinks = existing.JSLinks
-
 	if len(errs) > 0 {
 		s.renderPageForm(w, r, form, false, errs)
 		return

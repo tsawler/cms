@@ -75,11 +75,6 @@ cursor:pointer;border-bottom:2px solid transparent;border-radius:0}
 #code-close,#src-close{margin-left:auto;border:none;background:none;font-size:20px;line-height:1;
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
 #code-close:hover,#src-close:hover{background:#eceef1;color:#1c2128}
-.clinks{padding:10px 16px;border-bottom:1px solid #e3e6ea;background:#f8f9fb}
-.clinks label{display:block;font-size:12px;font-weight:600;color:#475467;margin-bottom:4px}
-.clinks textarea{width:100%;resize:vertical;min-height:30px;max-height:110px;
-border:1px solid #d9dce1;border-radius:8px;padding:6px 10px;background:#fff;
-font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto}
 .cbody{flex:1;position:relative;background:#11151c;min-height:0}
 #code-hl,#code-ta,#src-hl,#src-ta{position:absolute;inset:0;margin:0;padding:14px 16px;border:none;
 font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:4}

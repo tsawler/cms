@@ -494,3 +494,38 @@ func TestEditRenderMarksFallbackRegions(t *testing.T) {
 		t.Error("public render leaked fallback markers")
 	}
 }
+
+func TestEmbedCode(t *testing.T) {
+	tests := []struct {
+		name, code, tag, want string
+	}{
+		{"empty", "", "style", ""},
+		{"whitespace only", "  \n\t", "script", ""},
+		{"plain CSS wrapped", "body{color:red}", "style",
+			"<style>\nbody{color:red}\n</style>\n"},
+		{"plain JS wrapped", "console.log(1)", "script",
+			"<script>\nconsole.log(1)\n</script>\n"},
+		{"close tag in plain code escaped", `var s = "</script>";`, "script",
+			"<script>\nvar s = \"<\\/script>\";\n</script>\n"},
+		{"style block verbatim", "<style>body{color:red}</style>", "style",
+			"<style>body{color:red}</style>\n"},
+		{"link tag verbatim", `<link rel="stylesheet" href="/a.css">`, "style",
+			`<link rel="stylesheet" href="/a.css">` + "\n"},
+		{"script src verbatim", `<script src="/a.js"></script>`, "script",
+			`<script src="/a.js"></script>` + "\n"},
+		{"mixed markup and tags verbatim",
+			"<script src=\"/lib.js\"></script>\n<script>use(lib)</script>", "script",
+			"<script src=\"/lib.js\"></script>\n<script>use(lib)</script>\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			closeRe := styleCloseRe
+			if tt.tag == "script" {
+				closeRe = scriptCloseRe
+			}
+			if got := embedCode(tt.code, tt.tag, closeRe); got != tt.want {
+				t.Errorf("embedCode(%q) = %q, want %q", tt.code, got, tt.want)
+			}
+		})
+	}
+}

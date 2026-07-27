@@ -427,8 +427,12 @@ operation requires them.
 ### 7. Per-page CSS/JS
 
 Each page has optional `head_css` and `body_js` fields (plus attachable
-uploaded asset files), injected by the renderer. Editable in admin under an
-"Advanced" tab — present but out of the way for non-technical users.
+uploaded asset files), injected by the renderer; site-wide equivalents
+live in settings. Each field takes plain code or raw markup: a value
+containing `<style>`, `<link>`, or `<script>` tags is written into the
+page verbatim, anything else is wrapped in the appropriate tag. Editable
+in admin under an "Advanced" tab — present but out of the way for
+non-technical users.
 
 ## Data model (Postgres)
 

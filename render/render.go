@@ -331,27 +331,6 @@ func ValidBackgroundURL(s string) string {
 	return s
 }
 
-// ValidResourceURL returns the value if it is safe to use as an external
-// stylesheet or script URL — the same rules as background URLs.
-func ValidResourceURL(s string) string {
-	return ValidBackgroundURL(s)
-}
-
-// resourceLinks splits a newline-separated URL list, dropping empties
-// and anything that fails validation (defense against hand-edited rows).
-func resourceLinks(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	var out []string
-	for _, line := range strings.Split(raw, "\n") {
-		if u := ValidResourceURL(strings.TrimSpace(line)); u != "" {
-			out = append(out, u)
-		}
-	}
-	return out
-}
-
 // ValidSectionHeight returns the value if it is one of the fixed
 // viewport-height options ("50", "75", "100"), or "" otherwise ("auto"
 // and anything unknown mean no minimum height).
@@ -1096,19 +1075,6 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 		sb.WriteString(html.EscapeString(contentCSS))
 		sb.WriteString("\">\n")
 	}
-	// External stylesheets come before the inline CSS so the page's own
-	// rules can override the library's; site-wide ones come before the
-	// page's for the same reason.
-	for _, u := range resourceLinks(in.Site.SiteCSSLinks) {
-		sb.WriteString(`<link rel="stylesheet" href="`)
-		sb.WriteString(html.EscapeString(u))
-		sb.WriteString("\">\n")
-	}
-	for _, u := range resourceLinks(p.CSSLinks) {
-		sb.WriteString(`<link rel="stylesheet" href="`)
-		sb.WriteString(html.EscapeString(u))
-		sb.WriteString("\">\n")
-	}
 	if p.Description != "" {
 		sb.WriteString(`<meta name="description" content="`)
 		sb.WriteString(html.EscapeString(p.Description))
@@ -1116,20 +1082,12 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	}
 	// Site-wide CSS before the page's own, so a page's HeadCSS can
 	// override it. Written raw; editing it is restricted to admins.
-	if in.Site.SiteCSS != "" {
-		sb.WriteString("<style>\n")
-		sb.WriteString(styleCloseRe.ReplaceAllString(in.Site.SiteCSS, `<\/style`))
-		sb.WriteString("\n</style>\n")
-	}
-	if p.HeadCSS != "" {
-		sb.WriteString("<style>\n")
-		sb.WriteString(styleCloseRe.ReplaceAllString(p.HeadCSS, `<\/style`))
-		sb.WriteString("\n</style>\n")
-	}
+	sb.WriteString(embedCode(in.Site.SiteCSS, "style", styleCloseRe))
+	sb.WriteString(embedCode(p.HeadCSS, "style", styleCloseRe))
 	return template.HTML(sb.String())
 }
 
-// A literal closing tag inside the embedded code would end the wrapper
+// A literal closing tag inside wrapped plain code would end the wrapper
 // element early and dump the rest onto the page. `<\/` is an equivalent
 // escape inside JS strings, and the sequence has no legitimate use
 // outside one — same for CSS.
@@ -1138,36 +1096,33 @@ var (
 	scriptCloseRe = regexp.MustCompile(`(?i)</script`)
 )
 
-// scriptsHTML builds what {{cmsScripts}} emits before </body>: the page's
-// external scripts, then its inline per-page JS (so the inline code can
-// use what the external libraries define). Written raw; editing is
-// restricted to admins.
+// markupRe decides how an admin code field is embedded: a field that
+// carries its own <style>, <link>, or <script> tags is written into the
+// page verbatim; anything else is plain code and gets wrapped.
+var markupRe = regexp.MustCompile(`(?i)<(style|link|script)\b`)
+
+// embedCode renders one admin code field (page or site scope) for
+// injection into the page. Plain code is wrapped in tag with literal
+// closing tags escaped; code that already contains markup is emitted
+// as-is, in the order the admin wrote it.
+func embedCode(code, tag string, closeRe *regexp.Regexp) string {
+	if strings.TrimSpace(code) == "" {
+		return ""
+	}
+	if markupRe.MatchString(code) {
+		return code + "\n"
+	}
+	return "<" + tag + ">\n" + closeRe.ReplaceAllString(code, `<\/`+tag) + "\n</" + tag + ">\n"
+}
+
+// scriptsHTML builds what {{cmsScripts}} emits before </body>: the
+// site-wide JS before the page's own, so a page can build on it. Both
+// are written raw (plain code gets a <script> wrapper, markup passes
+// through verbatim); editing is restricted to admins.
 func scriptsHTML(p *content.Page, site content.SiteSettings) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
-	// Site-wide external scripts load before the page's, and all external
-	// scripts before the inline code that may build on them.
-	for _, u := range resourceLinks(site.SiteJSLinks) {
-		sb.WriteString(`<script src="`)
-		sb.WriteString(html.EscapeString(u))
-		sb.WriteString("\"></script>\n")
-	}
-	for _, u := range resourceLinks(p.JSLinks) {
-		sb.WriteString(`<script src="`)
-		sb.WriteString(html.EscapeString(u))
-		sb.WriteString("\"></script>\n")
-	}
-	// Site-wide JS before the page's own inline JS, so a page can build on
-	// it. Written raw; editing it is restricted to admins.
-	if site.SiteJS != "" {
-		sb.WriteString("<script>\n")
-		sb.WriteString(scriptCloseRe.ReplaceAllString(site.SiteJS, `<\/script`))
-		sb.WriteString("\n</script>\n")
-	}
-	if p.BodyJS != "" {
-		sb.WriteString("<script>\n")
-		sb.WriteString(scriptCloseRe.ReplaceAllString(p.BodyJS, `<\/script`))
-		sb.WriteString("\n</script>\n")
-	}
+	sb.WriteString(embedCode(site.SiteJS, "script", scriptCloseRe))
+	sb.WriteString(embedCode(p.BodyJS, "script", scriptCloseRe))
 	return template.HTML(sb.String())
 }

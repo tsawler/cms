@@ -77,8 +77,6 @@ export function openSiteSettings() {
                 // save doesn't wipe them.
                 siteCss: s.siteCss || "",
                 siteJs: s.siteJs || "",
-                siteCssLinks: s.siteCssLinks || "",
-                siteJsLinks: s.siteJsLinks || "",
             };
             api("/settings", {
                 method: "PUT",

@@ -59,10 +59,8 @@ type Page struct {
 	TemplateName string // template file within the host's TemplateFS
 	Status       Status
 	Visibility   Visibility
-	HeadCSS      string // extra per-page CSS, injected by cmsHead
-	BodyJS       string // extra per-page JS, injected by cmsScripts
-	CSSLinks     string // external stylesheet URLs, one per line
-	JSLinks      string // external script URLs, one per line
+	HeadCSS      string // extra per-page CSS (or raw head markup), injected by cmsHead
+	BodyJS       string // extra per-page JS (or raw markup), injected by cmsScripts
 	Title        string
 	Description  string
 	CreatedAt    time.Time
@@ -133,7 +131,6 @@ func NewStore(db *pgxpool.Pool, defaultLocale string) *Store {
 // an empty field falls back, so a French page with only a title still
 // gets the English description.
 const pageColumns = `p.id, p.slug, p.template_name, p.status, p.visibility, p.head_css, p.body_js,
-	p.css_links, p.js_links,
 	COALESCE(NULLIF(m.title, ''), md.title, ''),
 	COALESCE(NULLIF(m.description, ''), md.description, ''),
 	p.created_at, p.updated_at`
@@ -141,7 +138,6 @@ const pageColumns = `p.id, p.slug, p.template_name, p.status, p.visibility, p.he
 func scanPage(row pgx.Row) (*Page, error) {
 	var p Page
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
-		&p.CSSLinks, &p.JSLinks,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -221,10 +217,10 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js, css_links, js_links)
-		VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7)
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
+		VALUES ($1, $2, 'draft', $3, $4, $5)
 		RETURNING id`,
-		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS,
 	).Scan(&p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
@@ -258,8 +254,8 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 
 	var id int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js, css_links, js_links)
-		SELECT $2, template_name, 'draft', visibility, head_css, body_js, css_links, js_links
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
+		SELECT $2, template_name, 'draft', visibility, head_css, body_js
 		FROM cms_pages WHERE id = $1
 		RETURNING id`, srcID, slug).Scan(&id)
 	if pgutil.IsUniqueViolation(err) {
@@ -305,9 +301,9 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages
 		SET slug = $1, template_name = $2, visibility = $3, head_css = $4, body_js = $5,
-			css_links = $6, js_links = $7, updated_at = now()
-		WHERE id = $8`,
-		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks, p.ID)
+			updated_at = now()
+		WHERE id = $6`,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}

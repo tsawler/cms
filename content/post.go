@@ -54,7 +54,6 @@ const postJoins = `
 func scanPost(row pgx.Row) (*Post, error) {
 	var p Post
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
-		&p.CSSLinks, &p.JSLinks,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
 		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
 		&p.ThumbnailURL, &p.HeaderURL)
@@ -82,10 +81,10 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js, css_links, js_links)
-		VALUES ($1, $2, 'draft', $3, $4, $5, $6)
+		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js)
+		VALUES ($1, $2, 'draft', $3, $4)
 		RETURNING id`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks,
+		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS,
 	).Scan(&p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
@@ -123,9 +122,9 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages
 		SET slug = $1, template_name = $2, head_css = $3, body_js = $4,
-			css_links = $5, js_links = $6, updated_at = now()
-		WHERE id = $7`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.CSSLinks, p.JSLinks, p.ID)
+			updated_at = now()
+		WHERE id = $5`,
+		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
