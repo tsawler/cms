@@ -555,6 +555,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		Sections []struct {
 			BG      string `json:"bg"`
 			Width   string `json:"width"`
+			Corners string `json:"corners"`
 			Height  string `json:"height"`
 			VAlign  string `json:"valign"`
 			BGColor string `json:"bgcolor"`
@@ -598,6 +599,13 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		settings := map[string]string{
 			"bg":    s.deps.SectionStyles.Background(sec.BG).Key,
 			"width": s.deps.SectionStyles.Width(sec.Width).Key,
+		}
+		// Corner rounding stores only a non-default choice, so hosts
+		// without corner options never see the key.
+		if list := s.deps.SectionStyles.Corners; len(list) > 0 {
+			if c := s.deps.SectionStyles.Corner(sec.Corners); c.Key != list[0].Key {
+				settings["corners"] = c.Key
+			}
 		}
 		// Custom backgrounds and height are free-form values; invalid
 		// ones are dropped rather than stored.

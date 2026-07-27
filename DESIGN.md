@@ -229,9 +229,10 @@ each section is a full-width `<section>` wrapper (background classes)
 around an inner container (width classes) around ordinary rich HTML. This
 is the one place the CMS generates page-level markup — the trade-off for
 letting editors compose layouts — and every class it emits comes from
-curated, configurable options (`Config.SectionStyles`: backgrounds and
-widths, Tailwind-first defaults, same no-pickers philosophy as the Styles
-menu; a dark background carries `prose-invert` via ContentClass).
+curated, configurable options (`Config.SectionStyles`: backgrounds,
+widths, and corner rounding, Tailwind-first defaults, same no-pickers
+philosophy as the Styles menu; a dark background carries `prose-invert`
+via ContentClass, corner classes join the background on the wrapper).
 
 Data model: this activates the multi-block regions the `cms_blocks`
 schema anticipated — one block per section, ordered by `sort`, with a

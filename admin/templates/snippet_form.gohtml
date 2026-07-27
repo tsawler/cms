@@ -45,6 +45,16 @@
                 {{end}}
             </select>
         </div>
+        {{if .SectionStyles.Corners}}
+        <div class="cms-field">
+            <label for="set_corners">{{.T "Rounded corners"}}</label>
+            <select id="set_corners" name="set_corners">
+                {{range .SectionStyles.Corners}}
+                <option value="{{.Key}}" {{if eq .Key (index $set "corners")}}selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+        </div>
+        {{end}}
         <div class="cms-field">
             <label for="set_height">{{.T "Section height"}}</label>
             <select id="set_height" name="set_height">

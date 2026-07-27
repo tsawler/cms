@@ -27,8 +27,7 @@ function sbOpt(list, key) {
 // observe in the DOM, so the class has to stay attached for the
 // delayed re-probe to find its rule.
 var bgProbe = null;
-function classBackground(cls) {
-    if (!cls) return "";
+function probeStyle(cls) {
     if (!bgProbe) {
         bgProbe = document.createElement("div");
         bgProbe.style.cssText = "position:absolute;left:-9999px;top:-9999px";
@@ -36,8 +35,29 @@ function classBackground(cls) {
         document.body.appendChild(bgProbe);
     }
     bgProbe.className = cls;
-    var bg = getComputedStyle(bgProbe).backgroundColor;
+    return getComputedStyle(bgProbe);
+}
+
+function classBackground(cls) {
+    if (!cls) return "";
+    var bg = probeStyle(cls).backgroundColor;
     return bg === "rgba(0, 0, 0, 0)" || bg === "transparent" ? "" : bg;
+}
+
+// classRadius probes a curated corner class's border radius the same way
+// classBackground probes color, so the preview mirrors whatever the host
+// CSS actually rounds.
+function classRadius(cls) {
+    if (!cls) return "";
+    var r = probeStyle(cls).borderTopLeftRadius;
+    return !r || r === "0px" ? "" : r;
+}
+
+// cornerOption resolves the corners setting, or a no-op option when the
+// host ships no corner choices.
+function cornerOption(key) {
+    var list = sectionStyles.corners || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
 }
 
 function isDarkColor(c) {
@@ -62,26 +82,31 @@ function isDarkColor(c) {
 // for contrast against the background.
 function sectionPreview(v, el) {
     var bgOpt = sbOpt(sectionStyles.backgrounds, v.bg);
+    var cornerOpt = cornerOption(v.corners);
     var probed = v.bgcolor || classBackground(bgOpt.class);
-    var box = buildSectionPreview(v, el, probed || "#ffffff");
-    if (!probed && bgOpt.class) {
+    var radius = classRadius(cornerOpt.class);
+    var box = buildSectionPreview(v, el, probed || "#ffffff", radius);
+    if ((!probed && bgOpt.class) || (!radius && cornerOpt.class)) {
         // Dev setups on the Tailwind Play CDN generate class CSS
         // asynchronously — the probe itself triggers generation, so
-        // one delayed re-probe finds the color.
+        // one delayed re-probe finds the color and radius.
         setTimeout(function () {
             if (el.firstElementChild !== box) return; // stale render
-            var late = classBackground(bgOpt.class);
-            if (late) buildSectionPreview(v, el, late);
+            var lateBg = v.bgcolor || classBackground(bgOpt.class);
+            buildSectionPreview(v, el, lateBg || "#ffffff", classRadius(cornerOpt.class));
         }, 250);
     }
 }
 
-function buildSectionPreview(v, el, resolved) {
+function buildSectionPreview(v, el, resolved, radius) {
     el.innerHTML = "";
     var box = document.createElement("div");
     var hMap = { auto: 96, 50: 112, 75: 128, 100: 144 };
     box.style.cssText = "width:100%;position:relative;display:flex;flex-direction:column;" +
-        "overflow:hidden;border-radius:8px;border:1px solid #e3e6ea;transition:height .15s ease";
+        "overflow:hidden;border:1px solid #e3e6ea;transition:height .15s ease,border-radius .15s ease";
+    // Sites without corner options keep the preview's soft chrome; with
+    // them, the box shows the real radius (square for "none").
+    box.style.borderRadius = (sectionStyles.corners || []).length ? (radius || "0px") : "8px";
     box.style.height = (hMap[v.height] || 96) + "px";
     box.style.backgroundColor = resolved;
     if (v.bgimage) {
@@ -241,6 +266,13 @@ export function initSections() {
                     options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
                 { id: "width", label: "Content width", type: "select", value: wrapper.dataset.cmsWidth || "",
                     options: sectionStyles.widths.map(function (o) { return { value: o.key, label: o.label }; }) },
+            ];
+            if ((sectionStyles.corners || []).length) {
+                setFields.push({ id: "corners", label: "Rounded corners", type: "select",
+                    value: wrapper.dataset.cmsCorners || "",
+                    options: sectionStyles.corners.map(function (o) { return { value: o.key, label: o.label }; }) });
+            }
+            setFields.push(
                 { id: "height", label: "Section height", type: "select", value: wrapper.dataset.cmsHeight || "auto",
                     options: [
                         { value: "auto", label: "Auto (fits the content)" },
@@ -254,8 +286,7 @@ export function initSections() {
                         { value: "center", label: "Center" },
                         { value: "bottom", label: "Bottom" },
                     ] },
-                { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" },
-            ];
+                { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" });
             if (mediaEnabled) {
                 setFields.push({ id: "bgimage", label: "Background image", type: "image",
                     value: wrapper.dataset.cmsBgimage || "" });
@@ -274,12 +305,14 @@ export function initSections() {
     });
 }
 
-// applySectionSettings takes a settings object {bg, width, bgcolor,
-// bgimage} and makes the wrapper reflect it: curated options become
-// classes, the free-form background color/image become inline styles.
+// applySectionSettings takes a settings object {bg, width, corners,
+// bgcolor, bgimage} and makes the wrapper reflect it: curated options
+// become classes, the free-form background color/image become inline
+// styles.
 function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
+    var corner = cornerOption(s.corners);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     // Height is a minimum, in viewport units — content can still grow
@@ -290,11 +323,12 @@ function applySectionSettings(wrapper, s) {
     var valign = { center: 1, bottom: 1 }[s.valign] ? s.valign : "top";
     wrapper.dataset.cmsBg = bg.key;
     wrapper.dataset.cmsWidth = w.key;
+    wrapper.dataset.cmsCorners = corner.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
-    wrapper.className = bg.class || "";
+    wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
     wrapper.style.flexDirection = valign === "top" ? "" : "column";
@@ -325,6 +359,7 @@ export function reapplySectionClasses() {
         applySectionSettings(wrapper, {
             bg: wrapper.dataset.cmsBg,
             width: wrapper.dataset.cmsWidth,
+            corners: wrapper.dataset.cmsCorners,
             height: wrapper.dataset.cmsHeight,
             valign: wrapper.dataset.cmsValign,
             bgcolor: wrapper.dataset.cmsBgcolor,

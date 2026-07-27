@@ -47,7 +47,7 @@ func TestReadmeListsDefaultClasses(t *testing.T) {
 		add(st.Class)
 	}
 	styles := render.DefaultSectionStyles()
-	for _, o := range append(styles.Backgrounds, styles.Widths...) {
+	for _, o := range append(append(styles.Backgrounds, styles.Widths...), styles.Corners...) {
 		add(o.Class)
 		add(o.ContentClass)
 	}

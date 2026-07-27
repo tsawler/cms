@@ -59,12 +59,15 @@ try {
     });
 } catch (e) { /* malformed config: no Styles menu */ }
 
-// Curated section settings (backgrounds/widths) from the server.
+// Curated section settings (backgrounds/widths/corners) from the server.
+// corners may be empty: a host that ships no corner options hides the
+// gear dialog's rounding field.
 export var sectionStyles = { backgrounds: [{ key: "default", label: "Default", class: "" }],
-    widths: [{ key: "normal", label: "Normal", class: "" }] };
+    widths: [{ key: "normal", label: "Normal", class: "" }], corners: [] };
 try {
     var ss = JSON.parse(cfg.sectionStyles || "null");
     if (ss && ss.backgrounds && ss.backgrounds.length && ss.widths && ss.widths.length) {
+        if (!ss.corners) ss.corners = [];
         sectionStyles = ss;
     }
 } catch (e) { /* fall back to the minimal defaults above */ }

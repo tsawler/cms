@@ -297,8 +297,9 @@ any max-width container** (it renders full-bleed), and editors can add,
 reorder, restyle, and delete full-width sections directly on the page:
 each section has a control pill (↑ ↓ ＋ ⚙ ✕) in edit mode, new sections
 start from a snippet or empty, and the ⚙ settings offer curated choices
-only — background (Default / Light gray / Dark / Accent) and content
-width (Normal / Wide / Full width) by default. The ＋ buttons — on each
+only — background (Default / Light gray / Dark / Accent), content
+width (Normal / Wide / Full width), and rounded corners (None / Small /
+Medium / Large) by default. The ＋ buttons — on each
 section, at the bottom of the sections area, and on the tool rail — open
 an "Add a section" chooser: start empty, seed the section from any
 snippet, or pick a **section preset** (below).
@@ -316,10 +317,11 @@ screen height, centered), **Feature grid**, **Stats**, **Testimonials**,
 **Call-to-action banner** — so a blank-canvas page can be composed into
 a landing page without touching the settings dialog.
 
-Settings use the section-settings vocabulary: `bg` and `width` name
-`SectionStyles` option keys, `height` is `"50"`/`"75"`/`"100"` (percent
-of the screen), `valign` is `"center"`/`"bottom"`, and the free-form
-`bgcolor` (`#rrggbb`) and `bgimage` (URL) work too. Unknown keys and
+Settings use the section-settings vocabulary: `bg`, `width`, and
+`corners` name `SectionStyles` option keys, `height` is
+`"50"`/`"75"`/`"100"` (percent of the screen), `valign` is
+`"center"`/`"bottom"`, and the free-form `bgcolor` (`#rrggbb`) and
+`bgimage` (URL) work too. Unknown keys and
 invalid values fall back to the defaults. Register your own next to
 ordinary snippets:
 
@@ -336,15 +338,15 @@ Snippets: append(
 
 Admins can create presets after deployment too: the snippet form at
 `/admin/snippets` has a "Section preset" type with the curated settings
-(background, width, height, vertical alignment); the free-form `bgcolor`
-and `bgimage` settings are config-only. Everything after creation is
+(background, width, rounded corners, height, vertical alignment); the
+free-form `bgcolor` and `bgimage` settings are config-only. Everything after creation is
 ordinary: the preset's settings land in the section's ⚙ dialog, its HTML
 is normal editable content, and neither remembers where it came from.
 
 Each section renders as:
 
 ```html
-<section class="BG-CLASSES">
+<section class="BG-CLASSES CORNER-CLASSES">
   <div class="WIDTH-CLASSES">…editor content…</div>
 </section>
 ```
@@ -384,8 +386,20 @@ SectionStyles: &cms.SectionStyles{
         {Key: "normal", Label: "Normal", Class: "prose mx-auto max-w-3xl px-6 py-12"},
         {Key: "full", Label: "Full width", Class: "prose max-w-none px-6 py-12"},
     },
+    Corners: []cms.SectionOption{
+        {Key: "none", Label: "None (square)", Class: ""},
+        {Key: "soft", Label: "Soft", Class: "rounded-2xl"},
+    },
 },
 ```
+
+`Corners` rounds the `<section>` wrapper itself (where the background
+paints), so a tinted band reads as a card. Leaving `Corners` nil keeps
+the default choices (None / Small / Medium / Large →
+`rounded-lg` / `rounded-2xl` / `rounded-3xl`); an explicit empty slice
+(`[]cms.SectionOption{}`) removes the setting from the ⚙ dialog
+entirely. The first option is the default and should normally be a
+no-class "none".
 
 Safelist the default section classes along with the rest:
 
@@ -393,7 +407,7 @@ Safelist the default section classes along with the rest:
 safelist: [
     "bg-slate-50", "bg-slate-900", "bg-blue-700", "prose", "prose-slate",
     "prose-invert", "mx-auto", "max-w-3xl", "max-w-5xl", "max-w-none",
-    "px-6", "py-12",
+    "px-6", "py-12", "rounded-lg", "rounded-2xl", "rounded-3xl",
 ],
 ```
 

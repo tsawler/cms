@@ -302,6 +302,8 @@ func TestRenderSections(t *testing.T) {
 			Settings: map[string]string{"bg": "dark", "width": "full"}},
 		{Region: "extra", Kind: content.KindHTML, Sort: 1, Content: "<p>Second</p>",
 			Settings: map[string]string{"bg": "bogus-key", "width": "normal"}},
+		{Region: "extra", Kind: content.KindHTML, Sort: 2, Content: "<p>Third</p>",
+			Settings: map[string]string{"bg": "dark", "width": "full", "corners": "medium"}},
 	}
 
 	// Plain render: wrapper + container classes from settings, unknown
@@ -316,6 +318,9 @@ func TestRenderSections(t *testing.T) {
 	}
 	if !strings.Contains(out, `<section><div class="prose prose-slate mx-auto max-w-3xl px-6 py-12"><p>Second</p></div></section>`) {
 		t.Errorf("fallback/default section markup wrong:\n%s", out)
+	}
+	if !strings.Contains(out, `<section class="bg-slate-900 rounded-2xl">`) {
+		t.Errorf("corner class missing from rounded section wrapper:\n%s", out)
 	}
 	if strings.Contains(out, "data-cms-section") || strings.Contains(out, "data-cms-sections") {
 		t.Error("plain render leaked section edit markers")
@@ -335,6 +340,12 @@ func TestRenderSections(t *testing.T) {
 	}
 	if !strings.Contains(out, `data-cms-bg="default"`) {
 		t.Errorf("unknown bg key not resolved to fallback in edit render:\n%s", out)
+	}
+	if !strings.Contains(out, `data-cms-corners="medium"`) {
+		t.Errorf("edit render missing corners marker:\n%s", out)
+	}
+	if !strings.Contains(out, `data-cms-corners="none"`) {
+		t.Errorf("edit render missing default corners marker:\n%s", out)
 	}
 	if !strings.Contains(out, "data-section-styles=") {
 		t.Errorf("section styles JSON missing from script tag:\n%s", out)

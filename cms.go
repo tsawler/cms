@@ -58,11 +58,12 @@ type EditorStyle = render.EditorStyle
 // snippets.Snippet.
 type Snippet = snippets.Snippet
 
-// SectionStyles is the curated set of section backgrounds and widths; see
-// render.SectionStyles.
+// SectionStyles is the curated set of section backgrounds, widths, and
+// corner roundings; see render.SectionStyles.
 type SectionStyles = render.SectionStyles
 
-// SectionOption is one background or width choice; see render.SectionOption.
+// SectionOption is one background, width, or corner choice; see
+// render.SectionOption.
 type SectionOption = render.SectionOption
 
 // CaptchaConfig locates a self-hosted Cap CAPTCHA server for the admin
@@ -173,10 +174,12 @@ type Config struct {
 	// like editor styles do.
 	Snippets []Snippet
 
-	// SectionStyles are the curated background and width options for
-	// sections regions ({{cmsSections "name"}}). Nil gets the
-	// Tailwind-first defaults (render.DefaultSectionStyles). The classes
-	// need safelisting like editor styles do.
+	// SectionStyles are the curated background, width, and rounded-corner
+	// options for sections regions ({{cmsSections "name"}}). Nil gets the
+	// Tailwind-first defaults (render.DefaultSectionStyles); a config with
+	// a nil Corners list gets the default corner options (an empty non-nil
+	// slice ships none and hides the setting). The classes need
+	// safelisting like editor styles do.
 	SectionStyles *SectionStyles
 
 	// Tailwind, when set, makes the CMS rebuild a supplemental
@@ -254,6 +257,10 @@ func New(cfg Config) (*CMS, error) {
 	}
 	if cfg.SectionStyles == nil {
 		cfg.SectionStyles = render.DefaultSectionStyles()
+	} else if cfg.SectionStyles.Corners == nil {
+		// Hosts configured before corner rounding existed keep getting
+		// the default choices; an empty non-nil slice opts out.
+		cfg.SectionStyles.Corners = render.DefaultSectionStyles().Corners
 	}
 	if err := admin.ValidateSections(cfg.AdminSections); err != nil {
 		return nil, err

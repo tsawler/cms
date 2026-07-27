@@ -108,6 +108,7 @@ function collectSections(region) {
             return false;
         });
         out.push({ bg: wrapper.dataset.cmsBg || "", width: wrapper.dataset.cmsWidth || "",
+            corners: wrapper.dataset.cmsCorners || "",
             height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
             bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
             html: html });

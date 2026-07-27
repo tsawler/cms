@@ -252,10 +252,13 @@ type SectionOption struct {
 
 // SectionStyles is the curated set of section settings editors choose
 // from. Like editor styles, everything is classes — the host CSS owns the
-// actual appearance.
+// actual appearance. Corner classes go on the <section> wrapper like
+// background classes (the wrapper is what paints the background, so the
+// radius must clip it there).
 type SectionStyles struct {
 	Backgrounds []SectionOption `json:"backgrounds"`
 	Widths      []SectionOption `json:"widths"`
+	Corners     []SectionOption `json:"corners"`
 }
 
 func pickOption(list []SectionOption, key string) SectionOption {
@@ -277,6 +280,11 @@ func (ss *SectionStyles) Background(key string) SectionOption { return pickOptio
 // Width resolves a stored width key, falling back to the first option.
 func (ss *SectionStyles) Width(key string) SectionOption { return pickOption(ss.Widths, key) }
 
+// Corner resolves a stored corner-rounding key, falling back to the first
+// option. A nil Corners list resolves everything to a zero option, so
+// hosts that ship no corner choices render sections unchanged.
+func (ss *SectionStyles) Corner(key string) SectionOption { return pickOption(ss.Corners, key) }
+
 // DefaultSectionStyles is the Tailwind-first default set of section
 // settings. The classes need safelisting like editor styles do.
 func DefaultSectionStyles() *SectionStyles {
@@ -291,6 +299,12 @@ func DefaultSectionStyles() *SectionStyles {
 			{Key: "normal", Label: "Normal", Class: "prose prose-slate mx-auto max-w-3xl px-6 py-12"},
 			{Key: "wide", Label: "Wide", Class: "prose prose-slate mx-auto max-w-5xl px-6 py-12"},
 			{Key: "full", Label: "Full width", Class: "prose prose-slate max-w-none px-6 py-12"},
+		},
+		Corners: []SectionOption{
+			{Key: "none", Label: "None (square)", Class: ""},
+			{Key: "small", Label: "Small", Class: "rounded-lg"},
+			{Key: "medium", Label: "Medium", Class: "rounded-2xl"},
+			{Key: "large", Label: "Large", Class: "rounded-3xl"},
 		},
 	}
 }
@@ -661,6 +675,7 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	bg := r.sections.Background(b.Settings["bg"])
 	w := r.sections.Width(b.Settings["width"])
+	corner := r.sections.Corner(b.Settings["corners"])
 	bgColor := ValidBackgroundColor(b.Settings["bgcolor"])
 	bgImage := ValidBackgroundURL(b.Settings["bgimage"])
 	height := ValidSectionHeight(b.Settings["height"])
@@ -674,6 +689,9 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		sb.WriteString(`" data-cms-width="`)
 		sb.WriteString(html.EscapeString(w.Key))
 		sb.WriteString(`"`)
+		if corner.Key != "" {
+			sb.WriteString(` data-cms-corners="` + html.EscapeString(corner.Key) + `"`)
+		}
 		if height != "" {
 			sb.WriteString(` data-cms-height="`)
 			sb.WriteString(height)
@@ -689,8 +707,8 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 			sb.WriteString(` data-cms-bgimage="` + html.EscapeString(bgImage) + `"`)
 		}
 	}
-	if bg.Class != "" {
-		sb.WriteString(` class="` + html.EscapeString(bg.Class) + `"`)
+	if wrapCls := strings.TrimSpace(bg.Class + " " + corner.Class); wrapCls != "" {
+		sb.WriteString(` class="` + html.EscapeString(wrapCls) + `"`)
 	}
 	var style string
 	if height != "" {

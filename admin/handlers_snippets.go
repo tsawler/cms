@@ -102,8 +102,9 @@ func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[strin
 	}
 	if r.PostFormValue("kind") == "preset" {
 		// bg and width are always stored so the map is never empty (an
-		// empty map would read as a plain block downstream); height and
-		// valign only when they differ from the natural defaults.
+		// empty map would read as a plain block downstream); height,
+		// valign, and corners only when they differ from the natural
+		// defaults.
 		sn.Settings = map[string]string{
 			"bg":    s.deps.SectionStyles.Background(r.PostFormValue("set_bg")).Key,
 			"width": s.deps.SectionStyles.Width(r.PostFormValue("set_width")).Key,
@@ -113,6 +114,11 @@ func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[strin
 		}
 		if v := render.ValidSectionVAlign(r.PostFormValue("set_valign")); v != "" {
 			sn.Settings["valign"] = v
+		}
+		if list := s.deps.SectionStyles.Corners; len(list) > 0 {
+			if c := s.deps.SectionStyles.Corner(r.PostFormValue("set_corners")); c.Key != list[0].Key {
+				sn.Settings["corners"] = c.Key
+			}
 		}
 	}
 	return sn, errs

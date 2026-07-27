@@ -44,11 +44,13 @@
   var styleGroups;
   var sectionStyles = {
     backgrounds: [{ key: "default", label: "Default", class: "" }],
-    widths: [{ key: "normal", label: "Normal", class: "" }]
+    widths: [{ key: "normal", label: "Normal", class: "" }],
+    corners: []
   };
   try {
     ss = JSON.parse(cfg.sectionStyles || "null");
     if (ss && ss.backgrounds && ss.backgrounds.length && ss.widths && ss.widths.length) {
+      if (!ss.corners) ss.corners = [];
       sectionStyles = ss;
     }
   } catch (e) {
@@ -792,8 +794,7 @@
     return list[0];
   }
   var bgProbe = null;
-  function classBackground(cls) {
-    if (!cls) return "";
+  function probeStyle(cls) {
     if (!bgProbe) {
       bgProbe = document.createElement("div");
       bgProbe.style.cssText = "position:absolute;left:-9999px;top:-9999px";
@@ -801,8 +802,21 @@
       document.body.appendChild(bgProbe);
     }
     bgProbe.className = cls;
-    var bg = getComputedStyle(bgProbe).backgroundColor;
+    return getComputedStyle(bgProbe);
+  }
+  function classBackground(cls) {
+    if (!cls) return "";
+    var bg = probeStyle(cls).backgroundColor;
     return bg === "rgba(0, 0, 0, 0)" || bg === "transparent" ? "" : bg;
+  }
+  function classRadius(cls) {
+    if (!cls) return "";
+    var r = probeStyle(cls).borderTopLeftRadius;
+    return !r || r === "0px" ? "" : r;
+  }
+  function cornerOption(key) {
+    var list = sectionStyles.corners || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
   }
   function isDarkColor(c) {
     var r, g, b;
@@ -822,21 +836,24 @@
   }
   function sectionPreview(v, el) {
     var bgOpt = sbOpt(sectionStyles.backgrounds, v.bg);
+    var cornerOpt = cornerOption(v.corners);
     var probed = v.bgcolor || classBackground(bgOpt.class);
-    var box = buildSectionPreview(v, el, probed || "#ffffff");
-    if (!probed && bgOpt.class) {
+    var radius = classRadius(cornerOpt.class);
+    var box = buildSectionPreview(v, el, probed || "#ffffff", radius);
+    if (!probed && bgOpt.class || !radius && cornerOpt.class) {
       setTimeout(function() {
         if (el.firstElementChild !== box) return;
-        var late = classBackground(bgOpt.class);
-        if (late) buildSectionPreview(v, el, late);
+        var lateBg = v.bgcolor || classBackground(bgOpt.class);
+        buildSectionPreview(v, el, lateBg || "#ffffff", classRadius(cornerOpt.class));
       }, 250);
     }
   }
-  function buildSectionPreview(v, el, resolved) {
+  function buildSectionPreview(v, el, resolved, radius) {
     el.innerHTML = "";
     var box = document.createElement("div");
     var hMap = { auto: 96, 50: 112, 75: 128, 100: 144 };
-    box.style.cssText = "width:100%;position:relative;display:flex;flex-direction:column;overflow:hidden;border-radius:8px;border:1px solid #e3e6ea;transition:height .15s ease";
+    box.style.cssText = "width:100%;position:relative;display:flex;flex-direction:column;overflow:hidden;border:1px solid #e3e6ea;transition:height .15s ease,border-radius .15s ease";
+    box.style.borderRadius = (sectionStyles.corners || []).length ? radius || "0px" : "8px";
     box.style.height = (hMap[v.height] || 96) + "px";
     box.style.backgroundColor = resolved;
     if (v.bgimage) {
@@ -1006,7 +1023,20 @@
             options: sectionStyles.widths.map(function(o) {
               return { value: o.key, label: o.label };
             })
-          },
+          }
+        ];
+        if ((sectionStyles.corners || []).length) {
+          setFields.push({
+            id: "corners",
+            label: "Rounded corners",
+            type: "select",
+            value: wrapper.dataset.cmsCorners || "",
+            options: sectionStyles.corners.map(function(o) {
+              return { value: o.key, label: o.label };
+            })
+          });
+        }
+        setFields.push(
           {
             id: "height",
             label: "Section height",
@@ -1031,7 +1061,7 @@
             ]
           },
           { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" }
-        ];
+        );
         if (mediaEnabled) {
           setFields.push({
             id: "bgimage",
@@ -1056,17 +1086,19 @@
   function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
+    var corner = cornerOption(s.corners);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
     var valign = { center: 1, bottom: 1 }[s.valign] ? s.valign : "top";
     wrapper.dataset.cmsBg = bg.key;
     wrapper.dataset.cmsWidth = w.key;
+    wrapper.dataset.cmsCorners = corner.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
-    wrapper.className = bg.class || "";
+    wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
     wrapper.style.flexDirection = valign === "top" ? "" : "column";
@@ -1087,6 +1119,7 @@
       applySectionSettings(wrapper, {
         bg: wrapper.dataset.cmsBg,
         width: wrapper.dataset.cmsWidth,
+        corners: wrapper.dataset.cmsCorners,
         height: wrapper.dataset.cmsHeight,
         valign: wrapper.dataset.cmsValign,
         bgcolor: wrapper.dataset.cmsBgcolor,
@@ -4080,6 +4113,7 @@
       out.push({
         bg: wrapper.dataset.cmsBg || "",
         width: wrapper.dataset.cmsWidth || "",
+        corners: wrapper.dataset.cmsCorners || "",
         height: wrapper.dataset.cmsHeight || "",
         valign: wrapper.dataset.cmsValign || "",
         bgcolor: wrapper.dataset.cmsBgcolor || "",

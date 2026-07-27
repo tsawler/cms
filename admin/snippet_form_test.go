@@ -33,12 +33,12 @@ func TestParseSnippetForm(t *testing.T) {
 	set, errs, _, _ = do(url.Values{
 		"name": {"Big hero"}, "html": {"<h1>x</h1>"}, "kind": {"preset"},
 		"set_bg": {"dark"}, "set_width": {"wide"},
-		"set_height": {"100"}, "set_valign": {"center"},
+		"set_height": {"100"}, "set_valign": {"center"}, "set_corners": {"medium"},
 	})
 	if len(errs) != 0 {
 		t.Fatalf("preset: unexpected errors %v", errs)
 	}
-	want := map[string]string{"bg": "dark", "width": "wide", "height": "100", "valign": "center"}
+	want := map[string]string{"bg": "dark", "width": "wide", "height": "100", "valign": "center", "corners": "medium"}
 	for k, v := range want {
 		if set[k] != v {
 			t.Errorf("preset settings[%q] = %q, want %q", k, set[k], v)
@@ -46,11 +46,12 @@ func TestParseSnippetForm(t *testing.T) {
 	}
 
 	// Preset with junk values: bg/width fall back to defaults (never
-	// empty — a preset must stay recognizable), junk height/valign drop.
+	// empty — a preset must stay recognizable), junk height/valign drop,
+	// junk corners resolve to the default and stay unstored.
 	set, errs, _, _ = do(url.Values{
 		"name": {"P"}, "html": {"<p>x</p>"}, "kind": {"preset"},
 		"set_bg": {"nope"}, "set_width": {"nope"},
-		"set_height": {"9000"}, "set_valign": {"sideways"},
+		"set_height": {"9000"}, "set_valign": {"sideways"}, "set_corners": {"nope"},
 	})
 	if len(errs) != 0 {
 		t.Fatalf("junk preset: unexpected errors %v", errs)
@@ -63,6 +64,9 @@ func TestParseSnippetForm(t *testing.T) {
 	}
 	if _, ok := set["valign"]; ok {
 		t.Error("junk valign should be dropped")
+	}
+	if _, ok := set["corners"]; ok {
+		t.Error("junk corners should resolve to the default and not be stored")
 	}
 
 	// Validation errors still fire regardless of kind.

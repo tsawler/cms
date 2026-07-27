@@ -181,9 +181,11 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 		addList(st.Class)
 	}
 	if ss := c.cfg.SectionStyles; ss != nil {
-		for _, o := range append(append([]render.SectionOption{}, ss.Backgrounds...), ss.Widths...) {
-			addList(o.Class)
-			addList(o.ContentClass)
+		for _, list := range [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners} {
+			for _, o := range list {
+				addList(o.Class)
+				addList(o.ContentClass)
+			}
 		}
 	}
 

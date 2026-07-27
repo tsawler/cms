@@ -396,6 +396,7 @@ var frStrings = map[string]string{
 	"Section settings":        "Réglages de la section",
 	"Background style":        "Style d'arrière-plan",
 	"Content width":           "Largeur du contenu",
+	"Rounded corners":         "Coins arrondis",
 	"Section height":          "Hauteur de la section",
 	"Auto (fits the content)": "Auto (s'ajuste au contenu)",
 	"50% of the screen":       "50 % de l'écran",
