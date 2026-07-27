@@ -6,7 +6,7 @@
  * page in place so the result shows without a reload.
  * ------------------------------------------------------------------ */
 
-import { mediaEnabled } from "./state.js";
+import { mediaEnabled, isAdmin } from "./state.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
 
@@ -57,6 +57,16 @@ export function openSiteSettings() {
                 { value: "center", label: "Center" },
                 { value: "right", label: "Right" },
             ] });
+        fields.push({ id: "loginInNav", label: "Show a “Log in” link in the menu for logged-out visitors",
+            type: "check", value: s.loginInNav });
+        // Site-wide CSS/JS is written raw into every page, so only admins
+        // may edit it — the server ignores these fields from anyone else.
+        if (isAdmin) {
+            fields.push({ id: "siteCss", label: "Site-wide CSS", type: "textarea", value: s.siteCss,
+                rows: 6, mono: true, placeholder: "Applied on every public page, before each page’s own CSS" });
+            fields.push({ id: "siteJs", label: "Site-wide JavaScript", type: "textarea", value: s.siteJs,
+                rows: 6, mono: true, placeholder: "Runs on every public page" });
+        }
         openDialog({
             message: "Site settings",
             okLabel: "Save",
@@ -69,6 +79,11 @@ export function openSiteSettings() {
                 menuAlign: values.menuAlign,
                 siteName: values.siteName.trim(),
                 logoUrl: values.logo !== undefined ? values.logo : (s.logoUrl || ""),
+                loginInNav: values.loginInNav === "1",
+                // The CSS/JS fields are absent for non-admins; keep the
+                // stored values so a save doesn't wipe them.
+                siteCss: values.siteCss !== undefined ? values.siteCss : (s.siteCss || ""),
+                siteJs: values.siteJs !== undefined ? values.siteJs : (s.siteJs || ""),
             };
             api("/settings", {
                 method: "PUT",

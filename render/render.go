@@ -525,6 +525,10 @@ type Input struct {
 	// Site is the stored site-wide settings ({{cmsBrand}}, nav
 	// alignment). The zero value means "all defaults".
 	Site content.SiteSettings
+	// AdminPath is the URL prefix the admin area is mounted at, used to
+	// build the optional "Log in" nav link (Site.LoginInNav). Empty
+	// disables the link even when the setting is on.
+	AdminPath string
 }
 
 // LocaleLink is one entry {{cmsLocales}} returns: the current page's URL
@@ -591,10 +595,18 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			return template.HTML(sb.String())
 		},
 		"cmsMenu":    func(key string) []MenuEntry { return menus[key] },
-		"cmsNav":     func(key string) template.HTML { return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil) },
+		"cmsNav": func(key string) template.HTML {
+			// The login link shows only to logged-out visitors (edit == nil)
+			// when the setting is on and an admin path is known.
+			loginURL := ""
+			if in.Site.LoginInNav && edit == nil && in.AdminPath != "" {
+				loginURL = in.AdminPath + "/login"
+			}
+			return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil, loginURL)
+		},
 		"cmsBrand":   func(fallback ...string) template.HTML { return brandHTML(in.Site, fallback) },
 		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
-		"cmsScripts": func() template.HTML { return scriptsHTML(page) },
+		"cmsScripts": func() template.HTML { return scriptsHTML(page, in.Site) },
 		"cmsPosts": func(feed string, limit int) []PostInfo {
 			if in.Posts == nil {
 				return nil
@@ -834,7 +846,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
 // client-side after a menu save (editor/src/menu.js) — keep the two in
 // sync.
-func navHTML(key string, entries []MenuEntry, align string, edit bool) template.HTML {
+func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL string) template.HTML {
 	cls := "cms-nav"
 	switch align {
 	case "left", "center", "right":
@@ -848,6 +860,13 @@ func navHTML(key string, entries []MenuEntry, align string, edit bool) template.
 	sb.WriteString(`<ul class="cms-nav-list">`)
 	for _, e := range entries {
 		writeNavItem(&sb, e, edit)
+	}
+	// The optional "Log in" link (Site.LoginInNav), for logged-out
+	// visitors only — the caller passes "" otherwise.
+	if loginURL != "" {
+		sb.WriteString(`<li class="cms-nav-item cms-nav-login"><a class="cms-nav-link" href="`)
+		sb.WriteString(html.EscapeString(loginURL))
+		sb.WriteString(`">Log in</a></li>`)
 	}
 	sb.WriteString(`</ul></nav>`)
 	return template.HTML(sb.String())
@@ -1089,6 +1108,13 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 		sb.WriteString(html.EscapeString(p.Description))
 		sb.WriteString("\">\n")
 	}
+	// Site-wide CSS before the page's own, so a page's HeadCSS can
+	// override it. Written raw; editing it is restricted to admins.
+	if in.Site.SiteCSS != "" {
+		sb.WriteString("<style>\n")
+		sb.WriteString(styleCloseRe.ReplaceAllString(in.Site.SiteCSS, `<\/style`))
+		sb.WriteString("\n</style>\n")
+	}
 	if p.HeadCSS != "" {
 		sb.WriteString("<style>\n")
 		sb.WriteString(styleCloseRe.ReplaceAllString(p.HeadCSS, `<\/style`))
@@ -1110,13 +1136,20 @@ var (
 // external scripts, then its inline per-page JS (so the inline code can
 // use what the external libraries define). Written raw; editing is
 // restricted to admins.
-func scriptsHTML(p *content.Page) template.HTML {
+func scriptsHTML(p *content.Page, site content.SiteSettings) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
 	for _, u := range resourceLinks(p.JSLinks) {
 		sb.WriteString(`<script src="`)
 		sb.WriteString(html.EscapeString(u))
 		sb.WriteString("\"></script>\n")
+	}
+	// Site-wide JS before the page's own inline JS, so a page can build on
+	// it. Written raw; editing it is restricted to admins.
+	if site.SiteJS != "" {
+		sb.WriteString("<script>\n")
+		sb.WriteString(scriptCloseRe.ReplaceAllString(site.SiteJS, `<\/script`))
+		sb.WriteString("\n</script>\n")
 	}
 	if p.BodyJS != "" {
 		sb.WriteString("<script>\n")

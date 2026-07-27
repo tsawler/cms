@@ -9,13 +9,23 @@ type SiteSettings struct {
 	MenuAlign string // "left", "center", "right", or "" (host default)
 	SiteName  string
 	LogoURL   string // "" = no logo
+	// LoginInNav adds a "Log in" link to {{cmsNav}} for visitors who
+	// aren't logged in, pointing at the admin login page.
+	LoginInNav bool
+	// SiteCSS and SiteJS are injected raw into every public page (via
+	// cmsHead/cmsScripts). Editing them is admin-only, like per-page code.
+	SiteCSS string
+	SiteJS  string
 }
 
 // Keys the settings are stored under in cms_settings.
 const (
-	settingMenuAlign = "menu_align"
-	settingSiteName  = "site_name"
-	settingLogoURL   = "logo_url"
+	settingMenuAlign  = "menu_align"
+	settingSiteName   = "site_name"
+	settingLogoURL    = "logo_url"
+	settingLoginInNav = "login_in_nav"
+	settingSiteCSS    = "site_css"
+	settingSiteJS     = "site_js"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -39,6 +49,12 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteName = v
 		case settingLogoURL:
 			out.LogoURL = v
+		case settingLoginInNav:
+			out.LoginInNav = v == "1"
+		case settingSiteCSS:
+			out.SiteCSS = v
+		case settingSiteJS:
+			out.SiteJS = v
 		}
 	}
 	return out, rows.Err()
@@ -52,10 +68,17 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	loginInNav := ""
+	if in.LoginInNav {
+		loginInNav = "1"
+	}
 	for k, v := range map[string]string{
-		settingMenuAlign: in.MenuAlign,
-		settingSiteName:  in.SiteName,
-		settingLogoURL:   in.LogoURL,
+		settingMenuAlign:  in.MenuAlign,
+		settingSiteName:   in.SiteName,
+		settingLogoURL:    in.LogoURL,
+		settingLoginInNav: loginInNav,
+		settingSiteCSS:    in.SiteCSS,
+		settingSiteJS:     in.SiteJS,
 	} {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cms_settings (key, value) VALUES ($1, $2)

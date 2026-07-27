@@ -437,23 +437,36 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the site settings."))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"menuAlign": site.MenuAlign,
-		"siteName":  site.SiteName,
-		"logoUrl":   site.LogoURL,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"menuAlign":  site.MenuAlign,
+		"siteName":   site.SiteName,
+		"logoUrl":    site.LogoURL,
+		"loginInNav": site.LoginInNav,
+		"siteCss":    site.SiteCSS,
+		"siteJs":     site.SiteJS,
 	})
 }
 
+// maxSiteCodeLen caps site-wide CSS and JS each, so a paste can't bloat
+// every rendered page unboundedly.
+const maxSiteCodeLen = 100_000
+
 // apiSaveSettings stores the site-wide settings. Like menus they have no
-// draft state: the change is live immediately.
-// PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl"}
+// draft state: the change is live immediately. Site-wide CSS/JS is
+// written raw into every page, so only admins may change it — a non-admin
+// editor's request keeps whatever is already stored.
+// PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
+// "loginInNav", "siteCss", "siteJs"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		MenuAlign string `json:"menuAlign"`
-		SiteName  string `json:"siteName"`
-		LogoURL   string `json:"logoUrl"`
+		MenuAlign  string `json:"menuAlign"`
+		SiteName   string `json:"siteName"`
+		LogoURL    string `json:"logoUrl"`
+		LoginInNav bool   `json:"loginInNav"`
+		SiteCSS    string `json:"siteCss"`
+		SiteJS     string `json:"siteJs"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the request — try again."))
 		return
@@ -474,10 +487,30 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The logo needs to be an uploaded image or a web address."))
 		return
 	}
+	// Site-wide CSS/JS is injected raw, so it stays admin-only just like
+	// per-page code. Non-admins can still change the other settings; their
+	// request carries the stored code through unchanged.
+	css := unwrapCodeTag(body.SiteCSS, styleWrapRe)
+	js := unwrapCodeTag(body.SiteJS, scriptWrapRe)
+	if u := s.currentUser(r); u == nil || !u.Role.IsAdmin() {
+		current, err := s.deps.Content.SiteSettings(r.Context())
+		if err != nil {
+			s.deps.Logger.Error("cms admin: api loading site settings", "err", err)
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
+			return
+		}
+		css, js = current.SiteCSS, current.SiteJS
+	} else if len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
+		return
+	}
 	if err := s.deps.Content.SaveSiteSettings(r.Context(), content.SiteSettings{
-		MenuAlign: body.MenuAlign,
-		SiteName:  name,
-		LogoURL:   logo,
+		MenuAlign:  body.MenuAlign,
+		SiteName:   name,
+		LogoURL:    logo,
+		LoginInNav: body.LoginInNav,
+		SiteCSS:    css,
+		SiteJS:     js,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))

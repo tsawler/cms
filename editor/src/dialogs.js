@@ -57,6 +57,7 @@ export function openDialog(opts) {
             else if (f.type === "image") buildImageField(wrap, f);
             else if (f.type === "range") buildRangeField(wrap, f);
             else if (f.type === "text") buildTextField(wrap, f);
+            else if (f.type === "textarea") buildTextareaField(wrap, f);
             else if (f.type === "datetime") buildDatetimeField(wrap, f);
             else if (f.type === "check") buildCheckField(wrap, f);
             else buildSelectField(wrap, f);
@@ -148,6 +149,20 @@ function buildTextField(wrap, f) {
     dlgValues[f.id] = inp.value;
     inp.addEventListener("input", function () { dlgValues[f.id] = inp.value; dlgChanged(); });
     wrap.appendChild(inp);
+}
+
+// buildTextareaField is a multi-line text input for larger values like
+// site-wide CSS/JS. f.rows sets the visible height; f.mono renders the
+// value in a monospace font (handy for code).
+function buildTextareaField(wrap, f) {
+    var ta = document.createElement("textarea");
+    ta.className = "tinput" + (f.mono ? " tmono" : "");
+    ta.rows = f.rows || 4;
+    ta.placeholder = f.placeholder || "";
+    ta.value = f.value || "";
+    dlgValues[f.id] = ta.value;
+    ta.addEventListener("input", function () { dlgValues[f.id] = ta.value; dlgChanged(); });
+    wrap.appendChild(ta);
 }
 
 function buildDatetimeField(wrap, f) {

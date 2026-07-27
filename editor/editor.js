@@ -2283,6 +2283,32 @@
           { value: "right", label: "Right" }
         ]
       });
+      fields.push({
+        id: "loginInNav",
+        label: "Show a \u201CLog in\u201D link in the menu for logged-out visitors",
+        type: "check",
+        value: s.loginInNav
+      });
+      if (isAdmin) {
+        fields.push({
+          id: "siteCss",
+          label: "Site-wide CSS",
+          type: "textarea",
+          value: s.siteCss,
+          rows: 6,
+          mono: true,
+          placeholder: "Applied on every public page, before each page\u2019s own CSS"
+        });
+        fields.push({
+          id: "siteJs",
+          label: "Site-wide JavaScript",
+          type: "textarea",
+          value: s.siteJs,
+          rows: 6,
+          mono: true,
+          placeholder: "Runs on every public page"
+        });
+      }
       openDialog({
         message: "Site settings",
         okLabel: "Save",
@@ -2292,7 +2318,12 @@
         var next = {
           menuAlign: values.menuAlign,
           siteName: values.siteName.trim(),
-          logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || ""
+          logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
+          loginInNav: values.loginInNav === "1",
+          // The CSS/JS fields are absent for non-admins; keep the
+          // stored values so a save doesn't wipe them.
+          siteCss: values.siteCss !== void 0 ? values.siteCss : s.siteCss || "",
+          siteJs: values.siteJs !== void 0 ? values.siteJs : s.siteJs || ""
         };
         api("/settings", {
           method: "PUT",
@@ -3689,6 +3720,7 @@
         else if (f.type === "image") buildImageField(wrap, f);
         else if (f.type === "range") buildRangeField(wrap, f);
         else if (f.type === "text") buildTextField(wrap, f);
+        else if (f.type === "textarea") buildTextareaField(wrap, f);
         else if (f.type === "datetime") buildDatetimeField(wrap, f);
         else if (f.type === "check") buildCheckField(wrap, f);
         else buildSelectField(wrap, f);
@@ -3790,6 +3822,19 @@
       dlgChanged();
     });
     wrap.appendChild(inp);
+  }
+  function buildTextareaField(wrap, f) {
+    var ta = document.createElement("textarea");
+    ta.className = "tinput" + (f.mono ? " tmono" : "");
+    ta.rows = f.rows || 4;
+    ta.placeholder = f.placeholder || "";
+    ta.value = f.value || "";
+    dlgValues[f.id] = ta.value;
+    ta.addEventListener("input", function() {
+      dlgValues[f.id] = ta.value;
+      dlgChanged();
+    });
+    wrap.appendChild(ta);
   }
   function buildDatetimeField(wrap, f) {
     var inp = document.createElement("input");
@@ -4499,6 +4544,11 @@ background:#f8f9fb;display:flex;justify-content:center;align-items:center;min-he
 /* plain text + checkbox fields (label.chk must out-rank the
    .dlg .fld label heading rule, which sets display:block) */
 .dlg .tinput{margin:0}
+/* multi-line text field (site-wide CSS/JS) */
+.dlg textarea.tinput{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
+font:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
+.dlg textarea.tinput:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}
+.dlg textarea.tmono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
 .dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;
 font-weight:400;margin:0}
 .dlg .chk input{width:auto;margin:0}

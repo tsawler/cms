@@ -577,9 +577,10 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		Edit:    edit,
 		Post:    post,
 		Posts:   c.postLister(r.Context(), locale, editing),
-		Locales: c.cfg.Locales,
-		BaseURL: siteBaseURL(r),
-		Site:    site,
+		Locales:   c.cfg.Locales,
+		BaseURL:   siteBaseURL(r),
+		Site:      site,
+		AdminPath: c.cfg.AdminPath,
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
