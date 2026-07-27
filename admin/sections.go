@@ -61,18 +61,19 @@ var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 // handler's relative links resolve under the section.
 func (s *server) sectionHandler(sec Section) http.Handler {
 	prefix := SectionPathPrefix + "/" + sec.Path
+	base := s.deps.AdminPath + prefix + "/"
 	inner := http.StripPrefix(prefix, sec.Handler)
 
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == prefix {
-			url := s.deps.AdminPath + prefix + "/"
+			url := base
 			if r.URL.RawQuery != "" {
 				url += "?" + r.URL.RawQuery
 			}
 			http.Redirect(w, r, url, http.StatusMovedPermanently)
 			return
 		}
-		inner.ServeHTTP(w, r)
+		inner.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sectionBaseCtxKey{}, base)))
 	})
 
 	h = s.withServer(h)
@@ -105,6 +106,24 @@ func ValidateSections(sections []Section) error {
 // serverCtxKey carries the admin server into section handlers so the
 // package-level helpers below can reach sessions and templates.
 type serverCtxKey struct{}
+
+// sectionBaseCtxKey carries the current section's browser-facing base URL
+// into its handler, for SectionPath.
+type sectionBaseCtxKey struct{}
+
+// SectionPath returns the browser-facing base URL of the custom admin
+// section serving this request, with a trailing slash — e.g.
+// "/admin/x/reports/". Section handlers see mount-stripped paths, so a
+// redirect after a POST must target this absolute URL, not a relative one:
+//
+//	http.Redirect(w, r, admin.SectionPath(r), http.StatusSeeOther)
+//
+// Append a segment for sub-routes: SectionPath(r) + "settings". Outside a
+// section handler it returns "".
+func SectionPath(r *http.Request) string {
+	base, _ := r.Context().Value(sectionBaseCtxKey{}).(string)
+	return base
+}
 
 // withServer makes the admin server available to the helpers from inside
 // a section handler.

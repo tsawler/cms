@@ -54,9 +54,13 @@ if err != nil { ... }
 if err := c.Migrate(ctx); err != nil { ... }          // embedded migrations
 if _, err := c.SeedAdmin(ctx, "you@example.com", "You", "a strong password"); err != nil { ... }
 
-mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
-mux.Handle("/", c.Pages())
+mux.Handle("/", c.Handler())   // admin under Config.AdminPath, pages everywhere else
 ```
+
+(Hosts configured by environment can start from `cms.ConfigFromEnv()`,
+which fills S3, CAPTCHA, Tailwind, and the media knobs from the
+[documented variables](#environment-variables), and then set `DB`,
+`TemplateFS`, and the rest on the returned `Config`.)
 
 Templates declare editable areas with the CMS template funcs, and the admin
 UI discovers them automatically:
@@ -659,7 +663,7 @@ func reportsPage(w http.ResponseWriter, r *http.Request) {
 func refresh(w http.ResponseWriter, r *http.Request) {
     // CSRF was already validated before this ran.
     admin.SetFlash(r, "Refreshed.") // shown on the next admin page load
-    http.Redirect(w, r, "/admin/x/reports/", http.StatusSeeOther)
+    http.Redirect(w, r, admin.SectionPath(r), http.StatusSeeOther)
 }
 ```
 
@@ -682,7 +686,8 @@ Things to know:
   ```
 - **Redirect with full paths.** The handler sees stripped paths, so
   `http.Redirect` with a relative URL resolves against the wrong base;
-  use the browser-facing URL (`/admin/x/reports/`).
+  use `admin.SectionPath(r)`, the section's browser-facing base URL
+  (e.g. `/admin/x/reports/`), appending a segment for sub-routes.
 - `admin.RenderPage` always writes 200 and inserts `body` unescaped —
   it's your code's HTML, escape any user data you interpolate into it.
   For other status codes or a fully custom look, write the response
@@ -773,7 +778,11 @@ in days), defaulting to 30 days when unset.
 
 The example loads variables from a `.env` file — `examples/basic/.env`
 first, falling back to one at the repo root — without overriding
-anything already set in the real environment. Everything it reads:
+anything already set in the real environment. The `CMS_TAILWIND_*`,
+`S3_*`, and `CAP_*` variables plus `CMS_REMEMBER_DAYS` and the two
+`CMS_MEDIA_*` knobs are read by `cms.ConfigFromEnv`, which any host can
+use to fill those `Config` fields; the rest are the example's own.
+Everything read:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -781,7 +790,7 @@ anything already set in the real environment. Everything it reads:
 | `ADDR` | `:4000` | HTTP listen address. |
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
-| `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive values fall back to the default. |
+| `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
 | `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: a space-separated argv with `{content}` and `{output}` placeholders (see [Generated CSS for content classes](#generated-css-for-content-classes-optional) and `tailwind-content.sh`). |
@@ -792,7 +801,7 @@ anything already set in the real environment. Everything it reads:
 | `S3_SECRET` | — | Object-store secret key. |
 | `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
 | `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. |
-| `S3_APPLY_PUBLIC_POLICY` | unset | Set to `1` to apply a public-read bucket policy at startup (one-time setup). |
+| `S3_APPLY_PUBLIC_POLICY` | unset | Set to `1` to apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). |
 | `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA and makes the other `CAP_*` variables relevant. |
 | `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |
 | `CAP_SECRET` | — | Secret for that site key. |
@@ -883,5 +892,6 @@ overwritten by the next build (and marked `linguist-generated`).
   from a public bucket/CDN instead of the proxy, that header is in your
   hands — configure it there if SVG uploads concern you.
 - Set `Config.SecureCookies = true` in production (HTTPS).
-- `Config.AdminPath` must match wherever you mount `Admin()`; it defaults
-  to `/admin`.
+- `Config.AdminPath` (default `/admin`) is where `Handler()` serves the
+  admin area. If you wire `Admin()` yourself instead, the mount point
+  must match it.

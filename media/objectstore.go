@@ -124,6 +124,14 @@ type S3Config struct {
 	// disabled, newer Linode clusters) reject per-object ACLs outright.
 	// See ApplyPublicReadPolicy for setting the bucket policy.
 	ObjectACL string
+
+	// ApplyPublicReadPolicy makes cms.Migrate apply the public-read
+	// bucket policy (the S3Store method of the same name) when the store
+	// is built from cms.Config.S3 — one-time setup, idempotent, for
+	// buckets that weren't created public. It only sets the policy; pair
+	// it with PublicRead or PublicBaseURL so pages actually embed direct
+	// bucket URLs.
+	ApplyPublicReadPolicy bool
 }
 
 // S3Store implements ObjectStore against any S3-compatible service.

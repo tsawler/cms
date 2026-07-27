@@ -18,14 +18,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms"
 	"github.com/tsawler/cms/admin"
-	"github.com/tsawler/cms/media"
 )
 
 //go:embed templates
@@ -85,115 +83,46 @@ func run(logger *slog.Logger) error {
 	}
 	defer db.Close()
 
-	var objects media.ObjectStore
-	if os.Getenv("S3_ENDPOINT") != "" {
-		store, err := media.NewS3Store(media.S3Config{
-			Endpoint:  os.Getenv("S3_ENDPOINT"),
-			Region:    os.Getenv("S3_REGION"), // optional; derived from endpoint if empty
-			Bucket:    os.Getenv("S3_BUCKET"),
-			AccessKey: os.Getenv("S3_ACCESS_KEY"),
-			Secret:    os.Getenv("S3_SECRET"),
-			KeyPrefix: os.Getenv("S3_KEY_PREFIX"), // optional; namespaces keys in a shared bucket
-		})
-		if err != nil {
-			return err
-		}
-		// One-time setup: make uploads publicly readable via bucket
-		// policy (object ACLs are rejected by many modern stores).
-		if os.Getenv("S3_APPLY_PUBLIC_POLICY") == "1" {
-			if err := store.ApplyPublicReadPolicy(ctx); err != nil {
-				return err
-			}
-			logger.Info("applied public-read bucket policy", "bucket", os.Getenv("S3_BUCKET"))
-		}
-		objects = store
-	} else {
+	// The optional features are configured entirely from the environment
+	// — media library (S3_*, including a one-time public-read bucket
+	// policy via S3_APPLY_PUBLIC_POLICY=1), login CAPTCHA against the
+	// Cap container from docker-compose.yml (CAP_*; create a site key in
+	// the Cap dashboard at http://localhost:3300), Tailwind rebuilds and
+	// media tuning (CMS_*). See the README's variable table.
+	cfg, err := cms.ConfigFromEnv()
+	if err != nil {
+		return err
+	}
+	if cfg.S3 == nil {
 		logger.Warn("S3_ENDPOINT not set — media library disabled")
 	}
-
-	// Login CAPTCHA against the Cap container from docker-compose.yml.
-	// Create a site key in the Cap dashboard (http://localhost:3000) and
-	// set CAP_URL, CAP_SITE_KEY, and CAP_SECRET; unset means no CAPTCHA.
-	// The challenge is solved invisibly by default; CAP_WIDGET=visible
-	// shows Cap's checkbox widget on the login form instead.
-	var capCfg *cms.CaptchaConfig
-	if os.Getenv("CAP_URL") != "" {
-		capCfg = &cms.CaptchaConfig{
-			URL:         os.Getenv("CAP_URL"),
-			InternalURL: os.Getenv("CAP_INTERNAL_URL"), // optional
-			SiteKey:     os.Getenv("CAP_SITE_KEY"),
-			Secret:      os.Getenv("CAP_SECRET"),
-			Visible:     os.Getenv("CAP_WIDGET") == "visible",
-		}
-	} else {
+	if cfg.Captcha == nil {
 		logger.Warn("CAP_URL not set — login CAPTCHA disabled")
 	}
-
-	// "Remember me" duration in days; unset or invalid falls back to 30.
-	rememberFor := 30 * 24 * time.Hour
-	if d, err := strconv.Atoi(os.Getenv("CMS_REMEMBER_DAYS")); err == nil && d > 0 {
-		rememberFor = time.Duration(d) * 24 * time.Hour
+	// This example prefers a longer "Remember me" than the library's 24h
+	// default when CMS_REMEMBER_DAYS is unset.
+	if cfg.RememberFor == 0 {
+		cfg.RememberFor = 30 * 24 * time.Hour
 	}
 
-	// Lossy WebP quality for image variants, in (0, 1]; unset falls back
-	// to the CMS default (0.3). An invalid value is a config mistake —
-	// fail loudly rather than silently serving the wrong quality.
-	var webpQuality float64
-	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {
-		q, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return fmt.Errorf("CMS_MEDIA_WEBP_QUALITY %q is not a number: %w", v, err)
-		}
-		webpQuality = q
+	cfg.DB = db
+	cfg.Locales = []string{"en", "fr"}
+	cfg.Logger = logger
+	cfg.TemplateFS = templateFS
+	cfg.SharedTemplates = []string{"templates/base.gohtml"}
+	cfg.PageTemplates = []cms.PageTemplate{
+		{File: "templates/pages/home.gohtml", Label: "Home page"},
+		{File: "templates/pages/standard.gohtml", Label: "Standard page"},
+		{File: "templates/pages/canvas.gohtml", Label: "Blank canvas"},
+		{File: "templates/pages/blog.gohtml", Label: "Blog listing"},
+		{File: "templates/pages/news.gohtml", Label: "News listing"},
+	}
+	cfg.PostTemplate = cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post"}
+	cfg.AdminSections = []cms.AdminSection{
+		{Path: "reports", NavLabel: "Reports", Handler: reportsSection(db)},
 	}
 
-	// Video upload cap in MB; unset falls back to the CMS default (512).
-	var maxVideoMB int
-	if v := os.Getenv("CMS_MEDIA_MAX_VIDEO_MB"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("CMS_MEDIA_MAX_VIDEO_MB %q is not a number: %w", v, err)
-		}
-		maxVideoMB = n
-	}
-
-	// Content-driven Tailwind rebuilds: CMS_TAILWIND_COMMAND is a
-	// space-separated argv with {content} and {output} placeholders.
-	// The example's .env points it at tailwind-content.sh, which wraps
-	// the Tailwind v4 standalone CLI (see that script); without it,
-	// classes that exist only in stored content render unstyled.
-	var tailwindCfg *cms.TailwindConfig
-	if cmd := os.Getenv("CMS_TAILWIND_COMMAND"); cmd != "" {
-		tailwindCfg = &cms.TailwindConfig{
-			Command: strings.Fields(cmd),
-			Dir:     os.Getenv("CMS_TAILWIND_DIR"),
-		}
-	}
-
-	c, err := cms.New(cms.Config{
-		DB:               db,
-		Tailwind:         tailwindCfg,
-		Locales:          []string{"en", "fr"},
-		Logger:           logger,
-		ObjectStore:      objects,
-		Captcha:          capCfg,
-		RememberFor:      rememberFor,
-		MediaWebPQuality: webpQuality,
-		MediaMaxVideoMB:  maxVideoMB,
-		TemplateFS:       templateFS,
-		SharedTemplates:  []string{"templates/base.gohtml"},
-		PageTemplates: []cms.PageTemplate{
-			{File: "templates/pages/home.gohtml", Label: "Home page"},
-			{File: "templates/pages/standard.gohtml", Label: "Standard page"},
-			{File: "templates/pages/canvas.gohtml", Label: "Blank canvas"},
-			{File: "templates/pages/blog.gohtml", Label: "Blog listing"},
-			{File: "templates/pages/news.gohtml", Label: "News listing"},
-		},
-		PostTemplate: cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post"},
-		AdminSections: []cms.AdminSection{
-			{Path: "reports", NavLabel: "Reports", Handler: reportsSection(db)},
-		},
-	})
+	c, err := cms.New(cfg)
 	if err != nil {
 		return err
 	}
@@ -213,12 +142,12 @@ func run(logger *slog.Logger) error {
 			"email", adminEmail, "password", adminPassword)
 	}
 
+	// c.Handler() routes Config.AdminPath (default /admin) to the admin
+	// area and everything else to the public site.
 	mux := http.NewServeMux()
-	mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
-	mux.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 	// The compiled site stylesheet (see assets/input.css and gen.go).
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	mux.Handle("/", c.Pages())
+	mux.Handle("/", c.Handler())
 
 	addr := envOr("ADDR", ":4000")
 	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
@@ -258,11 +187,11 @@ func reportsSection(db *pgxpool.Pool) http.Handler {
 
 	// The relative form action resolves to {AdminPath}/x/reports/ping.
 	// CSRF has already been validated by the time this runs. Redirects
-	// need the full browser-facing URL: the handler sees stripped paths,
-	// so a relative redirect would resolve against the wrong base.
+	// need the full browser-facing URL — the handler sees stripped paths —
+	// which admin.SectionPath provides.
 	mux.HandleFunc("POST /ping", func(w http.ResponseWriter, r *http.Request) {
 		admin.SetFlash(r, "Pong — handled by the host application.")
-		http.Redirect(w, r, "/admin/x/reports/", http.StatusSeeOther)
+		http.Redirect(w, r, admin.SectionPath(r), http.StatusSeeOther)
 	})
 
 	return mux

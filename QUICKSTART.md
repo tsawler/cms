@@ -301,27 +301,27 @@ func run(logger *slog.Logger) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
-	mux.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	mux.Handle("/", c.Pages())
+	mux.Handle("/", c.Handler())
 
 	logger.Info("listening", "addr", ":4000", "admin", "http://localhost:4000/admin/")
 	return http.ListenAndServe(":4000", mux)
 }
 ```
 
-What the two handlers do:
+`c.Handler()` serves two areas from one handler:
 
-- **`c.Admin()`** — the whole admin area: login, dashboard, pages, users,
-  media, snippets, blog & news. Mount it wherever you like, but the mount
-  point must match `Config.AdminPath` (default `/admin`), and the prefix
-  must be stripped.
-- **`c.Pages()`** — the public site. It resolves the request path to a
+- **The admin area** — login, dashboard, pages, users, media, snippets,
+  blog & news — under `Config.AdminPath` (default `/admin`).
+- **The public site** everywhere else. It resolves the request path to a
   page and renders it with *your* templates. Anonymous visitors get
   published content; logged-in CMS users get drafts with the in-place
   editor injected. It also serves the editor's assets and proxied media
   under `/cms/`, and is strictly read-only (GET/HEAD).
+
+Hosts that need different wiring — the admin on its own hostname, extra
+middleware on one side only — can mount the two areas separately with
+`c.Admin()` (under `Config.AdminPath`, prefix stripped) and `c.Pages()`.
 
 Everything else — other routes, middleware, your API — is your mux, your
 rules. The CMS doesn't own the server.
@@ -423,7 +423,10 @@ you a second, independently edited menu.
 ## 9. Optional features
 
 Each of these is one config field away. All of them are shown wired up
-in `examples/basic/main.go`.
+in `examples/basic/main.go` — which sets every field in this section
+from the environment with one call, `cms.ConfigFromEnv()` (variable
+names and defaults are tabled in the README). The snippets below show
+the same fields set by hand.
 
 ### Media library (image/video uploads)
 
@@ -442,7 +445,9 @@ S3: &cms.S3Config{
 
 By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
-direct bucket/CDN URLs instead. Uploads get automatic WebP variants and
+direct bucket/CDN URLs instead (for a bucket that wasn't created public,
+also set `ApplyPublicReadPolicy` and `Migrate` will apply a public-read
+bucket policy — one-time, idempotent setup). Uploads get automatic WebP variants and
 thumbnails (`MediaWebPQuality` tunes compression); videos up to
 `MediaMaxVideoMB` (default 512) are stored as uploaded. Without `S3` the
 media library is simply disabled — everything else works. For a custom
@@ -562,7 +567,7 @@ Tailwind: &cms.TailwindConfig{
 - `Snippets` / `SectionStyles` — your own block library and section
   background/width options; nil gets Tailwind-first defaults.
 - `SessionLifetime`, `RememberFor` — login session durations.
-- `AdminPath` — mount the admin somewhere other than `/admin`.
+- `AdminPath` — serve the admin somewhere other than `/admin`.
 
 ## 10. Going to production
 

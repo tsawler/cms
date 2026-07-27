@@ -365,11 +365,26 @@ func New(cfg Config) (*CMS, error) {
 	return c, nil
 }
 
-// Migrate creates or upgrades the CMS's database schema. It is safe to call
-// on every startup and safe to call from multiple instances concurrently (a
-// Postgres advisory lock serializes them).
+// Migrate creates or upgrades the CMS's database schema, and performs any
+// configured one-time object-store setup (S3Config.ApplyPublicReadPolicy).
+// It is safe to call on every startup and safe to call from multiple
+// instances concurrently: a Postgres advisory lock serializes the schema
+// work, and the bucket policy is idempotent.
 func (c *CMS) Migrate(ctx context.Context) error {
-	return migrations.Run(ctx, c.cfg.DB, c.cfg.Logger)
+	if err := migrations.Run(ctx, c.cfg.DB, c.cfg.Logger); err != nil {
+		return err
+	}
+	// Only for the store New built from Config.S3 — a host-supplied
+	// ObjectStore manages its own bucket setup.
+	if c.cfg.ObjectStore == nil && c.cfg.S3 != nil && c.cfg.S3.ApplyPublicReadPolicy {
+		if s, ok := c.objects.(*media.S3Store); ok {
+			if err := s.ApplyPublicReadPolicy(ctx); err != nil {
+				return err
+			}
+			c.cfg.Logger.Info("cms: applied public-read bucket policy", "bucket", c.cfg.S3.Bucket)
+		}
+	}
+	return nil
 }
 
 // SeedAdmin creates an initial administrator account if and only if no users
@@ -408,8 +423,43 @@ func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool
 // it under Config.AdminPath with the prefix stripped:
 //
 //	mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin()))
+//
+// Most hosts should use Handler instead, which does this wiring itself.
 func (c *CMS) Admin() http.Handler {
 	return c.admin
+}
+
+// Handler returns a single handler for the whole site: requests under
+// Config.AdminPath go to the admin area (with the prefix stripped and the
+// bare admin path redirected to its trailing-slash form), and everything
+// else goes to Pages. Because the routing comes from AdminPath, the mount
+// point and the links the admin UI generates can never disagree:
+//
+//	mux.Handle("/", c.Handler())
+//
+// Hosts that need different wiring — the admin on its own hostname, extra
+// middleware on one side only — can still compose Admin and Pages
+// themselves.
+func (c *CMS) Handler() http.Handler {
+	adminPath := c.cfg.AdminPath // normalized by New: leading slash, no trailing slash
+	admin := http.StripPrefix(adminPath, c.admin)
+	pages := c.Pages()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == adminPath {
+			url := adminPath + "/"
+			if r.URL.RawQuery != "" {
+				url += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, url, http.StatusMovedPermanently)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, adminPath+"/") {
+			admin.ServeHTTP(w, r)
+			return
+		}
+		pages.ServeHTTP(w, r)
+	})
 }
 
 // Pages returns the public site handler: it looks up the page for the
@@ -577,13 +627,13 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := c.renderer.Render(w, render.Input{
-		Page:    page,
-		Blocks:  blocks,
-		Locale:  locale,
-		Menus:   menus,
-		Edit:    edit,
-		Post:    post,
-		Posts:   c.postLister(r.Context(), locale, editing),
+		Page:      page,
+		Blocks:    blocks,
+		Locale:    locale,
+		Menus:     menus,
+		Edit:      edit,
+		Post:      post,
+		Posts:     c.postLister(r.Context(), locale, editing),
 		Locales:   c.cfg.Locales,
 		BaseURL:   siteBaseURL(r),
 		Site:      site,

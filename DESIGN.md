@@ -34,8 +34,7 @@ c, err := cms.New(cms.Config{
     Templates: myTemplates,             // the customer's own Go templates
 })
 
-mux.Handle("/admin/", http.StripPrefix("/admin", c.Admin())) // admin UI + JSON API
-mux.Handle("/", c.Pages())                                   // public page rendering
+mux.Handle("/", c.Handler()) // admin UI under Config.AdminPath, public pages elsewhere
 ```
 
 Customer-specific features are added through extension points (below), never

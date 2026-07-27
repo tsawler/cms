@@ -63,15 +63,17 @@ func TestNavSectionsFor(t *testing.T) {
 	}
 }
 
-// A mounted section handler must see section-relative paths, and the bare
-// section URL must canonicalize to the trailing-slash form.
+// A mounted section handler must see section-relative paths and its own
+// browser-facing base via SectionPath, and the bare section URL must
+// canonicalize to the trailing-slash form.
 func TestSectionHandlerPaths(t *testing.T) {
-	var gotPath string
+	var gotPath, gotBase string
 	s := &server{deps: Deps{AdminPath: "/admin"}}
 	h := s.sectionHandler(Section{
 		Path: "reports",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
+			gotBase = SectionPath(r)
 		}),
 	})
 
@@ -80,12 +82,19 @@ func TestSectionHandlerPaths(t *testing.T) {
 		"/x/reports/refresh":     "/refresh",
 		"/x/reports/assets/a.js": "/assets/a.js",
 	} {
-		gotPath = ""
+		gotPath, gotBase = "", ""
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, reqPath, nil))
 		if gotPath != want {
 			t.Errorf("request %s: handler saw path %q, want %q", reqPath, gotPath, want)
 		}
+		if gotBase != "/admin/x/reports/" {
+			t.Errorf("request %s: SectionPath = %q, want /admin/x/reports/", reqPath, gotBase)
+		}
+	}
+
+	if got := SectionPath(httptest.NewRequest(http.MethodGet, "/", nil)); got != "" {
+		t.Errorf("SectionPath outside a section = %q, want empty", got)
 	}
 
 	rec := httptest.NewRecorder()
@@ -125,11 +134,11 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 	html := out.String()
 
 	for _, want := range []string{
-		`<p class="host">42 visits</p>`,  // body inserted unescaped
-		`<title>Reports — CMS</title>`,   // title block
-		`href="/admin/x/reports/"`,       // nav link target
+		`<p class="host">42 visits</p>`,              // body inserted unescaped
+		`<title>Reports — CMS</title>`,               // title block
+		`href="/admin/x/reports/"`,                   // nav link target
 		`<span class="cms-nav-label">Reports</span>`, // nav link label
-		`href="/admin/static/admin.css"`, // standard chrome
+		`href="/admin/static/admin.css"`,             // standard chrome
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered page missing %q:\n%s", want, html)
