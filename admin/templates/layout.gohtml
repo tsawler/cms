@@ -40,6 +40,9 @@
         <a {{if .Active}}class="cms-active" aria-current="page"{{end}} href="{{.URL}}">
             <span class="cms-nav-label">{{.Label}}</span></a>
         {{end}}
+        {{if .IsAdmin}}
+            <a href="/"><span class="cms-nav-label">Public Site</span></a>
+        {{end}}
     </nav>
     <div class="cms-sidebar-foot">
         <span class="cms-whoami">{{.User.Name}}</span>

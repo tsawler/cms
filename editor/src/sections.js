@@ -98,6 +98,20 @@ function sectionPreview(v, el) {
     }
 }
 
+// presetSectionHTML wraps a preset's starting markup in the same
+// section wrapper createSection would build for it — classes, inline
+// styles and content-width div included — so the drawer thumbnail
+// shows the section exactly as inserting it would.
+export function presetSectionHTML(html, settings) {
+    var wrapper = document.createElement("section");
+    var inner = document.createElement("div");
+    inner.setAttribute("data-cms-section-content", "");
+    inner.innerHTML = html;
+    wrapper.appendChild(inner);
+    applySectionSettings(wrapper, settings || {});
+    return wrapper.outerHTML;
+}
+
 function buildSectionPreview(v, el, resolved, radius) {
     el.innerHTML = "";
     var box = document.createElement("div");

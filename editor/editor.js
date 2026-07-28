@@ -848,6 +848,15 @@
       }, 250);
     }
   }
+  function presetSectionHTML(html, settings) {
+    var wrapper = document.createElement("section");
+    var inner = document.createElement("div");
+    inner.setAttribute("data-cms-section-content", "");
+    inner.innerHTML = html;
+    wrapper.appendChild(inner);
+    applySectionSettings(wrapper, settings || {});
+    return wrapper.outerHTML;
+  }
   function buildSectionPreview(v, el, resolved, radius) {
     el.innerHTML = "";
     var box = document.createElement("div");
@@ -1157,6 +1166,39 @@
 
   // ../src/snippets.js
   var snippetsLoaded = false;
+  var hostHeadCache = null;
+  function hostHead() {
+    if (hostHeadCache !== null) return hostHeadCache;
+    var parts = [];
+    document.querySelectorAll("link[rel=stylesheet],style").forEach(function(n) {
+      var href = n.getAttribute && n.getAttribute("href") || "";
+      if ((n.id || "").indexOf("mce-") === 0 || href.indexOf("tinymce") !== -1) return;
+      parts.push(n.outerHTML);
+    });
+    var tw = document.querySelector('script[src*="tailwind"]');
+    if (tw) parts.push('<script src="' + tw.src + '"><\/script>');
+    hostHeadCache = parts.join("");
+    return hostHeadCache;
+  }
+  var thumbIO = null;
+  function queueThumb(el, html, pad) {
+    if (!thumbIO) {
+      thumbIO = new IntersectionObserver(function(entries) {
+        entries.forEach(function(en) {
+          if (!en.isIntersecting) return;
+          thumbIO.unobserve(en.target);
+          var frame = document.createElement("iframe");
+          frame.setAttribute("aria-hidden", "true");
+          frame.setAttribute("tabindex", "-1");
+          frame.srcdoc = '<!doctype html><meta charset="utf-8">' + hostHead() + "<style>html,body{margin:0;background:#fff;overflow:hidden}body{padding:" + en.target._thumbPad + "}</style><body>" + en.target._thumbHTML + "</body>";
+          en.target.appendChild(frame);
+        });
+      }, { root: $("snip-list"), rootMargin: "200px" });
+    }
+    el._thumbHTML = html;
+    el._thumbPad = pad || "12px 14px";
+    thumbIO.observe(el);
+  }
   function datetimeNow() {
     var d = /* @__PURE__ */ new Date();
     var p = function(n) {
@@ -1207,12 +1249,17 @@
           tag.textContent = "Section";
           nm.appendChild(tag);
         }
+        var thumb = document.createElement("div");
+        thumb.className = sn.settings ? "sthumb sect" : "sthumb";
+        if (sn.settings) queueThumb(thumb, presetSectionHTML(sn.html, sn.settings), "0");
+        else queueThumb(thumb, sn.html);
         var desc = document.createElement("p");
         desc.className = "sdesc";
         var probe = document.createElement("div");
         probe.innerHTML = sn.html;
         desc.textContent = (probe.textContent || "").trim().replace(/\s+/g, " ").slice(0, 90);
         card.appendChild(nm);
+        card.appendChild(thumb);
         card.appendChild(desc);
         card.draggable = !sn.settings;
         card.addEventListener("dragstart", function(e) {
@@ -4506,6 +4553,17 @@ cursor:grab;background:#fff}
 .dlist.sections-mode .snip.preset{order:-1}
 .snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;
 color:#2f5fe0;font-size:10px;font-weight:600;vertical-align:1px}
+/* Thumbnails: real snippet markup rendered page-wide in an iframe
+   (which brings its own copy of the host CSS across the shadow
+   boundary) and scaled to card size. Section presets (.sect) render
+   full sections, so they get a taller crop; the iframe height is the
+   crop height divided by the scale factor. */
+.snip .sthumb{height:80px;margin:2px 0 6px;border:1px solid #eceef1;border-radius:6px;
+overflow:hidden;background:#f9fafb;pointer-events:none}
+.snip .sthumb iframe{border:0;width:720px;height:231px;transform:scale(.347);
+transform-origin:0 0;background:#fff}
+.snip .sthumb.sect{height:110px}
+.snip .sthumb.sect iframe{height:317px}
 .snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
 -webkit-line-clamp:2;-webkit-box-orient:vertical}
 

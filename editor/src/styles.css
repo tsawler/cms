@@ -195,6 +195,17 @@ cursor:grab;background:#fff}
 .dlist.sections-mode .snip.preset{order:-1}
 .snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;
 color:#2f5fe0;font-size:10px;font-weight:600;vertical-align:1px}
+/* Thumbnails: real snippet markup rendered page-wide in an iframe
+   (which brings its own copy of the host CSS across the shadow
+   boundary) and scaled to card size. Section presets (.sect) render
+   full sections, so they get a taller crop; the iframe height is the
+   crop height divided by the scale factor. */
+.snip .sthumb{height:80px;margin:2px 0 6px;border:1px solid #eceef1;border-radius:6px;
+overflow:hidden;background:#f9fafb;pointer-events:none}
+.snip .sthumb iframe{border:0;width:720px;height:231px;transform:scale(.347);
+transform-origin:0 0;background:#fff}
+.snip .sthumb.sect{height:110px}
+.snip .sthumb.sect iframe{height:317px}
 .snip .sdesc{font-size:11px;color:#667085;margin:0;overflow:hidden;display:-webkit-box;
 -webkit-line-clamp:2;-webkit-box-orient:vertical}
 

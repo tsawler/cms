@@ -9,9 +9,60 @@ import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
 import { markDirty, markSectionsDirty } from "./editing.js";
 import { lockButtons } from "./buttons.js";
-import { createSection } from "./sections.js";
+import { createSection, presetSectionHTML } from "./sections.js";
 
 var snippetsLoaded = false;
+
+/* ---- drawer thumbnails -------------------------------------------
+ * Snippet cards show a live miniature of their actual markup. The
+ * drawer lives in the editor's shadow root (host CSS can't reach it),
+ * so each thumbnail is a tiny iframe that borrows the host page's
+ * stylesheets and renders the fragment at page width, scaled down by
+ * CSS. Section presets render the same way, wrapped in the section
+ * markup their settings would produce (edge-to-edge, so no padding). */
+
+var hostHeadCache = null;
+function hostHead() {
+    if (hostHeadCache !== null) return hostHeadCache;
+    var parts = [];
+    document.querySelectorAll("link[rel=stylesheet],style").forEach(function (n) {
+        // Skip TinyMCE's injected skin — editor chrome, not site style.
+        var href = (n.getAttribute && n.getAttribute("href")) || "";
+        if ((n.id || "").indexOf("mce-") === 0 || href.indexOf("tinymce") !== -1) return;
+        parts.push(n.outerHTML);
+    });
+    // JIT setups (Tailwind Play CDN) only generate CSS for classes seen
+    // on this page; ship the script so the frame covers its own classes.
+    var tw = document.querySelector('script[src*="tailwind"]');
+    if (tw) parts.push('<script src="' + tw.src + '"><' + "/script>");
+    hostHeadCache = parts.join("");
+    return hostHeadCache;
+}
+
+// Thumbnails render lazily as cards scroll into view — a long snippet
+// list would otherwise spin up every iframe the moment the drawer opens.
+var thumbIO = null;
+function queueThumb(el, html, pad) {
+    if (!thumbIO) {
+        thumbIO = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+                if (!en.isIntersecting) return;
+                thumbIO.unobserve(en.target);
+                var frame = document.createElement("iframe");
+                frame.setAttribute("aria-hidden", "true");
+                frame.setAttribute("tabindex", "-1");
+                frame.srcdoc = '<!doctype html><meta charset="utf-8">' + hostHead() +
+                    "<style>html,body{margin:0;background:#fff;overflow:hidden}" +
+                    "body{padding:" + en.target._thumbPad + "}</style><body>" +
+                    en.target._thumbHTML + "</body>";
+                en.target.appendChild(frame);
+            });
+        }, { root: $("snip-list"), rootMargin: "200px" });
+    }
+    el._thumbHTML = html;
+    el._thumbPad = pad || "12px 14px";
+    thumbIO.observe(el);
+}
 
 // datetimeNow formats the current local time for <input type="datetime-local">.
 function datetimeNow() {
@@ -70,12 +121,17 @@ function loadSnippets() {
                 tag.textContent = "Section";
                 nm.appendChild(tag);
             }
+            var thumb = document.createElement("div");
+            thumb.className = sn.settings ? "sthumb sect" : "sthumb";
+            if (sn.settings) queueThumb(thumb, presetSectionHTML(sn.html, sn.settings), "0");
+            else queueThumb(thumb, sn.html);
             var desc = document.createElement("p");
             desc.className = "sdesc";
             var probe = document.createElement("div");
             probe.innerHTML = sn.html;
             desc.textContent = (probe.textContent || "").trim().replace(/\s+/g, " ").slice(0, 90);
             card.appendChild(nm);
+            card.appendChild(thumb);
             card.appendChild(desc);
             // Drag: TinyMCE accepts text/html drops and inserts the
             // markup at the drop caret inside any rich region. Presets
