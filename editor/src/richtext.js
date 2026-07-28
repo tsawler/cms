@@ -434,13 +434,16 @@ export function initInlineEditor(el, onDirty, register) {
         },
     };
     // The dropdown replaces TinyMCE's default menu: a built-in Headings
-    // submenu (headings are structure, not host-configurable styles —
-    // h1 stays reserved for the page title), then the host's entries.
+    // submenu (headings are structure, not host-configurable styles),
+    // then the host's entries. Heading 1 is there for completeness —
+    // a region that carries the page's own title needs it — though most
+    // content should start at Heading 2 under the page title.
     // Paragraph is the way back down: the menu applies block formats
     // without a toggle, so reverting a heading needs its own entry.
     opts.style_formats = [{
         title: "Headings",
         items: [
+            { title: "Heading 1", block: "h1" },
             { title: "Heading 2", block: "h2" },
             { title: "Heading 3", block: "h3" },
             { title: "Heading 4", block: "h4" },
