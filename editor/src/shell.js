@@ -230,6 +230,13 @@ function setBarMinimized(min) {
     } catch (e) { /* private mode */ }
 }
 
+// expandBar brings a minimized bar back, for actions started outside it
+// (the wrench menu's Edit entry) whose controls and status messages live
+// on the bar. Expand-only: minimizing stays the bar's own business.
+export function expandBar() {
+    if ($("bar").classList.contains("min")) setBarMinimized(false);
+}
+
 export function initBarMin() {
     $("close").addEventListener("click", function () {
         closePicker();

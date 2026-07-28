@@ -14,10 +14,12 @@
  * re-render to put it back.
  * ------------------------------------------------------------------ */
 
-import { adminPath, csrf, isAdmin, pageTemplates, postsEnabled } from "./state.js";
+import { adminPath, csrf, isAdmin, pageTemplates, postInfo, postsEnabled, state } from "./state.js";
 import { newPageDialog, newPostDialog } from "./snippets.js";
 import { openSiteSettings } from "./settings.js";
 import { openSiteCode } from "./pagecode.js";
+import { setEditing } from "./editing.js";
+import { expandBar } from "./shell.js";
 
 var WRENCH =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>';
@@ -35,6 +37,27 @@ function logout() {
     form.appendChild(token);
     document.body.appendChild(form);
     form.submit();
+}
+
+// The menu's first entry names what you are looking at, so it reads
+// "Edit news" on a news item rather than a generic "Edit page".
+function editLabel() {
+    if (!postInfo) return "Edit page";
+    return postInfo.feed === "news" ? "Edit news" : "Edit post";
+}
+
+// startEditing turns on in-place editing for the page in view — the same
+// thing the edit bar's Edit button does, reachable without hunting for
+// the bar.
+function startEditing() {
+    // Minimizing the bar also leaves edit mode, so a minimized bar means
+    // the Save/Publish controls and the "Loading editor…" status are out
+    // of sight just as editing begins — bring it back first.
+    expandBar();
+    // Re-entering while already editing would retake the snapshot that
+    // "Revert unsaved changes" restores from, quietly making the work so
+    // far the thing it reverts to.
+    if (!state.editing) setEditing(true);
 }
 
 function item(tools, label, onClick) {
@@ -64,6 +87,13 @@ export function initAdminTools() {
 
     var menu = document.createElement("div");
     menu.className = "cms-admin-menu";
+    // This page first, then the create actions, then the site-wide ones.
+    menu.appendChild(item(tools, editLabel(), startEditing));
+    menu.appendChild(document.createElement("hr"));
+    // The separator below belongs to the create group, so it is appended
+    // only when that group actually got an entry — not merely because
+    // the menu is non-empty, which the edit entry above would satisfy.
+    var beforeAdd = menu.children.length;
     if (pageTemplates.length) {
         menu.appendChild(item(tools, "Add page", newPageDialog));
     }
@@ -71,7 +101,7 @@ export function initAdminTools() {
         menu.appendChild(item(tools, "Add news item", function () { newPostDialog("news"); }));
         menu.appendChild(item(tools, "Add blog post", function () { newPostDialog("blog"); }));
     }
-    if (menu.children.length) menu.appendChild(document.createElement("hr"));
+    if (menu.children.length > beforeAdd) menu.appendChild(document.createElement("hr"));
     menu.appendChild(item(tools, "Site settings", openSiteSettings));
     // Site-wide code is written raw into every page, so the editor is
     // admin-only — matching the server, which ignores these fields in

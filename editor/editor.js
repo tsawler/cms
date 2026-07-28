@@ -2554,6 +2554,14 @@
     document.body.appendChild(form);
     form.submit();
   }
+  function editLabel() {
+    if (!postInfo) return "Edit page";
+    return postInfo.feed === "news" ? "Edit news" : "Edit post";
+  }
+  function startEditing() {
+    expandBar();
+    if (!state.editing) setEditing(true);
+  }
   function item(tools, label, onClick) {
     var b = document.createElement("button");
     b.type = "button";
@@ -2578,6 +2586,9 @@
     tools.appendChild(btn);
     var menu = document.createElement("div");
     menu.className = "cms-admin-menu";
+    menu.appendChild(item(tools, editLabel(), startEditing));
+    menu.appendChild(document.createElement("hr"));
+    var beforeAdd = menu.children.length;
     if (pageTemplates.length) {
       menu.appendChild(item(tools, "Add page", newPageDialog));
     }
@@ -2589,7 +2600,7 @@
         newPostDialog("blog");
       }));
     }
-    if (menu.children.length) menu.appendChild(document.createElement("hr"));
+    if (menu.children.length > beforeAdd) menu.appendChild(document.createElement("hr"));
     menu.appendChild(item(tools, "Site settings", openSiteSettings));
     if (isAdmin) menu.appendChild(item(tools, "Site CSS & JS", openSiteCode));
     var admin = document.createElement("a");
@@ -5002,6 +5013,9 @@ body.cms-editing [data-cms-fallback] {
       window.localStorage.setItem(BAR_MIN_KEY, min ? "1" : "0");
     } catch (e) {
     }
+  }
+  function expandBar() {
+    if ($("bar").classList.contains("min")) setBarMinimized(false);
   }
   function initBarMin() {
     $("close").addEventListener("click", function() {
