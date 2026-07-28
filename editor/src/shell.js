@@ -51,6 +51,7 @@ export function initShell() {
         '<button id="cancel" hidden>Revert unsaved changes</button>' +
         '<button id="revert-locale" class="dngr" hidden>Remove this translation…</button>' +
         '<button id="discard" class="dngr" hidden>Discard draft…</button>' +
+        '<button id="unpublish" class="dngr" hidden>Unpublish page…</button>' +
         '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
         '<hr id="menu-sep">' +
         '<button id="dup-page" hidden>Duplicate page…</button>' +

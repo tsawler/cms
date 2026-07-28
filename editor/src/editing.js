@@ -159,9 +159,13 @@ export function updateBarButtons() {
     // Discard is offered whenever there's a saved draft that differs from
     // what's live — the same condition as the "Unpublished edits" chip.
     $("discard").hidden = !(state.pageStatus === "published" && state.hasUnpublished);
+    // Unpublish is the counterpart to Publish: offered only while the page
+    // is actually live, since that is the only state it changes.
+    $("unpublish").hidden = state.pageStatus !== "published";
     // The separator only earns its place when the destructive group
     // above it has at least one visible item.
-    $("menu-sep").hidden = $("cancel").hidden && $("discard").hidden && $("del-page").hidden && $("revert-locale").hidden;
+    $("menu-sep").hidden = $("cancel").hidden && $("discard").hidden && $("del-page").hidden &&
+        $("revert-locale").hidden && $("unpublish").hidden;
 }
 
 export function initEditing() {

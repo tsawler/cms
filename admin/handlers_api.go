@@ -155,7 +155,7 @@ func (s *server) apiDuplicatePage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Posts are more than their backing page (feed, date, author…);
 	// duplicating just the page would strand a half-post.
-	if _, err := s.deps.Content.PostByPageID(r.Context(), page.ID, s.deps.DefaultLocale); err == nil {
+	if _, err := s.deps.Content.PostByPageID(r.Context(), page.ID, s.deps.DefaultLocale, true); err == nil {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Posts can't be duplicated."))
 		return
 	} else if !errors.Is(err, content.ErrNotFound) {
@@ -687,6 +687,23 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	s.contentChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "published"})
+}
+
+// apiUnpublish takes the page off the public site. Content is untouched —
+// draft and published both survive — so publishing again restores it.
+// POST /api/pages/{id}/unpublish
+func (s *server) apiUnpublish(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	if err := s.deps.Content.Unpublish(r.Context(), page.ID); err != nil {
+		s.deps.Logger.Error("cms admin: api unpublishing", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Unpublishing failed — try again."))
+		return
+	}
+	s.contentChanged()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "draft"})
 }
 
 // apiSetVisibility changes who may view the page on the public site.

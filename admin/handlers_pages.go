@@ -260,31 +260,26 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // finishContentSave applies the page/post form's submit action
-// (save/publish/unpublish), sets the flash, and redirects back to the
-// form, keeping a non-default editing locale's tab selected.
+// (save/publish), sets the flash, and redirects back to the form, keeping
+// a non-default editing locale's tab selected.
+//
+// Unpublishing is deliberately not a form action: it posts to its own
+// route, so taking content off the site can't drag whatever happens to be
+// sitting in the form into the draft along with it.
 func (s *server) finishContentSave(w http.ResponseWriter, r *http.Request, pageID int64, noun, formPath, locale string) {
 	// Full sentences are the translation keys, so the noun switches
 	// between complete messages rather than being concatenated.
 	published := s.tr(r, "Page published.")
-	unpublished := s.tr(r, "Page unpublished — it is no longer visible on the site.")
 	if noun == "Post" {
 		published = s.tr(r, "Post published.")
-		unpublished = s.tr(r, "Post unpublished — it is no longer visible on the site.")
 	}
-	switch r.PostFormValue("action") {
-	case "publish":
+	if r.PostFormValue("action") == "publish" {
 		if err := s.deps.Content.Publish(r.Context(), pageID); err != nil {
 			s.serverError(w, err)
 			return
 		}
 		s.flash(r, published)
-	case "unpublish":
-		if err := s.deps.Content.Unpublish(r.Context(), pageID); err != nil {
-			s.serverError(w, err)
-			return
-		}
-		s.flash(r, unpublished)
-	default:
+	} else {
 		s.flash(r, s.tr(r, "Draft saved. Publish when you're ready to make it live."))
 	}
 	s.contentChanged()
@@ -392,6 +387,23 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 	}
 	s.contentChanged()
 	s.flash(r, s.tr(r, "Draft changes discarded — the editor now matches the published page."))
+	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+}
+
+// pageUnpublish takes the page off the public site. Content is untouched:
+// both the draft and published block sets survive, so publishing again
+// restores the page.
+func (s *server) pageUnpublish(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	if err := s.deps.Content.Unpublish(r.Context(), page.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.contentChanged()
+	s.flash(r, s.tr(r, "Page unpublished — it is no longer visible on the site."))
 	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
 }
 

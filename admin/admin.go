@@ -160,6 +160,7 @@ func New(d Deps) http.Handler {
 			r.Post("/pages/{id}", s.pageUpdate)
 			r.Post("/pages/{id}/delete", s.pageDelete)
 			r.Post("/pages/{id}/discard", s.pageDiscard)
+			r.Post("/pages/{id}/unpublish", s.pageUnpublish)
 			r.Get("/pages/{id}/preview", s.pagePreview)
 
 			// JSON API for the in-place editor.
@@ -175,6 +176,7 @@ func New(d Deps) http.Handler {
 			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
 			r.Post("/api/pages/{id}/duplicate", s.apiDuplicatePage)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
+			r.Post("/api/pages/{id}/unpublish", s.apiUnpublish)
 			r.Post("/api/pages/{id}/discard", s.apiDiscard)
 			r.Put("/api/pages/{id}/visibility", s.apiSetVisibility)
 			r.Get("/api/snippets", s.apiSnippetsList)
@@ -195,6 +197,7 @@ func New(d Deps) http.Handler {
 				r.Post("/posts/{id}", s.postUpdate)
 				r.Post("/posts/{id}/delete", s.postDelete)
 				r.Post("/posts/{id}/discard", s.postDiscard)
+				r.Post("/posts/{id}/unpublish", s.postUnpublish)
 				r.Get("/posts/{id}/preview", s.postPreview)
 				r.Post("/api/posts", s.apiCreatePost)
 				r.Put("/api/posts/{id}", s.apiUpdatePostSettings)

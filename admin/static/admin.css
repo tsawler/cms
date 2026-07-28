@@ -277,6 +277,8 @@ td.cms-slug { color: var(--cms-muted); }
 .cms-actions { display: flex; gap: .5rem; align-items: center; }
 .cms-discard { margin-top: 1.5rem; }
 .cms-discard .cms-hint { margin-bottom: .5rem; }
+.cms-unpublish { margin-top: 1.5rem; }
+.cms-unpublish .cms-hint { margin-bottom: .5rem; }
 .cms-danger-zone { margin-top: 1.5rem; }
 
 /* Alerts and flash messages */

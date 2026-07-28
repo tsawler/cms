@@ -40,16 +40,32 @@ type Post struct {
 	HeaderURL    string // optional header/banner image
 }
 
-const postColumns = pageColumns + `,
+// postColumns and postJoins take draft for the same reason pageColumns
+// does: admin screens and the in-place editor read the working copy, the
+// public listings and feeds read what is published.
+func postColumns(draft bool) string {
+	return pageColumns(draft) + `,
 	po.id, po.feed, po.published_at, po.author_id, COALESCE(u.name, ''),
 	po.thumbnail_url, po.header_url`
+}
 
-const postJoins = `
+func postJoins(draft bool) string {
+	status := "published"
+	if draft {
+		status = "draft"
+	}
+	j := `
 	FROM cms_posts po
 	JOIN cms_pages p ON p.id = po.page_id
-	LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1
-	LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $2
+	LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1 AND m.status = '` + status + `'
+	LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $2 AND md.status = '` + status + `'
 	LEFT JOIN cms_users u ON u.id = po.author_id`
+	if draft {
+		j += `
+	LEFT JOIN cms_page_drafts d ON d.page_id = p.id`
+	}
+	return j
+}
 
 func scanPost(row pgx.Row) (*Post, error) {
 	var p Post
@@ -93,8 +109,14 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
 		VALUES ($1, $2, $3, $4)`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, $4, 'draft')`,
 		p.ID, locale, p.Title, p.Description); err != nil {
 		return 0, err
 	}
@@ -112,6 +134,10 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 // UpdatePost saves a post's fields and its backing page's fields and
 // metadata for locale, in one transaction. Like Page updates it does not
 // change publication status, and the author is fixed at creation.
+//
+// The backing page's staged fields (title, description, template, per-page
+// code) go to the working copy and reach the site on the next Publish; the
+// slug and the cms_posts fields — feed, date, images — apply immediately.
 func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -120,11 +146,8 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE cms_pages
-		SET slug = $1, template_name = $2, head_css = $3, body_js = $4,
-			updated_at = now()
-		WHERE id = $5`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS, p.ID)
+		UPDATE cms_pages SET slug = $1, updated_at = now() WHERE id = $2`,
+		p.Slug, p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
@@ -135,9 +158,18 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 		return ErrNotFound
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (page_id, locale)
+		ON CONFLICT (page_id)
+		DO UPDATE SET template_name = EXCLUDED.template_name,
+			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, $4, 'draft')
+		ON CONFLICT (page_id, locale, status)
 		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
 		p.ID, locale, p.Title, p.Description); err != nil {
 		return err
@@ -153,17 +185,18 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 }
 
 // PostByID returns the post with the given post id, with page metadata for
-// locale.
+// locale. It reads the working copy: every caller is an admin screen.
 func (s *Store) PostByID(ctx context.Context, id int64, locale string) (*Post, error) {
-	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.id = $3`,
+	row := s.db.QueryRow(ctx, `SELECT `+postColumns(true)+postJoins(true)+` WHERE po.id = $3`,
 		locale, s.defaultLocale, id)
 	return scanPost(row)
 }
 
 // PostByPageID returns the post backed by the given page, or ErrNotFound
-// when the page is not a post.
-func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string) (*Post, error) {
-	row := s.db.QueryRow(ctx, `SELECT `+postColumns+postJoins+` WHERE po.page_id = $3`,
+// when the page is not a post. With draft it reads the working copy, which
+// is what the in-place editor shows; without, what the site serves.
+func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string, draft bool) (*Post, error) {
+	row := s.db.QueryRow(ctx, `SELECT `+postColumns(draft)+postJoins(draft)+` WHERE po.page_id = $3`,
 		locale, s.defaultLocale, pageID)
 	return scanPost(row)
 }
@@ -173,7 +206,7 @@ func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string) (
 // publishedOnly, draft and private posts are omitted (the public view);
 // without, editors see everything. A non-positive limit returns everything.
 func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOnly bool, limit int) ([]Post, error) {
-	q := `SELECT ` + postColumns + postJoins + ` WHERE ($3 = '' OR po.feed = $3)`
+	q := `SELECT ` + postColumns(!publishedOnly) + postJoins(!publishedOnly) + ` WHERE ($3 = '' OR po.feed = $3)`
 	if publishedOnly {
 		q += ` AND p.status = 'published' AND p.visibility = 'public'`
 	}
@@ -201,8 +234,8 @@ func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOn
 // instead.
 func (s *Store) AllNonPost(ctx context.Context, locale string) ([]Page, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT `+pageColumns+`
-		FROM cms_pages p`+pageMetaJoins(1, 2)+`
+		SELECT `+pageColumns(true)+`
+		FROM cms_pages p`+pageMetaJoins(1, 2, true)+`
 		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)
 		ORDER BY p.slug`, locale, s.defaultLocale)
 	if err != nil {

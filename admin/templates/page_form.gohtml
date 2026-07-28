@@ -92,9 +92,6 @@
         {{else}}
         <button type="submit" name="action" value="save" class="cms-btn cms-btn-ghost">{{.T "Save draft"}}</button>
         <button type="submit" name="action" value="publish" class="cms-btn cms-btn-primary">{{.T "Save & publish"}}</button>
-        {{if eq .FormPage.Status "published"}}
-        <button type="submit" name="action" value="unpublish" class="cms-btn cms-btn-ghost">{{.T "Unpublish"}}</button>
-        {{end}}
         {{end}}
     </div>
 </form>
@@ -105,6 +102,15 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <p class="cms-hint">{{.T "This page has unpublished draft changes."}}</p>
     <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Discard draft changes"}}</button>
+</form>
+{{end}}
+
+{{if and (not .IsNew) (eq .FormPage.Status "published") .IsDefaultLocale}}
+<form method="post" action="{{.AdminPath}}/pages/{{.FormPage.ID}}/unpublish" class="cms-unpublish"
+      data-confirm="{{.T "Take this page off the public site? Nothing is deleted — you can publish it again later."}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p class="cms-hint">{{.T "This page is live on the site."}}</p>
+    <button type="submit" class="cms-btn cms-btn-ghost">{{.T "Unpublish"}}</button>
 </form>
 {{end}}
 

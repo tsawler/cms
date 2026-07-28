@@ -130,10 +130,26 @@ func NewStore(db *pgxpool.Pool, defaultLocale string) *Store {
 // field-level fallback to the default-locale join (md): an absent row or
 // an empty field falls back, so a French page with only a title still
 // gets the English description.
-const pageColumns = `p.id, p.slug, p.template_name, p.status, p.visibility, p.head_css, p.body_js,
-	COALESCE(NULLIF(m.title, ''), md.title, ''),
-	COALESCE(NULLIF(m.description, ''), md.description, ''),
-	p.created_at, p.updated_at`
+//
+// With draft, the fields that take part in the draft/publish workflow are
+// read from the working copy — cms_page_drafts (d) for the page-level
+// fields, and the draft-status metadata rows the joins select — instead of
+// the published values on cms_pages. Slug and visibility are not staged,
+// so they always read from cms_pages. The COALESCE back to cms_pages keeps
+// a page whose draft row somehow went missing readable instead of failing
+// the scan.
+func pageColumns(draft bool) string {
+	tmpl, css, js := "p.template_name", "p.head_css", "p.body_js"
+	if draft {
+		tmpl = "COALESCE(d.template_name, p.template_name)"
+		css = "COALESCE(d.head_css, p.head_css)"
+		js = "COALESCE(d.body_js, p.body_js)"
+	}
+	return `p.id, p.slug, ` + tmpl + `, p.status, p.visibility, ` + css + `, ` + js + `,
+		COALESCE(NULLIF(m.title, ''), md.title, ''),
+		COALESCE(NULLIF(m.description, ''), md.description, ''),
+		p.created_at, p.updated_at`
+}
 
 func scanPage(row pgx.Row) (*Page, error) {
 	var p Page
@@ -149,28 +165,43 @@ func scanPage(row pgx.Row) (*Page, error) {
 }
 
 // pageMetaJoins joins page metadata twice: the requested locale ($n) and
-// the default locale ($n+1), for pageColumns' fallback COALESCEs.
-func pageMetaJoins(localeArg, defaultArg int) string {
-	return `
-		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $` + strconv.Itoa(localeArg) + `
-		LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $` + strconv.Itoa(defaultArg)
+// the default locale ($n+1), for pageColumns' fallback COALESCEs. Both
+// joins take the draft or published side of the metadata, matching the
+// pageColumns call they accompany; the draft side also brings in the
+// page-level working copy the draft columns read from.
+func pageMetaJoins(localeArg, defaultArg int, draft bool) string {
+	status := "published"
+	if draft {
+		status = "draft"
+	}
+	j := `
+		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $` + strconv.Itoa(localeArg) + ` AND m.status = '` + status + `'
+		LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $` + strconv.Itoa(defaultArg) + ` AND md.status = '` + status + `'`
+	if draft {
+		j += `
+		LEFT JOIN cms_page_drafts d ON d.page_id = p.id`
+	}
+	return j
 }
 
 // GetByID returns the page with the given id, with metadata for locale.
+// It reads the draft working copy: every caller is an admin screen.
 func (s *Store) GetByID(ctx context.Context, id int64, locale string) (*Page, error) {
 	row := s.db.QueryRow(ctx, `
-		SELECT `+pageColumns+`
-		FROM cms_pages p`+pageMetaJoins(2, 3)+`
+		SELECT `+pageColumns(true)+`
+		FROM cms_pages p`+pageMetaJoins(2, 3, true)+`
 		WHERE p.id = $1`, id, locale, s.defaultLocale)
 	return scanPage(row)
 }
 
 // GetBySlug returns the page with the given slug, with metadata for locale.
-// With publishedOnly, draft pages are treated as not found.
+// With publishedOnly, draft pages are treated as not found and the page
+// reads as the site serves it; without, it reads as the working copy, which
+// is what the editor and preview want.
 func (s *Store) GetBySlug(ctx context.Context, slug, locale string, publishedOnly bool) (*Page, error) {
 	q := `
-		SELECT ` + pageColumns + `
-		FROM cms_pages p` + pageMetaJoins(2, 3) + `
+		SELECT ` + pageColumns(!publishedOnly) + `
+		FROM cms_pages p` + pageMetaJoins(2, 3, !publishedOnly) + `
 		WHERE p.slug = $1`
 	if publishedOnly {
 		q += ` AND p.status = 'published'`
@@ -178,11 +209,12 @@ func (s *Store) GetBySlug(ctx context.Context, slug, locale string, publishedOnl
 	return scanPage(s.db.QueryRow(ctx, q, slug, locale, s.defaultLocale))
 }
 
-// All returns every page with metadata for locale, ordered by slug.
+// All returns every page with metadata for locale, ordered by slug, as the
+// working copy — it backs admin listings.
 func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT `+pageColumns+`
-		FROM cms_pages p`+pageMetaJoins(1, 2)+`
+		SELECT `+pageColumns(true)+`
+		FROM cms_pages p`+pageMetaJoins(1, 2, true)+`
 		ORDER BY p.slug`, locale, s.defaultLocale)
 	if err != nil {
 		return nil, err
@@ -228,9 +260,17 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	if err != nil {
 		return 0, err
 	}
+	// The working copy starts out matching the row just written; edits to
+	// the staged fields land here and only reach cms_pages on Publish.
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
 		VALUES ($1, $2, $3, $4)`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, $4, 'draft')`,
 		p.ID, locale, p.Title, p.Description); err != nil {
 		return 0, err
 	}
@@ -252,11 +292,16 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Everything is copied from the source's working copy, so a duplicate
+	// reproduces what the editor shows rather than what is live.
 	var id int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
-		SELECT $2, template_name, 'draft', visibility, head_css, body_js
-		FROM cms_pages WHERE id = $1
+		SELECT $2, COALESCE(d.template_name, p.template_name), 'draft', p.visibility,
+			COALESCE(d.head_css, p.head_css), COALESCE(d.body_js, p.body_js)
+		FROM cms_pages p
+		LEFT JOIN cms_page_drafts d ON d.page_id = p.id
+		WHERE p.id = $1
 		RETURNING id`, srcID, slug).Scan(&id)
 	if pgutil.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
@@ -268,15 +313,21 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
-		SELECT $1, locale, title, description
-		FROM cms_page_meta WHERE page_id = $2`, id, srcID); err != nil {
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
+		SELECT $1, template_name, head_css, body_js
+		FROM cms_pages WHERE id = $1`, id); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
-		VALUES ($1, $2, $3, '')
-		ON CONFLICT (page_id, locale)
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		SELECT $1, locale, title, description, 'draft'
+		FROM cms_page_meta WHERE page_id = $2 AND status = 'draft'`, id, srcID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, '', 'draft')
+		ON CONFLICT (page_id, locale, status)
 		DO UPDATE SET title = EXCLUDED.title`, id, locale, title); err != nil {
 		return 0, err
 	}
@@ -291,6 +342,10 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 
 // Update saves a page's fields and its metadata for locale. It does not
 // change publication status; use Publish and Unpublish for that.
+//
+// Title, description, template and per-page code are staged: they land in
+// the working copy and reach the site on the next Publish. Slug and
+// visibility are not staged and take effect immediately.
 func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -300,10 +355,9 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages
-		SET slug = $1, template_name = $2, visibility = $3, head_css = $4, body_js = $5,
-			updated_at = now()
-		WHERE id = $6`,
-		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS, p.ID)
+		SET slug = $1, visibility = $2, updated_at = now()
+		WHERE id = $3`,
+		p.Slug, p.Visibility.orPublic(), p.ID)
 	if pgutil.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
@@ -314,9 +368,18 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 		return ErrNotFound
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (page_id, locale)
+		ON CONFLICT (page_id)
+		DO UPDATE SET template_name = EXCLUDED.template_name,
+			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, $4, 'draft')
+		ON CONFLICT (page_id, locale, status)
 		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
 		p.ID, locale, p.Title, p.Description); err != nil {
 		return err
@@ -326,12 +389,13 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 
 // UpdateMeta saves only a page's per-locale metadata (title and
 // description) — how non-default-locale admin tabs save, since every
-// other page field is locale-independent.
+// other page field is locale-independent. Like Update it writes the
+// working copy, so the change reaches the site on the next Publish.
 func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale, title, description string) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (page_id, locale)
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		VALUES ($1, $2, $3, $4, 'draft')
+		ON CONFLICT (page_id, locale, status)
 		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
 		pageID, locale, title, description)
 	return err
@@ -349,8 +413,9 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// Publish makes the page's draft content live: the published block set is
-// replaced by a copy of the draft set and the page is marked published.
+// Publish makes the page's draft content live: the published block set and
+// metadata are replaced by copies of the draft ones, the staged page-level
+// fields are copied onto the page row, and the page is marked published.
 func (s *Store) Publish(ctx context.Context, pageID int64) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -368,8 +433,26 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 		FROM cms_blocks WHERE page_id = $1 AND status = 'draft'`, pageID); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx,
-		"UPDATE cms_pages SET status = 'published', updated_at = now() WHERE id = $1", pageID)
+	if _, err := tx.Exec(ctx,
+		"DELETE FROM cms_page_meta WHERE page_id = $1 AND status = 'published'", pageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		SELECT page_id, locale, title, description, 'published'
+		FROM cms_page_meta WHERE page_id = $1 AND status = 'draft'`, pageID); err != nil {
+		return err
+	}
+	// Correlated subqueries rather than a join, so a page with no working
+	// copy row still publishes (keeping its current values) instead of
+	// silently matching nothing and reporting ErrNotFound.
+	tag, err := tx.Exec(ctx, `
+		UPDATE cms_pages SET
+			template_name = COALESCE((SELECT template_name FROM cms_page_drafts WHERE page_id = $1), template_name),
+			head_css      = COALESCE((SELECT head_css FROM cms_page_drafts WHERE page_id = $1), head_css),
+			body_js       = COALESCE((SELECT body_js FROM cms_page_drafts WHERE page_id = $1), body_js),
+			status = 'published', updated_at = now()
+		WHERE id = $1`, pageID)
 	if err != nil {
 		return err
 	}
@@ -379,8 +462,9 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 	return tx.Commit(ctx)
 }
 
-// DiscardDraft throws away a page's unpublished edits: the draft block set
-// is replaced by a copy of the currently published set, so the editor
+// DiscardDraft throws away a page's unpublished edits: the draft blocks
+// and metadata are replaced by copies of the currently published ones and
+// the staged page-level fields revert to the page row, so the editor
 // returns to exactly what is live. The page's publication status is left
 // unchanged. It is the inverse of Publish.
 func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
@@ -398,6 +482,22 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 		INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content, settings)
 		SELECT page_id, region, locale, 'draft', sort, kind, snippet_key, content, settings
 		FROM cms_blocks WHERE page_id = $1 AND status = 'published'`, pageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		"DELETE FROM cms_page_meta WHERE page_id = $1 AND status = 'draft'", pageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
+		SELECT page_id, locale, title, description, 'draft'
+		FROM cms_page_meta WHERE page_id = $1 AND status = 'published'`, pageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE cms_page_drafts d
+		SET template_name = p.template_name, head_css = p.head_css, body_js = p.body_js
+		FROM cms_pages p WHERE p.id = d.page_id AND d.page_id = $1`, pageID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -175,6 +175,23 @@ func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
 }
 
+// postUnpublish takes the post off the public site — out of the feed and
+// the listing as well as its own URL. Content is untouched, so publishing
+// again restores it.
+func (s *server) postUnpublish(w http.ResponseWriter, r *http.Request) {
+	post, ok := s.postFromURL(w, r)
+	if !ok {
+		return
+	}
+	if err := s.deps.Content.Unpublish(r.Context(), post.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.contentChanged()
+	s.flash(r, s.tr(r, "Post unpublished — it is no longer visible on the site."))
+	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
+}
+
 // postPreview renders the post's draft content with the real site
 // templates, post data included.
 func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {

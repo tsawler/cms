@@ -179,6 +179,25 @@ function publish() {
     }).catch(function (err) { setMsg(err.message); });
 }
 
+// unpublish takes the page off the public site. Nothing is thrown away —
+// the draft and published content both survive — so the page stays fully
+// editable and Publish puts it back. No reload: only the page's status
+// changes, not anything on screen.
+function unpublish() {
+    cmsConfirm("Take this page off the public site? Visitors will get a not-found page. Nothing is deleted — you can publish it again later.",
+        "Unpublish", true).then(function (yes) {
+        if (!yes) return;
+        setMsg("Unpublishing…");
+        api("/pages/" + pageId + "/unpublish", { method: "POST" }).then(function () {
+            state.pageStatus = "draft";
+            state.hasUnpublished = false;
+            updateChip();
+            flash("Unpublished — no longer on the site");
+            updateBarButtons();
+        }).catch(function (err) { setMsg(err.message); });
+    });
+}
+
 // discardDraft throws away the saved-but-unpublished draft, reverting it
 // to what's live. The page is reloaded afterwards so the visible content
 // matches the restored (published) draft.
@@ -293,6 +312,7 @@ export function initSaving() {
         save().catch(function (err) { setMsg(err.message); });
     });
     $("publish").addEventListener("click", publish);
+    $("unpublish").addEventListener("click", unpublish);
     $("discard").addEventListener("click", discardDraft);
 
     $("more").addEventListener("click", function (e) {

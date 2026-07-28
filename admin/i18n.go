@@ -241,6 +241,8 @@ var frStrings = map[string]string{
 	"Discard your unpublished changes and revert to the published version? This can't be undone.": "Abandonner vos modifications non publiées et revenir à la version publiée? Cette action est irréversible.",
 	"This page has unpublished draft changes.":                                                    "Cette page a des modifications de brouillon non publiées.",
 	"Discard draft changes": "Abandonner les modifications du brouillon",
+	"Take this page off the public site? Nothing is deleted — you can publish it again later.": "Retirer cette page du site public? Rien n'est supprimé — vous pourrez la republier plus tard.",
+	"This page is live on the site.":                                  "Cette page est en ligne sur le site.",
 	"Delete this page and all of its content? This cannot be undone.": "Supprimer cette page et tout son contenu? Cette action est irréversible.",
 	"Delete page": "Supprimer la page",
 
@@ -299,6 +301,8 @@ var frStrings = map[string]string{
 	"and press":                                        "et appuyez sur",
 	"to write in place with sections and snippets.":    "pour écrire directement avec les sections et les blocs.",
 	"This post has unpublished draft changes.":         "Ce billet a des modifications de brouillon non publiées.",
+	"Take this post off the public site? Nothing is deleted — you can publish it again later.": "Retirer ce billet du site public? Rien n'est supprimé — vous pourrez le republier plus tard.",
+	"This post is live on the site.":                                  "Ce billet est en ligne sur le site.",
 	"Delete this post and all of its content? This cannot be undone.": "Supprimer ce billet et tout son contenu? Cette action est irréversible.",
 	"Delete post": "Supprimer le billet",
 

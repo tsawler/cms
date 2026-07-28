@@ -39,9 +39,15 @@ func TestTemplatesRenderInFrench(t *testing.T) {
 		Regions:       []render.Region{{Name: "body", Kind: "sections"}, {Name: "lede", Kind: "text"}, {Name: "hero", Kind: "image"}},
 		RememberHours: 24,
 	}
-	for name, tmpl := range parseTemplates() {
-		if err := tmpl.ExecuteTemplate(io.Discard, "layout", data); err != nil {
-			t.Errorf("rendering %s in French: %v", name, err)
+	// EditLocale drives IsDefaultLocale, and the default-locale tab is
+	// where the standalone discard/unpublish/delete forms live — so render
+	// both tabs or that markup is never executed.
+	for _, editLocale := range []string{"fr", "en"} {
+		data.EditLocale = editLocale
+		for name, tmpl := range parseTemplates() {
+			if err := tmpl.ExecuteTemplate(io.Discard, "layout", data); err != nil {
+				t.Errorf("rendering %s in French (%s tab): %v", name, editLocale, err)
+			}
 		}
 	}
 }

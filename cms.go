@@ -580,7 +580,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	// When the page backs a blog/news post, hand the template its .Post.
 	var post *render.PostInfo
 	if c.postsEnabled() && (strings.HasPrefix(slug, "blog/") || strings.HasPrefix(slug, "news/")) {
-		p, err := c.content.PostByPageID(r.Context(), page.ID, locale)
+		p, err := c.content.PostByPageID(r.Context(), page.ID, locale, editing)
 		switch {
 		case err == nil:
 			post = render.PostInfoFor(p, render.LocalePrefix(locale, c.cfg.Locales[0]))

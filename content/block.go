@@ -94,26 +94,37 @@ func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string
 	return out, nil
 }
 
-// HasUnpublishedChanges reports whether a page's draft blocks differ from
-// its published blocks in any way (content, order, settings, or blocks
-// added/removed) in any locale. Locale-blind because Publish snapshots
-// every locale at once.
+// HasUnpublishedChanges reports whether a page has edits that the site is
+// not yet showing: draft blocks or metadata differing from the published
+// ones in any way (content, order, settings, or rows added/removed) in any
+// locale, or staged page-level fields differing from the page row. Locale-
+// blind because Publish snapshots every locale at once.
 func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, error) {
 	const blockSet = `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, settings::text
 		FROM cms_blocks WHERE page_id = $1 AND status = `
+	const metaSet = `SELECT locale, title, description
+		FROM cms_page_meta WHERE page_id = $1 AND status = `
 	var changed bool
 	err := s.db.QueryRow(ctx, `
 		SELECT EXISTS ((`+blockSet+`'draft') EXCEPT (`+blockSet+`'published'))
-		    OR EXISTS ((`+blockSet+`'published') EXCEPT (`+blockSet+`'draft'))`,
+		    OR EXISTS ((`+blockSet+`'published') EXCEPT (`+blockSet+`'draft'))
+		    OR EXISTS ((`+metaSet+`'draft') EXCEPT (`+metaSet+`'published'))
+		    OR EXISTS ((`+metaSet+`'published') EXCEPT (`+metaSet+`'draft'))
+		    OR EXISTS (
+				SELECT 1 FROM cms_page_drafts d
+				JOIN cms_pages p ON p.id = d.page_id
+				WHERE d.page_id = $1
+				  AND (d.template_name IS DISTINCT FROM p.template_name
+				    OR d.head_css IS DISTINCT FROM p.head_css
+				    OR d.body_js IS DISTINCT FROM p.body_js))`,
 		pageID).Scan(&changed)
 	return changed, err
 }
 
-// DeleteLocaleContent removes a page's draft blocks and its metadata row
+// DeleteLocaleContent removes a page's draft blocks and draft metadata row
 // for one (non-default) locale, so the page reverts to default-locale
-// fallback. Draft-side only for blocks: like any edit it goes live on the
-// next Publish. Metadata has no draft state, so the title/description
-// revert is immediate.
+// fallback. Draft-side only: like any edit it goes live on the next
+// Publish.
 func (s *Store) DeleteLocaleContent(ctx context.Context, pageID int64, locale string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -127,7 +138,7 @@ func (s *Store) DeleteLocaleContent(ctx context.Context, pageID int64, locale st
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		DELETE FROM cms_page_meta WHERE page_id = $1 AND locale = $2`,
+		DELETE FROM cms_page_meta WHERE page_id = $1 AND locale = $2 AND status = 'draft'`,
 		pageID, locale); err != nil {
 		return err
 	}
