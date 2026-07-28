@@ -18,13 +18,40 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 ## 1. Prerequisites
 
 - **Go 1.25+**
-- **A database**: PostgreSQL, MySQL 8.0.31+, or MariaDB 10.6+. This guide
-  uses Postgres; see the README's [Databases](README.md#databases) section
-  for the MySQL setup, which differs only in the driver, the DSN, and one
-  `Config` field.
+- **A database** — see the next section
 - **Docker** (optional, for the database and the CAPTCHA server)
 - **Tailwind CSS standalone CLI** (optional, for the recommended styling
   setup: `brew install tailwindcss` — no Node required)
+
+### Choosing a database
+
+| Engine | Minimum | Driver | `Config.Dialect` |
+| --- | --- | --- | --- |
+| PostgreSQL | 12 | `github.com/jackc/pgx/v5/stdlib` (`"pgx"`) | `"postgres"` (default) |
+| MySQL | 8.0.31 | `github.com/go-sql-driver/mysql` (`"mysql"`) | `"mysql"` |
+| MariaDB | 10.6 | `github.com/go-sql-driver/mysql` (`"mysql"`) | `"mysql"` |
+
+All three are first-class — the same store tests run against all of them, so
+no feature works on one and not another. Pick on operational grounds:
+
+**Match whatever your application already uses.** Every CMS table is prefixed
+`cms_`, so it is built to share a database with your own schema. One database
+means one backup, one pool, and transactions that can span both.
+
+Only if you have a free choice: **Postgres** is the reference implementation
+— the SQL is written in it and the dialect layer translates *away* from it —
+and it keeps DDL inside transactions, so a failed migration rolls back
+cleanly. On MySQL and MariaDB, DDL commits as it goes, so a failed migration
+can leave a half-applied schema needing manual repair. Choose
+**MySQL/MariaDB** if that is what you operate or your host provides; the cost
+is four DSN settings that fail subtly if you miss them (step 3).
+
+The MySQL floor is 8.0.31 rather than 8.0 because change detection uses
+`EXCEPT`, which MySQL only gained in that release. MariaDB has had it since
+10.3.
+
+This guide uses Postgres. Where MySQL differs — three places, all in step 3
+and step 5 — it says so inline.
 
 ## 2. Create the project
 
@@ -32,8 +59,13 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 mkdir mysite && cd mysite
 go mod init example.com/mysite
 go get github.com/tsawler/cms
-go get github.com/jackc/pgx/v5   # Postgres driver; for MySQL/MariaDB use
-                                 # github.com/go-sql-driver/mysql instead
+```
+
+Then the driver for your engine — one or the other, not both:
+
+```sh
+go get github.com/jackc/pgx/v5           # PostgreSQL
+go get github.com/go-sql-driver/mysql    # MySQL or MariaDB
 ```
 
 That only creates `go.mod` and `go.sum` — the rest of the files are
@@ -57,7 +89,7 @@ mysite/
         └── canvas.gohtml
 ```
 
-## 3. Start Postgres
+## 3. Start the database
 
 `docker-compose.yml`:
 
@@ -87,6 +119,52 @@ are prefixed `cms_`, so it can safely share a database with the rest of
 your application. You never write schema: `Migrate` (step 5) creates and
 upgrades everything, and is safe to run on every startup, even from
 several instances at once.
+
+### If you chose MySQL or MariaDB
+
+Use this service instead. `--default-time-zone=+00:00` matters: the CMS
+stores UTC, and anything else reading the database should see the same clock.
+
+```yaml
+services:
+  mysql:                        # or: image: mariadb:lts-ubi10
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: cms
+      MYSQL_USER: cms
+      MYSQL_PASSWORD: cms
+      MYSQL_ROOT_PASSWORD: cms
+    command: --default-time-zone=+00:00
+    ports:
+      - "3307:3306"   # 3307 to stay clear of a local MySQL
+    volumes:
+      - mysqldata:/var/lib/mysql
+
+volumes:
+  mysqldata:
+```
+
+**The DSN needs four settings.** They are not optional — without them the CMS
+misbehaves in ways that look like bugs elsewhere:
+
+| Setting | What breaks without it |
+| --- | --- |
+| `parseTime=true` | Timestamps scan as `[]byte`, not `time.Time` — scans fail. |
+| `loc=UTC` | The driver reads and writes timestamps in local time. |
+| `time_zone='+00:00'` | The *server session* disagrees with the driver, so SQL `now()` drifts from Go-written times: session expiry and post dates go wrong by your server's offset. |
+| `clientFoundRows=true` | `UPDATE` reports rows *changed* instead of rows *matched*. Re-saving a record with unchanged values then looks like "no such row", and **saves fail with a not-found error**. |
+
+Written out (note `'+00:00'` is URL-encoded):
+
+```
+cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true
+```
+
+**One operational difference to know now:** on MySQL and MariaDB, DDL commits
+as it goes. Postgres runs each migration in a transaction and rolls back on
+failure; these engines can leave a migration half-applied, needing manual
+repair. The version is only recorded on success, so a re-run retries the whole
+file.
 
 ## 4. Write the templates
 
@@ -305,6 +383,13 @@ func run(logger *slog.Logger) error {
 		logger.Warn("created initial admin — change this password")
 	}
 
+	// Publishes a page at "/" so a brand-new site serves something instead
+	// of a 404. The template must be one of PageTemplates above ("" takes
+	// the first). Also a no-op once the site has any content.
+	if _, err := c.SeedHomePage(ctx, "templates/pages/home.gohtml", "Welcome"); err != nil {
+		return err
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.Handle("/", c.Handler())
@@ -313,6 +398,31 @@ func run(logger *slog.Logger) error {
 	return http.ListenAndServe(":4000", mux)
 }
 ```
+
+### For MySQL or MariaDB
+
+Three lines change, and nothing else in the program does:
+
+```go
+import _ "github.com/go-sql-driver/mysql"   // instead of the pgx stdlib driver
+
+dsn = "cms:cms@tcp(localhost:3307)/cms" +
+    "?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true"
+db, err := sql.Open("mysql", dsn)           // instead of "pgx"
+
+c, err := cms.New(cms.Config{
+    DB:      db,
+    Dialect: "mysql",                       // "mysql" covers MariaDB too
+    // ...everything else identical
+})
+```
+
+`Config.Dialect` must match the driver the pool was opened with.
+`database/sql` does not expose the driver name, so the CMS cannot detect it,
+and the default is `"postgres"` — a mismatch fails immediately with SQL
+syntax errors rather than corrupting anything.
+
+### What the handler serves
 
 `c.Handler()` serves two areas from one handler:
 
@@ -372,10 +482,52 @@ Compile it (rerun after template changes, or use `--watch`):
 tailwindcss --input assets/input.css --output static/site.css --minify
 ```
 
-If you keep the CMS's default snippet library and section styles, their
-classes need covering too — the full lists are in the README under
-[Snippets](README.md#snippets) and [Sections](README.md#sections). For
-classes typed into content *after* deployment, see
+### The safelist
+
+Editor content lives in the database, where Tailwind's source scanner can't
+see it. Every class the CMS's own UI can apply must therefore be listed
+explicitly, or those styles silently vanish in a production build. This
+covers the default Styles menu, the alignment and image controls, the
+snippet library, and the section presets:
+
+```css
+/* Tailwind v4 — in assets/input.css, alongside @import "tailwindcss"; */
+@source inline("align-top aspect-video bg-blue-50 bg-blue-600 bg-blue-700 bg-slate-50 bg-slate-900 bg-white bg-yellow-200 block border border-2 border-b border-b-2 border-blue-200 border-dashed border-slate-200 border-slate-300 flex float-left float-right font-bold font-mono font-semibold font-serif gap-6 gap-8 grid h-auto inline-block items-center justify-center max-w-3xl max-w-5xl max-w-none mb-1 mb-2 mb-3 ml-6 mr-6 mt-1 mt-3 mx-auto my-4 my-6 my-8 not-prose odd:bg-slate-50 overflow-x-auto p-1 p-2 p-4 p-6 prose prose-invert prose-slate px-5 px-6 py-12 py-2.5 py-3 rounded-2xl rounded-3xl rounded-full rounded-lg rounded-xl sm:grid-cols-2 sm:grid-cols-3 sm:text-5xl text-2xl text-3xl text-4xl text-blue-600 text-blue-700 text-blue-900 text-center text-emerald-600 text-left text-lg text-red-600 text-right text-slate-500 text-slate-600 text-slate-700 text-sm text-white text-xl tracking-tight w-1/2 w-1/3 w-2/3 w-auto w-full");
+```
+
+```js
+// Tailwind v3 — tailwind.config.js
+safelist: [
+    "align-top", "aspect-video", "bg-blue-50", "bg-blue-600",
+    "bg-blue-700", "bg-slate-50", "bg-slate-900", "bg-white",
+    "bg-yellow-200", "block", "border", "border-2", "border-b",
+    "border-b-2", "border-blue-200", "border-dashed", "border-slate-200",
+    "border-slate-300", "flex", "float-left", "float-right", "font-bold",
+    "font-mono", "font-semibold", "font-serif", "gap-6", "gap-8", "grid",
+    "h-auto", "inline-block", "items-center", "justify-center",
+    "max-w-3xl", "max-w-5xl", "max-w-none", "mb-1", "mb-2", "mb-3",
+    "ml-6", "mr-6", "mt-1", "mt-3", "mx-auto", "my-4", "my-6", "my-8",
+    "not-prose", "odd:bg-slate-50", "overflow-x-auto", "p-1", "p-2",
+    "p-4", "p-6", "prose", "prose-invert", "prose-slate", "px-5", "px-6",
+    "py-12", "py-2.5", "py-3", "rounded-2xl", "rounded-3xl",
+    "rounded-full", "rounded-lg", "rounded-xl", "sm:grid-cols-2",
+    "sm:grid-cols-3", "sm:text-5xl", "text-2xl", "text-3xl", "text-4xl",
+    "text-blue-600", "text-blue-700", "text-blue-900", "text-center",
+    "text-emerald-600", "text-left", "text-lg", "text-red-600",
+    "text-right", "text-slate-500", "text-slate-600", "text-slate-700",
+    "text-sm", "text-white", "text-xl", "tracking-tight", "w-1/2",
+    "w-1/3", "w-2/3", "w-auto", "w-full",
+],
+```
+
+If you replace `EditorStyles`, `Snippets`, or `SectionStyles` with your own,
+safelist your classes instead of these. A test in the module
+(`TestDocsListDefaultClasses`) keeps this list in step with the defaults, so
+it won't quietly fall behind.
+
+`examples/basic/assets/input.css` is a working copy of the above. For classes
+typed into content *after* deployment — superadmins can enter arbitrary
+markup through the HTML source view — see
 [content-driven rebuilds](#content-driven-tailwind-rebuilds) below.
 
 ## 7. Run it, log in, create pages
@@ -386,11 +538,14 @@ go run .
 
 1. Open <http://localhost:4000/admin/> and log in with the credentials
    you passed to `SeedAdmin`.
-2. Visiting <http://localhost:4000/> right now shows a 404 — a fresh
-   database has no pages. Go to **Pages → New page** in the admin.
-3. Create the home page: title "Home", **leave the address empty** (the
-   empty slug *is* the homepage), pick the "Home page" template, save.
-4. Visit <http://localhost:4000/>. Because you're logged in, an **Edit**
+2. Visit <http://localhost:4000/>. `SeedHomePage` already created and
+   published it, so you get your layout with an empty content area rather
+   than a 404.
+3. To add more pages: **Pages → New page** in the admin. The **address** is
+   the URL path — `about`, or `about/team` for nesting. **Leave it empty to
+   make a page the homepage**; the empty slug *is* `/`, and only one page can
+   hold it. New pages start as drafts and 404 for the public until published.
+4. Back on <http://localhost:4000/>. Because you're logged in, an **Edit**
    bar appears on the page. Click Edit and the page becomes editable in
    place: click the headline and type; write rich text in the main
    region; click the image slot to pick or upload a picture (media
@@ -427,11 +582,9 @@ you a second, independently edited menu.
 
 ## 9. Optional features
 
-Each of these is one config field away. All of them are shown wired up
-in `examples/basic/main.go` — which sets every field in this section
-from the environment with one call, `cms.ConfigFromEnv()` (variable
-names and defaults are tabled in the README). The snippets below show
-the same fields set by hand.
+Each of these is one config field away. The snippets below set the fields by
+hand; [Configuration from the environment](#configuration-from-the-environment)
+at the end of this section does the same thing with one call.
 
 ### Media library (image/video uploads)
 
@@ -530,6 +683,23 @@ By default the challenge is solved invisibly in the background — users
 never see a CAPTCHA. Add `Visible: true` to show Cap's checkbox widget
 on the form instead.
 
+Two things worth knowing before you rely on it:
+
+- **Pin the widget version.** Set `WIDGET_VERSION` and `WASM_VERSION` on the
+  Cap container rather than leaving them at `latest`. The widget is a browser
+  dependency of your login page: on `latest`, an upstream release can change
+  its API or its CSP requirements under a deployment that hasn't changed at
+  all. `examples/basic/docker-compose.yml` pins known-good versions.
+- **The login page's CSP carries `'unsafe-eval'`**, because Cap's
+  instrumentation challenge calls `eval()`. It is scoped to that one page —
+  every other admin page gets a strict `default-src 'self'` policy. Turning
+  instrumentation off for the site key in the Cap dashboard removes the need
+  for it, at the cost of the anti-automation layer.
+
+If the Cap server is unreachable the login proceeds with a logged warning —
+an outage of the CAPTCHA backend shouldn't lock you out — and the throttle
+still applies.
+
 ### Custom admin pages
 
 Reports, imports, settings — register plain handlers and they're mounted
@@ -543,9 +713,15 @@ AdminSections: []cms.AdminSection{
 
 Inside the handler, `admin.UserFrom(r)`, `admin.CSRFToken(r)`,
 `admin.SetFlash(r, …)`, and `admin.RenderPage(w, r, title, body)` (from
-`github.com/tsawler/cms/admin`) integrate with the admin chrome. See
-[Custom admin pages](README.md#custom-admin-pages) and the working
-`reportsSection` in the example.
+`github.com/tsawler/cms/admin`) integrate with the admin chrome.
+
+The `/x/` namespace guarantees your paths never collide with built-in admin
+routes, now or after upgrades. Handlers run behind the same login, session,
+and CSRF middleware as the rest of the admin, so a POST needs the CSRF token
+in a `csrf_token` field or the `X-CSRF-Token` header. Redirects need
+`admin.SectionPath(r)` — your handler sees stripped paths, so a bare relative
+redirect lands in the wrong place. A working `reportsSection` is in
+`examples/basic/main.go`.
 
 ### Content-driven Tailwind rebuilds
 
@@ -570,9 +746,65 @@ Tailwind: &cms.TailwindConfig{
 - `EditorStyles` — replace the editor's Styles menu with your own named,
   on-brand styles (classes only, no color pickers).
 - `Snippets` / `SectionStyles` — your own block library and section
-  background/width options; nil gets Tailwind-first defaults.
-- `SessionLifetime`, `RememberFor` — login session durations.
+  background/width options; nil gets Tailwind-first defaults. **Both
+  defaults are Tailwind class names**, so a site not using Tailwind should
+  override them with classes its own stylesheet defines —
+  `examples/mariadb` shows exactly that.
+- `ObjectStore` — replace S3 entirely. Implement `media.ObjectStore`
+  (`Put`/`Get`/`Delete`/`PublicURL`) for local disk in development or any
+  storage you already run. When set, `S3` is ignored.
+- `SessionLifetime` (default 24h), `RememberFor` (default 30 days) — login
+  session durations.
 - `AdminPath` — serve the admin somewhere other than `/admin`.
+- `Logger` — a `*slog.Logger`; defaults to `slog.Default()`.
+- `SecureCookies` — see [step 10](#10-going-to-production).
+
+### Configuration from the environment
+
+`cms.ConfigFromEnv()` returns a `Config` with the media library, CAPTCHA,
+Tailwind, and session knobs already filled in from environment variables. You
+then set the fields it can't know — the database pool, templates — on the
+result:
+
+```go
+cfg, err := cms.ConfigFromEnv()
+if err != nil {
+    return err   // an invalid value is a startup error, not a silent default
+}
+cfg.DB = db
+cfg.TemplateFS = templateFS
+cfg.SharedTemplates = []string{"templates/base.gohtml"}
+cfg.PageTemplates = []cms.PageTemplate{ /* ... */ }
+
+c, err := cms.New(cfg)
+```
+
+Every variable it reads:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
+| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
+| `S3_BUCKET` | — | Bucket for uploaded media. |
+| `S3_ACCESS_KEY` | — | Object-store access key. |
+| `S3_SECRET` | — | Object-store secret key. |
+| `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
+| `S3_KEY_PREFIX` | unset | Prefix namespacing this site's keys inside a shared bucket. Pick a stable slug and never change it once media exists. |
+| `S3_APPLY_PUBLIC_POLICY` | unset | `1` applies a public-read bucket policy during `Migrate` (one-time, idempotent). |
+| `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. Non-numeric is a startup error. |
+| `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload cap in MB. Non-numeric is a startup error. |
+| `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA. |
+| `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |
+| `CAP_SECRET` | — | Secret paired with that site key. |
+| `CAP_INTERNAL_URL` | uses `CAP_URL` | Server-to-server Cap address, e.g. a container name inside Docker. |
+| `CAP_WIDGET` | invisible | `visible` shows Cap's checkbox widget instead of solving in the background. |
+| `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: space-separated argv with `{content}` and `{output}` placeholders. |
+| `CMS_TAILWIND_DIR` | unset | Working directory for that command. |
+
+These are read by the module. Anything else — where your DSN or listen
+address comes from — is your program's business; the variables
+`examples/basic` uses for that (`DATABASE_URL`, `ADDR`, `CMS_DIALECT`,
+`CMS_ADMIN_EMAIL`, `CMS_ADMIN_PASSWORD`) are its own, not the module's.
 
 ## 10. Going to production
 
@@ -581,7 +813,12 @@ Tailwind: &cms.TailwindConfig{
 - **Seed a strong password**, or change the seeded one immediately; the
   first account is a superadmin.
 - **Keep `Migrate` in startup.** It's idempotent, concurrency-safe, and
-  how schema upgrades ship with new module versions.
+  how schema upgrades ship with new module versions. On MySQL and MariaDB
+  it is not transactional (step 3), so take a backup before upgrading the
+  module — on those engines a failed migration needs manual repair.
+- **Leave the seeds in.** `SeedAdmin` and `SeedHomePage` both no-op once the
+  site has content, so they cost one cheap query per boot and can't
+  overwrite anything. Deleting the home page keeps it deleted.
 - **Compile the stylesheet as a build step** (the example wires it as
   `go generate`), and keep the safelist in sync with any custom
   `EditorStyles`/`Snippets`/`SectionStyles` you configure.
@@ -593,10 +830,21 @@ Tailwind: &cms.TailwindConfig{
 
 ## Where next
 
-- [README.md](README.md) — the full feature reference: Styles menu,
-  snippets, sections, blog & news, localization, menus, custom admin
-  pages, bot protection.
-- [`examples/basic`](examples/basic) — the reference host application,
-  including Docker setup, Tailwind wiring, S3 media, CAPTCHA, and a
-  custom admin section.
+You now have a complete site. These go deeper:
+
+- [`examples/basic`](examples/basic) — the reference host application, with
+  everything in step 9 wired up: Docker, Tailwind, S3 media, CAPTCHA, blog &
+  news, and a custom admin section. Postgres by default; MySQL and MariaDB
+  behind compose profiles.
+- [`examples/mariadb`](examples/mariadb) — the opposite end: the smallest
+  host that does something real. MariaDB, hand-written CSS, no Tailwind, no
+  build step. The one to read if you're not using Tailwind, since it shows
+  how to override `SectionStyles` and `EditorStyles` with your own classes.
+- [README.md](README.md) — the feature reference, in more depth than this
+  guide: the Styles menu, the snippet palette, section composition,
+  localization, menus, and bot protection.
 - [DESIGN.md](DESIGN.md) — architecture and design rationale.
+
+Running the CMS's own tests needs Docker: `make test` runs the store suite
+against Postgres, MySQL, and MariaDB in throwaway containers; `make
+test-unit` skips anything needing a database.

@@ -12,18 +12,26 @@ import (
 var classAttrRe = regexp.MustCompile(`class="([^"]*)"`)
 var classSplitRe = regexp.MustCompile(`\s+`)
 
-// TestReadmeListsDefaultClasses guards the README's Tailwind safelist
-// blocks against drift: every class the default editor styles, snippets,
-// section presets, and section styles can put into the database must
-// appear in README.md, or a production build that follows the docs will
-// silently drop styling the first time that content renders. When this
-// fails, add the missing class to the matching safelist block in the
-// README (marker classes like cms-btn are exempt — they aren't Tailwind
-// utilities).
-func TestReadmeListsDefaultClasses(t *testing.T) {
-	readme, err := os.ReadFile("README.md")
-	if err != nil {
-		t.Fatalf("reading README.md: %v", err)
+// TestDocsListDefaultClasses guards the Tailwind safelist blocks in both
+// guides against drift: every class the default editor styles, snippets,
+// section presets, and section styles can put into the database must appear
+// in each, or a production build that follows the docs will silently drop
+// styling the first time that content renders.
+//
+// Both files carry the list rather than one delegating to the other — a
+// reader following the quickstart should not have to cross-reference the
+// README to get a correct build — which is exactly why this has to be
+// checked mechanically. When it fails, add the missing class to the
+// safelist blocks in every file listed here (marker classes like cms-btn
+// are exempt — they aren't Tailwind utilities).
+func TestDocsListDefaultClasses(t *testing.T) {
+	docs := map[string][]byte{}
+	for _, name := range []string{"README.md", "QUICKSTART.md"} {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		docs[name] = b
 	}
 
 	seen := map[string]bool{}
@@ -60,8 +68,10 @@ func TestReadmeListsDefaultClasses(t *testing.T) {
 		// or space-separated in a v4 @source inline string) — a substring
 		// hit inside a longer class name doesn't count.
 		re := regexp.MustCompile(`[\s"']` + regexp.QuoteMeta(c) + `[\s"',]`)
-		if !re.Match(readme) {
-			t.Errorf("class %q (used by a default style, snippet, or section preset) is missing from the README safelists", c)
+		for name, doc := range docs {
+			if !re.Match(doc) {
+				t.Errorf("class %q (used by a default style, snippet, or section preset) is missing from the safelists in %s", c, name)
+			}
 		}
 	}
 }

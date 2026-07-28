@@ -14,10 +14,14 @@ media library (any S3-compatible bucket, automatic image resizing,
 SVG with script-stripping validation, MP4/WebM video, folders and
 search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
 self-hosted), the curated Styles menu, the snippet palette, editor-composable
-sections, and blog & news posts (page-backed, edited in place, with RSS)
-are all working: log in, browse the site, click Edit, change text and
-images directly on the page, drop in ready-made blocks, save drafts,
-publish. FR/EN localization is next.
+sections, blog & news posts (page-backed, edited in place, with RSS), and
+multilingual content (per-locale metadata and blocks, with field-level
+fallback to the default language) are all working: log in, browse the site,
+click Edit, change text and images directly on the page, drop in ready-made
+blocks, save drafts, publish.
+
+The storage layer runs on PostgreSQL, MySQL, and MariaDB, verified by a
+conformance suite that runs the same store tests against all three.
 
 To make an image editable in place, add `data-cms-image` to the tag:
 
@@ -34,8 +38,8 @@ var templateFS embed.FS
 // Postgres: sql.Open("pgx", dsn), with _ "github.com/jackc/pgx/v5/stdlib".
 // MySQL/MariaDB: see Databases below — the DSN needs specific settings.
 c, err := cms.New(cms.Config{
-    DB:              pool, // *sql.DB
-    // Dialect:      "mysql", // default "postgres"
+    DB:              db, // *sql.DB
+    // Dialect:      "mysql", // default "postgres"; "mysql" covers MariaDB
     S3: &cms.S3Config{ // omit to disable the media library
         Endpoint:  "us-ord-10.linodeobjects.com", // any S3-compatible store
         Bucket:    "my-site",
@@ -61,10 +65,11 @@ if err := c.Migrate(ctx); err != nil { ... }          // embedded migrations
 if _, err := c.SeedAdmin(ctx, "you@example.com", "You", "a strong password"); err != nil { ... }
 
 // Optional: give a brand-new site a published page at "/" instead of a 404.
-// The template must be one of PageTemplates above ("" takes the first) —
-// page templates belong to the host, so the CMS can't pick one. Both seeds
-// are no-ops once the site has content.
-if _, err := c.SeedHomePage(ctx, "templates/pages/canvas.gohtml", "Welcome"); err != nil { ... }
+// The template must be one of PageTemplates above — page templates belong to
+// the host, so the CMS can't pick one, and it refuses a name you haven't
+// configured. Pass "" to take the first entry. Both seeds are no-ops once
+// the site has any content.
+if _, err := c.SeedHomePage(ctx, "templates/pages/home.gohtml", "Welcome"); err != nil { ... }
 
 mux.Handle("/", c.Handler())   // admin under Config.AdminPath, pages everywhere else
 ```
@@ -101,6 +106,48 @@ cannot detect it.
 The MySQL floor is 8.0.31 rather than 8.0 because change detection uses
 `EXCEPT`, which MySQL only gained in that release. MariaDB has had it since
 10.3.
+
+### Choosing one
+
+All three are first-class: the same store tests run against all of them, so
+no feature works on one engine and not another. Pick on operational grounds,
+not on what the CMS supports.
+
+**Match whatever the host application already uses.** The CMS prefixes every
+table `cms_`, so it is designed to share a database with your own schema.
+One database means one backup, one connection pool, and transactions that
+can span both.
+
+Only if you have a free choice:
+
+- **Postgres** is the reference implementation — it is what the SQL is
+  written in, and the dialect layer translates *away* from it. It also
+  keeps DDL inside transactions, so a failed migration rolls back cleanly.
+  On MySQL and MariaDB, DDL commits as it goes and a failed migration can
+  leave a half-applied schema needing manual repair.
+- **MySQL / MariaDB** if that is what you operate, know, or your host
+  provides. The cost is the four DSN settings below, which are easy to get
+  wrong and fail subtly rather than loudly.
+
+Setup differs in exactly three places — the driver import, the DSN, and
+`Config.Dialect`. Nothing else in your application changes.
+
+```go
+// Postgres
+import _ "github.com/jackc/pgx/v5/stdlib"
+db, err := sql.Open("pgx", "postgres://user:pass@localhost:5432/mydb?sslmode=disable")
+cfg := cms.Config{DB: db} // Dialect defaults to "postgres"
+
+// MySQL or MariaDB
+import _ "github.com/go-sql-driver/mysql"
+db, err := sql.Open("mysql", "user:pass@tcp(localhost:3306)/mydb"+
+    "?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true")
+cfg := cms.Config{DB: db, Dialect: "mysql"}
+```
+
+Switching later means migrating the data yourself: the schemas are
+equivalent but the CMS has no export/import, so treat it as a real
+migration rather than a config change.
 
 ### MySQL and MariaDB DSN settings
 
@@ -841,7 +888,23 @@ the CAPTCHA backend shouldn't lock admins out, and the throttle still
 applies. Host applications can reuse the verification client
 (`captcha.New`, `Client.Verify`) for their own forms.
 
-## Running the example
+## Running the examples
+
+There are two, and they are deliberately opposites — start with whichever
+matches how you intend to build.
+
+| | [`examples/basic`](examples/basic) | [`examples/mariadb`](examples/mariadb) |
+| --- | --- | --- |
+| Database | Postgres (MySQL/MariaDB by profile) | MariaDB |
+| Styling | Tailwind, compiled via `go generate` | hand-written CSS in the layout |
+| Build step | needs the `tailwindcss` CLI | none |
+| Also shows | media library, login CAPTCHA, blog & news, a custom admin page | overriding `SectionStyles`/`EditorStyles` for a non-Tailwind host |
+| Ports | app 4000, db 5433 | app 4200, db 3309 |
+
+They use different ports and separate compose projects, so both can run at
+once.
+
+### The basic example
 
 ```sh
 cd examples/basic
@@ -879,6 +942,27 @@ Then open <http://localhost:4000/admin/> and log in with
 Login sessions end when the browser closes unless "Remember me" is
 ticked, which keeps the login for `cms.Config.RememberFor` — 30 days by
 default, or `CMS_REMEMBER_DAYS` (measured in days) when set.
+
+Both examples call `SeedHomePage` after `SeedAdmin`, so a fresh database
+serves a published page at `/` rather than a 404. It is a no-op once the
+site has any content — see [Quick start](#quick-start).
+
+### The MariaDB example
+
+The smallest host that does something real: no Tailwind, no build step, no
+object store, and a hand-written stylesheet in `templates/base.gohtml`.
+
+```sh
+cd examples/mariadb
+docker compose up -d      # MariaDB on localhost:3309
+go run .
+```
+
+Then <http://localhost:4200/admin/>, same development credentials. Its own
+[README](examples/mariadb/README.md) covers the one thing a non-Tailwind
+host has to know: the built-in `SectionStyles` and `EditorStyles` are
+Tailwind class names, so a plain-CSS site overrides both with classes its
+own stylesheet defines.
 
 ### Environment variables
 
@@ -988,7 +1072,16 @@ overwritten by the next build (and marked `linguist-generated`).
 - All tables are prefixed `cms_`, so the CMS can share a database with the
   host app.
 - `Migrate` is safe to run on every startup and from multiple instances
-  concurrently.
+  concurrently. On MySQL and MariaDB it is not transactional — see
+  [Schema](#schema).
+- **`Config.ObjectStore` replaces S3 entirely.** Implement
+  `media.ObjectStore` (`Put`/`Get`/`Delete`/`PublicURL`) and the media
+  library uses it instead of a bucket — local disk in development, or any
+  storage you already run. When set, `Config.S3` is ignored.
+- A few `Config` fields have no environment variable and are easy to miss:
+  `SessionLifetime` (default 24h; `RememberFor` extends it for "Remember
+  me"), `Logger` (defaults to `slog.Default()`), and `ObjectStore` above.
+  The struct's godoc documents every field.
 - SVG uploads are accepted as images (they act as their own web and
   thumbnail renditions — no rasterizing). Because an SVG viewed directly
   is a document that can run scripts, uploads are rejected unless they
