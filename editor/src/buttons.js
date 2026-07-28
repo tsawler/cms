@@ -62,9 +62,80 @@ export function hideButtonUI() {
 }
 
 /* Snippet blocks get their own floating chrome: a drag handle to
- * move the block and a trash can to delete it. */
+ * move the block, a gear for block settings, and a trash can. */
 var activeSnip = null;
 var dragSnip = null; // the block being moved while its handle is dragged
+
+// The block gear's spacing presets: curated combinations rather than
+// free-form numbers, so restyled blocks stay consistent across a site.
+// Padding shapes match cssPaddingRe in the server's sanitize policy.
+var SNIP_SPACING = {
+    compact: { padding: "10px 14px", margin: "8px" },
+    normal: { padding: "24px", margin: "24px" },
+    roomy: { padding: "40px", margin: "40px" },
+};
+
+// snipDark mirrors the section preview's contrast check, for tinting
+// the block preview's placeholder lines against the chosen background.
+function snipDark(hex) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex || "")) return false;
+    var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16),
+        b = parseInt(hex.slice(5, 7), 16);
+    return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+}
+
+// syncStyleShadow keeps TinyMCE's style shadow in step with an element's
+// real style attribute, or serialization reverts the change (same dance
+// as the button gear).
+function syncStyleShadow(el) {
+    if (el.style.cssText) {
+        el.setAttribute("data-mce-style", el.style.cssText);
+    } else {
+        el.removeAttribute("style");
+        el.removeAttribute("data-mce-style");
+    }
+}
+
+// syncDescendantColors makes a chosen text color actually take: children
+// whose own classes set a color would ignore the color inherited from
+// the block root, so they're pinned to color:inherit while an override
+// is active — and released when it's cleared. Buttons keep their own
+// colors (they have their own gear), as does any hand-set inline color.
+// Top-down document order matters: once an element inherits, everything
+// under it recomputes before it's compared.
+function syncDescendantColors(el, forced) {
+    el.querySelectorAll("*").forEach(function (n) {
+        if (n.closest(".cms-btn")) return;
+        if (forced) {
+            if (n.style.color && n.style.color !== "inherit") return;
+            if (getComputedStyle(n).color === getComputedStyle(n.parentElement).color) return;
+            n.style.color = "inherit";
+        } else if (n.style.color === "inherit") {
+            n.style.color = "";
+        } else {
+            return; // untouched by the gear — leave its shadow alone
+        }
+        syncStyleShadow(n);
+    });
+}
+
+// applySnippetSettings writes the gear's choices as inline styles on the
+// block root (they beat whatever classes the snippet came with, and are
+// saved as part of the content — no schema anywhere), plus a data
+// attribute so the dialog can re-select the spacing preset later.
+function applySnippetSettings(el, v) {
+    el.style.backgroundColor = v.bgcolor || "";
+    el.style.color = v.textcolor || "";
+    syncDescendantColors(el, !!v.textcolor);
+    var sp = SNIP_SPACING[v.spacing];
+    el.style.padding = sp ? sp.padding : "";
+    el.style.marginTop = sp ? sp.margin : "";
+    el.style.marginBottom = sp ? sp.margin : "";
+    if (sp) el.setAttribute("data-cms-snip-spacing", v.spacing);
+    else el.removeAttribute("data-cms-snip-spacing");
+    el.style.borderRadius = v.radius === "" ? "" : (parseInt(v.radius, 10) || 0) + "px";
+    syncStyleShadow(el);
+}
 
 function showSnipUI(el) {
     activeSnip = el;
@@ -760,6 +831,85 @@ export function initButtons() {
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
             else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
             flash("Block updated");
+        });
+    });
+
+    $("snip-set").addEventListener("click", function () {
+        if (!activeSnip) return;
+        var el = activeSnip;
+        var cs = window.getComputedStyle(el);
+        // Class-derived looks, for the preview when no override is set.
+        var baseBg = rgbToHex(cs.backgroundColor);
+        var basePad = cs.padding;
+        var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
+        openDialog({
+            message: "Block settings",
+            okLabel: "Apply",
+            fields: [
+                { id: "bgcolor", label: "Background color", type: "color",
+                    value: rgbToHex(el.style.backgroundColor) },
+                { id: "textcolor", label: "Text color", type: "color",
+                    value: rgbToHex(el.style.color) },
+                { id: "spacing", label: "Spacing", type: "select",
+                    value: el.getAttribute("data-cms-snip-spacing") || "",
+                    options: [
+                        { value: "", label: "As designed" },
+                        { value: "compact", label: "Compact" },
+                        { value: "normal", label: "Comfortable" },
+                        { value: "roomy", label: "Roomy" },
+                    ] },
+                { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40,
+                    value: String(Math.min(40, parseInt(el.style.borderRadius, 10) ||
+                        parseInt(cs.borderRadius, 10) || 0)) },
+            ],
+            // A stand-in page: gray context lines above and below the
+            // block, so spacing and background read as they will inline.
+            preview: function (v, out) {
+                out.innerHTML = "";
+                var page = document.createElement("div");
+                // The preview pane centers flex children; an explicit
+                // width keeps the stand-in page from shrink-wrapping.
+                page.style.cssText = "width:100%;box-sizing:border-box;background:#fff;" +
+                    "border:1px solid #e3e6ea;border-radius:4px;padding:8px 14px";
+                var ctxLine = function () {
+                    var l = document.createElement("div");
+                    l.style.cssText = "height:6px;border-radius:3px;background:#e3e6ea";
+                    return l;
+                };
+                var sp = SNIP_SPACING[v.spacing];
+                var bg = v.bgcolor || baseBg;
+                var box = document.createElement("div");
+                box.style.padding = sp ? sp.padding : basePad;
+                box.style.marginTop = sp ? sp.margin : baseMargin.top;
+                box.style.marginBottom = sp ? sp.margin : baseMargin.bottom;
+                box.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
+                if (bg) box.style.background = bg;
+                else box.style.border = "1px dashed #d9dce1";
+                // Placeholder lines take the chosen text color, so a bad
+                // contrast choice is visible before it's applied.
+                var lineColor = v.textcolor ||
+                    (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
+                [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]].forEach(function (d, i) {
+                    var line = document.createElement("div");
+                    line.style.cssText = "border-radius:3px";
+                    line.style.height = d[0];
+                    line.style.width = d[1];
+                    line.style.marginTop = i ? "6px" : "0";
+                    line.style.background = lineColor;
+                    box.appendChild(line);
+                });
+                page.appendChild(ctxLine());
+                page.appendChild(box);
+                page.appendChild(ctxLine());
+                out.appendChild(page);
+            },
+        }).then(function (v) {
+            if (!v) return;
+            var ed = findOwningEditor(el);
+            var run = function () { applySnippetSettings(el, v); };
+            if (ed) ed.undoManager.transact(run); else run();
+            markContainerDirty(el);
+            if (activeSnip === el) showSnipUI(el); // re-anchor around the new size
         });
     });
 

@@ -146,6 +146,7 @@ export function initShell() {
         '<div class="btnui" id="snip-ui">' +
         '<button id="snip-move" title="Drag to move this block" draggable="true">⠿</button>' +
         '<button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + "</button>" +
+        '<button id="snip-set" title="Block settings">' + ICONS.gear + "</button>" +
         '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="btnui" id="img-ui">' +

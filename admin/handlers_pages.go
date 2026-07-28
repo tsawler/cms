@@ -19,8 +19,9 @@ import (
 // contenteditable output and hand-written HTML from editors is untrusted;
 // UGCPolicy strips scripts, event handlers, and the like, while "class" is
 // allowed so framework-styled markup (e.g. Tailwind) survives. Inline
-// styles are stripped except text-align with known values, which is how
-// the editor's alignment buttons work.
+// styles are stripped except the tightly-matched properties the editor's
+// own tools emit: text-align (alignment buttons), the button gear's
+// styles on links, and the block gear's styles on snippet roots.
 var pixelHeightRe = regexp.MustCompile(`^[0-9]{1,4}px$`)
 
 // mediaURLRe bounds the image gear's rendition-URL data attributes:
@@ -39,8 +40,17 @@ var (
 	cssColorRe   = regexp.MustCompile(`^(#[0-9a-fA-F]{6}|rgb\([0-9]{1,3}, [0-9]{1,3}, [0-9]{1,3}\))$`)
 	cssBorderRe  = regexp.MustCompile(`^[0-9]px solid (#[0-9a-fA-F]{6}|rgb\([0-9]{1,3}, [0-9]{1,3}, [0-9]{1,3}\))$`)
 	cssPxRe      = regexp.MustCompile(`^[0-9]{1,3}px$`)
-	cssPaddingRe = regexp.MustCompile(`^[0-9]{1,3}px [0-9]{1,3}px$`)
+	cssPaddingRe = regexp.MustCompile(`^[0-9]{1,3}px( [0-9]{1,3}px)?$`)
 	btnSizeRe    = regexp.MustCompile(`^[sml]$`)
+	// The block gear (snippet settings) stores curated spacing presets.
+	snipSpacingRe = regexp.MustCompile(`^(compact|normal|roomy)$`)
+	// The gear's text color rides on the block root; descendants whose
+	// classes set their own color get pinned to color:inherit so the
+	// choice actually takes.
+	cssColorInheritRe = regexp.MustCompile(`^(#[0-9a-fA-F]{6}|rgb\([0-9]{1,3}, [0-9]{1,3}, [0-9]{1,3}\)|inherit)$`)
+	// Elements a snippet block's root can be (the gear applies to any
+	// .cms-snippet, so its styles are scoped to these block tags).
+	snipBlockEls = []string{"div", "p", "figure", "blockquote", "section"}
 )
 
 var editorHTMLPolicy = func() *bluemonday.Policy {
@@ -82,6 +92,15 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	p.AllowStyles("border-style").MatchingEnum("solid").OnElements("a")
 	p.AllowStyles("padding").Matching(cssPaddingRe).OnElements("a")
 	p.AllowAttrs("data-cms-btn-size").Matching(btnSizeRe).OnElements("a")
+	// Block-gear styles (editor.js snippet settings), on block roots.
+	p.AllowStyles("background-color").Matching(cssColorRe).OnElements(snipBlockEls...)
+	p.AllowStyles("padding").Matching(cssPaddingRe).OnElements(snipBlockEls...)
+	p.AllowStyles("margin-top", "margin-bottom", "border-radius").Matching(cssPxRe).OnElements(snipBlockEls...)
+	p.AllowAttrs("data-cms-snip-spacing").Matching(snipSpacingRe).OnElements(snipBlockEls...)
+	// Text color lands on the block root, but the color:inherit pins can
+	// sit on any descendant — so the (tightly value-bound) property is
+	// allowed everywhere. Named colors still don't pass.
+	p.AllowStyles("color").Matching(cssColorInheritRe).Globally()
 	// Open-in-new-tab from the button editor.
 	p.AllowAttrs("target").Matching(regexp.MustCompile(`^_blank$`)).OnElements("a")
 	p.AllowAttrs("rel").Matching(regexp.MustCompile(`^noopener( noreferrer)?$`)).OnElements("a")

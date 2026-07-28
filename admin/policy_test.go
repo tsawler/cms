@@ -36,7 +36,13 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`<a href="/x" class="cms-btn" data-cms-btn-size="l" style="background-color: rgb(17, 34, 51); ` +
 		`color: #ffee88; border: 2px solid #336699; border-radius: 24px; padding: 14px 28px; font-size: 18px;">styled button</a>` +
 		`<a href="/y" style="background-color: url(javascript:alert(4)); border-radius: 50vh;">bad button</a>` +
-		`<div style="background-color: #112233">not a link</div>` +
+		// Block-gear output: curated spacing preset, background color,
+		// and corner roundness as inline styles on the snippet root.
+		`<div class="cms-snippet" data-cms-snip-spacing="roomy" style="background-color: #112233; ` +
+		`padding: 40px; margin-top: 40px; margin-bottom: 40px; border-radius: 12px; color: #ffee99">` +
+		`<blockquote style="color: inherit">block</blockquote></div>` +
+		`<div data-cms-snip-spacing="huge" style="padding: 41vh; margin-top: -20px">bad block</div>` +
+		`<span style="background-color: #112233">not a block</span>` +
 		`<a href="/z" data-cms-btn-size="huge">bad size</a>` +
 		`<a href="https://example.com" target="_blank" rel="noopener">new tab</a>` +
 		`<a href="/w" target="_evil" rel="opener stylesheet">bad target</a>` +
@@ -80,6 +86,15 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`padding: 14px 28px`,
 		`font-size: 18px`,
 		`data-cms-btn-size="l"`,
+		// Block-gear styles must survive on snippet block roots, and the
+		// text-color override's inherit pins on any descendant.
+		`data-cms-snip-spacing="roomy"`,
+		`background-color: #112233`,
+		`padding: 40px`,
+		`margin-top: 40px`,
+		`border-radius: 12px`,
+		`color: #ffee99`,
+		`<blockquote style="color: inherit">`,
 		`target="_blank"`,
 		// UGCPolicy appends nofollow to every link's rel.
 		`rel="noopener nofollow"`,
@@ -112,7 +127,8 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		}
 	}
 	for _, banned := range []string{"<script", "onerror", "javascript:", "position", "color: red", "50vh",
-		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, `<div style`, "_evil", "opener stylesheet",
+		`data-height="junk"`, "url(", `data-cms-btn-size="huge"`, "_evil", "opener stylesheet",
+		`data-cms-snip-spacing="huge"`, "41vh", "-20px", "<span style",
 		"onload", "data:text/html", `preload="evil"`, "onplay",
 		"evil.example.com", "srcdoc", "sandbox"} {
 		if strings.Contains(out, banned) {
