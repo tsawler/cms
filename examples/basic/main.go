@@ -10,7 +10,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"embed"
 	"fmt"
@@ -18,10 +17,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/tsawler/cms"
 	"github.com/tsawler/cms/admin"
 )
@@ -29,29 +27,12 @@ import (
 //go:embed templates
 var templateFS embed.FS
 
-// loadDotEnv reads simple KEY=VALUE lines from the first .env file found and
-// sets any variables not already present in the environment. Good enough for
-// an example app; real deployments should use their platform's config.
+// loadDotEnv loads the first .env file found; godotenv never overrides
+// variables already set in the environment. A missing file is fine — real
+// deployments should use their platform's config.
 func loadDotEnv(paths ...string) {
 	for _, path := range paths {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			key, value, ok := strings.Cut(line, "=")
-			if ok && os.Getenv(key) == "" {
-				os.Setenv(strings.TrimSpace(key), strings.TrimSpace(value))
-			}
-		}
-		err = scanner.Err()
-		f.Close()
-		if err == nil {
+		if godotenv.Load(path) == nil {
 			return
 		}
 	}
@@ -99,12 +80,6 @@ func run(logger *slog.Logger) error {
 	if cfg.Captcha == nil {
 		logger.Warn("CAP_URL not set — login CAPTCHA disabled")
 	}
-	// This example prefers a longer "Remember me" than the library's 24h
-	// default when CMS_REMEMBER_DAYS is unset.
-	if cfg.RememberFor == 0 {
-		cfg.RememberFor = 30 * 24 * time.Hour
-	}
-
 	cfg.DB = db
 	cfg.Locales = []string{"en", "fr"}
 	cfg.Logger = logger

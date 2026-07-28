@@ -51,7 +51,7 @@ type Deps struct {
 	PostTemplate render.PageTemplate
 
 	// RememberFor is how long a "Remember me" login persists. The zero
-	// value falls back to 24h so a partially-populated Deps (tests,
+	// value falls back to 30 days so a partially-populated Deps (tests,
 	// direct package use) behaves sensibly.
 	RememberFor time.Duration
 
@@ -111,7 +111,7 @@ type server struct {
 // Deps.AdminPath with the prefix stripped.
 func New(d Deps) http.Handler {
 	if d.RememberFor <= 0 {
-		d.RememberFor = 24 * time.Hour
+		d.RememberFor = 30 * 24 * time.Hour
 	}
 	if len(d.Locales) == 0 {
 		if d.DefaultLocale == "" {
@@ -282,7 +282,10 @@ type templateData struct {
 	// embeds the Cap widget with it.
 	Captcha *captchaInfo
 
-	// RememberHours labels the login page's "Remember me" checkbox.
+	// RememberDays or RememberHours labels the login page's "Remember
+	// me" checkbox: days when the duration is a whole number of days
+	// (at least two, so the plural reads right), hours otherwise.
+	RememberDays  int
 	RememberHours int
 
 	// User management pages.
@@ -381,8 +384,12 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		MediaEnabled: s.deps.Media != nil,
 		Locales:      s.deps.Locales,
 		EditLocale:   s.deps.DefaultLocale,
-
-		RememberHours: int(s.deps.RememberFor.Round(time.Hour) / time.Hour),
+	}
+	hours := int(s.deps.RememberFor.Round(time.Hour) / time.Hour)
+	if hours >= 48 && hours%24 == 0 {
+		td.RememberDays = hours / 24
+	} else {
+		td.RememberHours = hours
 	}
 	td.AdminLang = s.adminLang(r)
 	if s.frEnabled() {

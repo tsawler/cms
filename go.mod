@@ -13,6 +13,7 @@ require (
 	github.com/gen2brain/webp v0.6.4
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/joho/godotenv v1.5.1
 	github.com/microcosm-cc/bluemonday v1.0.27
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0

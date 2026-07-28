@@ -33,7 +33,7 @@
         <div class="cms-field cms-remember">
             <label>
                 <input type="checkbox" name="remember" value="1">
-                {{.T "Remember me"}}{{if gt .RememberHours 0}} {{.T "for"}} {{.RememberHours}} {{.T "hours"}}{{end}}
+                {{.T "Remember me"}}{{if gt .RememberDays 0}} {{.T "for"}} {{.RememberDays}} {{.T "days"}}{{else if gt .RememberHours 0}} {{.T "for"}} {{.RememberHours}} {{.T "hours"}}{{end}}
             </label>
         </div>
         {{with .Captcha}}

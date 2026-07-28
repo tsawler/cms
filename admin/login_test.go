@@ -69,15 +69,15 @@ func postLogin(t *testing.T, srv *httptest.Server, client *http.Client, form url
 }
 
 // The login form must offer "Remember me", labelled with the configured
-// duration in hours.
+// duration (days when it is a whole number of days, hours otherwise).
 func TestLoginRememberCheckbox(t *testing.T) {
 	srv, client := newLoginTestServer(t, nil)
 	_, page := getLogin(t, srv, client)
 	if !strings.Contains(page, `name="remember"`) {
 		t.Errorf("login page missing remember checkbox:\n%s", page)
 	}
-	if !strings.Contains(page, "Remember me for 24 hours") {
-		t.Errorf("login page missing default 24h label:\n%s", page)
+	if !strings.Contains(page, "Remember me for 30 days") {
+		t.Errorf("login page missing default 30-day label:\n%s", page)
 	}
 }
 

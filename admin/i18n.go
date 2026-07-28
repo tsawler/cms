@@ -149,6 +149,7 @@ var frStrings = map[string]string{
 	"Remember me": "Se souvenir de moi",
 	"for":         "pendant",
 	"hours":       "heures",
+	"days":        "jours",
 	"Too many failed attempts. Please wait a few minutes and try again.": "Trop de tentatives échouées. Veuillez patienter quelques minutes et réessayer.",
 	"That email and password combination didn't work.":                   "Cette combinaison de courriel et de mot de passe n'a pas fonctionné.",
 	"Please complete the verification challenge.":                        "Veuillez compléter le test de vérification.",

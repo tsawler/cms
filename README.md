@@ -770,9 +770,8 @@ Then open <http://localhost:4000/admin/> and log in with
 `CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
 
 Login sessions end when the browser closes unless "Remember me" is
-ticked, which keeps the login for `cms.Config.RememberFor`. The library
-default is 24h; the example sets it from `CMS_REMEMBER_DAYS` (measured
-in days), defaulting to 30 days when unset.
+ticked, which keeps the login for `cms.Config.RememberFor` — 30 days by
+default, or `CMS_REMEMBER_DAYS` (measured in days) when set.
 
 ### Environment variables
 

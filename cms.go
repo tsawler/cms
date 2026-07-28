@@ -99,7 +99,7 @@ type Config struct {
 	// "Remember me" at login: the cookie survives browser restarts and
 	// the session deadline is extended to this duration. Without the
 	// tick, the cookie dies when the browser closes (SessionLifetime
-	// still bounds it server-side). Defaults to 24h.
+	// still bounds it server-side). Defaults to 30 days.
 	RememberFor time.Duration
 
 	// SecureCookies marks the session cookie Secure so it is only sent
@@ -244,7 +244,7 @@ func New(cfg Config) (*CMS, error) {
 		cfg.SessionLifetime = 24 * time.Hour
 	}
 	if cfg.RememberFor <= 0 {
-		cfg.RememberFor = 24 * time.Hour
+		cfg.RememberFor = 30 * 24 * time.Hour
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
