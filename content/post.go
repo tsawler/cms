@@ -2,11 +2,12 @@ package content
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/tsawler/cms/internal/pgutil"
+	"github.com/tsawler/cms/internal/dberr"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Feed is which of the two post feeds a post belongs to. Blog and news are
@@ -67,13 +68,13 @@ func postJoins(draft bool) string {
 	return j
 }
 
-func scanPost(row pgx.Row) (*Post, error) {
+func scanPost(row sqldb.Scanner) (*Post, error) {
 	var p Post
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
 		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
 		&p.ThumbnailURL, &p.HeaderURL)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -96,13 +97,11 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	err = tx.QueryRow(ctx, `
+	p.ID, err = tx.InsertID(ctx, `
 		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js)
-		VALUES ($1, $2, 'draft', $3, $4)
-		RETURNING id`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS,
-	).Scan(&p.ID)
-	if pgutil.IsUniqueViolation(err) {
+		VALUES ($1, $2, 'draft', $3, $4)`,
+		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS)
+	if dberr.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
 	}
 	if err != nil {
@@ -120,12 +119,11 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 		p.ID, locale, p.Title, p.Description); err != nil {
 		return 0, err
 	}
-	if err := tx.QueryRow(ctx, `
+	p.PostID, err = tx.InsertID(ctx, `
 		INSERT INTO cms_posts (page_id, feed, published_at, author_id, thumbnail_url, header_url)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id`,
-		p.ID, p.Feed, p.PublishedAt, p.AuthorID, p.ThumbnailURL, p.HeaderURL,
-	).Scan(&p.PostID); err != nil {
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		p.ID, p.Feed, p.PublishedAt, p.AuthorID, p.ThumbnailURL, p.HeaderURL)
+	if err != nil {
 		return 0, err
 	}
 	return p.PostID, tx.Commit(ctx)
@@ -148,7 +146,7 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages SET slug = $1, updated_at = now() WHERE id = $2`,
 		p.Slug, p.ID)
-	if pgutil.IsUniqueViolation(err) {
+	if dberr.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
 	if err != nil {
@@ -220,7 +218,7 @@ func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOn
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Post, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Post, error) {
 		p, err := scanPost(row)
 		if err != nil {
 			return Post{}, err
@@ -241,7 +239,7 @@ func (s *Store) AllNonPost(ctx context.Context, locale string) ([]Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Page, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Page, error) {
 		p, err := scanPage(row)
 		if err != nil {
 			return Page{}, err

@@ -142,7 +142,7 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	rows, err := c.cfg.DB.Query(ctx, `SELECT content FROM cms_blocks WHERE kind = 'html'`)
+	rows, err := c.db.Query(ctx, `SELECT content FROM cms_blocks WHERE kind = 'html'`)
 	if err != nil {
 		return nil, fmt.Errorf("cms: reading blocks for tailwind: %w", err)
 	}
@@ -158,7 +158,7 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	snips, err := c.cfg.DB.Query(ctx, `SELECT html FROM cms_snippets`)
+	snips, err := c.db.Query(ctx, `SELECT html FROM cms_snippets`)
 	if err != nil {
 		return nil, fmt.Errorf("cms: reading snippets for tailwind: %w", err)
 	}
@@ -205,7 +205,7 @@ func buildHash(tc *TailwindConfig, tokens []string) string {
 }
 
 func (c *CMS) loadContentCSS(ctx context.Context) (hash, css string, err error) {
-	row := c.cfg.DB.QueryRow(ctx,
+	row := c.db.QueryRow(ctx,
 		`SELECT class_hash, css FROM cms_content_css WHERE singleton`)
 	if err := row.Scan(&hash, &css); err != nil {
 		if strings.Contains(err.Error(), "no rows") {
@@ -217,7 +217,7 @@ func (c *CMS) loadContentCSS(ctx context.Context) (hash, css string, err error) 
 }
 
 func (c *CMS) storeContentCSS(ctx context.Context, hash, css string) error {
-	_, err := c.cfg.DB.Exec(ctx, `
+	_, err := c.db.Exec(ctx, `
 		INSERT INTO cms_content_css (singleton, class_hash, css)
 		VALUES (TRUE, $1, $2)
 		ON CONFLICT (singleton) DO UPDATE

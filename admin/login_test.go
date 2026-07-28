@@ -44,6 +44,14 @@ var csrfRe = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
 // client's session, plus the page body.
 func getLogin(t *testing.T, srv *httptest.Server, client *http.Client) (string, string) {
 	t.Helper()
+	_, token, body := getLoginResponse(t, srv, client)
+	return token, body
+}
+
+// getLoginResponse is getLogin plus the response itself, for the tests that
+// have to compare the page against the headers it was served with.
+func getLoginResponse(t *testing.T, srv *httptest.Server, client *http.Client) (*http.Response, string, string) {
+	t.Helper()
 	resp, err := client.Get(srv.URL + "/login")
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +62,7 @@ func getLogin(t *testing.T, srv *httptest.Server, client *http.Client) (string, 
 	if m == nil {
 		t.Fatalf("no csrf token in login page:\n%s", body)
 	}
-	return string(m[1]), string(body)
+	return resp, string(m[1]), string(body)
 }
 
 func postLogin(t *testing.T, srv *httptest.Server, client *http.Client, form url.Values) (*http.Response, string) {
@@ -81,16 +89,18 @@ func TestLoginRememberCheckbox(t *testing.T) {
 	}
 }
 
-// Without CAPTCHA configured, the config script must 404.
-func TestCaptchaConfigJSDisabled(t *testing.T) {
+// Without CAPTCHA configured, the login page carries no widget config and
+// the CSP needs no nonce.
+func TestCaptchaConfigAbsentWithoutCaptcha(t *testing.T) {
 	srv, client := newLoginTestServer(t, nil)
-	resp, err := client.Get(srv.URL + "/captcha.js")
-	if err != nil {
-		t.Fatal(err)
+	resp, _, page := getLoginResponse(t, srv, client)
+	for _, unwanted := range []string{"CAP_CUSTOM_WASM_URL", "CAP_PAKO_URL", "CAP_SCRIPT_NONCE"} {
+		if strings.Contains(page, unwanted) {
+			t.Errorf("login page sets %s without captcha configured:\n%s", unwanted, page)
+		}
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("captcha.js without captcha: status = %d, want 404", resp.StatusCode)
+	if csp := resp.Header.Get("Content-Security-Policy"); strings.Contains(csp, "nonce-") {
+		t.Errorf("CSP carries a nonce without captcha configured: %s", csp)
 	}
 }
 
@@ -134,7 +144,7 @@ func TestLoginCaptchaRequired(t *testing.T) {
 	}
 	srv, client := newLoginTestServer(t, cap)
 
-	csrfToken, page := getLogin(t, srv, client)
+	resp1, csrfToken, page := getLoginResponse(t, srv, client)
 	if strings.Contains(page, "<cap-widget") {
 		t.Errorf("invisible mode should not render the cap widget:\n%s", page)
 	}
@@ -150,18 +160,26 @@ func TestLoginCaptchaRequired(t *testing.T) {
 	if !strings.Contains(page, `src="http://cap.invalid:3000/assets/widget.js"`) {
 		t.Errorf("login page missing widget script:\n%s", page)
 	}
-	if !strings.Contains(page, `src="/admin/captcha.js"`) {
-		t.Errorf("login page missing captcha config script:\n%s", page)
+	// The widget's two CDN dependencies are redirected at copies the CSP
+	// admits, and the nonce is handed over for its instrumentation frame.
+	for _, want := range []string{
+		`window.CAP_CUSTOM_WASM_URL = "http://cap.invalid:3000/assets/cap_wasm_bg.wasm";`,
+		`window.CAP_PAKO_URL = "/admin/static/pako_inflate.min.js";`,
+		`window.CAP_SCRIPT_NONCE = "`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("login page missing %q:\n%s", want, page)
+		}
 	}
 
-	resp0, err := client.Get(srv.URL + "/captcha.js")
-	if err != nil {
-		t.Fatal(err)
+	// The nonce in the config script must be the one this response's CSP
+	// actually allows, or the browser blocks it.
+	nonce := regexp.MustCompile(`<script nonce="([^"]+)">`).FindStringSubmatch(page)
+	if nonce == nil {
+		t.Fatalf("login page has no nonced config script:\n%s", page)
 	}
-	js, _ := io.ReadAll(resp0.Body)
-	resp0.Body.Close()
-	if want := `window.CAP_CUSTOM_WASM_URL = "http://cap.invalid:3000/assets/cap_wasm_bg.wasm";`; !strings.Contains(string(js), want) {
-		t.Errorf("captcha.js = %q, want it to contain %q", js, want)
+	if csp := resp1.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "'nonce-"+nonce[1]+"'") {
+		t.Errorf("CSP %q does not admit the page's nonce %q", csp, nonce[1])
 	}
 
 	resp, body := postLogin(t, srv, client, url.Values{
@@ -240,7 +258,8 @@ func TestSecureHeadersCaptchaCSP(t *testing.T) {
 	resp.Body.Close()
 	csp := resp.Header.Get("Content-Security-Policy")
 	for _, want := range []string{
-		"script-src 'self' 'wasm-unsafe-eval' https://cap.example.com",
+		"'wasm-unsafe-eval' 'unsafe-eval' https://cap.example.com",
+		"'nonce-",
 		"style-src 'self' 'unsafe-inline'",
 		"connect-src 'self' https://cap.example.com",
 		"worker-src 'self' blob:",
@@ -258,5 +277,41 @@ func TestSecureHeadersCaptchaCSP(t *testing.T) {
 	resp.Body.Close()
 	if csp := resp.Header.Get("Content-Security-Policy"); strings.Contains(csp, "cap.example.com") {
 		t.Errorf("CSP mentions cap server without captcha configured: %s", csp)
+	}
+}
+
+// The CAPTCHA's concessions belong to the login page alone. Every other
+// admin page must get the same strict policy a deployment without CAPTCHA
+// serves — this is what keeps 'unsafe-eval' off the pages that actually
+// render stored content.
+func TestSecureHeadersCaptchaCSPIsLoginOnly(t *testing.T) {
+	cap, err := captcha.New(captcha.Config{URL: "https://cap.example.com", SiteKey: "k", Secret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, client := newLoginTestServer(t, cap)
+
+	// Any admin path other than the login form. Unauthenticated it
+	// redirects to login, so the redirect must not be followed — otherwise
+	// this would measure the login page's policy and pass vacuously.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("GET / = %d, want a redirect to login (the un-followed response)", resp.StatusCode)
+	}
+	resp.Body.Close()
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, unwanted := range []string{"'unsafe-eval'", "'nonce-", "cap.example.com", "'unsafe-inline'"} {
+		if strings.Contains(csp, unwanted) {
+			t.Errorf("non-login admin page CSP contains %q: %s", unwanted, csp)
+		}
+	}
+	if want := "default-src 'self'"; !strings.Contains(csp, want) {
+		t.Errorf("non-login admin page CSP missing %q: %s", want, csp)
 	}
 }

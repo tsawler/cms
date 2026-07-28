@@ -1,9 +1,12 @@
 # cms
 
 An embeddable content management system for Go web applications. Import it
-as a module, hand it a Postgres pool, and mount its handlers — no external
+as a module, hand it a database pool, and mount its handlers — no external
 files, no separate install. See [DESIGN.md](DESIGN.md) for the full
 architecture and build plan.
+
+Runs on **PostgreSQL**, **MySQL 8.0.31+**, and **MariaDB 10.6+** — see
+[Databases](#databases).
 
 **Status: phase 6 (blog & news).** Auth, user management, page CRUD with
 draft/publish, public rendering through the host's own templates, the
@@ -28,8 +31,11 @@ To make an image editable in place, add `data-cms-image` to the tag:
 //go:embed templates
 var templateFS embed.FS
 
+// Postgres: sql.Open("pgx", dsn), with _ "github.com/jackc/pgx/v5/stdlib".
+// MySQL/MariaDB: see Databases below — the DSN needs specific settings.
 c, err := cms.New(cms.Config{
-    DB:              pool, // *pgxpool.Pool
+    DB:              pool, // *sql.DB
+    // Dialect:      "mysql", // default "postgres"
     S3: &cms.S3Config{ // omit to disable the media library
         Endpoint:  "us-ord-10.linodeobjects.com", // any S3-compatible store
         Bucket:    "my-site",
@@ -54,6 +60,12 @@ if err != nil { ... }
 if err := c.Migrate(ctx); err != nil { ... }          // embedded migrations
 if _, err := c.SeedAdmin(ctx, "you@example.com", "You", "a strong password"); err != nil { ... }
 
+// Optional: give a brand-new site a published page at "/" instead of a 404.
+// The template must be one of PageTemplates above ("" takes the first) —
+// page templates belong to the host, so the CMS can't pick one. Both seeds
+// are no-ops once the site has content.
+if _, err := c.SeedHomePage(ctx, "templates/pages/canvas.gohtml", "Welcome"); err != nil { ... }
+
 mux.Handle("/", c.Handler())   // admin under Config.AdminPath, pages everywhere else
 ```
 
@@ -73,6 +85,72 @@ UI discovers them automatically:
 <head> ... {{cmsHead}} ... </head>      <!-- meta description + per-page CSS -->
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
+
+## Databases
+
+| Engine | Minimum | Driver | `Config.Dialect` |
+| --- | --- | --- | --- |
+| PostgreSQL | 12 | `github.com/jackc/pgx/v5/stdlib` (`"pgx"`) | `"postgres"` (default) |
+| MySQL | 8.0.31 | `github.com/go-sql-driver/mysql` (`"mysql"`) | `"mysql"` |
+| MariaDB | 10.6 | `github.com/go-sql-driver/mysql` (`"mysql"`) | `"mysql"` |
+
+`Config.DB` is a `*sql.DB` and `Config.Dialect` must match the driver it was
+opened with — `database/sql` does not expose the driver name, so the CMS
+cannot detect it.
+
+The MySQL floor is 8.0.31 rather than 8.0 because change detection uses
+`EXCEPT`, which MySQL only gained in that release. MariaDB has had it since
+10.3.
+
+### MySQL and MariaDB DSN settings
+
+Four settings are **required**; the CMS misbehaves subtly without them:
+
+```go
+dsn := "cms:cms@tcp(localhost:3307)/cms" +
+    "?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true"
+db, err := sql.Open("mysql", dsn)
+```
+
+| Setting | Why |
+| --- | --- |
+| `parseTime=true` | Timestamps scan into `time.Time` rather than `[]byte`. |
+| `loc=UTC` | The driver reads and writes timestamps as UTC. |
+| `time_zone='+00:00'` | Pins the *server session* to UTC too, so SQL `now()` and Go-written times agree. Without it, session expiry and post dates drift by the server's offset. |
+| `clientFoundRows=true` | Makes `UPDATE` report rows **matched** instead of rows **changed**. Without it, re-saving a record with unchanged values reports zero affected rows and the CMS reads that as "no such row" — saves fail with a not-found error. |
+
+### Schema
+
+Migrations are embedded per engine under `migrations/sql/postgres/` and
+`migrations/sql/mysql/`, sharing one version sequence: `0007` is the same
+change in both. `c.Migrate(ctx)` picks the right set and is safe to call on
+every startup.
+
+Adding a migration means writing **both** files. A unit test fails if a
+version exists in one directory and not the other.
+
+One operational difference is worth knowing: **MySQL and MariaDB commit DDL
+implicitly.** Postgres runs each migration in a transaction and rolls back
+cleanly on failure; on MySQL a failed migration can leave a partially applied
+schema that needs manual repair. The version is only recorded on success, so
+a re-run retries the whole file.
+
+### Behaviour parity
+
+The store tests run as a conformance suite against all three engines in
+throwaway containers (`make test`, needs Docker; `make test-unit` skips
+them). Where the engines would otherwise differ, the CMS pins the behaviour
+rather than letting it vary:
+
+- Keyed and enumerated columns are `VARCHAR(n)` on both, with identical
+  lengths — InnoDB cannot index `TEXT` without a prefix length, and Postgres
+  migration `0022` narrows the same columns so a value that saves on one
+  engine saves on the other.
+- `cms_media_folders.name` uses a binary collation on MySQL. Folder names are
+  free text an editor types, and MySQL's default collation would treat
+  "Photos" and "photos" as the same folder where Postgres does not. Slugs and
+  email addresses are normalized before they reach an index, so they need no
+  such pinning.
 
 ## The Styles menu (Tailwind-first)
 
@@ -722,6 +800,19 @@ To enable the CAPTCHA, run Cap (docker image `tiago2/cap`, see
 `examples/basic/docker-compose.yml`), open its dashboard, log in with
 the container's `ADMIN_KEY`, create a site key, and configure:
 
+> **Pin the widget version.** Set `WIDGET_VERSION` and `WASM_VERSION` on the
+> Cap container rather than leaving them at `latest`. The widget is a browser
+> dependency of the login page: on `latest`, an upstream release can change
+> its API or its CSP requirements under a deployment that has not changed at
+> all. The compose file pins known-good versions; treat a bump like any other
+> dependency upgrade and log in against it before committing.
+>
+> The login page's CSP also carries `'unsafe-eval'`, because Cap's
+> instrumentation challenge calls `eval()`. It is scoped to that one page —
+> every other admin page gets a strict `default-src 'self'` policy. Turning
+> instrumentation off for the site key in the Cap dashboard removes the need
+> for it, at the cost of the anti-automation layer.
+
 ```go
 c, err := cms.New(cms.Config{
     // ...
@@ -758,6 +849,22 @@ docker compose up -d      # Postgres on localhost:5433, Cap on localhost:3300
 go run .
 ```
 
+The compose file also carries MySQL and MariaDB, started only when asked for
+by profile. To run the example against one of them:
+
+```sh
+docker compose --profile mysql up -d      # MySQL on localhost:3307
+CMS_DIALECT=mysql go run .
+
+docker compose --profile mariadb up -d    # MariaDB on localhost:3308
+CMS_DIALECT=mysql DATABASE_URL='cms:cms@tcp(localhost:3308)/cms?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true' go run .
+```
+
+`CMS_DIALECT=mysql` covers MariaDB too — the two share one dialect. The
+example supplies the required DSN settings when `DATABASE_URL` is unset; if
+you set it yourself, include them all (see
+[MySQL and MariaDB DSN settings](#mysql-and-mariadb-dsn-settings)).
+
 To try the login CAPTCHA: open <http://localhost:3300>, log in with the
 `ADMIN_KEY` from `docker-compose.yml`, create a site key, and set
 `CAP_URL=http://localhost:3300`, `CAP_SITE_KEY`, and `CAP_SECRET` in the
@@ -785,7 +892,8 @@ Everything read:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgres://cms:cms@localhost:5433/cms?sslmode=disable` | Postgres connection string (matches `docker-compose.yml`). |
+| `CMS_DIALECT` | `postgres` | Database engine: `postgres`, or `mysql` for both MySQL and MariaDB. Selects the driver and the default `DATABASE_URL`. |
+| `DATABASE_URL` | Postgres: `postgres://cms:cms@localhost:5433/cms?sslmode=disable`; MySQL: `cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone='+00:00'&clientFoundRows=true` | Connection string, matching `docker-compose.yml`. A MySQL DSN you supply yourself must carry all four settings in the default. |
 | `ADDR` | `:4000` | HTTP listen address. |
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |

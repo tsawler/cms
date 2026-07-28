@@ -2,9 +2,16 @@
 
 {{define "content"}}
 {{if .Captcha}}
-{{/* Must load before the widget: points the WASM solver at our own Cap
-     server instead of a CDN the CSP blocks. */}}
-<script src="{{.AdminPath}}/captcha.js"></script>
+{{/* Must load before the widget. Redirects its two CDN dependencies at
+     copies the CSP admits, and hands it the nonce to stamp on the inline
+     script it runs inside its instrumentation frame — without which that
+     script is blocked and the solver never finishes. Carried inline (under
+     the same nonce) so the values match this response's policy. */}}
+<script nonce="{{.Captcha.Nonce}}">
+window.CAP_CUSTOM_WASM_URL = {{.Captcha.WasmURL}};
+window.CAP_PAKO_URL = {{.Captcha.PakoURL}};
+window.CAP_SCRIPT_NONCE = {{.Captcha.Nonce}};
+</script>
 <script type="module" src="{{.Captcha.ScriptURL}}"></script>
 {{if not .Captcha.Visible}}
 {{/* Invisible mode: solve the challenge in the background and fill the

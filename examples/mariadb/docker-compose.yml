@@ -1,0 +1,41 @@
+# MariaDB for the mariadb example app. This is its own compose project (the
+# directory name), with its own volume and port, so it never touches the
+# Postgres stack in examples/basic.
+#
+#   docker compose up -d
+#   go run .
+#
+# To throw the data away and start clean, scope it to this project's service:
+#
+#   docker compose rm -sfv mariadb
+#
+# `docker compose down -v` also works *here*, because this file defines only
+# the one service — but get in the habit of the scoped form: in
+# examples/basic the same command would take the dev Postgres data with it.
+services:
+  mariadb:
+    image: mariadb:lts-ubi10
+    environment:
+      MARIADB_DATABASE: cms
+      MARIADB_USER: cms
+      MARIADB_PASSWORD: cms
+      MARIADB_ROOT_PASSWORD: cms
+    # The CMS stores UTC and expects the session to agree; the DSN asks for
+    # this too, but setting it server-side means anything else poking at the
+    # database (a mariadb shell, a GUI) sees the same clock.
+    command: --default-time-zone=+00:00
+    ports:
+      # 3309 on the host: clear of a local MariaDB on 3306, of MySQL on 3307,
+      # and of the MariaDB profile in examples/basic on 3308, so every
+      # example can run at once.
+      - "3309:3306"
+    volumes:
+      - cms_mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cms_mariadb_data:

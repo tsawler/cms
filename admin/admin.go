@@ -144,7 +144,6 @@ func New(d Deps) http.Handler {
 
 	r.Get("/login", s.loginForm)
 	r.Post("/login", s.login)
-	r.Get("/captcha.js", s.captchaConfigJS)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireUser)
@@ -374,6 +373,15 @@ type captchaInfo struct {
 	ScriptURL string // widget script, served by the Cap server
 	Endpoint  string // data-cap-api-endpoint value
 	Visible   bool   // show the checkbox widget instead of solving invisibly
+
+	// WasmURL and PakoURL redirect the widget's two CDN dependencies at
+	// copies the CSP admits: the solver's WebAssembly binary (served by the
+	// Cap server) and the pako library (vendored into the admin's static
+	// assets). Nonce is the CSP nonce for the inline <script> that sets
+	// them, and which the widget reuses for its own instrumentation frame.
+	WasmURL string
+	PakoURL string
+	Nonce   string
 }
 
 func (s *server) newTemplateData(r *http.Request) templateData {
@@ -407,6 +415,9 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 			ScriptURL: s.deps.Captcha.ScriptURL(),
 			Endpoint:  s.deps.Captcha.WidgetEndpoint(),
 			Visible:   s.deps.Captcha.Visible(),
+			WasmURL:   s.deps.Captcha.WasmURL(),
+			PakoURL:   s.deps.AdminPath + captcha.PakoPath,
+			Nonce:     scriptNonce(r),
 		}
 	}
 	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin(), r.URL.Path)

@@ -8,11 +8,11 @@ package snippets
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Snippet is one insertable block. ID is set only for database-stored
@@ -180,20 +180,20 @@ func DefaultSectionPresets() []Snippet {
 
 // Store reads and writes admin-created snippets in Postgres.
 type Store struct {
-	db *pgxpool.Pool
+	db *sqldb.DB
 }
 
 // NewStore returns a Store backed by db.
-func NewStore(db *pgxpool.Pool) *Store {
+func NewStore(db *sqldb.DB) *Store {
 	return &Store{db: db}
 }
 
 const snippetColumns = "id, name, html, settings, created_at, updated_at"
 
-func scanSnippet(row pgx.Row) (*Snippet, error) {
+func scanSnippet(row sqldb.Scanner) (*Snippet, error) {
 	var s Snippet
-	err := row.Scan(&s.ID, &s.Name, &s.HTML, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err := row.Scan(&s.ID, &s.Name, &s.HTML, sqldb.JSONInto(&s.Settings), &s.CreatedAt, &s.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -208,7 +208,7 @@ func (s *Store) All(ctx context.Context) ([]Snippet, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Snippet, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Snippet, error) {
 		sn, err := scanSnippet(row)
 		if err != nil {
 			return Snippet{}, err
@@ -234,17 +234,21 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Snippet, error) {
 // Insert stores a new snippet and returns its id. A nil Settings map is
 // stored as NULL (plain block); a non-nil one makes it a section preset.
 func (s *Store) Insert(ctx context.Context, sn *Snippet) (int64, error) {
-	err := s.db.QueryRow(ctx,
-		"INSERT INTO cms_snippets (name, html, settings) VALUES ($1, $2, $3) RETURNING id",
-		sn.Name, sn.HTML, sn.Settings).Scan(&sn.ID)
-	return sn.ID, err
+	id, err := s.db.InsertID(ctx,
+		"INSERT INTO cms_snippets (name, html, settings) VALUES ($1, $2, $3)",
+		sn.Name, sn.HTML, sqldb.JSON(sn.Settings))
+	if err != nil {
+		return 0, err
+	}
+	sn.ID = id
+	return sn.ID, nil
 }
 
 // Update saves a stored snippet's name, HTML, and settings.
 func (s *Store) Update(ctx context.Context, sn *Snippet) error {
 	tag, err := s.db.Exec(ctx,
 		"UPDATE cms_snippets SET name = $1, html = $2, settings = $3, updated_at = now() WHERE id = $4",
-		sn.Name, sn.HTML, sn.Settings, sn.ID)
+		sn.Name, sn.HTML, sqldb.JSON(sn.Settings), sn.ID)
 	if err != nil {
 		return err
 	}

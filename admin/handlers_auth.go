@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -88,18 +87,6 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.deps.Logger.Info("cms admin: login", "user", u.Email)
 	http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
-}
-
-// captchaConfigJS sets the widget's globals before the widget module runs.
-// It exists because the admin CSP forbids inline scripts, so the login page
-// can't set window.CAP_CUSTOM_WASM_URL directly.
-func (s *server) captchaConfigJS(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Captcha == nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	fmt.Fprintf(w, "window.CAP_CUSTOM_WASM_URL = %q;\n", s.deps.Captcha.WasmURL())
 }
 
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {

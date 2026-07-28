@@ -1,6 +1,13 @@
 // Package migrations creates and upgrades the CMS's database schema from
 // SQL files embedded in the module, so host applications need no external
 // migration tool.
+//
+// Each supported engine has its own directory of migration files under sql/,
+// sharing one version sequence: sql/postgres/0007_x.sql and
+// sql/mysql/0007_x.sql are the same change expressed twice. The DDL dialects
+// differ too much to translate mechanically — identity columns, timestamp
+// types, and the fact that MySQL cannot index a TEXT column all need a human
+// decision — so they are maintained side by side.
 package migrations
 
 import (
@@ -13,59 +20,50 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
-//go:embed sql/*.sql
+//go:embed sql/postgres/*.sql sql/mysql/*.sql
 var sqlFS embed.FS
 
-// advisoryLockKey serializes concurrent migration runs (e.g. two instances
-// of the host app starting at once). Arbitrary but stable.
-const advisoryLockKey int64 = 746_111_551_253_09
+// lockName serializes concurrent migration runs, e.g. two instances of the
+// host app starting at once.
+const lockName = "cms_schema_migrations"
 
 // Run applies any migrations that have not yet been applied, in version
-// order, each in its own transaction. It is safe to call on every startup.
-func Run(ctx context.Context, db *pgxpool.Pool, logger *slog.Logger) error {
-	conn, err := db.Acquire(ctx)
+// order. It is safe to call on every startup.
+//
+// On Postgres each file runs in its own transaction, so a failure rolls
+// back. MySQL and MariaDB commit DDL implicitly, so a failure there can
+// leave a partially applied migration needing manual repair; the version is
+// only recorded on success, so a re-run retries the whole file.
+func Run(ctx context.Context, db *sqldb.DB, logger *slog.Logger) error {
+	d := db.Dialect()
+
+	// A dedicated connection, because the advisory lock is session-scoped:
+	// it must be taken and released on one connection to serialize anything.
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("cms migrations: acquiring connection: %w", err)
 	}
-	defer conn.Release()
+	defer conn.Close()
 
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", advisoryLockKey); err != nil {
-		return fmt.Errorf("cms migrations: acquiring advisory lock: %w", err)
-	}
-	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryLockKey)
-	}()
-
-	if _, err := conn.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS cms_schema_migrations (
-			version    INTEGER PRIMARY KEY,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		)`); err != nil {
-		return fmt.Errorf("cms migrations: creating migrations table: %w", err)
-	}
-
-	applied := map[int]bool{}
-	rows, err := conn.Query(ctx, "SELECT version FROM cms_schema_migrations")
+	unlock, err := d.Lock(ctx, conn.Execer(), lockName)
 	if err != nil {
-		return fmt.Errorf("cms migrations: reading applied versions: %w", err)
+		return fmt.Errorf("cms migrations: %w", err)
 	}
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			rows.Close()
-			return err
-		}
-		applied[v] = true
+	defer unlock()
+
+	if err := ensureLedger(ctx, db); err != nil {
+		return err
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	applied, err := appliedVersions(ctx, db)
+	if err != nil {
 		return err
 	}
 
-	entries, err := fs.ReadDir(sqlFS, "sql")
+	dir := "sql/" + d.MigrationDir()
+	entries, err := fs.ReadDir(sqlFS, dir)
 	if err != nil {
 		return fmt.Errorf("cms migrations: reading embedded sql: %w", err)
 	}
@@ -80,28 +78,76 @@ func Run(ctx context.Context, db *pgxpool.Pool, logger *slog.Logger) error {
 		if applied[version] {
 			continue
 		}
-		sqlBytes, err := sqlFS.ReadFile("sql/" + name)
+		script, err := sqlFS.ReadFile(dir + "/" + name)
 		if err != nil {
 			return err
 		}
-
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("cms migrations: beginning tx for %s: %w", name, err)
+		if err := apply(ctx, db, version, name, string(script)); err != nil {
+			return err
 		}
-		if _, err := tx.Exec(ctx, string(sqlBytes)); err != nil {
-			_ = tx.Rollback(ctx)
+		logger.Info("cms: applied migration", "file", name, "engine", d.Name())
+	}
+	return nil
+}
+
+// ensureLedger creates the table recording which migrations have run. It is
+// written in the portable subset both engines accept, since it predates any
+// dialect-specific schema.
+func ensureLedger(ctx context.Context, db *sqldb.DB) error {
+	if _, err := db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS cms_schema_migrations (
+			version    INTEGER PRIMARY KEY,
+			applied_at TIMESTAMP NOT NULL
+		)`); err != nil {
+		return fmt.Errorf("cms migrations: creating migrations table: %w", err)
+	}
+	return nil
+}
+
+// appliedVersions reads the set of versions already applied.
+func appliedVersions(ctx context.Context, db *sqldb.DB) (map[int]bool, error) {
+	rows, err := db.Query(ctx, "SELECT version FROM cms_schema_migrations")
+	if err != nil {
+		return nil, fmt.Errorf("cms migrations: reading applied versions: %w", err)
+	}
+	versions, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (int, error) {
+		var v int
+		err := row.Scan(&v)
+		return v, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cms migrations: reading applied versions: %w", err)
+	}
+	applied := make(map[int]bool, len(versions))
+	for _, v := range versions {
+		applied[v] = true
+	}
+	return applied, nil
+}
+
+// apply runs one migration file and records its version, in a transaction.
+// Postgres honours that fully; MySQL commits its DDL as it goes and can only
+// roll back the ledger insert.
+func apply(ctx context.Context, db *sqldb.DB, version int, name, script string) error {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("cms migrations: beginning tx for %s: %w", name, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Postgres takes the whole file in one Exec; MySQL's driver rejects
+	// multiple statements per call, so the dialect splits it.
+	for _, stmt := range db.Dialect().SplitStatements(script) {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("cms migrations: applying %s: %w", name, err)
 		}
-		if _, err := tx.Exec(ctx,
-			"INSERT INTO cms_schema_migrations (version) VALUES ($1)", version); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("cms migrations: recording %s: %w", name, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("cms migrations: committing %s: %w", name, err)
-		}
-		logger.Info("cms: applied migration", "file", name)
+	}
+	if _, err := tx.Exec(ctx,
+		"INSERT INTO cms_schema_migrations (version, applied_at) VALUES ($1, now())", version); err != nil {
+		return fmt.Errorf("cms migrations: recording %s: %w", name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("cms migrations: committing %s: %w", name, err)
 	}
 	return nil
 }

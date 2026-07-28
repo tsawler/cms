@@ -6,6 +6,7 @@ package content
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"regexp"
 	"strconv"
@@ -13,9 +14,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tsawler/cms/internal/pgutil"
+	"github.com/tsawler/cms/internal/dberr"
+	"github.com/tsawler/cms/internal/sqldb"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -112,14 +112,14 @@ func ValidSlug(s string) bool {
 // non-default locale fall back to the default locale's values where the
 // requested locale has none.
 type Store struct {
-	db            *pgxpool.Pool
+	db            *sqldb.DB
 	defaultLocale string
 }
 
 // NewStore returns a Store backed by db. defaultLocale is the fallback
 // for per-locale reads (page metadata, blocks); pass the site's first
 // configured locale. Empty defaults to "en".
-func NewStore(db *pgxpool.Pool, defaultLocale string) *Store {
+func NewStore(db *sqldb.DB, defaultLocale string) *Store {
 	if defaultLocale == "" {
 		defaultLocale = "en"
 	}
@@ -151,11 +151,11 @@ func pageColumns(draft bool) string {
 		p.created_at, p.updated_at`
 }
 
-func scanPage(row pgx.Row) (*Page, error) {
+func scanPage(row sqldb.Scanner) (*Page, error) {
 	var p Page
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -219,7 +219,7 @@ func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Page, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Page, error) {
 		p, err := scanPage(row)
 		if err != nil {
 			return Page{}, err
@@ -248,13 +248,11 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	err = tx.QueryRow(ctx, `
+	p.ID, err = tx.InsertID(ctx, `
 		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
-		VALUES ($1, $2, 'draft', $3, $4, $5)
-		RETURNING id`,
-		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS,
-	).Scan(&p.ID)
-	if pgutil.IsUniqueViolation(err) {
+		VALUES ($1, $2, 'draft', $3, $4, $5)`,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS)
+	if dberr.IsUniqueViolation(err) {
 		return 0, ErrDuplicateSlug
 	}
 	if err != nil {
@@ -294,20 +292,32 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 
 	// Everything is copied from the source's working copy, so a duplicate
 	// reproduces what the editor shows rather than what is live.
-	var id int64
+	//
+	// Read first, then insert a plain VALUES row. An INSERT ... SELECT with
+	// a RETURNING clause is Postgres-only — MySQL has no RETURNING at all
+	// and MariaDB supports it only on the VALUES form — and splitting the
+	// two also makes the copied fields explicit.
+	var src Page
 	err = tx.QueryRow(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
-		SELECT $2, COALESCE(d.template_name, p.template_name), 'draft', p.visibility,
+		SELECT COALESCE(d.template_name, p.template_name), p.visibility,
 			COALESCE(d.head_css, p.head_css), COALESCE(d.body_js, p.body_js)
 		FROM cms_pages p
 		LEFT JOIN cms_page_drafts d ON d.page_id = p.id
-		WHERE p.id = $1
-		RETURNING id`, srcID, slug).Scan(&id)
-	if pgutil.IsUniqueViolation(err) {
-		return 0, ErrDuplicateSlug
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
+		WHERE p.id = $1`, srcID,
+	).Scan(&src.TemplateName, &src.Visibility, &src.HeadCSS, &src.BodyJS)
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := tx.InsertID(ctx, `
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
+		VALUES ($1, $2, 'draft', $3, $4, $5)`,
+		slug, src.TemplateName, src.Visibility, src.HeadCSS, src.BodyJS)
+	if dberr.IsUniqueViolation(err) {
+		return 0, ErrDuplicateSlug
 	}
 	if err != nil {
 		return 0, err
@@ -358,7 +368,7 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 		SET slug = $1, visibility = $2, updated_at = now()
 		WHERE id = $3`,
 		p.Slug, p.Visibility.orPublic(), p.ID)
-	if pgutil.IsUniqueViolation(err) {
+	if dberr.IsUniqueViolation(err) {
 		return ErrDuplicateSlug
 	}
 	if err != nil {
@@ -494,10 +504,15 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 		FROM cms_page_meta WHERE page_id = $1 AND status = 'published'`, pageID); err != nil {
 		return err
 	}
+	// Correlated subqueries rather than UPDATE ... FROM, which is
+	// Postgres-only syntax; this matches the shape Publish uses above and
+	// runs unchanged on both engines.
 	if _, err := tx.Exec(ctx, `
-		UPDATE cms_page_drafts d
-		SET template_name = p.template_name, head_css = p.head_css, body_js = p.body_js
-		FROM cms_pages p WHERE p.id = d.page_id AND d.page_id = $1`, pageID); err != nil {
+		UPDATE cms_page_drafts SET
+			template_name = COALESCE((SELECT template_name FROM cms_pages WHERE id = $1), template_name),
+			head_css      = COALESCE((SELECT head_css FROM cms_pages WHERE id = $1), head_css),
+			body_js       = COALESCE((SELECT body_js FROM cms_pages WHERE id = $1), body_js)
+		WHERE page_id = $1`, pageID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

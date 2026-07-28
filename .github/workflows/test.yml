@@ -1,0 +1,57 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Everything that needs no database. Fast, and the only job that has to
+  # pass for a docs-only change.
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go test -short ./...
+
+  # The store tests as a conformance suite, once per engine. dbtest starts
+  # the container itself through testcontainers, which works on the GitHub
+  # runners because Docker is already available — so there are no `services:`
+  # here, and the engine list stays in one place (internal/dbtest) rather
+  # than being duplicated in this file.
+  #
+  # Each engine runs as its own job so a MySQL-only failure is obvious from
+  # the check name, and one engine's flake does not mask the others.
+  conformance:
+    name: conformance (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [postgres, mysql, mariadb]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      # -run selects the per-engine subtests by name; the parent tests still
+      # execute and skip the engines this job is not responsible for.
+      - name: go test (${{ matrix.engine }})
+        run: go test -p 2 ./... -run '.*/${{ matrix.engine }}' -count=1
+        timeout-minutes: 20

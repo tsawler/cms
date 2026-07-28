@@ -11,6 +11,55 @@ services:
     volumes:
       - cms_pgdata:/var/lib/postgresql/data
 
+  # MySQL and MariaDB sit behind profiles, so `docker compose up -d` still
+  # brings up just Postgres and Cap. Start one with:
+  #
+  #   docker compose --profile mysql up -d
+  #   CMS_DIALECT=mysql go run .
+  #
+  # The CMS needs four DSN settings on these engines (parseTime, loc,
+  # time_zone, clientFoundRows) — see the README. The example fills them in
+  # when DATABASE_URL is unset.
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: cms
+      MYSQL_USER: cms
+      MYSQL_PASSWORD: cms
+      MYSQL_ROOT_PASSWORD: cms
+    command: --default-time-zone=+00:00
+    ports:
+      # 3307 on the host to stay clear of any MySQL already on 3306.
+      - "3307:3306"
+    volumes:
+      - cms_mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ucms", "-pcms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mariadb:
+    profiles: ["mariadb"]
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: cms
+      MARIADB_USER: cms
+      MARIADB_PASSWORD: cms
+      MARIADB_ROOT_PASSWORD: cms
+    command: --default-time-zone=+00:00
+    ports:
+      # 3308, so MySQL and MariaDB can run side by side.
+      - "3308:3306"
+    volumes:
+      - cms_mariadbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # Cap (https://capjs.js.org): self-hosted proof-of-work CAPTCHA used by the
   # admin login form. One-time setup: open http://localhost:3300, log in with
   # ADMIN_KEY, create a site key, then put CAP_URL / CAP_SITE_KEY / CAP_SECRET
@@ -25,10 +74,21 @@ services:
       # secret (32+ chars) in real deployments.
       ADMIN_KEY: dev-cap-admin-key-change-me-1234567890
       REDIS_URL: redis://valkey:6379
-      # Serve the widget JS from this container (/assets/widget.js) so the
-      # login page needs no third-party CDN. In production, also pin
-      # WIDGET_VERSION and WASM_VERSION instead of the "latest" default.
+      # Serve the widget JS and WASM from this container (/assets/*) so the
+      # login page needs no third-party CDN.
       ENABLE_ASSETS_SERVER: "true"
+      # Pinned, not "latest". The widget is a browser dependency of the CMS's
+      # login page, and "latest" means an upstream release can change its API
+      # or its CSP requirements under a deployment that has not changed at
+      # all — which is exactly how this integration broke once already:
+      # solve() stopped returning the token, and the instrumentation step
+      # grew an eval() the admin CSP had to be widened for.
+      #
+      # Treat a bump like any other dependency upgrade: change it here, then
+      # log in against it before committing. The versions must exist on npm
+      # (@cap.js/widget, @cap.js/wasm).
+      WIDGET_VERSION: "0.1.56"
+      WASM_VERSION: "0.0.7"
     depends_on:
       valkey:
         condition: service_healthy
@@ -48,4 +108,6 @@ services:
 
 volumes:
   cms_pgdata:
+  cms_mysqldata:
+  cms_mariadbdata:
   cms_capdata:

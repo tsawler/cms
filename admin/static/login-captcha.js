@@ -15,11 +15,31 @@
 
     // Returns a promise that fills the token field, or null when the Cap
     // script isn't available (e.g. the Cap server is down).
+    //
+    // The token is collected three ways because the widget's API changed:
+    // current versions resolve solve() with nothing and dispatch a "solve"
+    // event, older ones resolved with the solution object. Reading the
+    // instance's token getter covers both. Whichever arrives first wins.
     function solve() {
-        if (!solving && typeof window.Cap === "function") {
-            solving = new window.Cap({ apiEndpoint: endpoint }).solve()
-                .then(function (solution) { field.value = solution.token; });
-        }
+        if (solving || typeof window.Cap !== "function") return solving;
+
+        var cap = new window.Cap({ apiEndpoint: endpoint });
+        solving = new Promise(function (done) {
+            var finish = function (token) {
+                if (token && !field.value) field.value = token;
+                done();
+            };
+            cap.addEventListener("solve", function (e) {
+                finish((e.detail && e.detail.token) || cap.token);
+            });
+            // A failed challenge still has to release the submit: the server
+            // answers an empty token with its verification message, which is
+            // a better outcome than a form that never submits.
+            cap.addEventListener("error", function () { done(); });
+            Promise.resolve(cap.solve()).then(function (solution) {
+                finish((solution && solution.token) || cap.token);
+            }, function () { done(); });
+        });
         return solving;
     }
 

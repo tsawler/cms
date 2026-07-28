@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"html/template"
@@ -18,7 +19,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/go-sql-driver/mysql" // database/sql driver "mysql"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 	"github.com/joho/godotenv"
 	"github.com/tsawler/cms"
 	"github.com/tsawler/cms/admin"
@@ -57,12 +59,29 @@ func run(logger *slog.Logger) error {
 	ctx := context.Background()
 	loadDotEnv(".env", "../../.env")
 
-	dsn := envOr("DATABASE_URL", "postgres://cms:cms@localhost:5433/cms?sslmode=disable")
-	db, err := pgxpool.New(ctx, dsn)
+	// CMS_DIALECT picks the engine: "postgres" (the default) or "mysql",
+	// which covers MariaDB too. Each needs its own driver and DSN.
+	//
+	// The MySQL default carries the four settings the CMS requires:
+	// parseTime/loc so timestamps scan into time.Time as UTC, time_zone so
+	// the server session agrees with them, and clientFoundRows so an UPDATE
+	// reports rows matched rather than rows changed. A DATABASE_URL supplied
+	// by hand has to include them as well — see the README.
+	dialect := envOr("CMS_DIALECT", "postgres")
+	driver, defaultDSN := "pgx", "postgres://cms:cms@localhost:5433/cms?sslmode=disable"
+	if dialect == "mysql" {
+		driver = "mysql"
+		defaultDSN = "cms:cms@tcp(localhost:3307)/cms" +
+			"?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true"
+	}
+	db, err := sql.Open(driver, envOr("DATABASE_URL", defaultDSN))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("connecting to the %s database: %w", dialect, err)
+	}
 
 	// The optional features are configured entirely from the environment
 	// — media library (S3_*, including a one-time public-read bucket
@@ -81,6 +100,7 @@ func run(logger *slog.Logger) error {
 		logger.Warn("CAP_URL not set — login CAPTCHA disabled")
 	}
 	cfg.DB = db
+	cfg.Dialect = dialect
 	cfg.Locales = []string{"en", "fr"}
 	cfg.Logger = logger
 	cfg.TemplateFS = templateFS
@@ -117,6 +137,12 @@ func run(logger *slog.Logger) error {
 			"email", adminEmail, "password", adminPassword)
 	}
 
+	// Give a fresh install something at "/" instead of a 404. No-op once
+	// the site has any content, so it never fights the editor.
+	if _, err := c.SeedHomePage(ctx, "templates/pages/canvas.gohtml", "Welcome"); err != nil {
+		return err
+	}
+
 	// c.Handler() routes Config.AdminPath (default /admin) to the admin
 	// area and everything else to the public site.
 	mux := http.NewServeMux()
@@ -133,16 +159,16 @@ func run(logger *slog.Logger) error {
 // Config.AdminSections. It serves {AdminPath}/x/reports/ behind the CMS's
 // login, session, and CSRF middleware, and uses the admin package helpers
 // to render inside the standard admin chrome.
-func reportsSection(db *pgxpool.Pool) http.Handler {
+func reportsSection(db *sql.DB) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		var pages, users int
-		if err := db.QueryRow(r.Context(), "select count(*) from cms_pages").Scan(&pages); err != nil {
+		if err := db.QueryRowContext(r.Context(), "select count(*) from cms_pages").Scan(&pages); err != nil {
 			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 			return
 		}
-		if err := db.QueryRow(r.Context(), "select count(*) from cms_users").Scan(&users); err != nil {
+		if err := db.QueryRowContext(r.Context(), "select count(*) from cms_users").Scan(&users); err != nil {
 			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 			return
 		}

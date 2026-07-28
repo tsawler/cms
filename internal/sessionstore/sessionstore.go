@@ -6,27 +6,27 @@ package sessionstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Store persists sessions in the cms_sessions table.
 type Store struct {
-	db          *pgxpool.Pool
+	db          *sqldb.DB
 	stopCleanup chan struct{}
 }
 
 // New returns a Store that deletes expired sessions once an hour.
-func New(db *pgxpool.Pool) *Store {
+func New(db *sqldb.DB) *Store {
 	return NewWithCleanupInterval(db, time.Hour)
 }
 
 // NewWithCleanupInterval returns a Store whose background cleanup runs at
 // the given interval. A zero or negative interval disables cleanup.
-func NewWithCleanupInterval(db *pgxpool.Pool, interval time.Duration) *Store {
+func NewWithCleanupInterval(db *sqldb.DB, interval time.Duration) *Store {
 	s := &Store{db: db}
 	if interval > 0 {
 		s.stopCleanup = make(chan struct{})
@@ -41,7 +41,7 @@ func (s *Store) Find(token string) ([]byte, bool, error) {
 	err := s.db.QueryRow(context.Background(),
 		"SELECT data FROM cms_sessions WHERE token = $1 AND expiry > now()", token,
 	).Scan(&data)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {

@@ -1,0 +1,5 @@
+-- No-op here: this directory has used VARCHAR for every keyed column since
+-- 0001, because InnoDB cannot index a TEXT column without a prefix length.
+-- The Postgres file of this version narrows the same columns from TEXT to
+-- VARCHAR(n) so both engines enforce identical limits; the version exists on
+-- this side too so one number means one change on either engine.

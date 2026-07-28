@@ -33,7 +33,10 @@ const (
 // SiteSettings returns the stored site settings. Keys never saved come
 // back as zero values, so a fresh install reads as "all defaults".
 func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
-	rows, err := s.db.Query(ctx, "SELECT key, value FROM cms_settings")
+	// "key" is a reserved word in MySQL, so the identifier needs quoting —
+	// and the two engines quote differently.
+	keyCol := s.db.Dialect().Quote("key")
+	rows, err := s.db.Query(ctx, "SELECT "+keyCol+", value FROM cms_settings")
 	if err != nil {
 		return SiteSettings{}, err
 	}
@@ -82,9 +85,10 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingSiteCSS:    in.SiteCSS,
 		settingSiteJS:     in.SiteJS,
 	} {
+		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO cms_settings (key, value) VALUES ($1, $2)
-			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, k, v); err != nil {
+			INSERT INTO cms_settings (`+keyCol+`, value) VALUES ($1, $2)
+			ON CONFLICT (`+keyCol+`) DO UPDATE SET value = EXCLUDED.value`, k, v); err != nil {
 			return err
 		}
 	}

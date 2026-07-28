@@ -1,0 +1,14 @@
+{{template "base" .}}
+
+{{define "content"}}
+<article class="wrap">
+    {{/* cmsText is a single line of plain text; cmsRegion is rich HTML.
+         Both become editable in place once you log in and click Edit. */}}
+    <h1>{{cmsText "heading"}}</h1>
+    <div class="prose">{{cmsRegion "main"}}</div>
+</article>
+
+{{/* An editor-composed list of full-width sections, each with its own
+     background and width, added from the "Add a section" chooser. */}}
+{{cmsSections "sections"}}
+{{end}}

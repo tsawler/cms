@@ -1,0 +1,93 @@
+{{define "base"}}<!doctype html>
+<html lang="{{.Locale}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Title}} — MariaDB Example</title>
+    <style>
+        /* Everything is hand-written here on purpose: this example has no
+           build step, so there is no compiled stylesheet to regenerate. The
+           .cms-* rules style markup the CMS renders (the nav, sections, and
+           the classes editors can apply from the Styles menu). */
+        :root {
+            --ink: #1f2933;
+            --muted: #6b7280;
+            --rule: #e5e7eb;
+            --accent: #7c3aed;
+            --paper: #faf9f7;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            color: var(--ink);
+            background: #fff;
+        }
+        .wrap { max-width: 44rem; margin: 0 auto; padding: 0 1.5rem; }
+        a { color: var(--accent); }
+
+        header { border-bottom: 1px solid var(--rule); }
+        header .wrap {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 1.5rem; padding-top: 1rem; padding-bottom: 1rem;
+        }
+        .brand { font-weight: 700; font-size: 1.125rem; color: var(--ink); text-decoration: none; }
+
+        main { padding: 3rem 0; }
+        h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 1.5rem; }
+        .prose > :first-child { margin-top: 0; }
+        .prose img { max-width: 100%; height: auto; border-radius: .5rem; }
+        .prose blockquote {
+            margin: 1.5rem 0; padding: .25rem 0 .25rem 1.25rem;
+            border-left: 3px solid var(--accent); color: var(--muted);
+        }
+
+        footer { border-top: 1px solid var(--rule); margin-top: 4rem; }
+        footer .wrap { padding-top: 2rem; padding-bottom: 2rem; color: var(--muted); font-size: .875rem; }
+
+        /* The CMS renders the nav with these stable class names. */
+        .cms-nav { font-size: .9375rem; }
+        .cms-nav-list { display: flex; gap: 1.25rem; list-style: none; margin: 0; padding: 0; }
+        .cms-nav-link { color: var(--muted); text-decoration: none; }
+        .cms-nav-link:hover, .cms-nav-link.cms-active { color: var(--ink); }
+        .cms-nav-burger { display: none; }
+
+        /* Section backgrounds, widths, and corners. These class names are
+           not built in — they are the ones Config.SectionStyles declares in
+           main.go, which is how a host without Tailwind owns the look. The
+           background class lands on the <section>, the width class on the
+           inner <div>. */
+        .cms-section-paper { background: var(--paper); }
+        .cms-section-accent { background: var(--accent); color: #fff; }
+        .cms-section-accent a { color: #fff; }
+        .cms-section-round { border-radius: 1rem; overflow: hidden; }
+        .cms-section-inner { max-width: 44rem; margin: 0 auto; padding: 3rem 1.5rem; }
+        .cms-section-wide { max-width: 68rem; }
+        .cms-section-full { max-width: none; }
+
+        /* Classes the default Styles menu applies to editor content. */
+        .cms-lead { font-size: 1.25rem; color: var(--muted); }
+        .cms-muted { color: var(--muted); }
+        .cms-btn {
+            display: inline-block; padding: .625rem 1.25rem; border-radius: .5rem;
+            background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
+        }
+    </style>
+    {{cmsHead}}
+</head>
+<body>
+<header>
+    <div class="wrap">
+        <a class="brand" href="{{if eq .Locale "fr"}}/fr{{else}}/{{end}}">{{cmsBrand "MariaDB Example"}}</a>
+        {{cmsNav "main"}}
+    </div>
+</header>
+
+<main>{{block "content" .}}{{end}}</main>
+
+<footer>
+    <div class="wrap">Running on MariaDB, via the cms module.</div>
+</footer>
+{{cmsScripts}}
+</body>
+</html>{{end}}

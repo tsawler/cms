@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -13,8 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Kind distinguishes images (resized, embeddable) and videos (stored as
@@ -61,7 +61,7 @@ var ErrNotFound = errors.New("media: not found")
 
 // Manager coordinates the object store and the Postgres metadata.
 type Manager struct {
-	db            *pgxpool.Pool
+	db            *sqldb.DB
 	objects       ObjectStore
 	keyRoot       string
 	webpQuality   float64
@@ -72,7 +72,7 @@ type Manager struct {
 // NewManager returns a Manager storing binaries in objects and metadata in
 // db. If objects implements KeyPrefixer, its prefix namespaces every key,
 // letting several deployments share one bucket.
-func NewManager(db *pgxpool.Pool, objects ObjectStore, logger *slog.Logger) *Manager {
+func NewManager(db *sqldb.DB, objects ObjectStore, logger *slog.Logger) *Manager {
 	var prefix string
 	if kp, ok := objects.(KeyPrefixer); ok {
 		prefix = kp.KeyPrefix()
@@ -292,12 +292,14 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		}
 	}
 
-	err = m.db.QueryRow(ctx, `
-		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		RETURNING id, created_at`,
-		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.VariantExt, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy,
-	).Scan(&md.ID, &md.CreatedAt)
+	// created_at is set here rather than read back from a RETURNING clause,
+	// which MySQL does not have. The column keeps its NOT NULL default for
+	// any row written outside this path.
+	md.CreatedAt = time.Now().UTC()
+	md.ID, err = m.db.InsertID(ctx, `
+		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.VariantExt, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy, md.CreatedAt)
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -308,11 +310,11 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 const mediaColumns = `m.id, m.kind, m.s3_key, m.filename, m.mime, m.ext, m.variant_ext, m.width, m.height, m.size,
 	m.folder_id, m.uploaded_by, m.created_at, COALESCE(t.alt_text, '')`
 
-func scanMedia(row pgx.Row) (*Media, error) {
+func scanMedia(row sqldb.Scanner) (*Media, error) {
 	var md Media
 	err := row.Scan(&md.ID, &md.Kind, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.VariantExt, &md.Width, &md.Height,
 		&md.Size, &md.FolderID, &md.UploadedBy, &md.CreatedAt, &md.Alt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -357,7 +359,10 @@ func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]M
 		where = append(where, "m.kind = "+arg(opts.Kind))
 	}
 	if opts.Query != "" {
-		where = append(where, "m.filename ILIKE "+arg("%"+ilikeEscaper.Replace(opts.Query)+"%"))
+		// Postgres needs ILIKE; MySQL's default collations already compare
+		// case-insensitively, so the dialect picks the spelling.
+		where = append(where, m.db.Dialect().CaseInsensitiveLike(
+			"m.filename", arg("%"+ilikeEscaper.Replace(opts.Query)+"%")))
 	}
 	switch {
 	case opts.FolderID != nil:
@@ -373,7 +378,7 @@ func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]M
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Media, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Media, error) {
 		md, err := scanMedia(row)
 		if err != nil {
 			return Media{}, err

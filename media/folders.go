@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/tsawler/cms/internal/pgutil"
+	"github.com/tsawler/cms/internal/dberr"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Folder is a flat organizational bucket for media, scoped to one media
@@ -43,7 +43,7 @@ func (m *Manager) Folders(ctx context.Context) ([]Folder, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Folder, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Folder, error) {
 		var f Folder
 		err := row.Scan(&f.ID, &f.Kind, &f.Name, &f.Count)
 		return f, err
@@ -62,15 +62,15 @@ func (m *Manager) CreateFolder(ctx context.Context, name string, kind Kind) (*Fo
 		return nil, ErrBadFolderKind
 	}
 	f := &Folder{Name: name, Kind: kind}
-	err := m.db.QueryRow(ctx,
-		"INSERT INTO cms_media_folders (name, kind) VALUES ($1, $2) RETURNING id", name, kind,
-	).Scan(&f.ID)
-	if pgutil.IsUniqueViolation(err) {
+	id, err := m.db.InsertID(ctx,
+		"INSERT INTO cms_media_folders (name, kind) VALUES ($1, $2)", name, kind)
+	if dberr.IsUniqueViolation(err) {
 		return nil, ErrDuplicateFolder
 	}
 	if err != nil {
 		return nil, err
 	}
+	f.ID = id
 	return f, nil
 }
 

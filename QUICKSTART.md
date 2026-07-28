@@ -10,7 +10,7 @@ The mental model up front: **the CMS is a library, not a platform.** You
 own `main()`, the HTTP server, the templates, and the stylesheet. The
 module supplies an admin area, authentication, content storage,
 migrations, and in-place editing on your public pages. You hand it a
-Postgres pool and your templates; it hands you two `http.Handler`s.
+database pool and your templates; it hands you two `http.Handler`s.
 
 A complete reference implementation lives in [`examples/basic`](examples/basic)
 — when in doubt, compare against it.
@@ -18,8 +18,11 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 ## 1. Prerequisites
 
 - **Go 1.25+**
-- **PostgreSQL** (any recent version; the guide uses Docker)
-- **Docker** (optional, for Postgres and the CAPTCHA server)
+- **A database**: PostgreSQL, MySQL 8.0.31+, or MariaDB 10.6+. This guide
+  uses Postgres; see the README's [Databases](README.md#databases) section
+  for the MySQL setup, which differs only in the driver, the DSN, and one
+  `Config` field.
+- **Docker** (optional, for the database and the CAPTCHA server)
 - **Tailwind CSS standalone CLI** (optional, for the recommended styling
   setup: `brew install tailwindcss` — no Node required)
 
@@ -29,7 +32,8 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 mkdir mysite && cd mysite
 go mod init example.com/mysite
 go get github.com/tsawler/cms
-go get github.com/jackc/pgx/v5
+go get github.com/jackc/pgx/v5   # Postgres driver; for MySQL/MariaDB use
+                                 # github.com/go-sql-driver/mysql instead
 ```
 
 That only creates `go.mod` and `go.sum` — the rest of the files are
@@ -78,7 +82,7 @@ volumes:
 docker compose up -d
 ```
 
-Any Postgres works — the CMS only needs a `*pgxpool.Pool`. All its tables
+Any Postgres works — the CMS only needs a `*sql.DB`. All its tables
 are prefixed `cms_`, so it can safely share a database with the rest of
 your application. You never write schema: `Migrate` (step 5) creates and
 upgrades everything, and is safe to run on every startup, even from
@@ -237,12 +241,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"log/slog"
 	"net/http"
 	"os"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" driver
 	"github.com/tsawler/cms"
 )
 
@@ -264,7 +269,7 @@ func run(logger *slog.Logger) error {
 	if dsn == "" {
 		dsn = "postgres://cms:cms@localhost:5433/cms?sslmode=disable"
 	}
-	db, err := pgxpool.New(ctx, dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
 	}

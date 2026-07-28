@@ -3,7 +3,7 @@ package content
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Kind distinguishes short plain text ({{cmsText}}) from rich HTML
@@ -44,10 +44,10 @@ func (s *Store) BlocksFor(ctx context.Context, pageID int64, locale string, stat
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Block, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Block, error) {
 		var b Block
 		err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
-			&b.Kind, &b.SnippetKey, &b.Content, &b.Settings)
+			&b.Kind, &b.SnippetKey, &b.Content, sqldb.JSONInto(&b.Settings))
 		return b, err
 	})
 }
@@ -70,10 +70,10 @@ func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string
 	if err != nil {
 		return nil, err
 	}
-	all, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Block, error) {
+	all, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (Block, error) {
 		var b Block
 		err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
-			&b.Kind, &b.SnippetKey, &b.Content, &b.Settings)
+			&b.Kind, &b.SnippetKey, &b.Content, sqldb.JSONInto(&b.Settings))
 		return b, err
 	})
 	if err != nil {
@@ -99,8 +99,14 @@ func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string
 // ones in any way (content, order, settings, or rows added/removed) in any
 // locale, or staged page-level fields differing from the page row. Locale-
 // blind because Publish snapshots every locale at once.
+// The set-difference probes rely on EXCEPT, which MySQL only gained in
+// 8.0.31 and MariaDB in 10.3 — that is where the CMS's MySQL floor comes
+// from. The JSON cast and the NULL-safe comparison have no shared spelling,
+// so both come from the dialect.
 func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, error) {
-	const blockSet = `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, settings::text
+	d := s.db.Dialect()
+	blockSet := `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, ` +
+		d.JSONText("settings") + `
 		FROM cms_blocks WHERE page_id = $1 AND status = `
 	const metaSet = `SELECT locale, title, description
 		FROM cms_page_meta WHERE page_id = $1 AND status = `
@@ -114,9 +120,9 @@ func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, 
 				SELECT 1 FROM cms_page_drafts d
 				JOIN cms_pages p ON p.id = d.page_id
 				WHERE d.page_id = $1
-				  AND (d.template_name IS DISTINCT FROM p.template_name
-				    OR d.head_css IS DISTINCT FROM p.head_css
-				    OR d.body_js IS DISTINCT FROM p.body_js))`,
+				  AND (`+d.Distinct("d.template_name", "p.template_name")+`
+				    OR `+d.Distinct("d.head_css", "p.head_css")+`
+				    OR `+d.Distinct("d.body_js", "p.body_js")+`))`,
 		pageID).Scan(&changed)
 	return changed, err
 }
@@ -173,7 +179,7 @@ func (s *Store) ReplaceDraftSections(ctx context.Context, pageID int64, region, 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, content, settings)
 			VALUES ($1, $2, $3, 'draft', $4, 'html', $5, $6)`,
-			pageID, region, locale, i, sec.Content, sec.Settings); err != nil {
+			pageID, region, locale, i, sec.Content, sqldb.JSON(sec.Settings)); err != nil {
 			return err
 		}
 	}

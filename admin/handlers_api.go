@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/tsawler/cms/content"
-	"github.com/tsawler/cms/internal/pgutil"
+	"github.com/tsawler/cms/internal/dberr"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 )
@@ -416,7 +416,7 @@ func (s *server) apiSaveMenu(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.deps.Content.ReplaceMenu(r.Context(), body.Menu, inputs); err != nil {
-		if pgutil.IsForeignKeyViolation(err) {
+		if dberr.IsForeignKeyViolation(err) {
 			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "One of the linked pages no longer exists — reload and try again."))
 			return
 		}

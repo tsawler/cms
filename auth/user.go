@@ -4,13 +4,13 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tsawler/cms/internal/pgutil"
+	"github.com/tsawler/cms/internal/dberr"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // Role controls what a user may do in the admin area.
@@ -62,20 +62,20 @@ var (
 
 // Store reads and writes users in Postgres.
 type Store struct {
-	db *pgxpool.Pool
+	db *sqldb.DB
 }
 
 // NewStore returns a Store backed by db.
-func NewStore(db *pgxpool.Pool) *Store {
+func NewStore(db *sqldb.DB) *Store {
 	return &Store{db: db}
 }
 
 const userColumns = "id, email, name, password_hash, role, active, created_at, updated_at"
 
-func scanUser(row pgx.Row) (*User, error) {
+func scanUser(row sqldb.Scanner) (*User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -104,7 +104,7 @@ func (s *Store) All(ctx context.Context) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (User, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (User, error) {
 		u, err := scanUser(row)
 		if err != nil {
 			return User{}, err
@@ -123,16 +123,18 @@ func (s *Store) Count(ctx context.Context) (int, error) {
 // Insert stores a new user and returns its id. Email is normalized to lower
 // case. Returns ErrDuplicateEmail if the address is taken.
 func (s *Store) Insert(ctx context.Context, u *User) (int64, error) {
-	err := s.db.QueryRow(ctx, `
+	id, err := s.db.InsertID(ctx, `
 		INSERT INTO cms_users (email, name, password_hash, role, active)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id`,
-		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.PasswordHash, u.Role, u.Active,
-	).Scan(&u.ID)
-	if pgutil.IsUniqueViolation(err) {
+		VALUES ($1, $2, $3, $4, $5)`,
+		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.PasswordHash, u.Role, u.Active)
+	if dberr.IsUniqueViolation(err) {
 		return 0, ErrDuplicateEmail
 	}
-	return u.ID, err
+	if err != nil {
+		return 0, err
+	}
+	u.ID = id
+	return u.ID, nil
 }
 
 // Update saves email, name, role, and active for an existing user. It does
@@ -143,7 +145,7 @@ func (s *Store) Update(ctx context.Context, u *User) error {
 		SET email = $1, name = $2, role = $3, active = $4, updated_at = now()
 		WHERE id = $5`,
 		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.Role, u.Active, u.ID)
-	if pgutil.IsUniqueViolation(err) {
+	if dberr.IsUniqueViolation(err) {
 		return ErrDuplicateEmail
 	}
 	if err != nil {

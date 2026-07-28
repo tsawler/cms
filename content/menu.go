@@ -3,7 +3,7 @@ package content
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/tsawler/cms/internal/sqldb"
 )
 
 // MenuItem is one entry in a navigation menu, with the linked page's slug
@@ -51,9 +51,9 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (MenuItem, error) {
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (MenuItem, error) {
 		var m MenuItem
-		err := row.Scan(&m.ID, &m.Menu, &m.Sort, &m.Label, &m.Labels, &m.PageID, &m.URL, &m.NewTab,
+		err := row.Scan(&m.ID, &m.Menu, &m.Sort, &m.Label, sqldb.JSONInto(&m.Labels), &m.PageID, &m.URL, &m.NewTab,
 			&m.ParentID, &m.PageSlug, &m.PageStatus, &m.PageVisibility)
 		return m, err
 	})
@@ -93,11 +93,11 @@ func (s *Store) ReplaceMenu(ctx context.Context, menu string, items []MenuItemIn
 	}
 	sort := 0
 	for _, item := range items {
-		var parentID int64
-		if err := tx.QueryRow(ctx, `
+		parentID, err := tx.InsertID(ctx, `
 			INSERT INTO cms_menu_items (menu, sort, label, labels, page_id, url, new_tab)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-			menu, sort, item.Label, labelsOf(item), item.PageID, item.URL, item.NewTab).Scan(&parentID); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			menu, sort, item.Label, sqldb.JSON(labelsOf(item)), item.PageID, item.URL, item.NewTab)
+		if err != nil {
 			return err
 		}
 		sort++
@@ -105,7 +105,7 @@ func (s *Store) ReplaceMenu(ctx context.Context, menu string, items []MenuItemIn
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO cms_menu_items (menu, sort, label, labels, page_id, url, new_tab, parent_id)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-				menu, sort, child.Label, labelsOf(child), child.PageID, child.URL, child.NewTab, parentID); err != nil {
+				menu, sort, child.Label, sqldb.JSON(labelsOf(child)), child.PageID, child.URL, child.NewTab, parentID); err != nil {
 				return err
 			}
 			sort++

@@ -1,5 +1,6 @@
 // Package cms is an embeddable content management system for Go web
-// applications. The host application supplies a pgx connection pool and its
+// applications. The host application supplies a database pool (Postgres,
+// MySQL, or MariaDB) and its
 // own page templates; the CMS supplies an admin area, authentication,
 // content storage, and (in later phases) in-place editing, media handling,
 // blog/news, and localization.
@@ -16,26 +17,29 @@ package cms
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/captcha"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/editor"
+	"github.com/tsawler/cms/internal/dialect"
 	"github.com/tsawler/cms/internal/sessiondata"
 	"github.com/tsawler/cms/internal/sessionstore"
+	"github.com/tsawler/cms/internal/sqldb"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/migrations"
 	"github.com/tsawler/cms/render"
@@ -78,10 +82,25 @@ type AdminSection = admin.Section
 
 // Config holds everything the host application provides to the CMS.
 type Config struct {
-	// DB is the Postgres connection pool. Required. All CMS tables are
+	// DB is the database connection pool. Required. All CMS tables are
 	// prefixed cms_, so the pool may point at a database shared with the
 	// host application.
-	DB *pgxpool.Pool
+	//
+	// Open it with a driver matching Dialect: "pgx" (from
+	// github.com/jackc/pgx/v5/stdlib) for Postgres, "mysql" (from
+	// github.com/go-sql-driver/mysql) for MySQL or MariaDB. A host that
+	// already holds a *pgxpool.Pool can convert it with
+	// stdlib.OpenDBFromPool.
+	DB *sql.DB
+
+	// Dialect selects the SQL the CMS generates: "postgres" (the default),
+	// or "mysql" for both MySQL 8.0.31+ and MariaDB 10.6+. It must match the
+	// driver DB was opened with — database/sql does not expose that, so it
+	// cannot be detected.
+	//
+	// MySQL DSNs must set parseTime=true so timestamps scan into time.Time;
+	// the CMS sets the session time zone to UTC itself.
+	Dialect string
 
 	// Locales lists the content locales the site supports, e.g.
 	// []string{"en", "fr"}. The first entry is the default. Defaults to
@@ -212,7 +231,10 @@ type Config struct {
 
 // CMS is the root object of the module. Create one with New.
 type CMS struct {
-	cfg        Config
+	cfg Config
+	// db wraps cfg.DB with the configured dialect; everything inside the
+	// CMS talks to this rather than to cfg.DB directly.
+	db         *sqldb.DB
 	sessions   *scs.SessionManager
 	users      *auth.Store
 	content    *content.Store
@@ -230,6 +252,11 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.DB == nil {
 		return nil, errors.New("cms: Config.DB is required")
 	}
+	d := dialect.For(cfg.Dialect)
+	if d == nil {
+		return nil, fmt.Errorf("cms: unknown Config.Dialect %q (want \"postgres\" or \"mysql\")", cfg.Dialect)
+	}
+	db := sqldb.New(cfg.DB, d)
 	if len(cfg.Locales) == 0 {
 		cfg.Locales = []string{"en"}
 	}
@@ -279,7 +306,7 @@ func New(cfg Config) (*CMS, error) {
 	}
 
 	sessions := scs.New()
-	sessions.Store = sessionstore.New(cfg.DB)
+	sessions.Store = sessionstore.New(db)
 	sessions.Lifetime = cfg.SessionLifetime
 	sessions.Cookie.Name = "cms_session"
 	// Session cookies by default; ticking "Remember me" at login makes
@@ -289,8 +316,8 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.SameSite = http.SameSiteLaxMode
 	sessions.Cookie.Secure = cfg.SecureCookies
 
-	users := auth.NewStore(cfg.DB)
-	contentStore := content.NewStore(cfg.DB, cfg.Locales[0])
+	users := auth.NewStore(db)
+	contentStore := content.NewStore(db, cfg.Locales[0])
 
 	var renderer *render.Renderer
 	if cfg.TemplateFS != nil {
@@ -321,7 +348,7 @@ func New(cfg Config) (*CMS, error) {
 		if cfg.MediaMaxVideoMB < 0 {
 			return nil, fmt.Errorf("cms: MediaMaxVideoMB must be positive, got %d", cfg.MediaMaxVideoMB)
 		}
-		mediaManager = media.NewManager(cfg.DB, objects, cfg.Logger)
+		mediaManager = media.NewManager(db, objects, cfg.Logger)
 		if cfg.MediaWebPQuality != 0 {
 			mediaManager.SetWebPQuality(cfg.MediaWebPQuality)
 		}
@@ -332,6 +359,7 @@ func New(cfg Config) (*CMS, error) {
 
 	c := &CMS{
 		cfg:      cfg,
+		db:       db,
 		sessions: sessions,
 		users:    users,
 		content:  contentStore,
@@ -350,7 +378,7 @@ func New(cfg Config) (*CMS, error) {
 		Content:        contentStore,
 		Renderer:       renderer,
 		Media:          mediaManager,
-		Snippets:       snippets.NewStore(cfg.DB),
+		Snippets:       snippets.NewStore(db),
 		Captcha:        capClient,
 		ConfigSnippets: cfg.Snippets,
 		SectionStyles:  cfg.SectionStyles,
@@ -371,7 +399,7 @@ func New(cfg Config) (*CMS, error) {
 // instances concurrently: a Postgres advisory lock serializes the schema
 // work, and the bucket policy is idempotent.
 func (c *CMS) Migrate(ctx context.Context) error {
-	if err := migrations.Run(ctx, c.cfg.DB, c.cfg.Logger); err != nil {
+	if err := migrations.Run(ctx, c.db, c.cfg.Logger); err != nil {
 		return err
 	}
 	// Only for the store New built from Config.S3 — a host-supplied
@@ -415,6 +443,55 @@ func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool
 		return false, err
 	}
 	c.cfg.Logger.Info("cms: created initial admin user", "email", email)
+	return true, nil
+}
+
+// SeedHomePage creates and publishes a home page — the empty slug, served at
+// "/" — if and only if the site has no pages or posts yet. It returns true if
+// the page was created. Call it after Migrate, alongside SeedAdmin; it is a
+// no-op on every startup after the first, so a home page that is later
+// deleted or renamed stays that way.
+//
+// templateName must be one of Config.PageTemplates; empty selects the first.
+// This is an argument rather than something the CMS decides because page
+// templates belong to the host — the module ships none, and a page naming a
+// template the host has not configured fails to render.
+//
+// The page is published rather than left as a draft, so that a fresh install
+// serves something at "/" instead of a 404. It has a title and no content:
+// the point is to give an editor somewhere to click.
+func (c *CMS) SeedHomePage(ctx context.Context, templateName, title string) (bool, error) {
+	if len(c.cfg.PageTemplates) == 0 {
+		return false, errors.New("cms: SeedHomePage needs at least one Config.PageTemplates entry")
+	}
+	if templateName == "" {
+		templateName = c.cfg.PageTemplates[0].File
+	}
+	if !slices.ContainsFunc(c.cfg.PageTemplates, func(t PageTemplate) bool {
+		return t.File == templateName
+	}) {
+		// Better to refuse than to write a row whose page cannot render.
+		return false, fmt.Errorf("cms: SeedHomePage: %q is not one of Config.PageTemplates", templateName)
+	}
+
+	pages, posts, err := c.content.Counts(ctx)
+	if err != nil {
+		return false, err
+	}
+	if pages > 0 || posts > 0 {
+		return false, nil
+	}
+
+	locale := c.cfg.Locales[0]
+	page := &content.Page{Slug: "", TemplateName: templateName, Title: title}
+	id, err := c.content.Insert(ctx, page, locale)
+	if err != nil {
+		return false, err
+	}
+	if err := c.content.Publish(ctx, id); err != nil {
+		return false, err
+	}
+	c.cfg.Logger.Info("cms: created initial home page", "template", templateName, "title", title)
 	return true, nil
 }
 

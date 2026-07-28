@@ -108,6 +108,16 @@ func (c *Client) WasmURL() string {
 	return c.cfg.URL + "/assets/cap_wasm_bg.wasm"
 }
 
+// PakoPath is the admin-relative path of the vendored pako library, which
+// the widget's instrumentation step decompresses with.
+//
+// Like the WASM binary, the widget defaults to a public CDN for this; the
+// admin CSP allows scripts only from the app and the Cap server, so the
+// fetch would be blocked and the solver would stall at the final step with
+// "Instrumentation timed out". Pointing window.CAP_PAKO_URL at our own copy
+// keeps it inside the policy.
+const PakoPath = "/static/pako_inflate.min.js"
+
 // Origin is the browser-facing origin of the Cap server, for building a
 // Content-Security-Policy that admits the widget.
 func (c *Client) Origin() string {
