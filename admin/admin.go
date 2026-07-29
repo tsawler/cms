@@ -340,6 +340,11 @@ type templateData struct {
 	Posts        []content.Post
 	FormPost     *content.Post
 	FeedFilter   string // active feed filter on the posts list ("", "blog", "news")
+	// Small preview URLs for the post form's two image pickers, resolved
+	// from whichever the post holds — a library image's thumbnail
+	// rendition, or an external URL as it stands. "" when unset.
+	FormPostThumb  string
+	FormPostHeader string
 
 	// Media pages.
 	MediaEnabled bool
@@ -556,19 +561,6 @@ func (td templateData) IsAdmin() bool {
 // editable.
 func (td templateData) IsDefaultLocale() bool {
 	return len(td.Locales) == 0 || td.EditLocale == td.Locales[0]
-}
-
-// MediaContains reports whether url is one of the listed media items' web
-// URLs. The post form's image selects use it to keep a stored URL that
-// isn't in the library (an original variant, or a URL set by code) from
-// being silently wiped on the next save.
-func (td templateData) MediaContains(url string) bool {
-	for _, m := range td.Media {
-		if m.WebURL == url {
-			return true
-		}
-	}
-	return false
 }
 
 // PostSlugTail is the post form's editable address portion: the backing

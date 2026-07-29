@@ -8,8 +8,10 @@
     <div class="mt-10 divide-y divide-slate-200">
         {{range cmsPosts "news" 20}}
         <a href="{{.URL}}" class="group flex gap-5 py-6">
-            {{with or .ThumbnailURL .HeaderURL}}
-            <img src="{{.}}" alt="" class="h-20 w-28 flex-none rounded-lg object-cover">
+            {{with or .Thumbnail .Header}}
+            <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="7rem"
+                 width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
+                 loading="lazy" decoding="async" class="h-20 w-28 flex-none rounded-lg object-cover">
             {{end}}
             <div>
                 <p class="text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}

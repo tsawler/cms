@@ -242,7 +242,13 @@ function buildImageField(wrap, f) {
     var clear = document.createElement("button");
     clear.type = "button";
     clear.textContent = "Clear";
+    // The address is what the preview shows; the library id rides along
+    // under "<id>_id" for callers that store the image rather than embed
+    // it (the post dialogs), so the site can choose the size each slot
+    // needs when it renders. It is 0 for an image from outside the
+    // library, which only ever arrives as a stored value.
     dlgValues[f.id] = f.value || "";
+    dlgValues[f.id + "_id"] = f.mediaId || 0;
     function show() {
         var v = dlgValues[f.id];
         thumb.hidden = !v;
@@ -253,19 +259,17 @@ function buildImageField(wrap, f) {
     }
     choose.addEventListener("click", function () {
         // The media picker opens above the dialog; the dialog stays put
-        // and shows the chosen image when the picker closes. The item's
-        // generated thumbnail rides along under "<id>_thumb" for callers
-        // that want it (the post dialogs).
+        // and shows the chosen image when the picker closes.
         openPicker("image", function (item) {
             dlgValues[f.id] = item.web;
-            dlgValues[f.id + "_thumb"] = item.thumb || item.web;
+            dlgValues[f.id + "_id"] = item.id || 0;
             show();
             dlgChanged();
         });
     });
     clear.addEventListener("click", function () {
         dlgValues[f.id] = "";
-        dlgValues[f.id + "_thumb"] = "";
+        dlgValues[f.id + "_id"] = 0;
         show();
         dlgChanged();
     });

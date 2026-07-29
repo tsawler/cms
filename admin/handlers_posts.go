@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -38,7 +39,7 @@ func (s *server) postNew(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
-	form, errs := s.parsePostMeta(r)
+	form, errs := s.parsePostMeta(r, nil)
 	if len(errs) > 0 {
 		s.renderPostForm(w, r, form, true, errs)
 		return
@@ -102,7 +103,7 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	form, errs := s.parsePostMeta(r)
+	form, errs := s.parsePostMeta(r, existing)
 	form.ID = existing.ID
 	form.PostID = existing.PostID
 	form.Status = existing.Status
@@ -217,7 +218,7 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 		Blocks:  blocks,
 		Locale:  locale,
 		Menus:   menus,
-		Post:    render.PostInfoFor(post, render.LocalePrefix(locale, s.deps.DefaultLocale)),
+		Post:    render.PostInfoFor(post, render.LocalePrefix(locale, s.deps.DefaultLocale), s.postImages()),
 		Locales: s.deps.Locales,
 		Site:    site,
 	})
@@ -229,7 +230,12 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 // parsePostMeta reads and validates the post form's metadata fields. The
 // address field holds only the part after the feed prefix; the stored slug
 // is always "<feed>/<address>".
-func (s *server) parsePostMeta(r *http.Request) (*content.Post, map[string]string) {
+//
+// existing is the stored post when editing and nil when creating. It
+// supplies the fields the form did not offer: with no media library the
+// image pickers are absent, and a save must leave the post's images alone
+// rather than clearing them.
+func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*content.Post, map[string]string) {
 	errs := map[string]string{}
 
 	p := &content.Post{}
@@ -266,14 +272,50 @@ func (s *server) parsePostMeta(r *http.Request) (*content.Post, map[string]strin
 		}
 	}
 
-	if u := strings.TrimSpace(r.PostFormValue("thumbnail_url")); validImageURL(u) {
-		p.ThumbnailURL = u
-	}
-	if u := strings.TrimSpace(r.PostFormValue("header_url")); validImageURL(u) {
-		p.HeaderURL = u
+	switch {
+	case s.deps.Media != nil:
+		p.ThumbnailMediaID, p.ThumbnailURL = s.parsePostImage(r, "thumbnail")
+		p.HeaderMediaID, p.HeaderURL = s.parsePostImage(r, "header")
+	case existing != nil:
+		p.ThumbnailMediaID, p.ThumbnailURL = existing.ThumbnailMediaID, existing.ThumbnailURL
+		p.HeaderMediaID, p.HeaderURL = existing.HeaderMediaID, existing.HeaderURL
 	}
 
 	return p, errs
+}
+
+// parsePostImage reads one of the post form's image pickers, whose select
+// holds a library id, "keep" (hold on to an image that is not in the
+// library, carried in the hidden field beside it), or "" for none. An id
+// naming something that is not a library image is treated as none rather
+// than failing the save: it can only come from a tampered form or an image
+// deleted while the form was open.
+func (s *server) parsePostImage(r *http.Request, field string) (*int64, string) {
+	switch choice := strings.TrimSpace(r.PostFormValue(field + "_media_id")); choice {
+	case "":
+		return nil, ""
+	case "keep":
+		if u := strings.TrimSpace(r.PostFormValue(field + "_url")); validImageURL(u) {
+			return nil, u
+		}
+		return nil, ""
+	default:
+		id, err := strconv.ParseInt(choice, 10, 64)
+		if err != nil || !s.isLibraryImage(r.Context(), id) {
+			return nil, ""
+		}
+		return &id, ""
+	}
+}
+
+// isLibraryImage reports whether id names an image in the media library —
+// the check that keeps a post's foreign key pointing at something real.
+func (s *server) isLibraryImage(ctx context.Context, id int64) bool {
+	if s.deps.Media == nil || id <= 0 {
+		return false
+	}
+	md, err := s.deps.Media.GetByID(ctx, id, s.deps.DefaultLocale)
+	return err == nil && md.Kind == media.KindImage
 }
 
 func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *content.Post, isNew bool, errs map[string]string) {
@@ -320,9 +362,42 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 			return
 		}
 		data.Media = s.deps.Media.Views(items)
+		data.FormPostThumb = s.postImagePreview(r.Context(), post.Thumbnail, post.ThumbnailMediaID, post.ThumbnailURL)
+		data.FormPostHeader = s.postImagePreview(r.Context(), post.Header, post.HeaderMediaID, post.HeaderURL)
 	}
 
 	s.render(w, status, "post_form", data)
+}
+
+// postImagePreview is the URL for the small preview beside a post form's
+// image picker: a library image's thumbnail rendition, or an external URL
+// as it stands.
+//
+// md is nil on a form re-rendered after a validation error, which was
+// parsed from the submission and so carries the id without the joined
+// record; the record is fetched then, so the picture the editor chose is
+// still on screen beside the message telling them what to fix.
+func (s *server) postImagePreview(ctx context.Context, md *media.Media, id *int64, fallbackURL string) string {
+	if md == nil && id != nil {
+		if loaded, err := s.deps.Media.GetByID(ctx, *id, s.deps.DefaultLocale); err == nil {
+			md = loaded
+		}
+	}
+	if md != nil {
+		if img := s.deps.Media.ImageFor(md, "thumb"); img != nil {
+			return img.URL
+		}
+	}
+	return fallbackURL
+}
+
+// postImages resolves posts' library images for renders the admin drives
+// itself (the post preview). Nil without a media library.
+func (s *server) postImages() render.PostImages {
+	if s.deps.Media == nil {
+		return nil
+	}
+	return s.deps.Media.ImageFor
 }
 
 // apiCreatePost creates a draft post from the editor's "new post" dialog:
@@ -330,15 +405,18 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 // title (numeric suffix when taken), and the creating user becomes the
 // author. Summary, date, and images are optional.
 // POST /api/posts {"title", "feed", "summary", "published_at",
-// "thumbnail_url", "header_url"} -> {ok, id, url}
+// "thumbnail_media_id", "thumbnail_url", "header_media_id", "header_url"}
+// -> {ok, id, url}
 func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Title        string `json:"title"`
-		Feed         string `json:"feed"`
-		Summary      string `json:"summary"`
-		PublishedAt  string `json:"published_at"` // datetime-local format; "" = now
-		ThumbnailURL string `json:"thumbnail_url"`
-		HeaderURL    string `json:"header_url"`
+		Title            string `json:"title"`
+		Feed             string `json:"feed"`
+		Summary          string `json:"summary"`
+		PublishedAt      string `json:"published_at"` // datetime-local format; "" = now
+		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
+		ThumbnailURL     string `json:"thumbnail_url"`
+		HeaderMediaID    int64  `json:"header_media_id"`
+		HeaderURL        string `json:"header_url"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
@@ -371,12 +449,8 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 			post.PublishedAt = t
 		}
 	}
-	if u := strings.TrimSpace(body.ThumbnailURL); u != "" && validImageURL(u) {
-		post.ThumbnailURL = u
-	}
-	if u := strings.TrimSpace(body.HeaderURL); u != "" && validImageURL(u) {
-		post.HeaderURL = u
-	}
+	post.ThumbnailMediaID, post.ThumbnailURL = s.apiPostImage(r.Context(), body.ThumbnailMediaID, body.ThumbnailURL)
+	post.HeaderMediaID, post.HeaderURL = s.apiPostImage(r.Context(), body.HeaderMediaID, body.HeaderURL)
 	var err error
 	for i := 1; i <= 50; i++ {
 		tail := base
@@ -413,18 +487,20 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 // post-settings gear: date, summary, thumbnail, and header image. Title,
 // feed, and slug stay as they are (the admin form owns those). These
 // fields have no draft state — like menus, they are live at once.
-// PUT /api/posts/{id} {"summary", "published_at", "thumbnail_url",
-// "header_url"} -> {ok}
+// PUT /api/posts/{id} {"summary", "published_at", "thumbnail_media_id",
+// "thumbnail_url", "header_media_id", "header_url"} -> {ok}
 func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	post, ok := s.postFromURL(w, r)
 	if !ok {
 		return
 	}
 	var body struct {
-		Summary      string `json:"summary"`
-		PublishedAt  string `json:"published_at"`
-		ThumbnailURL string `json:"thumbnail_url"`
-		HeaderURL    string `json:"header_url"`
+		Summary          string `json:"summary"`
+		PublishedAt      string `json:"published_at"`
+		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
+		ThumbnailURL     string `json:"thumbnail_url"`
+		HeaderMediaID    int64  `json:"header_media_id"`
+		HeaderURL        string `json:"header_url"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
@@ -441,12 +517,8 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		post.PublishedAt = t
 	}
-	if u := strings.TrimSpace(body.ThumbnailURL); u == "" || validImageURL(u) {
-		post.ThumbnailURL = u
-	}
-	if u := strings.TrimSpace(body.HeaderURL); u == "" || validImageURL(u) {
-		post.HeaderURL = u
-	}
+	post.ThumbnailMediaID, post.ThumbnailURL = s.apiPostImage(r.Context(), body.ThumbnailMediaID, body.ThumbnailURL)
+	post.HeaderMediaID, post.HeaderURL = s.apiPostImage(r.Context(), body.HeaderMediaID, body.HeaderURL)
 
 	if err := s.deps.Content.UpdatePost(r.Context(), post, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api updating post settings", "post", post.PostID, "err", err)
@@ -454,6 +526,20 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apiPostImage resolves one image field of the post JSON APIs. A library
+// id wins; failing that an address is kept when it looks like an image
+// URL, which is how an image from outside the library survives a save.
+// Neither means the post has no such image.
+func (s *server) apiPostImage(ctx context.Context, id int64, rawURL string) (*int64, string) {
+	if s.isLibraryImage(ctx, id) {
+		return &id, ""
+	}
+	if u := strings.TrimSpace(rawURL); u != "" && validImageURL(u) {
+		return nil, u
+	}
+	return nil, ""
 }
 
 // postFromURL loads the post identified by the {id} URL parameter, writing

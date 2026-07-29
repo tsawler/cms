@@ -1,11 +1,11 @@
 {{template "base" .}}
 
 {{define "content"}}
-{{with .Post}}
-{{if .HeaderURL}}
-<img src="{{.HeaderURL}}" alt="" class="h-64 w-full object-cover sm:h-80">
-{{end}}
-{{end}}
+{{with .Post}}{{with .Header}}
+<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw"
+     width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
+     decoding="async" class="h-64 w-full object-cover sm:h-80">
+{{end}}{{end}}
 
 <article>
     <header class="mx-auto max-w-3xl px-6 pt-12">

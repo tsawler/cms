@@ -382,7 +382,7 @@ func TestRenderPostsData(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.Render(&buf, Input{Page: page, Locale: "en", Post: PostInfoFor(post, ""), Posts: lister}); err != nil {
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Post: PostInfoFor(post, "", nil), Posts: lister}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()

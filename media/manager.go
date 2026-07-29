@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/tsawler/cms/internal/sqldb"
 )
 
@@ -86,6 +88,11 @@ type Manager struct {
 	webpQuality   float64
 	maxVideoBytes int64
 	logger        *slog.Logger
+
+	// Rebuilding renditions the ladder gained after an upload; see
+	// regenerate.go.
+	rebuilds  singleflight.Group
+	rebuildOK chan struct{}
 }
 
 // NewManager returns a Manager storing binaries in objects and metadata in
@@ -98,7 +105,8 @@ func NewManager(db *sqldb.DB, objects ObjectStore, logger *slog.Logger) *Manager
 	}
 	return &Manager{db: db, objects: objects,
 		keyRoot: keyRoot(prefix), manifestRoot: manifestRoot(prefix),
-		webpQuality: DefaultWebPQuality, maxVideoBytes: DefaultMaxVideoBytes, logger: logger}
+		webpQuality: DefaultWebPQuality, maxVideoBytes: DefaultMaxVideoBytes, logger: logger,
+		rebuildOK: make(chan struct{}, rebuildSlots())}
 }
 
 // SetWebPQuality overrides the lossy WebP quality used for image variants.
@@ -214,7 +222,7 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		// The poster is decorative; a bad one downgrades the video to
 		// posterless rather than failing the upload.
 		if len(poster) > 0 {
-			p, err := process(poster, http.DetectContentType(poster), m.webpQuality)
+			p, err := processPoster(poster, http.DetectContentType(poster), m.webpQuality)
 			if err != nil {
 				m.logger.Warn("cms media: dropping undecodable video poster", "filename", filename, "err", err)
 			} else {
@@ -366,6 +374,17 @@ func (m *Manager) GetByID(ctx context.Context, id int64, locale string) (*Media,
 		WHERE m.id = $1`, id, locale))
 }
 
+// byStoreKey returns the record whose objects live under key, without alt
+// text. The media proxy uses it to identify the item a requested object
+// belongs to.
+func (m *Manager) byStoreKey(ctx context.Context, key string) (*Media, error) {
+	return scanMedia(m.db.QueryRow(ctx, `
+		SELECT `+mediaColumns+`
+		FROM cms_media m
+		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $2
+		WHERE m.store_key = $1`, key, ""))
+}
+
 // ListOptions filters All. The zero value lists everything.
 type ListOptions struct {
 	Kind     Kind   // "" = both images and files
@@ -466,6 +485,15 @@ func (m *Manager) Delete(ctx context.Context, id int64, locale string) error {
 	return err
 }
 
+// variants returns the rendition ladder md's derived objects follow —
+// the full image ladder, or the shorter one a video's poster frame gets.
+func (md Media) variants() []variantSpec {
+	if md.Kind == KindVideo {
+		return posterVariants
+	}
+	return imageVariants
+}
+
 // objectKeys returns the absolute bucket keys of every object belonging to
 // md, ready to hand to the ObjectStore.
 func (m *Manager) objectKeys(md *Media) []string {
@@ -474,18 +502,22 @@ func (m *Manager) objectKeys(md *Media) []string {
 	}
 	keys := []string{m.abs(md.StoreKey + "/original" + md.Ext)}
 	if md.VariantExt != "" {
-		keys = append(keys,
-			m.abs(md.StoreKey+"/web"+md.VariantExt),
-			m.abs(md.StoreKey+"/thumb"+md.VariantExt))
+		for _, spec := range md.variants() {
+			keys = append(keys, m.abs(md.StoreKey+"/"+spec.Name+md.VariantExt))
+		}
 	}
 	return keys
 }
 
-// URL returns the public URL of one rendition: "original", "web", or
-// "thumb". Files have a single rendition, returned for any name. Videos
-// have "original" (the video itself; also returned for "web"), plus
-// "poster" and "thumb" — empty when the video has no poster.
+// URL returns the public URL of one rendition: "original" or any rung of
+// the ladder ("web", "card", "thumb"). Files have a single rendition,
+// returned for any name. Videos have "original" (the video itself; also
+// returned for "web"), plus "poster" and "thumb" — empty when the video
+// has no poster.
 func (m *Manager) URL(md *Media, rendition string) string {
+	original := func() string {
+		return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
+	}
 	switch md.Kind {
 	case KindFile:
 		return m.objects.PublicURL(m.abs(md.StoreKey))
@@ -503,17 +535,13 @@ func (m *Manager) URL(md *Media, rendition string) string {
 			}
 			return m.objects.PublicURL(m.abs(md.StoreKey + "/" + name + md.VariantExt))
 		default:
-			return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
+			return original()
 		}
 	}
-	switch rendition {
-	case "web":
-		return m.objects.PublicURL(m.abs(md.StoreKey + "/web" + md.VariantExt))
-	case "thumb":
-		return m.objects.PublicURL(m.abs(md.StoreKey + "/thumb" + md.VariantExt))
-	default:
-		return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
+	if _, ok := variantSpecFor(rendition); !ok || md.VariantExt == "" {
+		return original()
 	}
+	return m.objects.PublicURL(m.abs(md.StoreKey + "/" + rendition + md.VariantExt))
 }
 
 // View is a Media with its URLs precomputed, for templates.
@@ -521,6 +549,7 @@ type View struct {
 	Media
 	OriginalURL string
 	WebURL      string
+	CardURL     string // images only: the listing-card rendition
 	ThumbURL    string
 	PosterURL   string // videos only: the full-size poster frame, if one exists
 }
@@ -545,11 +574,105 @@ func (m *Manager) Views(items []Media) []View {
 		default:
 			v.OriginalURL = m.URL(&md, "original")
 			v.WebURL = m.URL(&md, "web")
+			v.CardURL = m.URL(&md, "card")
 			v.ThumbURL = m.URL(&md, "thumb")
 		}
 		out[i] = v
 	}
 	return out
+}
+
+// Rendition is one size of an image, as a srcset candidate.
+type Rendition struct {
+	URL    string
+	Width  int
+	Height int
+}
+
+// Image is one uploaded image ready to put in an <img> element: a default
+// src sized for the slot it fills, the srcset of every distinct rendition
+// so the browser can pick a better one, and the intrinsic size of that
+// default so it can reserve the space before the bytes arrive.
+//
+// Templates use it as
+//
+//	<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="..."
+//	     width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}">
+//
+// with sizes written by the template, since only it knows the layout.
+// Every field is safe to use on its own: a legacy or external image with
+// no library record still carries a URL, just no srcset or dimensions.
+type Image struct {
+	URL        string
+	Srcset     string
+	Width      int
+	Height     int
+	Alt        string
+	Renditions []Rendition
+}
+
+// ImageFor builds the <img> data for one library image. prefer names the
+// rung used as the default src — "web" for a full-width slot, "card" for a
+// listing card, "thumb" for a small preview; an unknown name falls back to
+// "web".
+//
+// The srcset lists every rung, smaller ones included, so a card slot can
+// still take the thumbnail on a narrow phone. Rungs that would come out the
+// same width are listed once: an image narrower than the ladder's bounds
+// is not upscaled, so its larger rungs are all the same picture.
+//
+// Vectors get a single URL and no srcset — an SVG scales losslessly, so
+// alternate widths would be the same bytes under different names. A nil or
+// non-image record returns nil, which templates render as nothing.
+func (m *Manager) ImageFor(md *Media, prefer string) *Image {
+	if md == nil || md.Kind != KindImage {
+		return nil
+	}
+	img := &Image{Alt: md.Alt, Width: md.Width, Height: md.Height}
+	if md.Ext == ".svg" {
+		img.URL = m.URL(md, "web")
+		return img
+	}
+	if _, ok := variantSpecFor(prefer); !ok {
+		prefer = "web"
+	}
+	img.URL = m.URL(md, prefer)
+
+	// Dimensions are unknown (a record written before they were recorded,
+	// say): serve the preferred rendition and let the browser measure it.
+	if md.Width <= 0 || md.Height <= 0 {
+		img.Width, img.Height = 0, 0
+		return img
+	}
+
+	seen := map[int]bool{}
+	for _, spec := range md.variants() {
+		w, h := variantSize(md.Width, md.Height, spec)
+		if spec.Name == prefer {
+			img.Width, img.Height = w, h
+		}
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		img.Renditions = append(img.Renditions, Rendition{URL: m.URL(md, spec.Name), Width: w, Height: h})
+	}
+	// A srcset with one candidate tells the browser nothing it does not
+	// already have from src.
+	if len(img.Renditions) > 1 {
+		var sb strings.Builder
+		for i, r := range img.Renditions {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(r.URL)
+			sb.WriteString(" ")
+			sb.WriteString(strconv.Itoa(r.Width))
+			sb.WriteString("w")
+		}
+		img.Srcset = sb.String()
+	}
+	return img
 }
 
 // SizeHuman renders Size for people, e.g. "1.4 MB".

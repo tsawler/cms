@@ -1,10 +1,14 @@
 // Package media stores uploads — images, videos, and documents: the binary
 // objects on any S3-compatible bucket (AWS, Linode, DigitalOcean, MinIO,
 // R2, ...) and their metadata in the database. Each image upload produces
-// the untouched original plus resized "web" and "thumb" variants encoded as
-// lossy WebP; videos are stored as uploaded (no transcoding) with an
-// optional poster frame; documents are stored as-is. Everything is served
-// directly from the bucket, or proxied by the CMS.
+// the untouched original plus a ladder of resized variants encoded as lossy
+// WebP — "web" for a full-width slot, "card" for a listing card, "thumb"
+// for a preview grid — which pages combine into a srcset so a browser
+// downloads the size it will actually display. Videos are stored as
+// uploaded (no transcoding) with an optional poster frame; documents are
+// stored as-is. Everything is served directly from the bucket, or proxied
+// by the CMS, which rebuilds a rendition an older upload lacks on the first
+// request for it (see regenerate.go).
 //
 // Every upload also writes a JSON manifest recording what the object keys
 // cannot — filename, alt text, folder, dimensions, uploader — which makes

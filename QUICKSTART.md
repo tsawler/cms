@@ -605,8 +605,9 @@ By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
 direct bucket/CDN URLs instead (for a bucket that wasn't created public,
 also set `ApplyPublicReadPolicy` and `Migrate` will apply a public-read
-bucket policy — one-time, idempotent setup). Uploads get automatic WebP variants and
-thumbnails (`MediaWebPQuality` tunes compression); videos up to
+bucket policy — one-time, idempotent setup). Images get an automatic ladder
+of WebP renditions — full width, card, thumbnail — that post templates emit
+as a srcset (`MediaWebPQuality` tunes compression); videos up to
 `MediaMaxVideoMB` (default 512) are stored as uploaded. Without `S3` the
 media library is simply disabled — everything else works. For a custom
 backend (local disk, tests), implement `media.ObjectStore` and set
@@ -671,7 +672,7 @@ carries `.Post` (date, author, header image, …):
 {{template "base" .}}
 
 {{define "content"}}
-{{with .Post}}{{if .HeaderURL}}<img src="{{.HeaderURL}}" alt="" class="h-64 w-full object-cover">{{end}}{{end}}
+{{with .Post}}{{with .Header}}<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw" width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" class="h-64 w-full object-cover">{{end}}{{end}}
 <article>
     <header class="mx-auto max-w-3xl px-6 pt-12">
         <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h1>
@@ -689,9 +690,27 @@ page whose slug lives under `blog/` or `news/`.
 
 For the listing page, create a page at slug `blog` (or `news`) whose
 template ranges over `{{cmsPosts "blog" 12}}` — each entry has `.Title`,
-`.Summary`, `.URL`, `.PublishedAt`, `.Author`, `.ThumbnailURL`,
-`.HeaderURL`, and `.Draft` (true only for editors, so you can badge
-drafts). RSS is automatic at `/blog/rss.xml` and `/news/rss.xml`.
+`.Summary`, `.URL`, `.PublishedAt`, `.Author`, `.Thumbnail`, `.Header`,
+and `.Draft` (true only for editors, so you can badge drafts). RSS is
+automatic at `/blog/rss.xml` and `/news/rss.xml`.
+
+`.Thumbnail` and `.Header` are the post's images with their renditions
+resolved — `.URL` is sized for the slot (card size for a thumbnail, full
+width for a header), `.Srcset` lists the rest, `.Width`/`.Height` are the
+intrinsic size of `.URL`, and `.Alt` comes from the media library. Both
+are nil when the post has no such image, so `{{with}}` is the natural way
+to use them:
+
+```html
+{{with or .Thumbnail .Header}}
+<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
+     width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" loading="lazy">
+{{end}}
+```
+
+Write `sizes` yourself — only your template knows how wide the image ends
+up. `.ThumbnailURL` and `.HeaderURL` still work if you only want a
+string.
 
 ### Multiple languages
 

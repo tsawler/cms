@@ -559,9 +559,10 @@ The post template never appears in the page-template choosers; posts are
 created from the editor tool rail's **Post** button or under
 **Blog & News** in the admin. The rail dialog takes everything up front:
 title, feed (Blog or News), summary, date/time, and an image chosen
-through the media picker (browse the library or upload) — the picked
-image becomes the **header image** and its automatically generated
-thumbnail rendition becomes the listing **thumbnail**. You land in the
+through the media picker (browse the library or upload) — that one image
+fills both slots, rendered at header size on the post and at card size in
+the listings, since a post stores which library image it uses rather than
+one fixed address. You land in the
 new draft ready to write. While editing a post in place, a **⚙ Post
 settings** pill pinned to the top-right of the page reopens those
 settings (date, summary, thumbnail,
@@ -574,9 +575,11 @@ The post template is a page template that additionally receives the
 post's metadata as `.Post` (nil on ordinary pages):
 
 ```html
-{{with .Post}}
-  {{if .HeaderURL}}<img src="{{.HeaderURL}}" alt="" class="h-64 w-full object-cover">{{end}}
-{{end}}
+{{with .Post}}{{with .Header}}
+  <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw"
+       width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
+       class="h-64 w-full object-cover">
+{{end}}{{end}}
 <h1>{{.Title}}</h1>
 {{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
 {{cmsSections "sections"}}
@@ -588,7 +591,10 @@ Any template can list posts with `cmsPosts` — feed name and a limit
 ```html
 {{range cmsPosts "blog" 12}}
   <a href="{{.URL}}">
-    {{with or .ThumbnailURL .HeaderURL}}<img src="{{.}}" alt="">{{end}}
+    {{with or .Thumbnail .Header}}
+      <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
+           width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" loading="lazy">
+    {{end}}
     <h2>{{.Title}}</h2>
     <p>{{.PublishedAt.Format "January 2, 2006"}}</p>
     <p>{{.Summary}}</p>
@@ -597,7 +603,20 @@ Any template can list posts with `cmsPosts` — feed name and a limit
 ```
 
 Each entry carries `Feed`, `Title`, `Summary` (the page description),
-`URL`, `PublishedAt`, `Author`, `ThumbnailURL`, `HeaderURL`, and `Draft`.
+`URL`, `PublishedAt`, `Author`, `Thumbnail`, `Header`, and `Draft`.
+
+`Thumbnail` and `Header` are the post's images with every rendition
+resolved, and are nil when the post has none. Each has `URL` (a default
+`src` sized for its slot — card size for a thumbnail, full width for a
+header), `Srcset` (every rendition, so the browser can pick a better
+one), `Width` and `Height` (the intrinsic size of `URL`, which stops the
+page reflowing as images arrive), and `Alt` from the media library.
+Write `sizes` yourself: only your template knows the layout.
+
+`ThumbnailURL` and `HeaderURL` are still there for templates that just
+want one string, and hold the same address as `.Thumbnail.URL` and
+`.Header.URL`.
+
 The public sees published posts only; logged-in editors also see drafts
 (`Draft` is true, so listing templates can badge them — see
 `examples/basic/templates/pages/blog.gohtml`). Listing pages themselves
@@ -1085,8 +1104,8 @@ overwritten by the next build (and marked `linguist-generated`).
   `SessionLifetime` (default 24h; `RememberFor` extends it for "Remember
   me"), `Logger` (defaults to `slog.Default()`), and `ObjectStore` above.
   The struct's godoc documents every field.
-- SVG uploads are accepted as images (they act as their own web and
-  thumbnail renditions — no rasterizing). Because an SVG viewed directly
+- SVG uploads are accepted as images (they act as their own renditions at
+  every size — no rasterizing). Because an SVG viewed directly
   is a document that can run scripts, uploads are rejected unless they
   are free of active content (`<script>`, `<foreignObject>`, `on*`
   attributes, `javascript:`/non-image `data:` hrefs, DTD internal

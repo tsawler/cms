@@ -312,8 +312,8 @@ export function newPostDialog(feed) {
         { id: "date", label: "Date", type: "datetime", value: datetimeNow() },
     ];
     if (mediaEnabled) {
-        // The chosen image becomes the header; its generated
-        // thumbnail rendition becomes the listing thumbnail.
+        // One image serves both slots: the site renders it at header size
+        // at the top of the post and at card size in the listings.
         fields.push({ id: "image", label: "Image", type: "image", value: "" });
     }
     openDialog({
@@ -334,8 +334,8 @@ export function newPostDialog(feed) {
                 feed: values.feed,
                 summary: values.summary || "",
                 published_at: values.date || "",
-                header_url: values.image || "",
-                thumbnail_url: values.image_thumb || "",
+                header_media_id: values.image_id || 0,
+                thumbnail_media_id: values.image_id || 0,
             }),
         }).then(function (body) {
             // The new post is a draft, so only editors see it —

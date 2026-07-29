@@ -1444,8 +1444,8 @@
           feed: values.feed,
           summary: values.summary || "",
           published_at: values.date || "",
-          header_url: values.image || "",
-          thumbnail_url: values.image_thumb || ""
+          header_media_id: values.image_id || 0,
+          thumbnail_media_id: values.image_id || 0
         })
       }).then(function(body) {
         window.location.href = body.url;
@@ -4137,6 +4137,7 @@
     clear.type = "button";
     clear.textContent = "Clear";
     dlgValues[f.id] = f.value || "";
+    dlgValues[f.id + "_id"] = f.mediaId || 0;
     function show() {
       var v = dlgValues[f.id];
       thumb.hidden = !v;
@@ -4148,14 +4149,14 @@
     choose.addEventListener("click", function() {
       openPicker("image", function(item2) {
         dlgValues[f.id] = item2.web;
-        dlgValues[f.id + "_thumb"] = item2.thumb || item2.web;
+        dlgValues[f.id + "_id"] = item2.id || 0;
         show();
         dlgChanged();
       });
     });
     clear.addEventListener("click", function() {
       dlgValues[f.id] = "";
-      dlgValues[f.id + "_thumb"] = "";
+      dlgValues[f.id + "_id"] = 0;
       show();
       dlgChanged();
     });
@@ -5170,8 +5171,20 @@ body.cms-editing [data-cms-fallback] {
       ];
       if (mediaEnabled) {
         fields.push(
-          { id: "thumb", label: "Thumbnail", type: "image", value: postInfo.thumbnailUrl },
-          { id: "header", label: "Header image", type: "image", value: postInfo.headerUrl }
+          {
+            id: "thumb",
+            label: "Thumbnail",
+            type: "image",
+            value: postInfo.thumbnailUrl,
+            mediaId: postInfo.thumbnailMediaId
+          },
+          {
+            id: "header",
+            label: "Header image",
+            type: "image",
+            value: postInfo.headerUrl,
+            mediaId: postInfo.headerMediaId
+          }
         );
       }
       openDialog({
@@ -5180,22 +5193,30 @@ body.cms-editing [data-cms-fallback] {
         fields
       }).then(function(values) {
         if (!values) return;
-        var thumb = values.thumb !== void 0 ? values.thumb : postInfo.thumbnailUrl || "";
-        var header = values.header !== void 0 ? values.header : postInfo.headerUrl || "";
+        function image(field, url, id) {
+          if (values[field] === void 0) return { url: url || "", id: id || 0 };
+          return { url: values[field] || "", id: values[field + "_id"] || 0 };
+        }
+        var thumb = image("thumb", postInfo.thumbnailUrl, postInfo.thumbnailMediaId);
+        var header = image("header", postInfo.headerUrl, postInfo.headerMediaId);
         api("/posts/" + postInfo.id, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             summary: values.summary,
             published_at: values.date,
-            thumbnail_url: thumb,
-            header_url: header
+            thumbnail_media_id: thumb.id,
+            thumbnail_url: thumb.id ? "" : thumb.url,
+            header_media_id: header.id,
+            header_url: header.id ? "" : header.url
           })
         }).then(function() {
           postInfo.publishedAt = values.date;
           postInfo.summary = values.summary;
-          postInfo.thumbnailUrl = thumb;
-          postInfo.headerUrl = header;
+          postInfo.thumbnailUrl = thumb.url;
+          postInfo.thumbnailMediaId = thumb.id;
+          postInfo.headerUrl = header.url;
+          postInfo.headerMediaId = header.id;
           flash("Post settings saved \u2014 the page shows them after a reload.");
         }).catch(function(err) {
           setMsg(err.message);

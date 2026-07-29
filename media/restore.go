@@ -300,9 +300,13 @@ func (m *Manager) adopt(ctx context.Context, mf *manifest, folderIDs map[string]
 			"item", mf.ItemID, "key", keys[0])
 		return nil
 	}
+	// A missing rendition is not a reason to skip the item: the media proxy
+	// rebuilds derived objects from the original on first request. Worth
+	// saying, though, since a bucket missing them was probably copied
+	// incompletely.
 	for _, key := range keys[1:] {
 		if !present[key] {
-			m.logger.Warn("cms media: adopted item is missing a rendition",
+			m.logger.Info("cms media: adopted item is missing a rendition; it will be rebuilt on first request",
 				"item", mf.ItemID, "key", key)
 		}
 	}

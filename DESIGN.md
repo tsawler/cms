@@ -443,8 +443,10 @@ cms_pages         id, slug, template_name, status (draft|published), sort, paren
 cms_page_meta     page_id, locale, title, description            -- SEO per locale
 cms_blocks        id, page_id, region, sort, snippet_key (nullable), html, locale, status
 cms_page_assets   page_id, kind (css|js), inline_content, media_id
-cms_posts         id, page_id (unique FK), feed (blog|news), published_at,
-                  author_id, thumbnail_url, header_url
+cms_posts         id, page_id (unique FK), feed (blog|news), published_at, author_id,
+                  thumbnail_media_id, thumbnail_url, header_media_id, header_url
+                  -- images are library ids, so the renderer picks the rendition each
+                  --   slot needs; the _url columns hold images from outside the library
                   -- slug/status/title/summary live on the backing page (4.3)
 cms_media         id, store_key, filename, mime, width, height, size, uploaded_by
                   -- store_key is relative to the media root: no row embeds S3_KEY_PREFIX
@@ -493,9 +495,11 @@ the module self-contained and the surface area small.
 2. **Pages & rendering** ✅ — page CRUD, template funcs, region storage,
    draft/publish, per-page CSS/JS, region auto-detection from parse trees,
    draft preview, editor-content sanitization
-3. **Media** ✅ — S3 uploads (any S3-compatible store), automatic web/thumb
-   variants, media library UI, cmsImage template func with picker, private
-   buckets supported by proxying media through the CMS (/cms/media/)
+3. **Media** ✅ — S3 uploads (any S3-compatible store), an automatic
+   web/card/thumb variant ladder behind srcsets (renditions an older upload
+   lacks are rebuilt on first request), media library UI, cmsImage template
+   func with picker, private buckets supported by proxying media through
+   the CMS (/cms/media/)
 4. **In-place editor** ✅ — injected script, Shadow DOM toolbar, TinyMCE
    6 (MIT, vendored) inline editing for rich regions, click-to-replace
    images with media picker and upload, JSON save/publish API with

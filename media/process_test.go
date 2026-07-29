@@ -44,24 +44,88 @@ func TestProcessJPEGProducesVariants(t *testing.T) {
 	if p.Ext != ".jpg" {
 		t.Errorf("ext = %q, want .jpg", p.Ext)
 	}
+	if len(p.Variants) != len(imageVariants) {
+		t.Fatalf("got %d variants, want one per rung (%d)", len(p.Variants), len(imageVariants))
+	}
+
+	// Every rung is decodable WebP at exactly the size variantSize
+	// promised — the numbers ImageFor reports as an <img>'s width and
+	// height, so they had better be the ones actually encoded.
+	byName := map[string]variant{}
+	for _, v := range p.Variants {
+		img, err := decodeVariant(v.Data)
+		if err != nil {
+			t.Fatalf("decoding %s variant: %v", v.Name, err)
+		}
+		if img.Bounds().Dx() != v.Width || img.Bounds().Dy() != v.Height {
+			t.Errorf("%s variant encoded %dx%d, recorded %dx%d",
+				v.Name, img.Bounds().Dx(), img.Bounds().Dy(), v.Width, v.Height)
+		}
+		byName[v.Name] = v
+	}
+
+	if got := byName["web"].Width; got != webMaxWidth {
+		t.Errorf("web width = %d, want %d", got, webMaxWidth)
+	}
+	if got := byName["card"].Width; got != cardMaxWidth {
+		t.Errorf("card width = %d, want %d", got, cardMaxWidth)
+	}
+	if thumb := byName["thumb"]; thumb.Width > thumbSize || thumb.Height > thumbSize {
+		t.Errorf("thumb %dx%d exceeds %dpx bound", thumb.Width, thumb.Height, thumbSize)
+	}
+	// The ladder is only worth having if the rungs really differ in size.
+	if byName["card"].Width >= byName["web"].Width {
+		t.Errorf("card (%d bytes) is not smaller than web (%d bytes)",
+			len(byName["card"].Data), len(byName["web"].Data))
+	}
+}
+
+func TestVariantSize(t *testing.T) {
+	web := variantSpec{Name: "web", MaxWidth: 1600}
+	card := variantSpec{Name: "card", MaxWidth: 800}
+	thumb := variantSpec{Name: "thumb", Box: 320}
+
+	tests := []struct {
+		name       string
+		spec       variantSpec
+		srcW, srcH int
+		wantW      int
+		wantH      int
+	}{
+		{"landscape down to card", card, 2000, 1000, 800, 400},
+		{"landscape down to web", web, 2000, 1000, 1600, 800},
+		{"landscape fits the thumb box on width", thumb, 2000, 1000, 320, 160},
+		{"portrait fits the thumb box on height", thumb, 1000, 2000, 160, 320},
+		{"already smaller is never upscaled", web, 640, 480, 640, 480},
+		{"exactly at the bound is left alone", card, 800, 600, 800, 600},
+		{"unknown source size stays unknown", card, 0, 0, 0, 0},
+		{"a sliver never rounds away to zero", card, 4000, 3, 800, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, h := variantSize(tt.srcW, tt.srcH, tt.spec)
+			if w != tt.wantW || h != tt.wantH {
+				t.Errorf("variantSize(%d, %d, %s) = %dx%d, want %dx%d",
+					tt.srcW, tt.srcH, tt.spec.Name, w, h, tt.wantW, tt.wantH)
+			}
+		})
+	}
+}
+
+// A video's poster has no stored original to rebuild from, so it gets only
+// the renditions a player and the library actually use.
+func TestProcessPosterSkipsTheCardRendition(t *testing.T) {
+	p, err := processPoster(testImage(t, 1920, 1080, "jpeg"), "image/jpeg", DefaultWebPQuality)
+	if err != nil {
+		t.Fatalf("processPoster: %v", err)
+	}
 	if len(p.Variants) != 2 {
-		t.Fatalf("got %d variants, want 2", len(p.Variants))
+		t.Fatalf("got %d variants, want web and thumb", len(p.Variants))
 	}
-
-	web, err := decodeVariant(p.Variants[0].Data)
-	if err != nil {
-		t.Fatalf("decoding web variant: %v", err)
-	}
-	if web.Bounds().Dx() != webMaxWidth {
-		t.Errorf("web width = %d, want %d", web.Bounds().Dx(), webMaxWidth)
-	}
-
-	thumb, err := decodeVariant(p.Variants[1].Data)
-	if err != nil {
-		t.Fatalf("decoding thumb variant: %v", err)
-	}
-	if thumb.Bounds().Dx() > thumbSize || thumb.Bounds().Dy() > thumbSize {
-		t.Errorf("thumb %v exceeds %dpx bound", thumb.Bounds(), thumbSize)
+	for _, v := range p.Variants {
+		if v.Name == "card" {
+			t.Error("a poster produced a card rendition")
+		}
 	}
 }
 

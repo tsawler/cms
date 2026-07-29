@@ -8,6 +8,7 @@ import (
 
 	"github.com/tsawler/cms/internal/dberr"
 	"github.com/tsawler/cms/internal/sqldb"
+	"github.com/tsawler/cms/media"
 )
 
 // Feed is which of the two post feeds a post belongs to. Blog and news are
@@ -32,13 +33,40 @@ func ValidFeed(s string) bool {
 // always prefixed with the feed name, e.g. "blog/launch-day".
 type Post struct {
 	Page
-	PostID       int64
-	Feed         Feed
-	PublishedAt  time.Time // display and ordering date, not a schedule
-	AuthorID     *int64
-	AuthorName   string // resolved from cms_users; "" when the author is gone
-	ThumbnailURL string // optional listing thumbnail
-	HeaderURL    string // optional header/banner image
+	PostID      int64
+	Feed        Feed
+	PublishedAt time.Time // display and ordering date, not a schedule
+	AuthorID    *int64
+	AuthorName  string // resolved from cms_users; "" when the author is gone
+
+	// A post's two images are each either a library image or a bare URL.
+	// The library is the normal case: the id is stored and the *MediaID
+	// and *Media fields are set, which lets the renderer pick the
+	// rendition that fits the slot and build a srcset from the rest.
+	// The URL fields carry images the library does not hold — an absolute
+	// URL elsewhere, or a path the host site serves itself — and are empty
+	// whenever an id is set.
+	ThumbnailMediaID *int64
+	ThumbnailURL     string       // optional listing thumbnail, when not from the library
+	Thumbnail        *media.Media // joined library record, nil when there is none
+	HeaderMediaID    *int64
+	HeaderURL        string // optional header/banner image, when not from the library
+	Header           *media.Media
+}
+
+// ThumbnailMediaIDValue returns the thumbnail's media id, or 0 when the
+// post has no library thumbnail — convenient in templates, where pointers
+// are awkward to compare.
+func (p *Post) ThumbnailMediaIDValue() int64 { return idValue(p.ThumbnailMediaID) }
+
+// HeaderMediaIDValue is ThumbnailMediaIDValue for the header image.
+func (p *Post) HeaderMediaIDValue() int64 { return idValue(p.HeaderMediaID) }
+
+func idValue(id *int64) int64 {
+	if id == nil {
+		return 0
+	}
+	return *id
 }
 
 // postColumns and postJoins take draft for the same reason pageColumns
@@ -47,7 +75,16 @@ type Post struct {
 func postColumns(draft bool) string {
 	return pageColumns(draft) + `,
 	po.id, po.feed, po.published_at, po.author_id, COALESCE(u.name, ''),
-	po.thumbnail_url, po.header_url`
+	po.thumbnail_url, po.header_url,` +
+		postMediaColumns("tm", "tma") + "," + postMediaColumns("hm", "hma")
+}
+
+// postMediaColumns lists one joined image's columns: everything
+// media.Manager needs to build its renditions, plus the alt text for the
+// render's locale. They are all NULL when the post has no such image.
+func postMediaColumns(item, meta string) string {
+	return item + `.id, ` + item + `.kind, ` + item + `.store_key, ` + item + `.ext, ` +
+		item + `.variant_ext, ` + item + `.width, ` + item + `.height, ` + meta + `.alt_text`
 }
 
 func postJoins(draft bool) string {
@@ -60,7 +97,11 @@ func postJoins(draft bool) string {
 	JOIN cms_pages p ON p.id = po.page_id
 	LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $1 AND m.status = '` + status + `'
 	LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $2 AND md.status = '` + status + `'
-	LEFT JOIN cms_users u ON u.id = po.author_id`
+	LEFT JOIN cms_users u ON u.id = po.author_id
+	LEFT JOIN cms_media tm ON tm.id = po.thumbnail_media_id
+	LEFT JOIN cms_media_meta tma ON tma.media_id = tm.id AND tma.locale = $1
+	LEFT JOIN cms_media hm ON hm.id = po.header_media_id
+	LEFT JOIN cms_media_meta hma ON hma.media_id = hm.id AND hma.locale = $1`
 	if draft {
 		j += `
 	LEFT JOIN cms_page_drafts d ON d.page_id = p.id`
@@ -68,18 +109,61 @@ func postJoins(draft bool) string {
 	return j
 }
 
+// joinedMedia receives the LEFT JOINed cms_media columns of one post
+// image. Every field is nullable because the join misses whenever the post
+// has no library image there.
+type joinedMedia struct {
+	id         sql.NullInt64
+	kind       sql.NullString
+	storeKey   sql.NullString
+	ext        sql.NullString
+	variantExt sql.NullString
+	width      sql.NullInt64
+	height     sql.NullInt64
+	alt        sql.NullString
+}
+
+func (j *joinedMedia) dest() []any {
+	return []any{&j.id, &j.kind, &j.storeKey, &j.ext, &j.variantExt, &j.width, &j.height, &j.alt}
+}
+
+// record rebuilds the media record the columns describe, and the id to
+// write back on the next save. Both are nil when the join missed.
+func (j *joinedMedia) record() (*int64, *media.Media) {
+	if !j.id.Valid {
+		return nil, nil
+	}
+	id := j.id.Int64
+	return &id, &media.Media{
+		ID:         id,
+		Kind:       media.Kind(j.kind.String),
+		StoreKey:   j.storeKey.String,
+		Ext:        j.ext.String,
+		VariantExt: j.variantExt.String,
+		Width:      int(j.width.Int64),
+		Height:     int(j.height.Int64),
+		Alt:        j.alt.String,
+	}
+}
+
 func scanPost(row sqldb.Scanner) (*Post, error) {
 	var p Post
-	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
+	var thumb, header joinedMedia
+	dest := []any{&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
 		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
-		&p.ThumbnailURL, &p.HeaderURL)
+		&p.ThumbnailURL, &p.HeaderURL}
+	dest = append(dest, thumb.dest()...)
+	dest = append(dest, header.dest()...)
+	err := row.Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	p.ThumbnailMediaID, p.Thumbnail = thumb.record()
+	p.HeaderMediaID, p.Header = header.record()
 	return &p, nil
 }
 
@@ -120,9 +204,11 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 		return 0, err
 	}
 	p.PostID, err = tx.InsertID(ctx, `
-		INSERT INTO cms_posts (page_id, feed, published_at, author_id, thumbnail_url, header_url)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		p.ID, p.Feed, p.PublishedAt, p.AuthorID, p.ThumbnailURL, p.HeaderURL)
+		INSERT INTO cms_posts (page_id, feed, published_at, author_id,
+			thumbnail_media_id, thumbnail_url, header_media_id, header_url)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.ID, p.Feed, p.PublishedAt, p.AuthorID,
+		p.ThumbnailMediaID, p.ThumbnailURL, p.HeaderMediaID, p.HeaderURL)
 	if err != nil {
 		return 0, err
 	}
@@ -174,9 +260,12 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE cms_posts
-		SET feed = $1, published_at = $2, thumbnail_url = $3, header_url = $4
-		WHERE id = $5`,
-		p.Feed, p.PublishedAt, p.ThumbnailURL, p.HeaderURL, p.PostID); err != nil {
+		SET feed = $1, published_at = $2,
+			thumbnail_media_id = $3, thumbnail_url = $4,
+			header_media_id = $5, header_url = $6
+		WHERE id = $7`,
+		p.Feed, p.PublishedAt, p.ThumbnailMediaID, p.ThumbnailURL,
+		p.HeaderMediaID, p.HeaderURL, p.PostID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

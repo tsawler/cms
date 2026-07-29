@@ -18,6 +18,16 @@ func (c *CMS) postsEnabled() bool {
 	return c.renderer != nil && c.cfg.PostTemplate.File != ""
 }
 
+// postImages resolves posts' library images into their renditions. Nil
+// when the deployment has no media library, which leaves posts showing
+// whatever URLs they stored.
+func (c *CMS) postImages() render.PostImages {
+	if c.media == nil {
+		return nil
+	}
+	return c.media.ImageFor
+}
+
 // postLister returns the {{cmsPosts}} data source for one render: the
 // public sees published posts only, editors also see drafts (flagged, so
 // listing templates can badge them). Nil when blog & news is disabled.
@@ -26,6 +36,7 @@ func (c *CMS) postLister(ctx context.Context, locale string, editing bool) rende
 		return nil
 	}
 	prefix := render.LocalePrefix(locale, c.cfg.Locales[0])
+	images := c.postImages()
 	return func(feed string, limit int) []render.PostInfo {
 		if !content.ValidFeed(feed) {
 			return nil
@@ -37,7 +48,7 @@ func (c *CMS) postLister(ctx context.Context, locale string, editing bool) rende
 		}
 		out := make([]render.PostInfo, 0, len(posts))
 		for i := range posts {
-			out = append(out, *render.PostInfoFor(&posts[i], prefix))
+			out = append(out, *render.PostInfoFor(&posts[i], prefix, images))
 		}
 		return out
 	}

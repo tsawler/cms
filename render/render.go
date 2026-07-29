@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/media"
 )
 
 // PageTemplate is one template the host application offers for pages. File
@@ -165,16 +166,31 @@ type PageData struct {
 // listing pages. Title and Summary are the backing page's title and
 // description for the render's locale.
 type PostInfo struct {
-	ID           int64  // post id, for the editor's settings API
-	Feed         string // "blog" or "news"
-	Title        string
-	Summary      string
-	URL          string // site-relative, e.g. "/blog/launch-day"
-	PublishedAt  time.Time
-	Author       string
-	ThumbnailURL string // "" when no thumbnail was chosen
-	HeaderURL    string // "" when no header image was chosen
-	Draft        bool   // only ever true on editor renders
+	ID          int64  // post id, for the editor's settings API
+	Feed        string // "blog" or "news"
+	Title       string
+	Summary     string
+	URL         string // site-relative, e.g. "/blog/launch-day"
+	PublishedAt time.Time
+	Author      string
+
+	// Thumbnail and Header are the post's images with every rendition
+	// resolved — src, srcset, and intrinsic size — and are nil when the
+	// post has none. Prefer them to the bare URLs: a listing card that
+	// uses .Thumbnail gets an image sized for a card, where .ThumbnailURL
+	// alone leaves the browser to download it and scale it down.
+	Thumbnail *media.Image
+	Header    *media.Image
+	// ThumbnailURL and HeaderURL are the same images' default src, for
+	// templates that want one string. "" when the post has no such image.
+	ThumbnailURL string
+	HeaderURL    string
+	// The library ids behind those images, 0 when the image is external or
+	// unset. The in-place editor's post-settings dialog round-trips them.
+	ThumbnailMediaID int64
+	HeaderMediaID    int64
+
+	Draft bool // only ever true on editor renders
 }
 
 // PostLister supplies a feed's posts, newest first, for {{cmsPosts}}. A
@@ -182,21 +198,54 @@ type PostInfo struct {
 // nothing).
 type PostLister func(feed string, limit int) []PostInfo
 
+// PostImages resolves a post's library image into the renditions a
+// template can use. prefer names the rendition wanted as the default src.
+// media.Manager.ImageFor is the implementation; nil (no media library
+// configured) leaves posts with whatever URLs they stored.
+type PostImages func(md *media.Media, prefer string) *media.Image
+
 // PostInfoFor builds the template-facing view of a stored post.
-// localePrefix ("" or e.g. "/fr", see LocalePrefix) localizes the URL.
-func PostInfoFor(p *content.Post, localePrefix string) *PostInfo {
-	return &PostInfo{
-		ID:           p.PostID,
-		Feed:         string(p.Feed),
-		Title:        p.Title,
-		Summary:      p.Description,
-		URL:          localePrefix + "/" + p.Slug,
-		PublishedAt:  p.PublishedAt,
-		Author:       p.AuthorName,
-		ThumbnailURL: p.ThumbnailURL,
-		HeaderURL:    p.HeaderURL,
-		Draft:        p.Status != content.StatusPublished,
+// localePrefix ("" or e.g. "/fr", see LocalePrefix) localizes the URL, and
+// images resolves the post's library images.
+func PostInfoFor(p *content.Post, localePrefix string, images PostImages) *PostInfo {
+	info := &PostInfo{
+		ID:               p.PostID,
+		Feed:             string(p.Feed),
+		Title:            p.Title,
+		Summary:          p.Description,
+		URL:              localePrefix + "/" + p.Slug,
+		PublishedAt:      p.PublishedAt,
+		Author:           p.AuthorName,
+		ThumbnailMediaID: p.ThumbnailMediaIDValue(),
+		HeaderMediaID:    p.HeaderMediaIDValue(),
+		Draft:            p.Status != content.StatusPublished,
 	}
+	// A listing card is a few hundred pixels wide and a header spans the
+	// page, so the two slots want different rungs of the ladder.
+	info.Thumbnail = postImage(p.Thumbnail, p.ThumbnailURL, "card", images)
+	info.Header = postImage(p.Header, p.HeaderURL, "web", images)
+	if info.Thumbnail != nil {
+		info.ThumbnailURL = info.Thumbnail.URL
+	}
+	if info.Header != nil {
+		info.HeaderURL = info.Header.URL
+	}
+	return info
+}
+
+// postImage resolves one of a post's images, falling back to a stored URL
+// for images the library does not hold — and for a library image the
+// caller gave no resolver for, which is a CMS running without media.
+func postImage(md *media.Media, fallbackURL, prefer string, images PostImages) *media.Image {
+	if md != nil && images != nil {
+		if img := images(md, prefer); img != nil {
+			return img
+		}
+	}
+	if fallbackURL == "" {
+		return nil
+	}
+	return &media.Image{URL: fallbackURL}
 }
 
 // stubFuncs lets templates parse before real, page-bound funcs are attached
@@ -773,12 +822,16 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	postJSON := ""
 	if edit.Post != nil {
 		b, err := json.Marshal(map[string]any{
-			"id":           edit.Post.ID,
-			"feed":         edit.Post.Feed,
-			"summary":      edit.Post.Summary,
-			"publishedAt":  edit.Post.PublishedAt.Local().Format("2006-01-02T15:04"),
-			"thumbnailUrl": edit.Post.ThumbnailURL,
-			"headerUrl":    edit.Post.HeaderURL,
+			"id":          edit.Post.ID,
+			"feed":        edit.Post.Feed,
+			"summary":     edit.Post.Summary,
+			"publishedAt": edit.Post.PublishedAt.Local().Format("2006-01-02T15:04"),
+			// Both forms of each image: the id is what a save writes back,
+			// the URL is what the dialog shows as a preview.
+			"thumbnailMediaId": edit.Post.ThumbnailMediaID,
+			"thumbnailUrl":     edit.Post.ThumbnailURL,
+			"headerMediaId":    edit.Post.HeaderMediaID,
+			"headerUrl":        edit.Post.HeaderURL,
 		})
 		if err == nil {
 			postJSON = string(b)

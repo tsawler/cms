@@ -725,7 +725,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		p, err := c.content.PostByPageID(r.Context(), page.ID, locale, editing)
 		switch {
 		case err == nil:
-			post = render.PostInfoFor(p, render.LocalePrefix(locale, c.cfg.Locales[0]))
+			post = render.PostInfoFor(p, render.LocalePrefix(locale, c.cfg.Locales[0]), c.postImages())
 		case !errors.Is(err, content.ErrNotFound):
 			c.cfg.Logger.Error("cms: loading post", "slug", slug, "err", err)
 		}
@@ -841,6 +841,19 @@ func (c *CMS) serveMedia(w http.ResponseWriter, r *http.Request) {
 	} else {
 		body, contentType, err = c.objects.Get(r.Context(), key)
 		length = -1
+		if errors.Is(err, media.ErrObjectNotFound) {
+			// A rendition this image predates — the ladder gained a rung
+			// after it was uploaded — or one lost from the bucket. Build it
+			// now and serve it; every later request is an ordinary hit.
+			switch rebuildErr := c.media.EnsureRendition(r.Context(), rest); {
+			case rebuildErr == nil:
+				body, contentType, err = c.objects.Get(r.Context(), key)
+			case errors.Is(rebuildErr, media.ErrNoRendition):
+				// Nothing to build: the 404 below is the right answer.
+			default:
+				c.cfg.Logger.Error("cms: rebuilding media rendition", "key", key, "err", rebuildErr)
+			}
+		}
 	}
 	if errors.Is(err, media.ErrObjectNotFound) {
 		http.NotFound(w, r)

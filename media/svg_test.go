@@ -23,10 +23,14 @@ func TestProcessSVGClean(t *testing.T) {
 	if p.Ext != ".svg" || p.VariantExt != ".svg" {
 		t.Errorf("ext = %q / %q, want .svg / .svg", p.Ext, p.VariantExt)
 	}
-	if len(p.Variants) != 2 {
-		t.Fatalf("got %d variants, want web and thumb", len(p.Variants))
+	// A vector answers every rung of the ladder with its own bytes.
+	if len(p.Variants) != len(imageVariants) {
+		t.Fatalf("got %d variants, want one per rung (%d)", len(p.Variants), len(imageVariants))
 	}
-	for _, v := range p.Variants {
+	for i, v := range p.Variants {
+		if v.Name != imageVariants[i].Name {
+			t.Errorf("variant %d is %q, want %q", i, v.Name, imageVariants[i].Name)
+		}
 		if string(v.Data) != cleanSVG {
 			t.Errorf("variant %s bytes differ from the original", v.Name)
 		}

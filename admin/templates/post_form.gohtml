@@ -73,39 +73,42 @@
     {{end}}{{end}}
 
     {{if .MediaEnabled}}
+    {{/* The pickers store the library id, not one image address: the site
+         then picks the size each slot needs when it renders the post. An
+         image that came from somewhere else has no id, so it keeps its
+         address through the "keep" option and the hidden field beside it. */}}
     <div class="cms-field">
-        <label for="thumbnail_url">{{.T "Thumbnail"}} <span class="cms-muted">{{.T "(optional — shown on listing cards)"}}</span></label>
-        {{with .FormPost.ThumbnailURL}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
-        <select id="thumbnail_url" name="thumbnail_url">
+        <label for="thumbnail_media_id">{{.T "Thumbnail"}} <span class="cms-muted">{{.T "(optional — shown on listing cards)"}}</span></label>
+        {{with .FormPostThumb}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
+        <select id="thumbnail_media_id" name="thumbnail_media_id">
             <option value="">{{.T "— no thumbnail —"}}</option>
-            {{$current := .FormPost.ThumbnailURL}}
-            {{if and $current (not ($.MediaContains $current))}}
-            <option value="{{$current}}" selected>{{.T "(current image)"}}</option>
+            {{$current := .FormPost.ThumbnailMediaIDValue}}
+            {{if and (not $current) .FormPost.ThumbnailURL}}
+            <option value="keep" selected>{{.T "(current image)"}}</option>
             {{end}}
             {{range .Media}}
-            <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
+            <option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
             {{end}}
         </select>
+        <input type="hidden" name="thumbnail_url" value="{{.FormPost.ThumbnailURL}}">
     </div>
 
     <div class="cms-field">
-        <label for="header_url">{{.T "Header image"}} <span class="cms-muted">{{.T "(optional — shown at the top of the post)"}}</span></label>
-        {{with .FormPost.HeaderURL}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
-        <select id="header_url" name="header_url">
+        <label for="header_media_id">{{.T "Header image"}} <span class="cms-muted">{{.T "(optional — shown at the top of the post)"}}</span></label>
+        {{with .FormPostHeader}}<img src="{{.}}" alt="" class="cms-image-current">{{end}}
+        <select id="header_media_id" name="header_media_id">
             <option value="">{{.T "— no header image —"}}</option>
-            {{$current := .FormPost.HeaderURL}}
-            {{if and $current (not ($.MediaContains $current))}}
-            <option value="{{$current}}" selected>{{.T "(current image)"}}</option>
+            {{$current := .FormPost.HeaderMediaIDValue}}
+            {{if and (not $current) .FormPost.HeaderURL}}
+            <option value="keep" selected>{{.T "(current image)"}}</option>
             {{end}}
             {{range .Media}}
-            <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
+            <option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
             {{end}}
         </select>
+        <input type="hidden" name="header_url" value="{{.FormPost.HeaderURL}}">
         <p class="cms-hint">{{.T "Choose from the"}} <a href="{{.AdminPath}}/media">{{.T "media library"}}</a>{{.T "; upload new images there first."}}</p>
     </div>
-    {{else}}
-    <input type="hidden" name="thumbnail_url" value="{{.FormPost.ThumbnailURL}}">
-    <input type="hidden" name="header_url" value="{{.FormPost.HeaderURL}}">
     {{end}}
     {{end}}
 

@@ -19,7 +19,7 @@ import (
 // bombs, non-xml processing instructions), and the media proxy serves
 // image/svg+xml with a script-blocking Content-Security-Policy as
 // defense in depth. Being vector graphics they need no raster variants —
-// the same bytes are stored as original, web, and thumb, so pickers and
+// the same bytes are stored under every rendition name, so pickers and
 // pages use them exactly like any other image.
 
 const svgContentType = "image/svg+xml"
@@ -85,16 +85,22 @@ func processSVG(data []byte) (*processed, error) {
 	if !rootSeen {
 		return nil, ErrUnsupportedType
 	}
-	return &processed{
+	p := &processed{
 		Width:      width,
 		Height:     height,
 		Ext:        ".svg",
 		VariantExt: ".svg",
-		Variants: []variant{
-			{Name: "web", Ext: ".svg", Mime: svgContentType, Data: data},
-			{Name: "thumb", Ext: ".svg", Mime: svgContentType, Data: data},
-		},
-	}, nil
+	}
+	// One rung per raster rendition, all the same bytes, so an SVG answers
+	// every URL the ladder can produce and pickers and pages use it exactly
+	// like any other image.
+	for _, spec := range imageVariants {
+		p.Variants = append(p.Variants, variant{
+			Name: spec.Name, Ext: ".svg", Mime: svgContentType,
+			Width: width, Height: height, Data: data,
+		})
+	}
+	return p, nil
 }
 
 // checkSVGToken rejects an element that can execute or embed active

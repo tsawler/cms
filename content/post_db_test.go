@@ -344,3 +344,117 @@ func TestPostDeletingPageDeletesPost(t *testing.T) {
 		}
 	})
 }
+
+// seedImage inserts a cms_media row directly — enough for the post joins to
+// have something to resolve, without standing up an object store.
+func seedImage(t *testing.T, db *sqldb.DB, storeKey, filename string, w, h int) int64 {
+	t.Helper()
+	ctx := context.Background()
+	id, err := db.InsertID(ctx, `
+		INSERT INTO cms_media (kind, store_key, filename, mime, ext, variant_ext, width, height, size, created_at)
+		VALUES ('image', $1, $2, 'image/jpeg', '.jpg', '.webp', $3, $4, 1024, now())`,
+		storeKey, filename, w, h)
+	if err != nil {
+		t.Fatalf("seeding media %q: %v", filename, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO cms_media_meta (media_id, locale, alt_text) VALUES ($1, $2, $3)`,
+		id, defaultLocale, "Alt for "+filename); err != nil {
+		t.Fatalf("seeding alt text: %v", err)
+	}
+	return id
+}
+
+// A post's images are library references, and reads join enough of the
+// media row for the renderer to build every rendition from it.
+func TestPostImagesJoinTheLibrary(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		thumbID := seedImage(t, db, "aaaaaaaaaaaaaaaaaaaaaaaa", "card.jpg", 2000, 1000)
+		headerID := seedImage(t, db, "bbbbbbbbbbbbbbbbbbbbbbbb", "banner.jpg", 3000, 1200)
+
+		post := seedPost(t, s, content.Post{
+			Page:             content.Page{Slug: "blog/with-images", Title: "With images"},
+			ThumbnailMediaID: &thumbID,
+			HeaderMediaID:    &headerID,
+		})
+
+		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if got.ThumbnailMediaIDValue() != thumbID || got.HeaderMediaIDValue() != headerID {
+			t.Fatalf("media ids = %d/%d, want %d/%d",
+				got.ThumbnailMediaIDValue(), got.HeaderMediaIDValue(), thumbID, headerID)
+		}
+		if got.Thumbnail == nil || got.Header == nil {
+			t.Fatal("the joined media records did not come back")
+		}
+		if got.Thumbnail.StoreKey != "aaaaaaaaaaaaaaaaaaaaaaaa" || got.Thumbnail.VariantExt != ".webp" {
+			t.Errorf("thumbnail joined %q/%q, want the seeded key and variant ext",
+				got.Thumbnail.StoreKey, got.Thumbnail.VariantExt)
+		}
+		if got.Thumbnail.Width != 2000 || got.Thumbnail.Height != 1000 {
+			t.Errorf("thumbnail dimensions = %dx%d, want 2000x1000",
+				got.Thumbnail.Width, got.Thumbnail.Height)
+		}
+		if got.Header.Alt != "Alt for banner.jpg" {
+			t.Errorf("header alt = %q, want the library's", got.Header.Alt)
+		}
+		// A listing read walks the same joins.
+		posts, err := s.Posts(ctx, content.FeedBlog, defaultLocale, false, 0)
+		if err != nil {
+			t.Fatalf("Posts: %v", err)
+		}
+		if len(posts) != 1 || posts[0].Thumbnail == nil {
+			t.Fatalf("listing did not join the thumbnail: %+v", posts)
+		}
+	})
+}
+
+// A post with no images at all still scans: the joins simply miss.
+func TestPostWithoutImages(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		post := seedPost(t, s, content.Post{
+			Page: content.Page{Slug: "blog/plain", Title: "Plain"},
+		})
+		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if got.Thumbnail != nil || got.Header != nil {
+			t.Error("a post with no images came back with joined media")
+		}
+		if got.ThumbnailMediaID != nil || got.HeaderMediaID != nil {
+			t.Error("a post with no images came back with media ids")
+		}
+	})
+}
+
+// Deleting a library image used to leave posts pointing at a dead URL. The
+// foreign key now clears the reference instead.
+func TestDeletingMediaClearsPostImages(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		id := seedImage(t, db, "cccccccccccccccccccccccc", "doomed.jpg", 800, 600)
+		post := seedPost(t, s, content.Post{
+			Page:             content.Page{Slug: "blog/doomed", Title: "Doomed"},
+			ThumbnailMediaID: &id,
+		})
+
+		if _, err := db.Exec(ctx, "DELETE FROM cms_media WHERE id = $1", id); err != nil {
+			t.Fatalf("deleting media: %v", err)
+		}
+		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if got.ThumbnailMediaID != nil || got.Thumbnail != nil {
+			t.Errorf("the post still references the deleted image: %v", got.ThumbnailMediaID)
+		}
+	})
+}
