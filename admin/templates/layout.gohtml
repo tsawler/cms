@@ -7,6 +7,7 @@
     <title>{{block "title" .}}CMS{{end}}</title>
     <link rel="stylesheet" href="{{.AdminPath}}/static/admin.css">
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
+    {{if .PageScript}}<script src="{{.AdminPath}}/static/{{.PageScript}}" defer></script>{{end}}
 </head>
 <body class="cms-admin{{if .User}} cms-has-sidebar{{end}}">
 {{if .User}}

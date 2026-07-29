@@ -8,6 +8,7 @@ import (
 
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 	"github.com/tsawler/cms/snippets"
 )
@@ -50,6 +51,36 @@ func TestTemplatesRenderInFrench(t *testing.T) {
 			}
 		}
 	}
+
+	// The media page renders one kind per tab, and its root and in-folder
+	// views differ — so walk every combination or most of the template is
+	// never executed.
+	folder := media.Folder{ID: 7, Name: "Field notes", Kind: media.KindImage, Count: 2}
+	data.Folders = []media.Folder{folder}
+	data.Media = []media.View{{Media: media.Media{ID: 1, Kind: media.KindImage, Filename: "hero.jpg", Ext: ".jpg", Width: 800, Height: 600}}}
+	data.Videos = []media.View{{Media: media.Media{ID: 2, Kind: media.KindVideo, Filename: "clip.mp4", Ext: ".mp4"}}}
+	data.Documents = []media.View{{Media: media.Media{ID: 3, Kind: media.KindFile, Filename: "terms.pdf", Ext: ".pdf"}}}
+	mediaTmpl := parseTemplates()["media"]
+	for _, tab := range []string{"images", "documents", "videos"} {
+		for _, inFolder := range []bool{false, true} {
+			data.MediaTab = tab
+			data.CurrentFolder = nil
+			if inFolder {
+				data.CurrentFolder = &folder
+			}
+			switch tab {
+			case "documents":
+				data.Entries = data.Documents
+			case "videos":
+				data.Entries = data.Videos
+			default:
+				data.Entries = data.Media
+			}
+			if err := mediaTmpl.ExecuteTemplate(io.Discard, "layout", data); err != nil {
+				t.Errorf("rendering media in French (%s tab, in folder=%v): %v", tab, inFolder, err)
+			}
+		}
+	}
 }
 
 func TestTReturnsKeyForEnglishAndUnknown(t *testing.T) {
@@ -81,6 +112,7 @@ func TestFrStringsWellFormed(t *testing.T) {
 	identical := map[string]bool{
 		"Pages": true, "Description": true, "Date": true, "Type": true,
 		"Documents": true, "Images": true, "admin": true, "superadmin": true,
+		"Destination": true,
 	}
 	for k, v := range frStrings {
 		if strings.TrimSpace(k) == "" {

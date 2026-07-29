@@ -853,8 +853,15 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filed, err := s.fileInto(r.Context(), md, folderID)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api media upload filing", "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "That file could not be processed."))
+		return
+	}
+
 	view := s.deps.Media.Views([]media.Media{*md})[0]
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "media": toMediaJSON(view)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "filed": filed, "media": toMediaJSON(view)})
 }
 
 // apiFoldersList returns media folders with item counts, filtered to one

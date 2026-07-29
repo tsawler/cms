@@ -273,6 +273,11 @@ type templateData struct {
 	Flash     string
 	Error     string // form-level error message
 
+	// PageScript names an extra script in static/ that this page needs
+	// (e.g. "media.js"), loaded after admin.js. Empty on pages whose
+	// behavior the shared admin.js already covers.
+	PageScript string
+
 	// AdminLang is the admin UI language for this request ("en" or "fr");
 	// templates translate their strings through T with it. LangToggle is
 	// the language the topbar toggle switches to — empty when the site has
@@ -324,7 +329,11 @@ type templateData struct {
 	Media        []media.View // images
 	Videos       []media.View
 	Documents    []media.View // files (PDFs, office docs, ...)
-	Folders      []media.Folder
+	// Entries is the active tab's bucket — what the listing actually
+	// renders. The three kind slices above stay populated so the tabs can
+	// show a count for each without a second query.
+	Entries []media.View
+	Folders []media.Folder
 	// CurrentFolder is the folder being browsed, nil at the root (which
 	// lists unfiled items and the folder tiles) and during a search.
 	CurrentFolder *media.Folder

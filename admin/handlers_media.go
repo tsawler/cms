@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -132,7 +133,16 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 			data.Media = append(data.Media, v)
 		}
 	}
+	switch kind {
+	case media.KindFile:
+		data.Entries = data.Documents
+	case media.KindVideo:
+		data.Entries = data.Videos
+	default:
+		data.Entries = data.Media
+	}
 	data.Folders = folders
+	data.PageScript = "media.js"
 	data.MediaQuery = query
 	data.MediaFolder = folderParam
 	data.MediaTab = tab
@@ -140,6 +150,37 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 	data.MaxVideoMB = s.deps.Media.MaxVideoBytes() >> 20
 	data.Error = formError
 	s.render(w, status, "media", data)
+}
+
+// fileInto files a freshly uploaded item into the folder it was aimed at,
+// undoing the filing when the folder holds a different kind. Folders belong
+// to exactly one kind, so a PDF dropped into an image folder would be
+// stored somewhere the Documents tab can never list it — dropping it back
+// to unfiled at least leaves it findable. Reports whether it stayed put.
+//
+// Uploading several files at once is what makes this reachable: one
+// destination, and a batch that need not be all of one kind.
+func (s *server) fileInto(ctx context.Context, md *media.Media, folderID *int64) (filed bool, err error) {
+	if folderID == nil {
+		return true, nil
+	}
+	folders, err := s.deps.Media.Folders(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, f := range folders {
+		if f.ID == *folderID {
+			if f.Kind == md.Kind {
+				return true, nil
+			}
+			break
+		}
+	}
+	if err := s.deps.Media.Move(ctx, md.ID, nil); err != nil {
+		return false, err
+	}
+	md.FolderID = nil
+	return false, nil
 }
 
 // backToMedia redirects to the referring media view, so the active tab
@@ -193,18 +234,24 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	filed, err := s.fileInto(r.Context(), md, folderID)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+
 	// Land on the tab that shows what was just uploaded.
-	tab := "images"
+	tab, msg := "images", "Image uploaded."
 	switch md.Kind {
 	case media.KindVideo:
-		s.flash(r, s.tr(r, "Video uploaded."))
-		tab = "videos"
+		tab, msg = "videos", "Video uploaded."
 	case media.KindFile:
-		s.flash(r, s.tr(r, "Document uploaded."))
-		tab = "documents"
-	default:
-		s.flash(r, s.tr(r, "Image uploaded."))
+		tab, msg = "documents", "Document uploaded."
 	}
+	if !filed {
+		msg = "Uploaded, but saved outside the folder — that folder holds a different kind of file."
+	}
+	s.flash(r, s.tr(r, msg))
 	http.Redirect(w, r, s.deps.AdminPath+"/media?tab="+tab, http.StatusSeeOther)
 }
 
