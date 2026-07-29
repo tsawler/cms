@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tsawler/cms/content"
@@ -76,7 +77,7 @@ func (c *CMS) serveFeed(w http.ResponseWriter, r *http.Request, feed content.Fee
 		return
 	}
 
-	base := siteBaseURL(r) + render.LocalePrefix(locale, c.cfg.Locales[0])
+	base := c.siteBaseURL(r) + render.LocalePrefix(locale, c.cfg.Locales[0])
 	ch := rssChannel{
 		Title: r.Host + " — " + string(feed),
 		Link:  base + "/" + string(feed),
@@ -111,12 +112,40 @@ func (c *CMS) serveFeed(w http.ResponseWriter, r *http.Request, feed content.Fee
 	}
 }
 
-// siteBaseURL derives the absolute-URL base for feed links from the
-// request, honoring a proxy's X-Forwarded-Proto.
-func siteBaseURL(r *http.Request) string {
+// siteBaseURL is the absolute base ("scheme://host", no trailing slash)
+// for links that have to work away from this request: feed items,
+// hreflang alternates, and the media library's copyable links.
+//
+// Config.SiteURL wins when the host set one — a proxy that rewrites Host,
+// or an admin reached by a different name than the public site, both make
+// the request a bad guess. Otherwise it comes from the request, honoring
+// a proxy's X-Forwarded-Proto.
+func (c *CMS) siteBaseURL(r *http.Request) string {
+	if c.cfg.SiteURL != "" {
+		return c.cfg.SiteURL
+	}
+	return requestBaseURL(r)
+}
+
+func requestBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+// normalizeSiteURL tidies a configured Config.SiteURL: no trailing slash,
+// and a bare host name ("example.com") is taken to mean https, since a
+// canonical public URL essentially always is.
+func normalizeSiteURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	u = strings.TrimRight(u, "/")
+	if !strings.Contains(u, "://") {
+		u = "https://" + u
+	}
+	return u
 }

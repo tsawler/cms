@@ -160,7 +160,10 @@
                            copy-to-clipboard button, and the shared handler
                            would treat a click anywhere on this entry as
                            one and overwrite it with "Copied!". */}}
-                    data-url="{{.WebURL}}"
+                    {{- /* Absolute: this is the value Copy link puts on
+                           the clipboard, and it has to work when pasted
+                           outside the site. */}}
+                    data-url="{{$.Abs .WebURL}}"
                     data-name="{{.Filename}}"
                     data-kind="{{.Kind}}"
                     data-ext="{{if .Ext}}{{slice .Ext 1}}{{end}}"

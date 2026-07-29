@@ -55,6 +55,13 @@ type Deps struct {
 	// direct package use) behaves sensibly.
 	RememberFor time.Duration
 
+	// SiteBaseURL returns the site's absolute public base
+	// ("scheme://host", no trailing slash) for the given request, so the
+	// admin can offer links that work when pasted somewhere else. Nil
+	// leaves such links site-relative, which is fine for tests and direct
+	// package use.
+	SiteBaseURL func(*http.Request) string
+
 	// ContentChanged, when set, is called (without waiting) after any
 	// mutation that can change which CSS classes stored content uses:
 	// region/section saves, publish/discard, page create/delete, and
@@ -283,6 +290,11 @@ type templateData struct {
 	// browsers rather than documents.
 	PageWide bool
 
+	// SiteBase is the site's absolute public base for this request; see
+	// Abs. Empty when Deps.SiteBaseURL is unset, which leaves links
+	// site-relative.
+	SiteBase string
+
 	// AdminLang is the admin UI language for this request ("en" or "fr");
 	// templates translate their strings through T with it. LangToggle is
 	// the language the topbar toggle switches to — empty when the site has
@@ -369,6 +381,24 @@ type templateData struct {
 	NavCurrent string
 }
 
+// Abs makes a site-relative URL absolute against the site's public base,
+// for links meant to be pasted somewhere else — "Copy link" produces
+// something that works in an email, not just in this tab.
+//
+// URLs that are already absolute come back untouched: with an S3
+// PublicBaseURL or a public bucket, media already lives on its own
+// domain, and prefixing that would only break it.
+func (td templateData) Abs(u string) string {
+	if u == "" || td.SiteBase == "" ||
+		strings.Contains(u, "://") || strings.HasPrefix(u, "//") {
+		return u
+	}
+	if !strings.HasPrefix(u, "/") {
+		return td.SiteBase + "/" + u
+	}
+	return td.SiteBase + u
+}
+
 // navLink is one host-registered section's entry in the admin sidebar.
 type navLink struct {
 	URL    string
@@ -409,6 +439,9 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		MediaEnabled: s.deps.Media != nil,
 		Locales:      s.deps.Locales,
 		EditLocale:   s.deps.DefaultLocale,
+	}
+	if s.deps.SiteBaseURL != nil {
+		td.SiteBase = s.deps.SiteBaseURL(r)
 	}
 	hours := int(s.deps.RememberFor.Round(time.Hour) / time.Hour)
 	if hours >= 48 && hours%24 == 0 {

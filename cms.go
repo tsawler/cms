@@ -127,6 +127,21 @@ type Config struct {
 	// under, used when the admin UI generates links. Defaults to "/admin".
 	AdminPath string
 
+	// SiteURL is the site's canonical public base URL, e.g.
+	// "https://example.com" — scheme and host, no trailing slash and no
+	// path. It is what the CMS uses wherever a link has to work outside
+	// this request: the media library's "Copy link" buttons, RSS feed
+	// links, and hreflang alternates.
+	//
+	// Optional. When empty each request's own scheme and Host header are
+	// used instead, which is right for development and for a site served
+	// under one name. Set it when that guess would be wrong — behind a
+	// proxy that rewrites Host, or when the admin is reached by a
+	// different name than the public site.
+	//
+	// A value with no scheme is assumed to be https.
+	SiteURL string
+
 	// SessionLifetime is how long a login session lasts. Defaults to 24h.
 	SessionLifetime time.Duration
 
@@ -300,6 +315,7 @@ func New(cfg Config) (*CMS, error) {
 		cfg.AdminPath = "/admin"
 	}
 	cfg.AdminPath = "/" + strings.Trim(cfg.AdminPath, "/")
+	cfg.SiteURL = normalizeSiteURL(cfg.SiteURL)
 	if cfg.SessionLifetime <= 0 {
 		cfg.SessionLifetime = 24 * time.Hour
 	}
@@ -419,6 +435,7 @@ func New(cfg Config) (*CMS, error) {
 		Sections:       cfg.AdminSections,
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
+		SiteBaseURL:    c.siteBaseURL,
 		DefaultLocale:  cfg.Locales[0],
 		Locales:        cfg.Locales,
 		RememberFor:    cfg.RememberFor,
@@ -760,7 +777,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		Post:      post,
 		Posts:     c.postLister(r.Context(), locale, editing),
 		Locales:   c.cfg.Locales,
-		BaseURL:   siteBaseURL(r),
+		BaseURL:   c.siteBaseURL(r),
 		Site:      site,
 		AdminPath: c.cfg.AdminPath,
 	}); err != nil {

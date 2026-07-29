@@ -827,6 +827,7 @@ Every variable it reads:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
 | `S3_ENDPOINT` | unset (media library disabled) | S3-compatible endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
 | `S3_BUCKET` | — | Bucket for uploaded media. |

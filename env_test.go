@@ -1,6 +1,9 @@
 package cms
 
 import (
+	tls13 "crypto/tls"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,7 @@ var envVars = []string{
 	"CAP_URL", "CAP_INTERNAL_URL", "CAP_SITE_KEY", "CAP_SECRET", "CAP_WIDGET",
 	"CMS_REMEMBER_DAYS", "CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
+	"CMS_SITE_URL",
 }
 
 func clearEnv(t *testing.T) {
@@ -149,6 +153,87 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 		t.Setenv("CMS_REMEMBER_DAYS", bad)
 		if _, err := ConfigFromEnv(); err == nil {
 			t.Errorf("CMS_REMEMBER_DAYS=%q: expected an error, got nil", bad)
+		}
+	}
+}
+
+func TestConfigFromEnvSiteURL(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("CMS_SITE_URL", "https://example.com")
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	if cfg.SiteURL != "https://example.com" {
+		t.Errorf("SiteURL = %q, want https://example.com", cfg.SiteURL)
+	}
+
+	clearEnv(t)
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	if cfg.SiteURL != "" {
+		t.Errorf("unset CMS_SITE_URL: SiteURL = %q, want empty", cfg.SiteURL)
+	}
+}
+
+func TestNormalizeSiteURL(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"  ", ""},
+		{"https://example.com", "https://example.com"},
+		{"https://example.com/", "https://example.com"},
+		{"https://example.com///", "https://example.com"},
+		{"  https://example.com  ", "https://example.com"},
+		{"http://localhost:4000", "http://localhost:4000"},
+		// A bare host is what people reach for when asked for a server
+		// name, and a canonical public URL is essentially always https.
+		{"example.com", "https://example.com"},
+		{"example.com/", "https://example.com"},
+	} {
+		if got := normalizeSiteURL(c.in); got != c.want {
+			t.Errorf("normalizeSiteURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSiteBaseURL(t *testing.T) {
+	req := func(tls bool, proto string) *http.Request {
+		r := httptest.NewRequest("GET", "http://site.test/x", nil)
+		r.Host = "site.test"
+		if tls {
+			r.TLS = &tls13.ConnectionState{}
+		}
+		if proto != "" {
+			r.Header.Set("X-Forwarded-Proto", proto)
+		}
+		return r
+	}
+
+	configured := &CMS{cfg: Config{SiteURL: "https://canonical.example"}}
+	if got := configured.siteBaseURL(req(false, "")); got != "https://canonical.example" {
+		t.Errorf("configured SiteURL should win, got %q", got)
+	}
+	// Even when the request looks nothing like it — that is the point of
+	// configuring one.
+	if got := configured.siteBaseURL(req(true, "https")); got != "https://canonical.example" {
+		t.Errorf("configured SiteURL should win over the request, got %q", got)
+	}
+
+	derived := &CMS{cfg: Config{}}
+	for _, c := range []struct {
+		name  string
+		tls   bool
+		proto string
+		want  string
+	}{
+		{"plain", false, "", "http://site.test"},
+		{"tls", true, "", "https://site.test"},
+		{"behind a proxy", false, "https", "https://site.test"},
+	} {
+		if got := derived.siteBaseURL(req(c.tls, c.proto)); got != c.want {
+			t.Errorf("%s: siteBaseURL = %q, want %q", c.name, got, c.want)
 		}
 	}
 }

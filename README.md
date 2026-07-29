@@ -970,8 +970,8 @@ own stylesheet defines.
 The example loads variables from a `.env` file — `examples/basic/.env`
 first, falling back to one at the repo root — without overriding
 anything already set in the real environment. The `CMS_TAILWIND_*`,
-`S3_*`, and `CAP_*` variables plus `CMS_REMEMBER_DAYS` and the two
-`CMS_MEDIA_*` knobs are read by `cms.ConfigFromEnv`, which any host can
+`S3_*`, and `CAP_*` variables plus `CMS_SITE_URL`, `CMS_REMEMBER_DAYS`
+and the two `CMS_MEDIA_*` knobs are read by `cms.ConfigFromEnv`, which any host can
 use to fill those `Config` fields; the rest are the example's own.
 Everything read:
 
@@ -983,6 +983,7 @@ Everything read:
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
+| `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
 | `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |

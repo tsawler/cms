@@ -14,6 +14,9 @@ import (
 
 // ConfigFromEnv returns a Config populated from the environment:
 //
+//   - CMS_SITE_URL → SiteURL, the site's canonical public address
+//     ("https://example.com"). Leave it unset in development, where each
+//     request's own host is right.
 //   - S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET,
 //     S3_KEY_PREFIX, S3_APPLY_PUBLIC_POLICY (=1) → S3. Setting
 //     S3_ENDPOINT enables the media library.
@@ -43,6 +46,10 @@ import (
 //	c, err := cms.New(cfg)
 func ConfigFromEnv() (Config, error) {
 	var cfg Config
+
+	// The site's public address, for links that have to work off the page.
+	// Leave it unset in development, where the request's host is right.
+	cfg.SiteURL = os.Getenv("CMS_SITE_URL")
 
 	if endpoint := os.Getenv("S3_ENDPOINT"); endpoint != "" {
 		cfg.S3 = &S3Config{
