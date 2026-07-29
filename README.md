@@ -12,7 +12,8 @@ Runs on **PostgreSQL**, **MySQL 8.0.31+**, and **MariaDB 10.6+** — see
 draft/publish, public rendering through the host's own templates, the
 media library (any S3-compatible bucket, automatic image resizing,
 SVG with script-stripping validation, MP4/WebM video, folders and
-search), in-place editing (TinyMCE 6 — the last MIT release, vendored and
+search, and a self-describing bucket an empty database can rebuild
+itself from), in-place editing (TinyMCE 6 — the last MIT release, vendored and
 self-hosted), the curated Styles menu, the snippet palette, editor-composable
 sections, blog & news posts (page-backed, edited in place, with RSS), and
 multilingual content (per-locale metadata and blocks, with field-level
@@ -984,6 +985,7 @@ Everything read:
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
+| `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |
 | `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: a space-separated argv with `{content}` and `{output}` placeholders (see [Generated CSS for content classes](#generated-css-for-content-classes-optional) and `tailwind-content.sh`). |
 | `CMS_TAILWIND_DIR` | unset | Working directory for `CMS_TAILWIND_COMMAND`. |
 | `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
@@ -991,7 +993,7 @@ Everything read:
 | `S3_ACCESS_KEY` | — | Object-store access key. |
 | `S3_SECRET` | — | Object-store secret key. |
 | `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
-| `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. |
+| `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. It also scopes media adoption and the public-read policy, so set it whenever the bucket is shared. |
 | `S3_APPLY_PUBLIC_POLICY` | unset | Set to `1` to apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). |
 | `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA and makes the other `CAP_*` variables relevant. |
 | `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |

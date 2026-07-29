@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
@@ -54,18 +55,50 @@ func (s *memStore) Delete(_ context.Context, key string) error {
 
 func (s *memStore) PublicURL(key string) string { return "/" + key }
 
+// List makes memStore a Lister, so restore tests exercise the real adoption
+// path.
+func (s *memStore) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []ObjectInfo
+	for key, data := range s.objects {
+		if strings.HasPrefix(key, prefix) {
+			out = append(out, ObjectInfo{Key: key, Size: int64(len(data))})
+		}
+	}
+	return out, nil
+}
+
+// keys returns every stored key with the given prefix, for assertions.
+func (s *memStore) keys(prefix string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for key := range s.objects {
+		if strings.HasPrefix(key, prefix) {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
 func (s *memStore) len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.objects)
 }
 
+// newTestLogger returns a logger that discards, since these tests assert on
+// state rather than output.
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 // newTestManager returns a Manager backed by db and a fresh in-memory object
 // store, plus the store so tests can assert on what was written.
 func newTestManager(db *sqldb.DB) (*Manager, *memStore) {
 	objects := newMemStore()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewManager(db, objects, logger), objects
+	return NewManager(db, objects, newTestLogger()), objects
 }
 
 func TestMediaUploadAndGet(t *testing.T) {
@@ -101,8 +134,13 @@ func TestMediaUploadAndGet(t *testing.T) {
 		if got.Filename != "photo.png" {
 			t.Errorf("filename = %q, want %q", got.Filename, "photo.png")
 		}
-		if got.S3Key != md.S3Key {
-			t.Errorf("s3_key = %q, want %q", got.S3Key, md.S3Key)
+		if got.StoreKey != md.StoreKey {
+			t.Errorf("store_key = %q, want %q", got.StoreKey, md.StoreKey)
+		}
+		// Store keys are relative to the media root: nothing in the
+		// database embeds "media/" or the deployment prefix.
+		if strings.HasPrefix(got.StoreKey, "media/") {
+			t.Errorf("store_key = %q, want a key relative to the media root", got.StoreKey)
 		}
 		if got.Size != int64(len(png)) {
 			t.Errorf("size = %d, want %d", got.Size, len(png))

@@ -54,6 +54,22 @@ type PageTemplate = render.PageTemplate
 // media.S3Config.
 type S3Config = media.S3Config
 
+// MediaAdoptMode controls rebuilding the media library from the object
+// store; see media.AdoptMode and Config.MediaAdopt.
+type MediaAdoptMode = media.AdoptMode
+
+// Media adoption modes, aliasing the media package's; see Config.MediaAdopt.
+const (
+	// MediaAdoptWhenEmpty rebuilds the library from the bucket when the
+	// database holds no media. It is the zero value, and so the default.
+	MediaAdoptWhenEmpty = media.AdoptWhenEmpty
+	// MediaAdoptOff never reads the bucket's manifests.
+	MediaAdoptOff = media.AdoptOff
+	// MediaAdoptReconcile adopts anything the database is missing on every
+	// startup, not only the first.
+	MediaAdoptReconcile = media.AdoptReconcile
+)
+
 // EditorStyle is one entry in the in-place editor's Styles menu; see
 // render.EditorStyle.
 type EditorStyle = render.EditorStyle
@@ -172,6 +188,23 @@ type Config struct {
 	// uploaded (no transcoding), so the practical ceiling is what
 	// visitors' connections can stream.
 	MediaMaxVideoMB int
+
+	// MediaAdopt controls whether Migrate rebuilds the media library from
+	// the bucket. Every upload writes a manifest describing it, so a
+	// bucket carries everything needed to recreate the cms_media rows —
+	// filenames, alt text, folders, dimensions and all.
+	//
+	// The zero value, MediaAdoptWhenEmpty, adopts a bucket's media when
+	// the database has none: point a fresh deployment at a bucket that
+	// already holds content and the library comes back. That is the case
+	// worth having for disaster recovery, and for a staging environment
+	// pointed at a copy of production's bucket. Set MediaAdoptReconcile to
+	// check on every startup instead, or MediaAdoptOff to never look.
+	//
+	// Adoption only ever inserts. It will not delete rows whose objects
+	// have gone, because every way listing a bucket can fail looks exactly
+	// like that.
+	MediaAdopt MediaAdoptMode
 
 	// EditorStyles populates the in-place editor's Styles menu — named,
 	// on-brand text styles that apply CSS classes. Nil gets the
@@ -393,11 +426,15 @@ func New(cfg Config) (*CMS, error) {
 	return c, nil
 }
 
-// Migrate creates or upgrades the CMS's database schema, and performs any
-// configured one-time object-store setup (S3Config.ApplyPublicReadPolicy).
+// Migrate creates or upgrades the CMS's database schema, performs any
+// configured one-time object-store setup (S3Config.ApplyPublicReadPolicy),
+// and rebuilds the media library from the bucket when Config.MediaAdopt
+// calls for it.
+//
 // It is safe to call on every startup and safe to call from multiple
-// instances concurrently: a Postgres advisory lock serializes the schema
-// work, and the bucket policy is idempotent.
+// instances concurrently: advisory locks serialize the schema work and the
+// adoption, the bucket policy is idempotent, and adoption skips media the
+// database already has.
 func (c *CMS) Migrate(ctx context.Context) error {
 	if err := migrations.Run(ctx, c.db, c.cfg.Logger); err != nil {
 		return err
@@ -410,6 +447,17 @@ func (c *CMS) Migrate(ctx context.Context) error {
 				return err
 			}
 			c.cfg.Logger.Info("cms: applied public-read bucket policy", "bucket", c.cfg.S3.Bucket)
+		}
+	}
+	if c.media != nil {
+		res, err := c.media.Restore(ctx, c.cfg.MediaAdopt)
+		if err != nil {
+			return err
+		}
+		if res.DidWork() {
+			c.cfg.Logger.Info("cms: adopted media from the object store",
+				"items", res.Adopted, "folders", res.Folders, "already_present", res.Skipped,
+				"missing_objects", res.Orphaned, "failed", res.Failed)
 		}
 	}
 	return nil

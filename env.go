@@ -23,6 +23,10 @@ import (
 //   - CMS_REMEMBER_DAYS → RememberFor, in days.
 //   - CMS_MEDIA_WEBP_QUALITY → MediaWebPQuality.
 //   - CMS_MEDIA_MAX_VIDEO_MB → MediaMaxVideoMB.
+//   - CMS_MEDIA_ADOPT (when-empty | off | reconcile) → MediaAdopt, which
+//     decides whether a bucket that already holds media is adopted into an
+//     empty database. Setting S3_KEY_PREFIX is what makes that safe on a
+//     bucket shared with other sites.
 //   - CMS_TAILWIND_COMMAND (a space-separated argv with {content} and
 //     {output} placeholders), CMS_TAILWIND_DIR → Tailwind.
 //
@@ -84,6 +88,19 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("cms: CMS_MEDIA_MAX_VIDEO_MB %q is not a number: %w", v, err)
 		}
 		cfg.MediaMaxVideoMB = n
+	}
+
+	if v := os.Getenv("CMS_MEDIA_ADOPT"); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "when-empty":
+			cfg.MediaAdopt = MediaAdoptWhenEmpty
+		case "off":
+			cfg.MediaAdopt = MediaAdoptOff
+		case "reconcile":
+			cfg.MediaAdopt = MediaAdoptReconcile
+		default:
+			return Config{}, fmt.Errorf("cms: CMS_MEDIA_ADOPT %q is not one of when-empty, off, reconcile", v)
+		}
 	}
 
 	if cmd := os.Getenv("CMS_TAILWIND_COMMAND"); cmd != "" {

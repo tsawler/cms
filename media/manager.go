@@ -31,9 +31,17 @@ const (
 // Media is one uploaded image, video, or document. Alt is the alt text for
 // the locale it was loaded with (images only).
 type Media struct {
-	ID         int64
-	Kind       Kind
-	S3Key      string // images/videos: key prefix (objects at S3Key/original.<ext> etc.); files: the full object key
+	ID   int64
+	Kind Kind
+	// StoreKey locates the item's objects *relative to the media root*, so
+	// it embeds neither "media/" nor the deployment's S3Config.KeyPrefix:
+	// images and videos store the bare item id (their objects live at
+	// StoreKey+"/original.<ext>" under the root), files store
+	// "<id>/<name>.<ext>", the object itself. Manager.abs composes the
+	// absolute key. Keeping the root out of the database is what lets a
+	// deployment change its KeyPrefix, and what lets a bucket be adopted
+	// into a deployment that uses a different one.
+	StoreKey   string
 	Filename   string
 	Mime       string
 	Ext        string
@@ -56,6 +64,16 @@ func (md Media) FolderIDValue() int64 {
 	return *md.FolderID
 }
 
+// ItemID returns the opaque per-upload id every object of this item lives
+// under — StoreKey for images and videos, its leading path segment for
+// files. It names the item's manifest.
+func (md Media) ItemID() string {
+	if i := strings.IndexByte(md.StoreKey, '/'); i >= 0 {
+		return md.StoreKey[:i]
+	}
+	return md.StoreKey
+}
+
 // ErrNotFound is returned when no media matches the query.
 var ErrNotFound = errors.New("media: not found")
 
@@ -64,6 +82,7 @@ type Manager struct {
 	db            *sqldb.DB
 	objects       ObjectStore
 	keyRoot       string
+	manifestRoot  string
 	webpQuality   float64
 	maxVideoBytes int64
 	logger        *slog.Logger
@@ -77,7 +96,8 @@ func NewManager(db *sqldb.DB, objects ObjectStore, logger *slog.Logger) *Manager
 	if kp, ok := objects.(KeyPrefixer); ok {
 		prefix = kp.KeyPrefix()
 	}
-	return &Manager{db: db, objects: objects, keyRoot: keyRoot(prefix),
+	return &Manager{db: db, objects: objects,
+		keyRoot: keyRoot(prefix), manifestRoot: manifestRoot(prefix),
 		webpQuality: DefaultWebPQuality, maxVideoBytes: DefaultMaxVideoBytes, logger: logger}
 }
 
@@ -108,6 +128,13 @@ func (m *Manager) MaxVideoBytes() int64 {
 // prefix.
 func (m *Manager) KeyRoot() string {
 	return m.keyRoot
+}
+
+// abs turns a Media.StoreKey-relative path into the absolute bucket key.
+// Every call into the ObjectStore goes through it, which is what keeps the
+// deployment prefix out of the database.
+func (m *Manager) abs(relative string) string {
+	return m.keyRoot + relative
 }
 
 // Upload validates and stores a buffered upload, returning its record. It
@@ -145,18 +172,20 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 	if _, err := rand.Read(buf); err != nil {
 		return nil, err
 	}
-	prefix := m.keyRoot + hex.EncodeToString(buf)
+	// The item id, and so every key below, is relative to the media root.
+	itemID := hex.EncodeToString(buf)
 
 	stored := []string{}
 	cleanup := func() {
 		for _, key := range stored {
-			if err := m.objects.Delete(context.WithoutCancel(ctx), key); err != nil {
+			if err := m.objects.Delete(context.WithoutCancel(ctx), m.abs(key)); err != nil {
 				m.logger.Error("cms media: cleaning up after failed upload", "key", key, "err", err)
 			}
 		}
 	}
+	// put takes a root-relative key, matching what lands in the database.
 	put := func(key, contentType string, body io.Reader) error {
-		if err := m.objects.Put(ctx, key, contentType, body); err != nil {
+		if err := m.objects.Put(ctx, m.abs(key), contentType, body); err != nil {
 			cleanup()
 			return err
 		}
@@ -178,7 +207,7 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 			return nil, ErrTooLarge
 		}
 		md.Kind = KindVideo
-		md.S3Key = prefix
+		md.StoreKey = itemID
 		md.Mime = contentType
 		md.Ext = ext
 
@@ -192,13 +221,13 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 				md.VariantExt = p.VariantExt
 				md.Width, md.Height = p.Width, p.Height
 				for _, v := range p.Variants {
-					if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
+					if err := put(itemID+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
 						return nil, err
 					}
 				}
 			}
 		}
-		if err := put(prefix+"/original"+ext, contentType, src); err != nil {
+		if err := put(itemID+"/original"+ext, contentType, src); err != nil {
 			return nil, err
 		}
 	} else if isSVGFilename(filename) {
@@ -216,17 +245,17 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 			return nil, err
 		}
 		md.Kind = KindImage
-		md.S3Key = prefix
+		md.StoreKey = itemID
 		md.Mime = svgContentType
 		md.Ext = p.Ext
 		md.VariantExt = p.VariantExt
 		md.Width, md.Height = p.Width, p.Height
 
-		if err := put(prefix+"/original"+p.Ext, svgContentType, bytes.NewReader(data)); err != nil {
+		if err := put(itemID+"/original"+p.Ext, svgContentType, bytes.NewReader(data)); err != nil {
 			return nil, err
 		}
 		for _, v := range p.Variants {
-			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
+			if err := put(itemID+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
 				return nil, err
 			}
 		}
@@ -243,17 +272,17 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 			return nil, err
 		}
 		md.Kind = KindImage
-		md.S3Key = prefix
+		md.StoreKey = itemID
 		md.Mime = sniffed
 		md.Ext = p.Ext
 		md.VariantExt = p.VariantExt
 		md.Width, md.Height = p.Width, p.Height
 
-		if err := put(prefix+"/original"+p.Ext, sniffed, bytes.NewReader(data)); err != nil {
+		if err := put(itemID+"/original"+p.Ext, sniffed, bytes.NewReader(data)); err != nil {
 			return nil, err
 		}
 		for _, v := range p.Variants {
-			if err := put(prefix+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
+			if err := put(itemID+"/"+v.Name+v.Ext, v.Mime, bytes.NewReader(v.Data)); err != nil {
 				return nil, err
 			}
 		}
@@ -270,11 +299,11 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 			return nil, err
 		}
 		md.Kind = KindFile
-		md.S3Key = prefix + "/" + safeObjectName(filename, ext)
+		md.StoreKey = itemID + "/" + safeObjectName(filename, ext)
 		md.Mime = contentType
 		md.Ext = ext
 
-		if err := put(md.S3Key, contentType, bytes.NewReader(data)); err != nil {
+		if err := put(md.StoreKey, contentType, bytes.NewReader(data)); err != nil {
 			return nil, err
 		}
 	}
@@ -297,22 +326,27 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 	// any row written outside this path.
 	md.CreatedAt = time.Now().UTC()
 	md.ID, err = m.db.InsertID(ctx, `
-		INSERT INTO cms_media (kind, s3_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by, created_at)
+		INSERT INTO cms_media (kind, store_key, filename, mime, ext, variant_ext, width, height, size, folder_id, uploaded_by, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		md.Kind, md.S3Key, md.Filename, md.Mime, md.Ext, md.VariantExt, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy, md.CreatedAt)
+		md.Kind, md.StoreKey, md.Filename, md.Mime, md.Ext, md.VariantExt, md.Width, md.Height, md.Size, md.FolderID, md.UploadedBy, md.CreatedAt)
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
+
+	// Written last: a crash before this leaves objects nobody references,
+	// which is invisible and cheap to sweep, where a manifest without its
+	// objects would be a broken item on the next restore.
+	m.syncManifest(ctx, md.ID)
 	return md, nil
 }
 
-const mediaColumns = `m.id, m.kind, m.s3_key, m.filename, m.mime, m.ext, m.variant_ext, m.width, m.height, m.size,
+const mediaColumns = `m.id, m.kind, m.store_key, m.filename, m.mime, m.ext, m.variant_ext, m.width, m.height, m.size,
 	m.folder_id, m.uploaded_by, m.created_at, COALESCE(t.alt_text, '')`
 
 func scanMedia(row sqldb.Scanner) (*Media, error) {
 	var md Media
-	err := row.Scan(&md.ID, &md.Kind, &md.S3Key, &md.Filename, &md.Mime, &md.Ext, &md.VariantExt, &md.Width, &md.Height,
+	err := row.Scan(&md.ID, &md.Kind, &md.StoreKey, &md.Filename, &md.Mime, &md.Ext, &md.VariantExt, &md.Width, &md.Height,
 		&md.Size, &md.FolderID, &md.UploadedBy, &md.CreatedAt, &md.Alt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -402,15 +436,25 @@ func (m *Manager) UpdateAlt(ctx context.Context, id int64, locale, alt string) e
 		VALUES ($1, $2, $3)
 		ON CONFLICT (media_id, locale) DO UPDATE SET alt_text = EXCLUDED.alt_text`,
 		id, locale, alt)
-	return err
+	if err != nil {
+		return err
+	}
+	m.syncManifest(ctx, id)
+	return nil
 }
 
-// Delete removes a media record and its bucket objects. Pages that still
-// reference the image keep its (now dead) URL; the admin UI warns about
-// this before deleting.
+// Delete removes a media record, its manifest, and its bucket objects.
+// Pages that still reference the image keep its (now dead) URL; the admin UI
+// warns about this before deleting.
 func (m *Manager) Delete(ctx context.Context, id int64, locale string) error {
 	md, err := m.GetByID(ctx, id, locale)
 	if err != nil {
+		return err
+	}
+	// The manifest goes first, and unlike the binaries a failure here stops
+	// the delete: a manifest that outlives its row would resurrect the item
+	// on the next restore, which is worse than a delete the user retries.
+	if err := m.deleteManifest(ctx, md.ItemID()); err != nil {
 		return err
 	}
 	for _, key := range m.objectKeys(md) {
@@ -422,15 +466,17 @@ func (m *Manager) Delete(ctx context.Context, id int64, locale string) error {
 	return err
 }
 
+// objectKeys returns the absolute bucket keys of every object belonging to
+// md, ready to hand to the ObjectStore.
 func (m *Manager) objectKeys(md *Media) []string {
 	if md.Kind == KindFile {
-		return []string{md.S3Key}
+		return []string{m.abs(md.StoreKey)}
 	}
-	keys := []string{md.S3Key + "/original" + md.Ext}
+	keys := []string{m.abs(md.StoreKey + "/original" + md.Ext)}
 	if md.VariantExt != "" {
 		keys = append(keys,
-			md.S3Key+"/web"+md.VariantExt,
-			md.S3Key+"/thumb"+md.VariantExt)
+			m.abs(md.StoreKey+"/web"+md.VariantExt),
+			m.abs(md.StoreKey+"/thumb"+md.VariantExt))
 	}
 	return keys
 }
@@ -442,7 +488,7 @@ func (m *Manager) objectKeys(md *Media) []string {
 func (m *Manager) URL(md *Media, rendition string) string {
 	switch md.Kind {
 	case KindFile:
-		return m.objects.PublicURL(md.S3Key)
+		return m.objects.PublicURL(m.abs(md.StoreKey))
 	case KindVideo:
 		switch rendition {
 		case "poster", "thumb":
@@ -455,18 +501,18 @@ func (m *Manager) URL(md *Media, rendition string) string {
 			if rendition == "thumb" {
 				name = "thumb"
 			}
-			return m.objects.PublicURL(md.S3Key + "/" + name + md.VariantExt)
+			return m.objects.PublicURL(m.abs(md.StoreKey + "/" + name + md.VariantExt))
 		default:
-			return m.objects.PublicURL(md.S3Key + "/original" + md.Ext)
+			return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
 		}
 	}
 	switch rendition {
 	case "web":
-		return m.objects.PublicURL(md.S3Key + "/web" + md.VariantExt)
+		return m.objects.PublicURL(m.abs(md.StoreKey + "/web" + md.VariantExt))
 	case "thumb":
-		return m.objects.PublicURL(md.S3Key + "/thumb" + md.VariantExt)
+		return m.objects.PublicURL(m.abs(md.StoreKey + "/thumb" + md.VariantExt))
 	default:
-		return m.objects.PublicURL(md.S3Key + "/original" + md.Ext)
+		return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
 	}
 }
 

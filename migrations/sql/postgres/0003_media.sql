@@ -1,6 +1,9 @@
 CREATE TABLE cms_media (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    s3_key      TEXT NOT NULL UNIQUE, -- key prefix; objects live at <prefix>/original.<ext> etc.
+    -- Key relative to the media root, so nothing here embeds S3_KEY_PREFIX:
+    -- images and videos store the bare item id (objects live at
+    -- <root>/<store_key>/original.<ext> etc.), files the id and object name.
+    store_key   TEXT NOT NULL UNIQUE,
     filename    TEXT NOT NULL,
     mime        TEXT NOT NULL,
     ext         TEXT NOT NULL,

@@ -71,14 +71,39 @@ func (m *Manager) CreateFolder(ctx context.Context, name string, kind Kind) (*Fo
 		return nil, err
 	}
 	f.ID = id
+	// Folders live only in the database, so an empty one would vanish on a
+	// restore unless the bucket records it.
+	m.syncFoldersManifest(ctx)
 	return f, nil
 }
 
 // DeleteFolder removes a folder; its contents become unfiled (the media
 // rows' folder_id is nulled by the foreign key).
 func (m *Manager) DeleteFolder(ctx context.Context, id int64) error {
-	_, err := m.db.Exec(ctx, "DELETE FROM cms_media_folders WHERE id = $1", id)
-	return err
+	// The children have to be identified before the delete, because the
+	// foreign key clears their folder_id as it goes.
+	rows, err := m.db.Query(ctx, "SELECT id FROM cms_media WHERE folder_id = $1", id)
+	if err != nil {
+		return err
+	}
+	orphaned, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (int64, error) {
+		var mediaID int64
+		err := row.Scan(&mediaID)
+		return mediaID, err
+	})
+	if err != nil {
+		return err
+	}
+
+	if _, err := m.db.Exec(ctx, "DELETE FROM cms_media_folders WHERE id = $1", id); err != nil {
+		return err
+	}
+
+	for _, mediaID := range orphaned {
+		m.syncManifest(ctx, mediaID)
+	}
+	m.syncFoldersManifest(ctx)
+	return nil
 }
 
 // Move puts a media item into a folder, or back to unfiled when folderID is
@@ -92,5 +117,6 @@ func (m *Manager) Move(ctx context.Context, mediaID int64, folderID *int64) erro
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	m.syncManifest(ctx, mediaID)
 	return nil
 }

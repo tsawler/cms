@@ -446,7 +446,8 @@ cms_page_assets   page_id, kind (css|js), inline_content, media_id
 cms_posts         id, page_id (unique FK), feed (blog|news), published_at,
                   author_id, thumbnail_url, header_url
                   -- slug/status/title/summary live on the backing page (4.3)
-cms_media         id, s3_key, filename, mime, width, height, size, uploaded_by
+cms_media         id, store_key, filename, mime, width, height, size, uploaded_by
+                  -- store_key is relative to the media root: no row embeds S3_KEY_PREFIX
 cms_media_meta    media_id, locale, alt_text
 cms_snippets      key, name, html, editable_slots, source (code|db)
 cms_versions      entity_type, entity_id, locale, payload jsonb, saved_by, saved_at

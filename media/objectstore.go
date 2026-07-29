@@ -1,10 +1,15 @@
 // Package media stores uploads — images, videos, and documents: the binary
 // objects on any S3-compatible bucket (AWS, Linode, DigitalOcean, MinIO,
-// R2, ...) and their metadata in Postgres. Each image upload produces the
-// untouched original plus resized "web" and "thumb" variants encoded as
+// R2, ...) and their metadata in the database. Each image upload produces
+// the untouched original plus resized "web" and "thumb" variants encoded as
 // lossy WebP; videos are stored as uploaded (no transcoding) with an
 // optional poster frame; documents are stored as-is. Everything is served
 // directly from the bucket, or proxied by the CMS.
+//
+// Every upload also writes a JSON manifest recording what the object keys
+// cannot — filename, alt text, folder, dimensions, uploader — which makes
+// the bucket self-describing: a database with no media can rebuild its
+// library from one. See manifest.go and restore.go.
 package media
 
 import (
@@ -61,6 +66,23 @@ type RangeGetter interface {
 	GetRange(ctx context.Context, key, rangeSpec string) (body io.ReadCloser, contentType, contentRange string, length int64, err error)
 }
 
+// ObjectInfo describes one object found by a Lister.
+type ObjectInfo struct {
+	Key  string
+	Size int64
+}
+
+// Lister is an optional ObjectStore interface for enumerating objects under
+// a key prefix. Manager.Restore needs it to find the manifests describing a
+// bucket's media; a store that does not implement it simply cannot be
+// adopted from, and Restore reports that rather than failing. S3Store
+// implements it.
+type Lister interface {
+	// List returns every object whose key starts with prefix. Order is
+	// unspecified. An empty result is not an error.
+	List(ctx context.Context, prefix string) ([]ObjectInfo, error)
+}
+
 // KeyPrefixer is an optional interface an ObjectStore may implement to
 // namespace one deployment's objects inside a bucket shared by several
 // sites: when present, the Manager stores objects under
@@ -77,6 +99,20 @@ func keyRoot(prefix string) string {
 		return "media/"
 	}
 	return prefix + "/media/"
+}
+
+// manifestRoot is the bucket prefix the per-item manifests live under:
+// "manifests/", or "<prefix>/manifests/" when a deployment prefix is set.
+//
+// Manifests sit outside keyRoot on purpose. They carry original filenames
+// and uploader emails, and the public-read bucket policy grants GET on
+// keyRoot only — so a public bucket publishes the binaries without
+// publishing the metadata describing them.
+func manifestRoot(prefix string) string {
+	if prefix == "" {
+		return "manifests/"
+	}
+	return prefix + "/manifests/"
 }
 
 // S3Config configures the S3-compatible object store.
@@ -96,11 +132,16 @@ type S3Config struct {
 	// shared by several sites: objects are stored under
 	// "<KeyPrefix>/media/..." instead of "media/...". Use a short slug
 	// unique to the deployment — letters, digits, '.', '-', '_' — e.g.
-	// "acme-hotel". Once media has been uploaded it must never change:
-	// stored object keys embed it. Proxied media URLs (the default) do
-	// not expose it; direct bucket and CDN URLs include it. A shared
-	// bucket pairs well with per-deployment credentials restricted to
-	// this prefix. Empty — the default — keeps keys under "media/".
+	// "acme-hotel". Proxied media URLs (the default) do not expose it;
+	// direct bucket and CDN URLs include it. A shared bucket pairs well
+	// with per-deployment credentials restricted to this prefix, and is
+	// what makes adopting a bucket into an empty database safe (see
+	// Manager.Restore). Empty — the default — keeps keys under "media/".
+	//
+	// Changing it after uploads exist is allowed as far as the database
+	// is concerned — stored keys are relative to the media root, so no
+	// row embeds it — but the objects themselves must be moved to the
+	// new prefix to stay reachable.
 	KeyPrefix string
 	// PublicRead marks the bucket as publicly readable, so pages embed
 	// direct bucket URLs. Leave false — the default — to serve media
@@ -223,10 +264,38 @@ func (s *S3Store) Put(ctx context.Context, key, contentType string, body io.Read
 	return nil
 }
 
-// ApplyPublicReadPolicy sets a bucket policy that lets anyone GET objects
-// (but not list or write). Call it once during site setup when the bucket
-// was not created public; it is idempotent. This is the supported way to
-// serve uploads publicly on stores that reject per-object ACLs.
+// List implements Lister with the ListObjectsV2 paginator, so buckets with
+// more than one page of objects enumerate fully.
+func (s *S3Store) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	var out []ObjectInfo
+	pages := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.cfg.Bucket),
+		Prefix: aws.String(prefix),
+	})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("media: listing %s: %w", prefix, err)
+		}
+		for _, obj := range page.Contents {
+			out = append(out, ObjectInfo{
+				Key:  aws.ToString(obj.Key),
+				Size: aws.ToInt64(obj.Size),
+			})
+		}
+	}
+	return out, nil
+}
+
+// ApplyPublicReadPolicy sets a bucket policy that lets anyone GET the media
+// binaries (but not list or write, and not the manifests, which live outside
+// the media root and name uploaders). Call it once during site setup when
+// the bucket was not created public; it is idempotent. This is the supported
+// way to serve uploads publicly on stores that reject per-object ACLs.
+//
+// The grant is scoped to this deployment's media root, so several sites can
+// share a bucket under different KeyPrefixes without one site's policy
+// publishing another's objects.
 func (s *S3Store) ApplyPublicReadPolicy(ctx context.Context) error {
 	policy := fmt.Sprintf(`{
 		"Version": "2012-10-17",
@@ -235,9 +304,9 @@ func (s *S3Store) ApplyPublicReadPolicy(ctx context.Context) error {
 			"Effect": "Allow",
 			"Principal": "*",
 			"Action": ["s3:GetObject"],
-			"Resource": ["arn:aws:s3:::%s/*"]
+			"Resource": ["arn:aws:s3:::%s/%s*"]
 		}]
-	}`, s.cfg.Bucket)
+	}`, s.cfg.Bucket, keyRoot(s.cfg.KeyPrefix))
 	_, err := s.client.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
 		Bucket: aws.String(s.cfg.Bucket),
 		Policy: aws.String(policy),

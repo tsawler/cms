@@ -13,7 +13,7 @@ var envVars = []string{
 	"S3_KEY_PREFIX", "S3_APPLY_PUBLIC_POLICY",
 	"CAP_URL", "CAP_INTERNAL_URL", "CAP_SITE_KEY", "CAP_SECRET", "CAP_WIDGET",
 	"CMS_REMEMBER_DAYS", "CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
-	"CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
+	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
 }
 
 func clearEnv(t *testing.T) {
@@ -35,6 +35,32 @@ func TestConfigFromEnvEmpty(t *testing.T) {
 	}
 	if cfg.RememberFor != 0 || cfg.MediaWebPQuality != 0 || cfg.MediaMaxVideoMB != 0 {
 		t.Errorf("empty environment set values: %+v", cfg)
+	}
+	// Adoption defaults on: a fresh deployment pointed at a bucket that
+	// already holds media should pick it up without being told to.
+	if cfg.MediaAdopt != MediaAdoptWhenEmpty {
+		t.Errorf("MediaAdopt = %v, want the when-empty default", cfg.MediaAdopt)
+	}
+}
+
+func TestConfigFromEnvMediaAdopt(t *testing.T) {
+	for value, want := range map[string]MediaAdoptMode{
+		"when-empty": MediaAdoptWhenEmpty,
+		"off":        MediaAdoptOff,
+		"reconcile":  MediaAdoptReconcile,
+		"Reconcile":  MediaAdoptReconcile, // case-insensitive
+		" off ":      MediaAdoptOff,       // and trimmed
+	} {
+		clearEnv(t)
+		t.Setenv("CMS_MEDIA_ADOPT", value)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Errorf("CMS_MEDIA_ADOPT=%q: %v", value, err)
+			continue
+		}
+		if cfg.MediaAdopt != want {
+			t.Errorf("CMS_MEDIA_ADOPT=%q gave %v, want %v", value, cfg.MediaAdopt, want)
+		}
 	}
 }
 
@@ -108,6 +134,7 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 		"CMS_REMEMBER_DAYS":      "soon",
 		"CMS_MEDIA_WEBP_QUALITY": "high",
 		"CMS_MEDIA_MAX_VIDEO_MB": "big",
+		"CMS_MEDIA_ADOPT":        "sometimes",
 	} {
 		clearEnv(t)
 		t.Setenv(envVar, bad)

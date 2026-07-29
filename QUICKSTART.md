@@ -612,6 +612,50 @@ media library is simply disabled — everything else works. For a custom
 backend (local disk, tests), implement `media.ObjectStore` and set
 `Config.ObjectStore`.
 
+### Adopting a bucket that already has media
+
+The bucket is self-describing. Alongside the binaries under
+`<prefix>/media/`, every upload writes a small JSON manifest under
+`<prefix>/manifests/` recording what the object keys cannot: the original
+filename, alt text per locale, which folder the item is in, its
+dimensions, and the uploader's email.
+
+So a database that knows nothing about a bucket can rebuild from it. On
+`Migrate`, when `cms_media` is empty and the bucket has manifests, the CMS
+adopts them — the media library comes back with its folders, alt text, and
+attribution intact. That covers restoring a lost database, and pointing a
+staging environment at a copy of production's bucket.
+
+```go
+MediaAdopt: cms.MediaAdoptWhenEmpty,  // the default (zero value)
+// cms.MediaAdoptReconcile — check on every startup, not only when empty
+// cms.MediaAdoptOff       — never read the bucket
+```
+
+Adoption is **additive**: it inserts rows for manifests the database is
+missing and never deletes anything, because a truncated listing, a
+transient error, and misscoped credentials all look exactly like "the
+objects are gone". Items whose binaries are actually missing are logged and
+skipped rather than adopted as dead entries. Runs are idempotent and
+resumable — an interrupted one picks up where it left off — and an advisory
+lock keeps two instances starting at once from racing.
+
+Two things to know:
+
+- **Set `S3_KEY_PREFIX` when the bucket is shared.** Adoption is scoped to
+  this deployment's prefix; without one, a fresh deployment on a shared
+  bucket would pull in another site's library. A bucket this site owns
+  outright needs no prefix — the CMS only warns if it actually adopts media
+  from an unprefixed bucket.
+- **Manifests are private.** They carry uploader emails and original
+  filenames, so they live outside the media root and `ApplyPublicReadPolicy`
+  grants public GET on `<prefix>/media/*` only.
+
+Manifest writes during normal operation are best-effort: an object store
+that is briefly unreachable leaves a sidecar stale rather than failing an
+editor's edit. `Manager.SyncManifests` rewrites every manifest from the
+database and repairs that drift.
+
 ### Blog & news
 
 Add a post template to enable both feeds:
@@ -789,10 +833,11 @@ Every variable it reads:
 | `S3_ACCESS_KEY` | — | Object-store access key. |
 | `S3_SECRET` | — | Object-store secret key. |
 | `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
-| `S3_KEY_PREFIX` | unset | Prefix namespacing this site's keys inside a shared bucket. Pick a stable slug and never change it once media exists. |
+| `S3_KEY_PREFIX` | unset | Prefix namespacing this site's keys inside a shared bucket. Pick a stable slug; it also scopes media adoption, so set it whenever the bucket is shared. |
 | `S3_APPLY_PUBLIC_POLICY` | unset | `1` applies a public-read bucket policy during `Migrate` (one-time, idempotent). |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. Non-numeric is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload cap in MB. Non-numeric is a startup error. |
+| `CMS_MEDIA_ADOPT` | `when-empty` | Rebuild the media library from the bucket: `when-empty` on a database with no media, `reconcile` on every startup, `off` never. See [Adopting a bucket that already has media](#adopting-a-bucket-that-already-has-media). |
 | `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA. |
 | `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |
 | `CAP_SECRET` | — | Secret paired with that site key. |
