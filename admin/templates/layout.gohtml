@@ -9,7 +9,9 @@
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
     {{if .PageScript}}<script src="{{.AdminPath}}/static/{{.PageScript}}" defer></script>{{end}}
 </head>
-<body class="cms-admin{{if .User}} cms-has-sidebar{{end}}">
+{{- /* Strings admin.js needs but cannot translate itself, since it is a
+       static file served to every language. */}}
+<body class="cms-admin{{if .User}} cms-has-sidebar{{end}}" data-t-copied="{{.T "Copied!"}}">
 {{if .User}}
 <aside class="cms-sidebar">
     <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>

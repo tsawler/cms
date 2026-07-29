@@ -341,6 +341,7 @@ var frStrings = map[string]string{
 	"Save":                                        "Enregistrer",
 	"Folder":                                      "Dossier",
 	"Copy link":                                   "Copier le lien",
+	"Copied!":                                     "Copié!",
 	"Delete this image? Pages still using it will show a broken picture.": "Supprimer cette image? Les pages qui l'utilisent encore afficheront une image brisée.",
 	"Delete": "Supprimer",
 	"No images yet — upload your first one above.": "Aucune image pour l'instant — téléversez votre première ci-dessus.",

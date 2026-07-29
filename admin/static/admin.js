@@ -128,10 +128,20 @@
     document.addEventListener("click", function (e) {
         var btn = e.target.closest ? e.target.closest("[data-copy]") : null;
         if (!btn) return;
+        // A second click while "Copied!" is showing would capture that as
+        // the label to restore, and the button would keep it for good.
+        if (btn.dataset.copying) return;
+        var original = btn.textContent;
         navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function () {
-            var original = btn.textContent;
-            btn.textContent = "Copied!";
-            setTimeout(function () { btn.textContent = original; }, 1500);
+            btn.dataset.copying = "1";
+            btn.textContent = document.body.getAttribute("data-t-copied") || "Copied!";
+            setTimeout(function () {
+                btn.textContent = original;
+                delete btn.dataset.copying;
+            }, 1500);
+        }, function () {
+            // Clipboard refused (insecure context, denied permission).
+            // Say nothing rather than claim a copy that did not happen.
         });
     });
 
