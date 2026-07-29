@@ -133,6 +133,7 @@ func (s *server) setLang(w http.ResponseWriter, r *http.Request) {
 // once, in their first group.
 var frStrings = map[string]string{
 	// Layout / navigation.
+	"Continue":    "Continuer", // confirmation dialog's fallback button
 	"Contents":    "Sommaire",
 	"Dashboard":   "Tableau de bord",
 	"Pages":       "Pages",

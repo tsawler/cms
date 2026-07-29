@@ -70,5 +70,23 @@
     {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}
     {{template "content" .}}
 </main>
+{{if .User}}
+{{- /* One confirmation dialog for the whole admin, driven by admin.js.
+       Its title, detail, button label and tone all come from the form
+       being submitted, so a confirmation can never drift from the action
+       it is confirming. */}}
+<dialog class="cms-dialog cms-confirm" id="cms-confirm" aria-labelledby="cms-confirm-title"
+        data-t-ok="{{.T "Continue"}}">
+    <div class="cms-confirm-body">
+        <h2 id="cms-confirm-title" data-confirm-title></h2>
+        <p class="cms-confirm-detail" data-confirm-detail></p>
+    </div>
+    <div class="cms-dialog-foot">
+        <span class="cms-dialog-foot-gap"></span>
+        <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-dialog-close>{{.T "Cancel"}}</button>
+        <button type="button" class="cms-btn cms-btn-sm" data-dialog-confirm>{{.T "Continue"}}</button>
+    </div>
+</dialog>
+{{end}}
 </body>
 </html>{{end}}

@@ -4,29 +4,7 @@
 (function () {
     "use strict";
 
-    // ---------------------------------------------------------------
-    // Dialogs: [data-dialog-open="id"] opens, [data-dialog-close] closes,
-    // and a click on the backdrop closes too.
-    // ---------------------------------------------------------------
-    document.addEventListener("click", function (e) {
-        if (!e.target.closest) return;
-
-        var opener = e.target.closest("[data-dialog-open]");
-        if (opener) {
-            var dlg = document.getElementById(opener.getAttribute("data-dialog-open"));
-            if (dlg && !dlg.open) dlg.showModal();
-            return;
-        }
-        if (e.target.closest("[data-dialog-close]")) {
-            var open = e.target.closest("dialog");
-            if (open) open.close();
-            return;
-        }
-        // The dialog element itself fills the viewport behind its panel,
-        // so a click that lands on it is a click on the backdrop.
-        if (e.target.matches && e.target.matches("dialog.cms-dialog")) e.target.close();
-    });
-
+    // Opening and closing dialogs is shared admin chrome; admin.js owns it.
     var uploader = document.getElementById("cms-uploader");
     if (!uploader) return;
 
@@ -492,7 +470,9 @@
         if (e.key === "Delete" || e.key === "Backspace") {
             if (selected().some(function (x) { return x.getAttribute("data-id"); })) {
                 e.preventDefault();
-                deleteForm.requestSubmit(); // requestSubmit so data-confirm still fires
+                // requestSubmit, not submit, so the confirmation still runs;
+                // naming the button gives the dialog its label and tone.
+                deleteForm.requestSubmit(deleteForm.querySelector("button[type=submit]"));
             }
             return;
         }
