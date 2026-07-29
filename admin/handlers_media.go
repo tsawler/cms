@@ -143,6 +143,7 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 	}
 	data.Folders = folders
 	data.PageScript = "media.js"
+	data.PageWide = true
 	data.MediaQuery = query
 	data.MediaFolder = folderParam
 	data.MediaTab = tab
@@ -297,6 +298,67 @@ func (s *server) mediaMove(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Media.Move(r.Context(), id, folderID); err != nil {
 		s.serverError(w, err)
 		return
+	}
+	s.backToMedia(w, r)
+}
+
+// selectedIDs reads the media ids a bulk form submitted as repeated "id"
+// fields, dropping anything unparseable rather than failing the whole
+// action over one bad value.
+func selectedIDs(r *http.Request) []int64 {
+	if err := r.ParseForm(); err != nil {
+		return nil
+	}
+	raw := r.PostForm["id"]
+	ids := make([]int64, 0, len(raw))
+	for _, v := range raw {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// mediaBulkMove refiles every selected item ("" form value = unfiled).
+// The listing lets several items be selected at once, so its actions act
+// on the selection rather than on one row at a time.
+func (s *server) mediaBulkMove(w http.ResponseWriter, r *http.Request) {
+	ids := selectedIDs(r)
+	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
+	for _, id := range ids {
+		if err := s.deps.Media.Move(r.Context(), id, folderID); err != nil {
+			s.serverError(w, err)
+			return
+		}
+	}
+	if n := len(ids); n == 1 {
+		s.flash(r, s.tr(r, "1 file moved."))
+	} else if n > 1 {
+		s.flash(r, fmt.Sprintf(s.tr(r, "%d files moved."), n))
+	}
+	s.backToMedia(w, r)
+}
+
+// mediaBulkDelete deletes every selected item. A missing row is not an
+// error: two tabs open on the same folder can both submit the same id.
+func (s *server) mediaBulkDelete(w http.ResponseWriter, r *http.Request) {
+	ids := selectedIDs(r)
+	deleted := 0
+	for _, id := range ids {
+		err := s.deps.Media.Delete(r.Context(), id, s.deps.DefaultLocale)
+		if errors.Is(err, media.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		deleted++
+	}
+	if deleted == 1 {
+		s.flash(r, s.tr(r, "1 file deleted."))
+	} else if deleted > 1 {
+		s.flash(r, fmt.Sprintf(s.tr(r, "%d files deleted."), deleted))
 	}
 	s.backToMedia(w, r)
 }

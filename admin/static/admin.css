@@ -151,6 +151,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
     padding: 2.25rem clamp(1.25rem, 4vw, 3rem);
 }
 .cms-main > * { max-width: 62rem; }
+/* A file browser is not a reading column — it gets the whole width. */
+.cms-main-wide > * { max-width: none; }
 /* Login (no sidebar): a centered column on the paper ground. */
 body.cms-admin:not(.cms-has-sidebar) .cms-main {
     max-width: 60rem;
@@ -560,50 +562,303 @@ body.cms-dragging .cms-table {
     cursor: pointer;
 }
 .cms-upload-cancel:hover { color: var(--cms-danger); border-color: var(--cms-danger-line); }
-.cms-media-grid {
+/* ---------------------------------------------------------------
+   The listing. One set of nodes, two layouts: an icon grid by default,
+   the same cells reflowed into columns in list view. Actions are not
+   here — they live in the selection bar and the inspector, which is
+   what lets an entry be a thumbnail and a name and nothing else.
+   --------------------------------------------------------------- */
+.cms-browser-body { display: flex; align-items: flex-start; gap: 1.25rem; }
+.cms-items-wrap { flex: 1; min-width: 0; }
+.cms-items {
+    list-style: none;
+    margin: 0;
+    padding: .25rem;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    gap: .35rem;
+    user-select: none;
 }
-.cms-media-card {
-    background: var(--cms-surface);
-    border: 1px solid var(--cms-fog);
+.cms-items:focus-visible { outline: 2px solid var(--cms-spruce); outline-offset: 2px; }
+
+.cms-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .3rem;
+    padding: .6rem .4rem .5rem;
+    border: 1px solid transparent;
     border-radius: 8px;
+    cursor: default;
+}
+.cms-item:hover { background: rgba(34, 96, 75, .05); }
+.cms-item.cms-selected {
+    background: var(--cms-spruce-tint);
+    border-color: var(--cms-spruce-line);
+}
+/* Dragging files over a folder: this is where they will land. */
+.cms-item.cms-drop-target {
+    background: var(--cms-spruce-tint);
+    border-color: var(--cms-spruce);
+    border-style: dashed;
+}
+
+.cms-item-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 6.5rem;
+    border-radius: 6px;
+    background: #ecefe9;
     overflow: hidden;
 }
-.cms-media-card > a { display: block; background: #ecefe9; }
-.cms-media-card img,
-.cms-media-card video {
-    display: block;
-    width: 100%;
-    height: 9rem;
-    object-fit: cover;
+/* contain, not cover: you are identifying a file, and a crop hides which
+   one it is. */
+.cms-item-thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
 }
-.cms-media-body { padding: .75rem; }
-.cms-media-name {
-    margin: 0;
-    font-size: .85rem;
+.cms-selected .cms-item-thumb { background: #e0e9e3; }
+/* An SVG with no width collapses to nothing or fills its container, so the
+   base size belongs here — the breadcrumb uses this icon too. */
+.cms-folder-icon {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex: 0 0 auto;
+    fill: var(--cms-muted);
+}
+.cms-item-thumb .cms-folder-icon { width: 3rem; height: 3rem; }
+
+/* Nothing to show a picture of, so the file says what it is: a sheet with
+   its extension stamped on it, in the same letterpress voice as the
+   status badges. */
+.cms-item-sheet {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    width: 2.9rem;
+    height: 3.6rem;
+    padding-bottom: .45rem;
+    background: var(--cms-surface);
+    border: 1px solid var(--cms-fog);
+    border-radius: 3px;
+}
+.cms-item-sheet::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-width: 0 .7rem .7rem 0;
+    border-style: solid;
+    border-color: var(--cms-fog) var(--cms-paper);
+}
+.cms-item-sheet-video { border-color: var(--cms-spruce-line); }
+.cms-item-ext {
+    font-family: var(--cms-mono);
+    font-size: .56rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--cms-muted);
+}
+
+.cms-item-name {
+    font-size: .82rem;
+    line-height: 1.3;
+    text-align: center;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.cms-item-size {
+    font-family: var(--cms-mono);
+    font-size: .68rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--cms-muted);
+}
+/* The icon view shows a name and one fact; the rest are columns the list
+   view turns back on. */
+.cms-item-kind, .cms-item-dims, .cms-item-added { display: none; }
+.cms-items-head { display: none; }
+.cms-badge-noalt { margin-left: .3rem; vertical-align: .05em; }
+
+/* List view */
+.cms-view-list .cms-items { display: block; padding: 0; }
+.cms-view-list .cms-items-head,
+.cms-view-list .cms-item {
+    display: grid;
+    grid-template-columns: 2.4rem minmax(0, 1fr) 5rem 5.5rem 7rem 8rem;
+    align-items: center;
+    gap: .75rem;
+    padding: .3rem .5rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+}
+.cms-view-list .cms-items-head {
+    display: grid;
+    padding-bottom: .35rem;
+    border-bottom: 1px solid var(--cms-fog);
+    border-radius: 0;
+}
+.cms-view-list .cms-items-head button {
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    font-size: .64rem;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    color: var(--cms-muted);
+}
+.cms-view-list .cms-items-head button:hover { color: var(--cms-ink); }
+.cms-view-list .cms-items-head button.cms-active { color: var(--cms-spruce); }
+.cms-view-list .cms-item + .cms-item { border-top-color: var(--cms-fog); }
+.cms-view-list .cms-item-thumb {
+    width: 2.4rem;
+    height: 1.9rem;
+    border-radius: 3px;
+}
+.cms-view-list .cms-item-thumb .cms-folder-icon { width: 1.2rem; height: 1.2rem; }
+.cms-view-list .cms-item-sheet {
+    width: 1.35rem;
+    height: 1.7rem;
+    padding-bottom: .15rem;
+}
+.cms-view-list .cms-item-sheet::before { border-width: 0 .35rem .35rem 0; }
+.cms-view-list .cms-item-ext { font-size: .38rem; }
+.cms-view-list .cms-item-name {
+    text-align: left;
+    display: block;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: .88rem;
+    font-weight: 600;
 }
-.cms-media-dims {
-    margin: 0 0 .5rem;
+.cms-view-list .cms-item-kind,
+.cms-view-list .cms-item-dims,
+.cms-view-list .cms-item-added {
+    display: block;
     font-family: var(--cms-mono);
-    font-size: .72rem;
+    font-size: .7rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--cms-muted);
 }
-.cms-media-alt { display: flex; gap: .4rem; margin-bottom: .5rem; }
-.cms-media-alt input {
-    flex: 1;
-    min-width: 0;
+.cms-view-list .cms-item-kind { font-family: var(--cms-font); }
+.cms-view-list .cms-item-size { font-size: .7rem; }
+
+.cms-empty {
+    color: var(--cms-muted);
+    padding: 2.5rem .5rem;
+    text-align: center;
+}
+
+/* Selection bar: appears only with a selection, which is the whole point
+   of moving the actions off the entries. */
+.cms-selbar {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: .75rem;
+    padding: .5rem .75rem;
+    background: var(--cms-spruce-tint);
+    border: 1px solid var(--cms-spruce-line);
+    border-radius: var(--cms-radius);
+}
+.cms-selbar form { margin: 0; }
+.cms-selbar-count {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--cms-spruce);
+    margin-right: .35rem;
+}
+.cms-selbar select {
+    padding: .3rem .4rem;
+    border: 1px solid var(--cms-spruce-line);
+    border-radius: var(--cms-radius);
+    background: var(--cms-surface);
+    font: inherit;
+    font-size: .8rem;
+}
+.cms-selbar .cms-btn-ghost { background: var(--cms-surface); }
+.cms-selbar-clear { margin-left: auto; }
+.cms-selbar [disabled] { opacity: .45; cursor: default; }
+
+/* Inspector */
+.cms-inspector {
+    flex: 0 0 15rem;
+    position: sticky;
+    top: 1rem;
+    padding: 1rem;
+    background: var(--cms-surface);
+    border: 1px solid var(--cms-fog);
+    border-radius: 8px;
+}
+.cms-inspector-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 7rem;
+    margin-bottom: .75rem;
+    background: #ecefe9;
+    border-radius: 6px;
+}
+.cms-inspector-preview:empty { display: none; }
+.cms-inspector-preview img { max-width: 100%; max-height: 10rem; object-fit: contain; }
+.cms-inspector-name {
+    margin: 0 0 .6rem;
+    font-size: .9rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.cms-inspector-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .15rem .6rem;
+    margin: 0 0 1rem;
+    font-size: .78rem;
+}
+.cms-inspector-facts dt {
+    color: var(--cms-muted);
+    font-size: .64rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    align-self: center;
+}
+.cms-inspector-facts dd {
+    margin: 0;
+    font-family: var(--cms-mono);
+    font-variant-numeric: tabular-nums;
+}
+.cms-inspector-alt { margin-bottom: .75rem; }
+.cms-inspector-alt label {
+    display: block;
+    font-size: .72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--cms-muted);
+    margin-bottom: .3rem;
+}
+.cms-inspector-alt input {
+    width: 100%;
+    margin-bottom: .4rem;
     padding: .35rem .5rem;
     border: 1px solid var(--cms-fog);
     border-radius: var(--cms-radius);
     font: inherit;
     font-size: .82rem;
 }
-.cms-media-actions { display: flex; gap: .4rem; justify-content: space-between; }
+.cms-inspector-alt .cms-hint { margin-top: .35rem; font-size: .72rem; }
+
 .cms-image-current {
     display: block;
     max-width: 14rem;
@@ -613,51 +868,6 @@ body.cms-dragging .cms-table {
     margin-bottom: .5rem;
 }
 
-/* Directory browsing: folders sit in the listings as ordinary entries
-   (cards in the grid, rows in the list and the documents table), with a
-   breadcrumb once inside one. */
-.cms-folder-icon {
-    width: 1.15rem;
-    height: 1.15rem;
-    flex: 0 0 auto;
-    fill: var(--cms-muted);
-}
-.cms-folder-card {
-    display: block;
-    text-decoration: none;
-    color: inherit;
-}
-.cms-folder-card:hover { border-color: var(--cms-spruce); }
-.cms-folder-thumb {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 9rem;
-    background: #ecefe9;
-}
-.cms-folder-thumb .cms-folder-icon {
-    width: 3rem;
-    height: 3rem;
-}
-.cms-media-list .cms-folder-card {
-    display: flex;
-    align-items: center;
-    gap: .75rem;
-}
-.cms-media-list .cms-folder-thumb {
-    flex: 0 0 auto;
-    width: 4.5rem;
-    height: 3rem;
-}
-.cms-media-list .cms-folder-thumb .cms-folder-icon {
-    width: 1.4rem;
-    height: 1.4rem;
-}
-.cms-folder-link {
-    display: inline-flex;
-    align-items: center;
-    gap: .45rem;
-}
 .cms-crumbs {
     display: flex;
     align-items: center;
@@ -687,62 +897,10 @@ body.cms-dragging .cms-table {
     background: var(--cms-surface);
     border-color: var(--cms-fog);
 }
-
-/* List view: the same media cards laid out as rows */
-.cms-media-grid.cms-media-list { display: block; }
-.cms-media-list .cms-media-card {
-    display: flex;
-    align-items: center;
-    gap: .75rem;
-    margin-bottom: .5rem;
-}
-.cms-media-list .cms-media-card > a { flex: 0 0 auto; }
-.cms-media-list .cms-media-card img,
-.cms-media-list .cms-media-card video { width: 4.5rem; height: 3rem; }
-.cms-media-list .cms-media-body {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: .5rem .75rem;
-    min-width: 0;
-    padding: .35rem .75rem .35rem 0;
-}
-.cms-media-list .cms-media-name { flex: 1 1 8rem; min-width: 6rem; }
-.cms-media-list .cms-media-dims { margin: 0; flex: 0 0 5.5rem; }
-.cms-media-list .cms-media-alt { margin: 0; flex: 1 1 10rem; }
-.cms-media-list .cms-media-move { margin: 0; flex: 0 0 8rem; }
-.cms-media-list .cms-media-actions { flex: 0 0 auto; }
+.cms-btn-icon { font-size: .95rem; line-height: 1.15; padding: .3rem .5rem; }
+.cms-btn-icon.cms-active { color: var(--cms-spruce); border-color: var(--cms-spruce-line); }
 
 .cms-section-head { margin-top: 2rem; }
-.cms-filter-bar {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
-}
-.cms-filter-form { display: flex; gap: .5rem; align-items: center; }
-.cms-filter-form input[type="search"],
-.cms-filter-form input[type="text"],
-.cms-filter-form select,
-.cms-upload-row select {
-    padding: .45rem .6rem;
-    border: 1px solid var(--cms-fog);
-    border-radius: var(--cms-radius);
-    font: inherit;
-    font-size: .9rem;
-    background: var(--cms-surface);
-}
-.cms-media-move { margin-bottom: .5rem; }
-.cms-media-move select {
-    width: 100%;
-    font-size: .82rem;
-    padding: .3rem .4rem;
-    border: 1px solid var(--cms-fog);
-    border-radius: var(--cms-radius);
-    background: var(--cms-surface);
-}
 .cms-table .cms-actions select {
     font-size: .82rem;
     padding: .3rem .4rem;

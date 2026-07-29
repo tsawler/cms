@@ -66,7 +66,7 @@
     </div>
 </aside>
 {{end}}
-<main class="cms-main">
+<main class="cms-main{{if .PageWide}} cms-main-wide{{end}}">
     {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}
     {{template "content" .}}
 </main>

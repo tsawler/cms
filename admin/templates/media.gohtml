@@ -55,6 +55,8 @@
             <button type="button" data-view="grid" title="{{.T "Icon view"}}" aria-label="{{.T "Icon view"}}">▦</button>
             <button type="button" data-view="list" title="{{.T "List view"}}" aria-label="{{.T "List view"}}">≡</button>
         </div>
+        <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-icon" data-inspector-toggle
+                title="{{.T "Details"}}" aria-label="{{.T "Details"}}" aria-pressed="false">ⓘ</button>
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-dialog-open="cms-newfolder">{{.T "New folder"}}</button>
         <button type="button" class="cms-btn cms-btn-primary cms-btn-sm" data-dialog-open="cms-uploader">{{.T "Upload"}}</button>
     </div>
@@ -84,144 +86,153 @@
     </form>
 </noscript>
 
-{{- /* Folders list as entries inside each tab's listing, Finder-style,
-       at the root of a browse (never during a search). */}}
+{{- /* One listing for all three tabs. Folders are entries in it, like
+       Finder shows them, and appear at the root of a browse (never during
+       a search, which spans every folder and lists results flat).
+
+       Both views render the same nodes — the icon view is a grid of tiles,
+       the list view reflows those same cells into columns. One DOM keeps
+       the selection model, the keyboard handling and the inspector from
+       having to exist twice. */}}
 {{$showFolders := and (not .CurrentFolder) (not .MediaQuery) (gt (len .Folders) 0)}}
 
-{{if eq .MediaTab "images"}}
-<div class="cms-media-grid">
-    {{if $showFolders}}{{template "media_folder_cards" .}}{{end}}
-    {{range .Media}}
-    <div class="cms-media-card">
-        <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
-            <img src="{{.ThumbURL}}" alt="{{.Alt}}" loading="lazy">
-        </a>
-        <div class="cms-media-body">
-            <p class="cms-media-name" title="{{.Filename}}">{{.Filename}}</p>
-            {{- /* SVGs may have no intrinsic size; skip the 0×0 */}}
-            <p class="cms-muted cms-media-dims">{{if .Width}}{{.Width}}×{{.Height}}{{else}}&nbsp;{{end}}</p>
-            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/alt" class="cms-media-alt">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <input type="text" name="alt" value="{{.Alt}}" placeholder="{{$.T "Description (alt text)"}}">
-                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{$.T "Save"}}</button>
-            </form>
-            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move" class="cms-media-move">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
-                    <option value="">{{$.T "No folder"}}</option>
-                    {{$current := .FolderIDValue}}
-                    {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
-                </select>
-            </form>
-            <div class="cms-media-actions">
-                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.WebURL}}">{{$.T "Copy link"}}</button>
-                <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                      data-confirm="{{$.T "Delete this image? Pages still using it will show a broken picture."}}">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
-                </form>
-            </div>
-        </div>
+<div class="cms-browser">
+    {{- /* Selection actions. Hidden until something is selected: the
+           per-item buttons this replaced were on screen at all times, four
+           to a tile, which is what made the old grid unreadable. */}}
+    <div class="cms-selbar" data-selbar hidden>
+        <span class="cms-selbar-count" data-sel-count aria-live="polite"
+              data-t-one="{{.T "1 selected"}}" data-t-many="{{.T "{n} selected"}}"></span>
+        <form method="post" action="{{.AdminPath}}/media/bulk/move" class="cms-selbar-move" data-sel-form>
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <select name="folder" data-sel-move aria-label="{{.T "Move to"}}">
+                <option value="">{{.T "Move to…"}}</option>
+                <option value="root">{{.T "No folder"}}</option>
+                {{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+            </select>
+        </form>
+        <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-copy>{{.T "Copy link"}}</button>
+        <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form
+              data-confirm="{{.T "Delete the selected files? Pages still using them will break."}}">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{.T "Delete"}}</button>
+        </form>
+        <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-selbar-clear" data-sel-clear>{{.T "Clear"}}</button>
     </div>
-    {{end}}
-    {{if and (not .Media) (not $showFolders)}}
-    <p class="cms-muted">{{.T "No images yet — upload your first one above."}}</p>
-    {{end}}
-</div>
-{{end}}
 
-{{if eq .MediaTab "videos"}}
-<div class="cms-media-grid">
-    {{if $showFolders}}{{template "media_folder_cards" .}}{{end}}
-    {{range .Videos}}
-    <div class="cms-media-card">
-        <a href="{{.OriginalURL}}" target="_blank" rel="noopener">
-            {{if .ThumbURL}}
-            <img src="{{.ThumbURL}}" alt="" loading="lazy">
-            {{else}}
-            <video src="{{.OriginalURL}}" preload="metadata" muted></video>
+    <div class="cms-browser-body">
+        <div class="cms-items-wrap">
+            {{- /* Column headings, list view only. Clicking one sorts. */}}
+            <div class="cms-items-head">
+                <span class="cms-col-thumb"></span>
+                <button type="button" class="cms-col-name" data-sort="name">{{.T "Name"}}</button>
+                <button type="button" class="cms-col-kind" data-sort="kind">{{.T "Type"}}</button>
+                <button type="button" class="cms-col-size" data-sort="size">{{.T "Size"}}</button>
+                <button type="button" class="cms-col-dims" data-sort="dims">{{.T "Dimensions"}}</button>
+                <button type="button" class="cms-col-added" data-sort="added">{{.T "Added"}}</button>
+            </div>
+
+            <ul class="cms-items" data-items role="listbox" aria-multiselectable="true"
+                aria-label="{{.T "Media"}}" tabindex="0">
+                {{if $showFolders}}
+                {{range .Folders}}
+                <li class="cms-item cms-item-folder" role="option" aria-selected="false"
+                    data-open="{{$.AdminPath}}/media?tab={{$.MediaTab}}&folder={{.ID}}"
+                    data-folder-id="{{.ID}}"
+                    data-name="{{.Name}}">
+                    <span class="cms-item-thumb">
+                        <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                    </span>
+                    <span class="cms-item-name" title="{{.Name}}">{{.Name}}</span>
+                    <span class="cms-item-kind"><span class="cms-badge">{{$.T "folder"}}</span></span>
+                    <span class="cms-item-size">{{if eq .Count 1}}1 {{$.T "file"}}{{else}}{{.Count}} {{$.T "files"}}{{end}}</span>
+                    <span class="cms-item-dims"></span>
+                    <span class="cms-item-added"></span>
+                </li>
+                {{end}}
+                {{end}}
+
+                {{range .Entries}}
+                <li class="cms-item" role="option" aria-selected="false"
+                    data-id="{{.ID}}"
+                    data-open="{{.OriginalURL}}"
+                    {{- /* Not data-copy: that attribute marks a
+                           copy-to-clipboard button, and the shared handler
+                           would treat a click anywhere on this entry as
+                           one and overwrite it with "Copied!". */}}
+                    data-url="{{.WebURL}}"
+                    data-name="{{.Filename}}"
+                    data-kind="{{.Kind}}"
+                    data-ext="{{if .Ext}}{{slice .Ext 1}}{{end}}"
+                    data-size="{{.Size}}"
+                    data-size-human="{{.SizeHuman}}"
+                    data-dims="{{if .Width}}{{.Width}}×{{.Height}}{{end}}"
+                    data-added="{{.CreatedAt.Unix}}"
+                    data-added-human="{{.CreatedAt.Format "Jan 2, 2006"}}"
+                    data-alt="{{.Alt}}"
+                    data-thumb="{{.ThumbURL}}">
+                    <span class="cms-item-thumb">
+                        {{if .ThumbURL}}
+                        <img src="{{.ThumbURL}}" alt="" loading="lazy">
+                        {{else if eq .Kind "video"}}
+                        <span class="cms-item-sheet cms-item-sheet-video" aria-hidden="true">
+                            <span class="cms-item-ext">{{if .Ext}}{{slice .Ext 1}}{{end}}</span>
+                        </span>
+                        {{else}}
+                        {{- /* No thumbnail to show, so the file states what it
+                               is: the extension set like a stamp on a sheet. */}}
+                        <span class="cms-item-sheet" aria-hidden="true">
+                            <span class="cms-item-ext">{{if .Ext}}{{slice .Ext 1}}{{end}}</span>
+                        </span>
+                        {{end}}
+                    </span>
+                    <span class="cms-item-name" title="{{.Filename}}">{{.Filename}}
+                        {{- if and (eq .Kind "image") (not .Alt)}}
+                        {{- /* An image nobody has described. A stamp shows it
+                               at a glance; the old alt field on every tile
+                               showed only that a field existed. */}}
+                        <span class="cms-badge cms-badge-draft cms-badge-noalt">{{$.T "no alt"}}</span>
+                        {{- end}}
+                    </span>
+                    <span class="cms-item-kind"><span class="cms-badge">{{if .Ext}}{{slice .Ext 1}}{{end}}</span></span>
+                    <span class="cms-item-size">{{.SizeHuman}}</span>
+                    <span class="cms-item-dims">{{if .Width}}{{.Width}}×{{.Height}}{{end}}</span>
+                    <span class="cms-item-added">{{.CreatedAt.Format "Jan 2, 2006"}}</span>
+                </li>
+                {{end}}
+            </ul>
+
+            {{if and (not .Entries) (not $showFolders)}}
+            <p class="cms-empty">
+                {{if .MediaQuery}}{{.T "Nothing matches that search."}}
+                {{else if eq .MediaTab "documents"}}{{.T "No documents here yet. Drop files on this page, or use Upload."}}
+                {{else if eq .MediaTab "videos"}}{{.T "No videos here yet. Drop an MP4 or WebM on this page, or use Upload."}}
+                {{else}}{{.T "No images here yet. Drop files on this page, or use Upload."}}{{end}}
+            </p>
             {{end}}
-        </a>
-        <div class="cms-media-body">
-            <p class="cms-media-name" title="{{.Filename}}">{{.Filename}}</p>
-            <p class="cms-muted cms-media-dims">{{if .Width}}{{.Width}}×{{.Height}} · {{end}}{{.SizeHuman}}</p>
-            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move" class="cms-media-move">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
-                    <option value="">{{$.T "No folder"}}</option>
-                    {{$current := .FolderIDValue}}
-                    {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
-                </select>
-            </form>
-            <div class="cms-media-actions">
-                <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">{{$.T "Copy link"}}</button>
-                <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                      data-confirm="{{$.T "Delete this video? Pages still using it will show a broken player."}}">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
-                </form>
-            </div>
         </div>
-    </div>
-    {{end}}
-    {{if and (not .Videos) (not $showFolders)}}
-    <p class="cms-muted">{{.T "No videos yet — upload an MP4 or WebM above."}}</p>
-    {{end}}
-</div>
-{{end}}
 
-{{if eq .MediaTab "documents"}}
-<table class="cms-table">
-    <thead>
-    <tr>
-        <th>{{.T "Name"}}</th>
-        <th>{{.T "Type"}}</th>
-        <th>{{.T "Size"}}</th>
-        <th></th>
-    </tr>
-    </thead>
-    <tbody>
-    {{if $showFolders}}
-    {{range .Folders}}
-    <tr>
-        <td><a class="cms-folder-link" href="{{$.AdminPath}}/media?tab=documents&folder={{.ID}}">
-            <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-            {{.Name}}</a></td>
-        <td><span class="cms-badge">{{$.T "folder"}}</span></td>
-        <td>{{if eq .Count 1}}1 {{$.T "file"}}{{else}}{{.Count}} {{$.T "files"}}{{end}}</td>
-        <td></td>
-    </tr>
-    {{end}}
-    {{end}}
-    {{range .Documents}}
-    <tr>
-        <td><a href="{{.OriginalURL}}" target="_blank" rel="noopener">{{.Filename}}</a></td>
-        <td><span class="cms-badge">{{.Ext}}</span></td>
-        <td>{{.SizeHuman}}</td>
-        <td class="cms-table-actions cms-actions">
-            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/move">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <select name="folder" data-autosubmit title="{{$.T "Folder"}}">
-                    <option value="">{{$.T "No folder"}}</option>
-                    {{$current := .FolderIDValue}}
-                    {{range $.Folders}}<option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>{{end}}
-                </select>
+        {{- /* Inspector: everything about one file, which is where alt text
+               and Copy link went when they left the tiles. */}}
+        <aside class="cms-inspector" data-inspector hidden aria-label="{{.T "Details"}}"
+               data-t-none="{{.T "Select one file to see its details."}}">
+            <div class="cms-inspector-preview" data-inspector-preview></div>
+            <p class="cms-inspector-name" data-inspector-name></p>
+            <dl class="cms-inspector-facts" data-inspector-facts
+                data-t-kind="{{.T "Type"}}" data-t-size="{{.T "Size"}}"
+                data-t-dims="{{.T "Dimensions"}}" data-t-added="{{.T "Added"}}"></dl>
+            <form method="post" class="cms-inspector-alt" data-inspector-alt
+                  data-action-template="{{.AdminPath}}/media/{id}/alt">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <label for="cms-inspector-alt-input">{{.T "Description (alt text)"}}</label>
+                <input id="cms-inspector-alt-input" type="text" name="alt" autocomplete="off">
+                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{.T "Save"}}</button>
+                <p class="cms-hint">{{.T "Screen readers read this instead of the picture."}}</p>
             </form>
-            <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-copy="{{.OriginalURL}}">{{$.T "Copy link"}}</button>
-            <form method="post" action="{{$.AdminPath}}/media/{{.ID}}/delete"
-                  data-confirm="{{$.T "Delete this document? Pages that link to it will have a broken link."}}">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{$.T "Delete"}}</button>
-            </form>
-        </td>
-    </tr>
-    {{end}}
-    {{if and (not .Documents) (not $showFolders)}}
-    <tr><td colspan="4" class="cms-muted">{{.T "No documents yet."}}</td></tr>
-    {{end}}
-    </tbody>
-</table>
-{{end}}
+            <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-block" data-inspector-copy>{{.T "Copy link"}}</button>
+        </aside>
+    </div>
+</div>
 
 {{- /* Upload: one dialog with two faces. It opens on the drop zone and
        swaps to the transfer queue once files are chosen, so picking and

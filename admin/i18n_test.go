@@ -112,7 +112,7 @@ func TestFrStringsWellFormed(t *testing.T) {
 	identical := map[string]bool{
 		"Pages": true, "Description": true, "Date": true, "Type": true,
 		"Documents": true, "Images": true, "admin": true, "superadmin": true,
-		"Destination": true,
+		"Destination": true, "Dimensions": true,
 	}
 	for k, v := range frStrings {
 		if strings.TrimSpace(k) == "" {

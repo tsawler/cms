@@ -220,6 +220,8 @@ func New(d Deps) http.Handler {
 			r.Post("/media/{id}/alt", s.mediaUpdateAlt)
 			r.Post("/media/{id}/delete", s.mediaDelete)
 			r.Post("/media/{id}/move", s.mediaMove)
+			r.Post("/media/bulk/move", s.mediaBulkMove)
+			r.Post("/media/bulk/delete", s.mediaBulkDelete)
 			r.Post("/media/folders/new", s.mediaFolderCreate)
 			r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
 
@@ -277,6 +279,9 @@ type templateData struct {
 	// (e.g. "media.js"), loaded after admin.js. Empty on pages whose
 	// behavior the shared admin.js already covers.
 	PageScript string
+	// PageWide drops the main column's reading width for pages that are
+	// browsers rather than documents.
+	PageWide bool
 
 	// AdminLang is the admin UI language for this request ("en" or "fr");
 	// templates translate their strings through T with it. LangToggle is
