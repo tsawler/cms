@@ -1,15 +1,15 @@
 /* ------------------------------------------------------------------ *
  * Post settings — the edit bar's gear on blog/news post pages: title,
- * date, summary, thumbnail, and header image, saved through PUT
- * /api/posts.
+ * summary, meta description, date, byline, and thumbnail, saved through
+ * PUT /api/posts.
  *
- * The date and the images are properties of the post and go live the
- * moment they are saved (they order and illustrate it in listings). The
- * title and summary are the backing page's metadata: per-locale, and
- * staged like the rest of the page's content, so they reach the site
- * with the next Publish. They are read unresolved — see pagemeta.js —
- * so an untranslated post shows the default language as a placeholder
- * rather than prefilling a copy of it.
+ * The date, the byline, and the images are properties of the post and go
+ * live the moment they are saved (they order, sign, and illustrate it in
+ * listings). The title, summary, and meta description are the backing
+ * page's metadata: per-locale, and staged like the rest of the page's
+ * content, so they reach the site with the next Publish. They are read
+ * unresolved — see pagemeta.js — so an untranslated post shows the
+ * default language as a placeholder rather than prefilling a copy of it.
  * ------------------------------------------------------------------ */
 
 import { cfg, postInfo, mediaEnabled } from "./state.js";
@@ -26,10 +26,21 @@ export function initPostSettings() {
             setMsg("");
             var fields = metaFields(meta, {
                 descLabel: "Summary",
-                descHint: "Shown in listings, feeds, and search results",
+                descHint: "Shown on listing cards and in the RSS feed",
+                // A post is the one page whose summary and search
+                // description are different jobs, so it gets both.
+                meta: true,
             });
             fields.push({ id: "date", label: "Date", type: "datetime", span: true,
                 value: postInfo.publishedAt });
+            // The byline, named where there is a name to show — turning
+            // it off is a display choice, so the post stays recorded
+            // against its author either way, and the date stays.
+            fields.push({ id: "byline", type: "check", span: true,
+                value: !postInfo.hideAuthor,
+                label: postInfo.authorName
+                    ? "Show the author's name (" + postInfo.authorName + ")"
+                    : "Show the author's name" });
             // The banner above a post is a section in the template's
             // header region, edited on the page like any other; the only
             // image that belongs to the post itself is its listing
@@ -38,7 +49,7 @@ export function initPostSettings() {
                 fields.push({ id: "thumb", label: "Thumbnail", type: "image", span: true,
                     value: postInfo.thumbnailUrl, mediaId: postInfo.thumbnailMediaId });
             }
-            fields.push(metaNote("the title and summary"));
+            fields.push(metaNote("the text"));
             return openDialog({
                 message: "Post settings" + localeSuffix(),
                 okLabel: "Save",
@@ -66,16 +77,19 @@ export function initPostSettings() {
                 body: JSON.stringify({
                     title: values.title,
                     summary: values.description,
+                    meta_description: values.metaDescription,
                     published_at: values.date,
+                    hide_author: !values.byline,
                     thumbnail_media_id: thumb.id,
                     thumbnail_url: thumb.id ? "" : thumb.url,
                 }),
             }).then(function () {
                 postInfo.publishedAt = values.date;
                 postInfo.summary = values.description;
+                postInfo.hideAuthor = !values.byline;
                 postInfo.thumbnailUrl = thumb.url;
                 postInfo.thumbnailMediaId = thumb.id;
-                afterMetaSave("Post settings", "the title and summary");
+                afterMetaSave("Post settings", "the text");
             });
         }).catch(function (err) { setMsg(err.message); });
     });

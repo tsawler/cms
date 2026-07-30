@@ -63,8 +63,26 @@ type Page struct {
 	BodyJS       string // extra per-page JS (or raw markup), injected by cmsScripts
 	Title        string
 	Description  string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// MetaDescription is what search engines are told the page is about,
+	// when that should differ from Description. It exists for posts,
+	// whose Description is the summary shown in listings and feeds — a
+	// blurb written for readers browsing a list, which is not always the
+	// line worth showing under a search result. Empty means "use
+	// Description", so an ordinary page, whose Description is already its
+	// meta description, never sets it. Read MetaTag rather than this
+	// field to get the words a page actually publishes.
+	MetaDescription string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// MetaTag is the description the page publishes to search engines: its
+// own meta description, or the summary/description it falls back to.
+func (p *Page) MetaTag() string {
+	if p.MetaDescription != "" {
+		return p.MetaDescription
+	}
+	return p.Description
 }
 
 var (
@@ -148,13 +166,14 @@ func pageColumns(draft bool) string {
 	return `p.id, p.slug, ` + tmpl + `, p.status, p.visibility, ` + css + `, ` + js + `,
 		COALESCE(NULLIF(m.title, ''), md.title, ''),
 		COALESCE(NULLIF(m.description, ''), md.description, ''),
+		COALESCE(NULLIF(m.meta_description, ''), md.meta_description, ''),
 		p.created_at, p.updated_at`
 }
 
 func scanPage(row sqldb.Scanner) (*Page, error) {
 	var p Page
 	err := row.Scan(&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
-		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt)
+		&p.Title, &p.Description, &p.MetaDescription, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -267,9 +286,9 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, $4, 'draft')`,
-		p.ID, locale, p.Title, p.Description); err != nil {
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return 0, err
 	}
 	return p.ID, tx.Commit(ctx)
@@ -329,14 +348,14 @@ func (s *Store) Duplicate(ctx context.Context, srcID int64, slug, title, locale 
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		SELECT $1, locale, title, description, 'draft'
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		SELECT $1, locale, title, description, meta_description, 'draft'
 		FROM cms_page_meta WHERE page_id = $2 AND status = 'draft'`, id, srcID); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, '', 'draft')
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, '', '', 'draft')
 		ON CONFLICT (page_id, locale, status)
 		DO UPDATE SET title = EXCLUDED.title`, id, locale, title); err != nil {
 		return 0, err
@@ -387,27 +406,30 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, $4, 'draft')
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')
 		ON CONFLICT (page_id, locale, status)
-		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
-		p.ID, locale, p.Title, p.Description); err != nil {
+		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
+			meta_description = EXCLUDED.meta_description`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// UpdateMeta saves only a page's per-locale metadata (title and
-// description) — how non-default-locale admin tabs save, since every
-// other page field is locale-independent. Like Update it writes the
-// working copy, so the change reaches the site on the next Publish.
-func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale, title, description string) error {
+// UpdateMeta saves only a page's per-locale metadata — how non-default-
+// locale admin tabs save, since every other page field is locale-
+// independent, and how the in-place editor's settings dialogs save. Like
+// Update it writes the working copy, so the change reaches the site on
+// the next Publish.
+func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale string, m PageMeta) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, $4, 'draft')
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')
 		ON CONFLICT (page_id, locale, status)
-		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
-		pageID, locale, title, description)
+		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
+			meta_description = EXCLUDED.meta_description`,
+		pageID, locale, m.Title, m.Description, m.MetaDescription)
 	return err
 }
 
@@ -418,13 +440,19 @@ func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale, title, des
 // prefilling the field with them — prefilling would copy the default
 // language into the translation's own row on the next save, and the page
 // would stop tracking the original for good.
+//
+// It is also what UpdateMeta writes, so a save states every stored field
+// rather than a list of strings whose order is the only thing keeping
+// the title out of the description.
 type PageMeta struct {
-	Title       string
-	Description string
-	// The default locale's stored values. Both are empty when the
+	Title           string
+	Description     string
+	MetaDescription string
+	// The default locale's stored values. All are empty when the
 	// metadata read is the default locale's own.
-	InheritedTitle       string
-	InheritedDescription string
+	InheritedTitle           string
+	InheritedDescription     string
+	InheritedMetaDescription string
 }
 
 // MetaFor returns the page's draft metadata for locale as stored: no
@@ -435,13 +463,14 @@ type PageMeta struct {
 func (s *Store) MetaFor(ctx context.Context, pageID int64, locale string) (PageMeta, error) {
 	var m PageMeta
 	err := s.db.QueryRow(ctx, `
-		SELECT COALESCE(m.title, ''), COALESCE(m.description, ''),
-			COALESCE(md.title, ''), COALESCE(md.description, '')
+		SELECT COALESCE(m.title, ''), COALESCE(m.description, ''), COALESCE(m.meta_description, ''),
+			COALESCE(md.title, ''), COALESCE(md.description, ''), COALESCE(md.meta_description, '')
 		FROM cms_pages p
 		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $2 AND m.status = 'draft'
 		LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $3 AND md.status = 'draft'
 		WHERE p.id = $1`, pageID, locale, s.defaultLocale,
-	).Scan(&m.Title, &m.Description, &m.InheritedTitle, &m.InheritedDescription)
+	).Scan(&m.Title, &m.Description, &m.MetaDescription,
+		&m.InheritedTitle, &m.InheritedDescription, &m.InheritedMetaDescription)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PageMeta{}, ErrNotFound
 	}
@@ -451,7 +480,7 @@ func (s *Store) MetaFor(ctx context.Context, pageID int64, locale string) (PageM
 	// The default locale inherits from nothing; reporting its own values
 	// as inherited would offer them as a placeholder for themselves.
 	if locale == s.defaultLocale {
-		m.InheritedTitle, m.InheritedDescription = "", ""
+		m.InheritedTitle, m.InheritedDescription, m.InheritedMetaDescription = "", "", ""
 	}
 	return m, nil
 }
@@ -493,8 +522,8 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		SELECT page_id, locale, title, description, 'published'
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		SELECT page_id, locale, title, description, meta_description, 'published'
 		FROM cms_page_meta WHERE page_id = $1 AND status = 'draft'`, pageID); err != nil {
 		return err
 	}
@@ -544,8 +573,8 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		SELECT page_id, locale, title, description, 'draft'
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		SELECT page_id, locale, title, description, meta_description, 'draft'
 		FROM cms_page_meta WHERE page_id = $1 AND status = 'published'`, pageID); err != nil {
 		return err
 	}

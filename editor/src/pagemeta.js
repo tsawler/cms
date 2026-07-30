@@ -51,26 +51,47 @@ function inheritPlaceholder(inherited, fallback) {
     return fallback;
 }
 
+// charCount is the live length note under whichever field ends up being
+// the one search engines read. The useful length of a description is a
+// fact about search results rather than about the field, so it is worth
+// saying while it is being typed.
+function charCount(id) {
+    return { type: "note", span: true, text: function (v) {
+        var n = (v[id] || "").length;
+        if (!n) return "";
+        return n + " characters" + (n > 160
+            ? " — search results usually cut off around 160."
+            : "");
+    } };
+}
+
 // metaFields builds the title and description fields both dialogs use.
-// opts.descLabel and opts.descHint caption the description, which is a
-// page's meta description and a post's summary — one column, two names.
+// opts.descLabel and opts.descHint caption the description: a page's
+// meta description, or a post's summary.
+//
+// opts.meta adds the separate meta description underneath, which is what
+// a post has and a page does not — a page's description already is its
+// meta description, while a post's is the blurb its listing card shows.
+// The count then belongs under that field instead, since it is the one
+// search results are cut from.
 export function metaFields(meta, opts) {
-    return [
+    var fields = [
         { id: "title", label: "Title", type: "text", value: meta.title, span: true,
             placeholder: inheritPlaceholder(meta.inheritedTitle, "Shown in the browser tab and in search results") },
         { id: "description", label: opts.descLabel, type: "textarea", rows: 3, span: true,
             value: meta.description,
             placeholder: inheritPlaceholder(meta.inheritedDescription, opts.descHint) },
-        // A live count, because the useful length of a description is a
-        // fact about search results rather than about the field.
-        { type: "note", span: true, text: function (v) {
-            var n = (v.description || "").length;
-            if (!n) return "";
-            return n + " characters" + (n > 160
-                ? " — search results usually cut off around 160."
-                : "");
-        } },
     ];
+    if (!opts.meta) {
+        fields.push(charCount("description"));
+        return fields;
+    }
+    fields.push({ id: "metaDescription", label: "Meta description", type: "textarea", rows: 3,
+        span: true, value: meta.metaDescription,
+        placeholder: inheritPlaceholder(meta.inheritedMetaDescription,
+            "The summary search engines show — leave empty to use the summary above") });
+    fields.push(charCount("metaDescription"));
+    return fields;
 }
 
 // metaNote is the dialog's closing line. On a translation it explains

@@ -108,7 +108,7 @@ func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, 
 	blockSet := `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, ` +
 		d.JSONText("settings") + `
 		FROM cms_blocks WHERE page_id = $1 AND status = `
-	const metaSet = `SELECT locale, title, description
+	const metaSet = `SELECT locale, title, description, meta_description
 		FROM cms_page_meta WHERE page_id = $1 AND status = `
 	var changed bool
 	err := s.db.QueryRow(ctx, `

@@ -445,6 +445,97 @@ func TestRenderPostsData(t *testing.T) {
 	}
 }
 
+// A post set to publish without a byline reports no author at all, so
+// the {{with .Author}} every template already writes drops the byline
+// and keeps the date. The name stays recorded — the editor's gear needs
+// it to say whose byline is switched off.
+func TestRenderPostWithoutByline(t *testing.T) {
+	post := &content.Post{
+		Page: content.Page{Slug: "news/notice", Title: "Notice"},
+		Feed: content.FeedNews,
+	}
+	post.AuthorName = "Pat Writer"
+	post.PublishedAt = time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+
+	info := PostInfoFor(post, "", nil)
+	if info.Author != "Pat Writer" {
+		t.Errorf("bylined post: Author = %q, want the author", info.Author)
+	}
+
+	post.HideAuthor = true
+	info = PostInfoFor(post, "", nil)
+	if info.Author != "" {
+		t.Errorf("Author = %q, want empty so {{with .Author}} prints nothing", info.Author)
+	}
+	if info.AuthorName != "Pat Writer" || !info.HideAuthor {
+		t.Errorf("AuthorName/HideAuthor = %q/%v, want the recorded author and the flag",
+			info.AuthorName, info.HideAuthor)
+	}
+	if !info.PublishedAt.Equal(post.PublishedAt) {
+		t.Error("hiding the byline changed the date")
+	}
+}
+
+// cmsDate writes the date in the language the page is rendered in. A
+// French page formatting its date with Go's own .Format would show the
+// month in English, which is the bug the func exists to remove.
+func TestRenderDateFollowsLocale(t *testing.T) {
+	fsys := fstest.MapFS{
+		"pages/post.gohtml": &fstest.MapFile{Data: []byte(
+			`{{with .Post}}<time>{{cmsDate .PublishedAt}}</time><b>{{cmsDate .PublishedAt "short"}}</b>{{end}}`)},
+	}
+	r, err := New(fsys, nil, []PageTemplate{{File: "pages/post.gohtml", Label: "Post"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	page := &content.Page{ID: 1, TemplateName: "pages/post.gohtml", Title: "Launch"}
+	post := &content.Post{Page: content.Page{Slug: "blog/launch", Title: "Launch"}, Feed: content.FeedBlog}
+	post.PublishedAt = time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+
+	for locale, want := range map[string]string{
+		"en": "<time>July 30, 2026</time><b>Jul 30, 2026</b>",
+		"fr": "<time>30 juillet 2026</time><b>30 juil. 2026</b>",
+	} {
+		var buf bytes.Buffer
+		if err := r.Render(&buf, Input{Page: page, Locale: locale, Post: PostInfoFor(post, "", nil)}); err != nil {
+			t.Fatalf("Render(%s): %v", locale, err)
+		}
+		if got := buf.String(); got != want {
+			t.Errorf("locale %s: got %q, want %q", locale, got, want)
+		}
+	}
+}
+
+// A post's meta description is what the page publishes to search
+// engines; its summary is what listings show. cmsHead prints the first
+// and falls back to the second, so a post that sets none is unchanged.
+func TestRenderMetaDescriptionPrefersItsOwn(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 5, TemplateName: "pages/home.gohtml", Title: "Launch",
+		Description: "We shipped it"}
+
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), `<meta name="description" content="We shipped it">`) {
+		t.Errorf("without its own meta description, want the summary:\n%s", buf.String())
+	}
+
+	page.MetaDescription = "How we shipped, and what broke"
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<meta name="description" content="How we shipped, and what broke">`) {
+		t.Errorf("want the page's own meta description:\n%s", out)
+	}
+	if strings.Contains(out, `content="We shipped it"`) {
+		t.Error("the summary was published as the meta description too")
+	}
+}
+
 // pagedRenderer parses a template that exercises cmsFeed's numbers and
 // cmsPagination's markup together.
 func pagedRenderer(t *testing.T) *Renderer {

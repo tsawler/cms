@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tsawler/cms/internal/datefmt"
 )
 
 // langCookieName holds the user's admin UI language ("en" or "fr").
@@ -102,6 +104,14 @@ func (td templateData) T(key string) string {
 		}
 	}
 	return key
+}
+
+// D is T for dates: {{.D .PublishedAt}} writes the date in the admin
+// language, so a French admin reads "30 juil. 2026" rather than the one
+// English string left in a translated table. Abbreviated, because every
+// caller is a column in a list.
+func (td templateData) D(t time.Time) string {
+	return datefmt.Short(t, td.AdminLang)
 }
 
 // setLang handles the topbar language toggle: it stores the chosen admin
@@ -288,8 +298,13 @@ var frStrings = map[string]string{
 	"(after /blog/ or /news/; leave empty to use the title)":            "(après /blog/ ou /news/; laissez vide pour utiliser le titre)",
 	"my-first-post": "mon-premier-billet",
 	"Summary":       "Résumé",
-	"(shown in listings, feeds, and search engines)":                        "(affiché dans les listes, les fils et les moteurs de recherche)",
-	"The date shown on the post and used to order listings — newest first.": "La date affichée sur le billet et utilisée pour ordonner les listes — du plus récent au plus ancien.",
+	"(shown on listing cards and in the RSS feed)": "(affiché sur les cartes des listes et dans le fil RSS)",
+	"Meta description": "Méta-description",
+	"Leave empty to use the summary. Search results usually cut off around 160 characters.": "Laissez vide pour utiliser le résumé. Les résultats de recherche coupent généralement vers 160 caractères.",
+	"Show the author's name": "Afficher le nom de l'auteur",
+	"Off publishes the post under the site's name, with the date but no byline.": "Désactivé, le billet paraît au nom du site, avec la date mais sans signature.",
+	"(shown in listings, feeds, and search engines)":                             "(affiché dans les listes, les fils et les moteurs de recherche)",
+	"The date shown on the post and used to order listings — newest first.":      "La date affichée sur le billet et utilisée pour ordonner les listes — du plus récent au plus ancien.",
 	"Thumbnail":                           "Vignette",
 	"(optional — shown on listing cards)": "(facultatif — affichée sur les cartes des listes)",
 	"— no thumbnail —":                    "— aucune vignette —",

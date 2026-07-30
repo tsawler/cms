@@ -28,7 +28,7 @@
     <tr>
         <td>{{if .Title}}{{.Title}}{{else}}<span class="cms-muted">{{$.T "(untitled)"}}</span>{{end}}</td>
         <td>{{$.T (printf "%s" .Feed)}}</td>
-        <td>{{.PublishedAt.Format "Jan 2, 2006"}}</td>
+        <td>{{$.D .PublishedAt}}</td>
         <td>{{if .AuthorName}}{{.AuthorName}}{{else}}<span class="cms-muted">—</span>{{end}}</td>
         <td>{{if eq .Status "published"}}<span class="cms-badge cms-badge-ok">{{$.T "published"}}</span>{{else}}<span class="cms-badge cms-badge-draft">{{$.T "draft"}}</span>{{end}}</td>
         <td class="cms-table-actions"><a href="{{$.AdminPath}}/posts/{{.PostID}}">{{$.T "Edit"}}</a></td>

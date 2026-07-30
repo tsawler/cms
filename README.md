@@ -582,13 +582,31 @@ does two jobs, becoming the background of the post's banner section and
 its card in the listings. You land in the new draft with the banner
 already on it, ready to write. While editing a post in place, a **⚙ Post
 settings** pill pinned to the top-right of the page reopens those
-settings — title, summary, date, and listing image. The date and the
-image go live the moment they are saved, like menus, since they order
-and illustrate the post rather than being page content; the title and
-summary are page metadata and reach the site with the next Publish. On a
+settings, and holds the rest of them: title, summary, meta description,
+date, byline, and listing image — the same fields as the admin's post
+form. The date, the byline, and the image go live the moment they are
+saved, like menus, since they order, sign, and illustrate the post
+rather than being page content; the title, summary, and meta description
+are page metadata and reach the site with the next Publish. On a
 translated site the pill edits the language the page is rendered in, so
 a French post gets a French title and summary. The creating user is
 stamped as the author; feed and address changes live on the admin form.
+
+Two of those settings are particular to posts:
+
+- **Meta description.** A page has one description, which is its meta
+  description. A post's description is its *summary* — the blurb on
+  listing cards and in RSS — which is not always the line worth showing
+  under a search result, so a post carries a second, per-locale meta
+  description beside it. Empty means "use the summary", which is what
+  every post that has never set one says, so nothing changes until it is
+  filled in. `{{cmsHead}}` publishes whichever applies.
+- **Show the author's name.** Off publishes the post under the site's
+  name: the date still prints, the byline does not. The author is not
+  changed — it stays recorded and comes back when the setting does — and
+  templates need nothing new, because a post with its byline off reports
+  an empty `.Author`, which the `{{with .Author}}` a byline is already
+  written with skips.
 
 A post has no header field. The banner at the top of a post is a
 **section** in a region of its own, so it is edited on the page with the
@@ -605,7 +623,7 @@ else to wire up:
 {{cmsSections "header"}}
 <article>
   {{if not (cmsHasSections "header")}}<h1>{{cmsTitle}}</h1>{{end}}
-  {{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
+  {{with .Post}}<p>{{cmsDate .PublishedAt}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
   {{cmsSections "sections"}}
 </article>
 ```
@@ -642,14 +660,25 @@ walks the whole feed see [Paginated listings](#paginated-listings) below:
            width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" loading="lazy">
     {{end}}
     <h2>{{.Title}}</h2>
-    <p>{{.PublishedAt.Format "January 2, 2006"}}</p>
+    <p>{{cmsDate .PublishedAt}}</p>
     <p>{{.Summary}}</p>
   </a>
 {{end}}
 ```
 
 Each entry carries `Feed`, `Title`, `Summary` (the page description),
-`URL`, `PublishedAt`, `Author`, `Thumbnail`, and `Draft`.
+`URL`, `PublishedAt`, `Author`, `Thumbnail`, and `Draft`. `Author` is
+empty on a post whose byline is switched off in its settings, so
+`{{with .Author}} · {{.}}{{end}}` is all a template needs to honour that
+— the date stays either way.
+
+Print dates with `{{cmsDate .PublishedAt}}` rather than Go's own
+`.Format`: it writes the date in the language the page is being rendered
+in ("July 30, 2026", "30 juillet 2026"), where `.Format` names months in
+English on every page whatever language it is written in. Add `"short"`
+— `{{cmsDate .PublishedAt "short"}}` — for the abbreviated month in a
+tight listing. English and French are built in; any other locale formats
+as English, and a template is free to format its own dates instead.
 
 #### Paginated listings
 

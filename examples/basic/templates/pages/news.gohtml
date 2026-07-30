@@ -15,7 +15,7 @@
                  loading="lazy" decoding="async" class="h-20 w-28 flex-none rounded-lg object-cover">
             {{end}}
             <div>
-                <p class="text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}
+                <p class="text-sm text-slate-500">{{cmsDate .PublishedAt}}
                     {{if .Draft}}<span class="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Draft</span>{{end}}
                 </p>
                 <h2 class="mt-1 text-lg font-semibold text-slate-900 group-hover:underline">{{.Title}}</h2>

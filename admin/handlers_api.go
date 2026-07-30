@@ -702,11 +702,13 @@ func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"locale":               locale,
-		"title":                meta.Title,
-		"description":          meta.Description,
-		"inheritedTitle":       meta.InheritedTitle,
-		"inheritedDescription": meta.InheritedDescription,
+		"locale":                   locale,
+		"title":                    meta.Title,
+		"description":              meta.Description,
+		"metaDescription":          meta.MetaDescription,
+		"inheritedTitle":           meta.InheritedTitle,
+		"inheritedDescription":     meta.InheritedDescription,
+		"inheritedMetaDescription": meta.InheritedMetaDescription,
 	})
 }
 
@@ -721,18 +723,20 @@ func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
 //
 // A field left out of the body entirely is left alone, which is not the
 // same as sending it empty: the in-place title editor sends a title and
-// no description, and must not take the page's meta description with it.
-// The dialogs send both fields and so overwrite both.
-// PUT /api/pages/{id}/meta  body: {"locale", "title", "description"}
+// nothing else, and must not take the page's description with it. The
+// dialogs send every field they show and so overwrite them all.
+// PUT /api/pages/{id}/meta  body: {"locale", "title", "description",
+// "metaDescription"}
 func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.pageFromURL(w, r)
 	if !ok {
 		return
 	}
 	var body struct {
-		Locale      string  `json:"locale"`
-		Title       *string `json:"title"`
-		Description *string `json:"description"`
+		Locale          string  `json:"locale"`
+		Title           *string `json:"title"`
+		Description     *string `json:"description"`
+		MetaDescription *string `json:"metaDescription"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMetaBody))
 	if err := dec.Decode(&body); err != nil {
@@ -743,8 +747,8 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown language."))
 		return
 	}
-	var title, desc string
-	if body.Title == nil || body.Description == nil {
+	var meta content.PageMeta
+	if body.Title == nil || body.Description == nil || body.MetaDescription == nil {
 		// Only what the body omits is read back; a full save needs no
 		// round trip.
 		stored, err := s.deps.Content.MetaFor(r.Context(), page.ID, body.Locale)
@@ -753,19 +757,23 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 			return
 		}
-		title, desc = stored.Title, stored.Description
+		meta = content.PageMeta{Title: stored.Title, Description: stored.Description,
+			MetaDescription: stored.MetaDescription}
 	}
 	if body.Title != nil {
-		title = strings.TrimSpace(*body.Title)
+		meta.Title = strings.TrimSpace(*body.Title)
 	}
 	if body.Description != nil {
-		desc = strings.TrimSpace(*body.Description)
+		meta.Description = strings.TrimSpace(*body.Description)
 	}
-	if title == "" && body.Locale == s.deps.DefaultLocale {
+	if body.MetaDescription != nil {
+		meta.MetaDescription = strings.TrimSpace(*body.MetaDescription)
+	}
+	if meta.Title == "" && body.Locale == s.deps.DefaultLocale {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Title is required."))
 		return
 	}
-	if err := s.deps.Content.UpdateMeta(r.Context(), page.ID, body.Locale, title, desc); err != nil {
+	if err := s.deps.Content.UpdateMeta(r.Context(), page.ID, body.Locale, meta); err != nil {
 		s.deps.Logger.Error("cms admin: api saving page meta", "page", page.ID, "locale", body.Locale, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 		return

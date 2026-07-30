@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/internal/datefmt"
 	"github.com/tsawler/cms/media"
 )
 
@@ -151,10 +152,17 @@ func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale str
 
 // PageData is the dot value passed to a page template.
 type PageData struct {
-	Title       string
+	Title string
+	// Description is the page's description, which on a post is its
+	// summary — the words its listing card and feed entry show.
 	Description string
-	Slug        string
-	Locale      string
+	// MetaDescription is what cmsHead publishes to search engines: the
+	// page's own meta description when it has one, otherwise
+	// Description. Templates need it only to do something else with the
+	// same words; the meta tag itself comes from cmsHead.
+	MetaDescription string
+	Slug            string
+	Locale          string
 	// Post is set when the page is a blog or news post's backing page —
 	// the post template reads its date, author, and images from here.
 	// Nil on ordinary pages.
@@ -172,7 +180,16 @@ type PostInfo struct {
 	Summary     string
 	URL         string // site-relative, e.g. "/blog/launch-day"
 	PublishedAt time.Time
-	Author      string
+	// Author is the byline to print: empty when the post has none, and
+	// equally empty when the post is set to publish without one, so
+	// {{with .Author}} is all a template needs for either.
+	Author string
+	// HideAuthor is that setting, and AuthorName the name behind it —
+	// the recorded author whether or not it is shown. Templates want
+	// .Author; these two are for the editor's settings gear, which has
+	// to name the byline it is offering to switch off.
+	HideAuthor bool
+	AuthorName string
 
 	// Thumbnail is the post's listing image with every rendition resolved
 	// — src, srcset, and intrinsic size — and is nil when the post has
@@ -316,13 +333,21 @@ type PostImages func(md *media.Media, prefer string) *media.Image
 // images resolves the post's library images.
 func PostInfoFor(p *content.Post, localePrefix string, images PostImages) *PostInfo {
 	info := &PostInfo{
-		ID:               p.PostID,
-		Feed:             string(p.Feed),
-		Title:            p.Title,
-		Summary:          p.Description,
-		URL:              localePrefix + "/" + p.Slug,
-		PublishedAt:      p.PublishedAt,
-		Author:           p.AuthorName,
+		ID:          p.PostID,
+		Feed:        string(p.Feed),
+		Title:       p.Title,
+		Summary:     p.Description,
+		URL:         localePrefix + "/" + p.Slug,
+		PublishedAt: p.PublishedAt,
+		// A post with its byline hidden reports no author at all, so
+		// every template that already writes {{with .Author}} — the
+		// shape a byline has, since a post can always have lost its
+		// author to a deleted account — honours the setting with no
+		// change. The stored author is not disturbed; it is simply not
+		// something this render has.
+		Author:           authorName(p),
+		HideAuthor:       p.HideAuthor,
+		AuthorName:       p.AuthorName,
 		ThumbnailMediaID: p.ThumbnailMediaIDValue(),
 		Draft:            p.Status != content.StatusPublished,
 	}
@@ -333,6 +358,15 @@ func PostInfoFor(p *content.Post, localePrefix string, images PostImages) *PostI
 		info.ThumbnailURL = info.Thumbnail.URL
 	}
 	return info
+}
+
+// authorName is the byline a render should show: the post's author, or
+// nothing when the post is set to publish without one.
+func authorName(p *content.Post) string {
+	if p.HideAuthor {
+		return ""
+	}
+	return p.AuthorName
 }
 
 // postImage resolves one of a post's images, falling back to a stored URL
@@ -474,6 +508,7 @@ var stubFuncs = template.FuncMap{
 	"cmsSections":    func(string) template.HTML { return "" },
 	"cmsHasSections": func(string) bool { return false },
 	"cmsTitle":       func() template.HTML { return "" },
+	"cmsDate":        func(time.Time, ...string) string { return "" },
 	"cmsMenu":        func(string) []MenuEntry { return nil },
 	"cmsNav":         func(string) template.HTML { return "" },
 	"cmsBrand":       func(...string) template.HTML { return "" },
@@ -913,7 +948,19 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		// escaped text and nothing else, which is why it belongs in the
 		// body and .Title still belongs in <title>.
 		"cmsTitle": func() template.HTML { return template.HTML(html.EscapeString(page.Title)) },
-		"cmsMenu":  func(key string) []MenuEntry { return menus[key] },
+		// cmsDate writes a date in the language the page is being read
+		// in: "July 30, 2026" in English, "30 juillet 2026" in French.
+		// Go's own .Format names months in English whatever the page is
+		// written in, which leaves the date as the one line of a
+		// translated page still in the wrong language. Pass "short" for
+		// the abbreviated month, where a listing's line is tight.
+		"cmsDate": func(t time.Time, style ...string) string {
+			if len(style) > 0 && style[0] == "short" {
+				return datefmt.Short(t, locale)
+			}
+			return datefmt.Long(t, locale)
+		},
+		"cmsMenu": func(key string) []MenuEntry { return menus[key] },
 		"cmsNav": func(key string) template.HTML {
 			// The login link shows only to logged-out visitors (edit == nil)
 			// when the setting is on and an admin path is known.
@@ -994,11 +1041,12 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 
 	var buf bytes.Buffer
 	if err := clone.ExecuteTemplate(&buf, path.Base(page.TemplateName), PageData{
-		Title:       page.Title,
-		Description: page.Description,
-		Slug:        page.Slug,
-		Locale:      locale,
-		Post:        in.Post,
+		Title:           page.Title,
+		Description:     page.Description,
+		MetaDescription: page.MetaTag(),
+		Slug:            page.Slug,
+		Locale:          locale,
+		Post:            in.Post,
 	}); err != nil {
 		return fmt.Errorf("render: executing %s: %w", page.TemplateName, err)
 	}
@@ -1128,6 +1176,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 			"feed":        edit.Post.Feed,
 			"summary":     edit.Post.Summary,
 			"publishedAt": edit.Post.PublishedAt.Local().Format("2006-01-02T15:04"),
+			// The byline toggle, and the name it would show — the gear
+			// says whose byline it is offering to leave off.
+			"hideAuthor": edit.Post.HideAuthor,
+			"authorName": edit.Post.AuthorName,
 			// Both forms of the thumbnail: the id is what a save writes
 			// back, the URL is what the dialog shows as a preview.
 			"thumbnailMediaId": edit.Post.ThumbnailMediaID,
@@ -1482,9 +1534,11 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 		sb.WriteString(html.EscapeString(contentCSS))
 		sb.WriteString("\">\n")
 	}
-	if p.Description != "" {
+	// A post's own meta description when it has one, otherwise the
+	// summary it shares with its listing card (MetaTag).
+	if desc := p.MetaTag(); desc != "" {
 		sb.WriteString(`<meta name="description" content="`)
-		sb.WriteString(html.EscapeString(p.Description))
+		sb.WriteString(html.EscapeString(desc))
 		sb.WriteString("\">\n")
 	}
 	// Site-wide CSS before the page's own, so a page's HeadCSS can

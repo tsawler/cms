@@ -189,6 +189,7 @@ The functions available in every template:
 | `{{cmsPosts "blog" 10}}` | the newest N blog/news entries |
 | `{{cmsFeed "blog"}}` | one `?page=`-worth of a feed, for paginated listings |
 | `{{cmsPagination $feed}}` | a ready-made Previous / 1 2 3 / Next bar |
+| `{{cmsDate .PublishedAt}}` | a date in the page's language ("30 juillet 2026") |
 | `{{cmsLocales}}` | language-switcher links (multi-locale sites) |
 | `{{cmsHead}}` | meta description, per-page CSS, hreflang — put in `<head>` |
 | `{{cmsScripts}}` | per-page JS — put before `</body>` |
@@ -691,7 +692,7 @@ carries `.Post` (date, author, listing image, …):
         {{if not (cmsHasSections "header")}}
         <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{cmsTitle}}</h1>
         {{end}}
-        {{with .Post}}<p class="mt-3 text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
+        {{with .Post}}<p class="mt-3 text-sm text-slate-500">{{cmsDate .PublishedAt}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
     </header>
     {{cmsSections "sections"}}
 </article>
@@ -718,6 +719,27 @@ Posts are created from the tool rail's **Post** button (title, feed,
 summary, date, image up front) or under **Blog & News** in the
 admin, and then **edited in place exactly like pages** — a post is an
 ordinary page whose slug lives under `blog/` or `news/`.
+
+The gear beside the edit bar's **Done** button holds the rest of a post's
+settings, the same fields the admin's post form has:
+
+- **Title** and **Summary** — the summary is the blurb listing cards and
+  the RSS feed show.
+- **Meta description** — what search engines are given, when that should
+  read differently from the summary. Empty means "use the summary", so a
+  post that never sets one behaves as it always did. (An ordinary page
+  has one description, edited under **Page settings**: for a page the
+  description *is* the meta description.)
+- **Date** — shown on the post and used to order listings.
+- **Show the author's name** — off publishes the post under the site's
+  name, keeping the date but printing no byline. The author stays
+  recorded, so switching it back on restores the same name; templates
+  need nothing beyond the `{{with .Author}}` they already write.
+- **Thumbnail** — the listing image.
+
+Title, summary, and meta description are per-locale and staged like the
+rest of the page, so they reach the site on the next Publish; the date,
+the byline, and the thumbnail apply at once.
 
 For the listing page, create a page at slug `blog` (or `news`) whose
 template ranges over `{{cmsPosts "blog" 12}}` — each entry has `.Title`,

@@ -25,7 +25,8 @@ try {
 export var defaultLocale = locales[0] || cfg.locale || "en";
 
 // When the current page backs a blog/news post: {id, feed, summary,
-// publishedAt, thumbnailUrl, headerUrl}. Null on ordinary pages. Mutable:
+// publishedAt, hideAuthor, authorName, thumbnailUrl, thumbnailMediaId}.
+// Null on ordinary pages. Mutable:
 // the post-settings dialog updates it after a save so reopening shows
 // the saved values.
 export var postInfo = null;

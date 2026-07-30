@@ -5333,8 +5333,15 @@ body.cms-editing [data-cms-fallback] {
     }
     return fallback;
   }
+  function charCount(id) {
+    return { type: "note", span: true, text: function(v) {
+      var n = (v[id] || "").length;
+      if (!n) return "";
+      return n + " characters" + (n > 160 ? " \u2014 search results usually cut off around 160." : "");
+    } };
+  }
   function metaFields(meta, opts) {
-    return [
+    var fields = [
       {
         id: "title",
         label: "Title",
@@ -5351,15 +5358,26 @@ body.cms-editing [data-cms-fallback] {
         span: true,
         value: meta.description,
         placeholder: inheritPlaceholder(meta.inheritedDescription, opts.descHint)
-      },
-      // A live count, because the useful length of a description is a
-      // fact about search results rather than about the field.
-      { type: "note", span: true, text: function(v) {
-        var n = (v.description || "").length;
-        if (!n) return "";
-        return n + " characters" + (n > 160 ? " \u2014 search results usually cut off around 160." : "");
-      } }
+      }
     ];
+    if (!opts.meta) {
+      fields.push(charCount("description"));
+      return fields;
+    }
+    fields.push({
+      id: "metaDescription",
+      label: "Meta description",
+      type: "textarea",
+      rows: 3,
+      span: true,
+      value: meta.metaDescription,
+      placeholder: inheritPlaceholder(
+        meta.inheritedMetaDescription,
+        "The summary search engines show \u2014 leave empty to use the summary above"
+      )
+    });
+    fields.push(charCount("metaDescription"));
+    return fields;
   }
   function metaNote(staged) {
     if (isTranslation()) {
@@ -5539,7 +5557,10 @@ body.cms-editing [data-cms-fallback] {
         setMsg("");
         var fields = metaFields(meta, {
           descLabel: "Summary",
-          descHint: "Shown in listings, feeds, and search results"
+          descHint: "Shown on listing cards and in the RSS feed",
+          // A post is the one page whose summary and search
+          // description are different jobs, so it gets both.
+          meta: true
         });
         fields.push({
           id: "date",
@@ -5547,6 +5568,13 @@ body.cms-editing [data-cms-fallback] {
           type: "datetime",
           span: true,
           value: postInfo.publishedAt
+        });
+        fields.push({
+          id: "byline",
+          type: "check",
+          span: true,
+          value: !postInfo.hideAuthor,
+          label: postInfo.authorName ? "Show the author's name (" + postInfo.authorName + ")" : "Show the author's name"
         });
         if (mediaEnabled) {
           fields.push({
@@ -5558,7 +5586,7 @@ body.cms-editing [data-cms-fallback] {
             mediaId: postInfo.thumbnailMediaId
           });
         }
-        fields.push(metaNote("the title and summary"));
+        fields.push(metaNote("the text"));
         return openDialog({
           message: "Post settings" + localeSuffix(),
           okLabel: "Save",
@@ -5579,16 +5607,19 @@ body.cms-editing [data-cms-fallback] {
           body: JSON.stringify({
             title: values.title,
             summary: values.description,
+            meta_description: values.metaDescription,
             published_at: values.date,
+            hide_author: !values.byline,
             thumbnail_media_id: thumb.id,
             thumbnail_url: thumb.id ? "" : thumb.url
           })
         }).then(function() {
           postInfo.publishedAt = values.date;
           postInfo.summary = values.description;
+          postInfo.hideAuthor = !values.byline;
           postInfo.thumbnailUrl = thumb.url;
           postInfo.thumbnailMediaId = thumb.id;
-          afterMetaSave("Post settings", "the title and summary");
+          afterMetaSave("Post settings", "the text");
         });
       }).catch(function(err) {
         setMsg(err.message);

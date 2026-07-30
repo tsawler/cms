@@ -203,6 +203,81 @@ func TestPostUpdate(t *testing.T) {
 	})
 }
 
+// A post carries two descriptions and a byline switch. The meta
+// description is staged metadata like the title, so it reaches the site
+// on Publish; the byline is a cms_posts field and applies at once.
+func TestPostMetaDescriptionAndByline(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		post := seedPost(t, s, content.Post{
+			Page: content.Page{Slug: "news/notice", Title: "Notice",
+				Description: "What changed, for the listing"},
+			Feed: content.FeedNews,
+		})
+
+		// A post that sets none publishes its summary; MetaTag is what
+		// resolves that, so an unset field is not an empty meta tag.
+		if got := post.MetaDescription; got != "" {
+			t.Errorf("new post meta description = %q, want empty", got)
+		}
+		if got, err := s.PostByID(ctx, post.PostID, defaultLocale); err != nil {
+			t.Fatalf("PostByID: %v", err)
+		} else if got.MetaTag() != "What changed, for the listing" {
+			t.Errorf("MetaTag = %q, want the summary", got.MetaTag())
+		}
+
+		if err := s.Publish(ctx, post.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		post.MetaDescription = "The notice in search-result words"
+		post.HideAuthor = true
+		if err := s.UpdatePost(ctx, post, defaultLocale); err != nil {
+			t.Fatalf("UpdatePost: %v", err)
+		}
+
+		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if got.MetaDescription != "The notice in search-result words" {
+			t.Errorf("working-copy meta description = %q", got.MetaDescription)
+		}
+		if got.MetaTag() != "The notice in search-result words" {
+			t.Errorf("MetaTag = %q, want the post's own", got.MetaTag())
+		}
+		if got.Description != "What changed, for the listing" {
+			t.Errorf("summary = %q, want it untouched", got.Description)
+		}
+		// The byline is not staged: hiding it takes effect on the live
+		// post without a Publish, like the date.
+		if !got.HideAuthor {
+			t.Error("working copy still shows the byline")
+		}
+		live, err := s.PostByPageID(ctx, post.ID, defaultLocale, false)
+		if err != nil {
+			t.Fatalf("PostByPageID(published): %v", err)
+		}
+		if !live.HideAuthor {
+			t.Error("published post still shows the byline")
+		}
+		// ...while the meta description waits for one.
+		if live.MetaDescription != "" {
+			t.Errorf("published meta description = %q, want the pre-edit empty", live.MetaDescription)
+		}
+
+		if err := s.Publish(ctx, post.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		if live, err = s.PostByPageID(ctx, post.ID, defaultLocale, false); err != nil {
+			t.Fatalf("PostByPageID(published): %v", err)
+		}
+		if live.MetaDescription != "The notice in search-result words" {
+			t.Errorf("published meta description = %q, want the edited one", live.MetaDescription)
+		}
+	})
+}
+
 func TestPostsFiltering(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()

@@ -24,7 +24,7 @@
             <div class="p-5">
                 {{if .Draft}}<span class="mb-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Draft</span>{{end}}
                 <h2 class="text-lg font-semibold text-slate-900 group-hover:underline">{{.Title}}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>
+                <p class="mt-1 text-sm text-slate-500">{{cmsDate .PublishedAt}}{{with .Author}} · {{.}}{{end}}</p>
                 {{with .Summary}}<p class="mt-2 text-sm text-slate-600">{{.}}</p>{{end}}
             </div>
         </a>

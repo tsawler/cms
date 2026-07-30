@@ -52,8 +52,14 @@
     {{end}}
 
     <div class="cms-field">
-        <label for="description">{{.T "Summary"}} <span class="cms-muted">{{.T "(shown in listings, feeds, and search engines)"}}</span></label>
+        <label for="description">{{.T "Summary"}} <span class="cms-muted">{{.T "(shown on listing cards and in the RSS feed)"}}</span></label>
         <input type="text" id="description" name="description" value="{{.FormPost.Description}}">
+    </div>
+
+    <div class="cms-field">
+        <label for="meta_description">{{.T "Meta description"}} <span class="cms-muted">{{.T "(for search engines)"}}</span></label>
+        <input type="text" id="meta_description" name="meta_description" value="{{.FormPost.MetaDescription}}">
+        <p class="cms-hint">{{.T "Leave empty to use the summary. Search results usually cut off around 160 characters."}}</p>
     </div>
 
     {{if .IsDefaultLocale}}
@@ -65,12 +71,16 @@
         <p class="cms-hint">{{.T "The date shown on the post and used to order listings — newest first."}}</p>
     </div>
 
-    {{if not .IsNew}}{{if .FormPost.AuthorName}}
-    <div class="cms-field">
-        <label>{{.T "Author"}}</label>
-        <p class="cms-static">{{.FormPost.AuthorName}}</p>
+    {{/* The byline is a display choice, not a change of author: the post
+         stays recorded against whoever wrote it either way, so a new post
+         offers the switch before there is a name to show. */}}
+    <div class="cms-field cms-field-check">
+        <label>
+            <input type="checkbox" name="show_author" {{if not .FormPost.HideAuthor}}checked{{end}}>
+            {{.T "Show the author's name"}}{{if not .IsNew}}{{with .FormPost.AuthorName}} <span class="cms-muted">({{.}})</span>{{end}}{{end}}
+        </label>
+        <p class="cms-hint">{{.T "Off publishes the post under the site's name, with the date but no byline."}}</p>
     </div>
-    {{end}}{{end}}
 
     {{if .MediaEnabled}}
     {{/* The picker stores the library id, not one image address: the site

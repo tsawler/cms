@@ -320,8 +320,13 @@ func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
 			s.renderPageForm(w, r, existing, false, map[string]string{"title": s.tr(r, "Title is required.")})
 			return
 		}
-		desc := strings.TrimSpace(r.PostFormValue("description"))
-		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, title, desc); err != nil {
+		// A page's description is its meta description; only posts, whose
+		// description is a listing summary, carry a second one.
+		meta := content.PageMeta{
+			Title:       title,
+			Description: strings.TrimSpace(r.PostFormValue("description")),
+		}
+		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, meta); err != nil {
 			s.serverError(w, err)
 			return
 		}

@@ -22,7 +22,7 @@
     <tr>
         <td>{{.Name}}</td>
         <td>{{if .Settings}}{{$.T "Section preset"}}{{else}}{{$.T "Inline block"}}{{end}}</td>
-        <td>{{.UpdatedAt.Format "Jan 2, 2006"}}</td>
+        <td>{{$.D .UpdatedAt}}</td>
         <td class="cms-table-actions cms-actions">
             <a class="cms-btn cms-btn-ghost cms-btn-sm" href="{{$.AdminPath}}/snippets/{{.ID}}">{{$.T "Edit"}}</a>
             <form method="post" action="{{$.AdminPath}}/snippets/{{.ID}}/delete"

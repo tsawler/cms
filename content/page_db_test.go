@@ -124,7 +124,7 @@ func TestPageMetadataLocaleFallback(t *testing.T) {
 		}, defaultLocale)
 
 		// French gets a title but deliberately no description.
-		if err := s.UpdateMeta(ctx, p.ID, "fr", "Titre Français", ""); err != nil {
+		if err := s.UpdateMeta(ctx, p.ID, "fr", content.PageMeta{Title: "Titre Français", Description: ""}); err != nil {
 			t.Fatalf("UpdateMeta(fr): %v", err)
 		}
 
@@ -156,7 +156,7 @@ func TestPageMetaForReadsRawValues(t *testing.T) {
 			Title:       "English Title",
 			Description: "English description",
 		}, defaultLocale)
-		if err := s.UpdateMeta(ctx, p.ID, "fr", "Titre Français", ""); err != nil {
+		if err := s.UpdateMeta(ctx, p.ID, "fr", content.PageMeta{Title: "Titre Français", Description: ""}); err != nil {
 			t.Fatalf("UpdateMeta(fr): %v", err)
 		}
 
@@ -221,7 +221,7 @@ func TestPageMetaForReadsTheDraft(t *testing.T) {
 		if err := s.Publish(ctx, p.ID); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
-		if err := s.UpdateMeta(ctx, p.ID, defaultLocale, "Edited Title", "New description"); err != nil {
+		if err := s.UpdateMeta(ctx, p.ID, defaultLocale, content.PageMeta{Title: "Edited Title", Description: "New description"}); err != nil {
 			t.Fatalf("UpdateMeta: %v", err)
 		}
 
@@ -442,7 +442,7 @@ func TestPageDuplicate(t *testing.T) {
 			Title:        "Source Page",
 			Description:  "Source description",
 		}, defaultLocale)
-		if err := s.UpdateMeta(ctx, src.ID, "fr", "Page Source", "Description source"); err != nil {
+		if err := s.UpdateMeta(ctx, src.ID, "fr", content.PageMeta{Title: "Page Source", Description: "Description source"}); err != nil {
 			t.Fatalf("UpdateMeta(fr): %v", err)
 		}
 		if err := s.UpsertDraftBlock(ctx, src.ID, "body", defaultLocale, content.KindHTML, "<p>copy me</p>"); err != nil {

@@ -105,8 +105,12 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 			s.renderPostForm(w, r, existing, false, map[string]string{"title": s.tr(r, "Title is required.")})
 			return
 		}
-		desc := strings.TrimSpace(r.PostFormValue("description"))
-		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, title, desc); err != nil {
+		meta := content.PageMeta{
+			Title:           title,
+			Description:     strings.TrimSpace(r.PostFormValue("description")),
+			MetaDescription: strings.TrimSpace(r.PostFormValue("meta_description")),
+		}
+		if err := s.deps.Content.UpdateMeta(r.Context(), existing.ID, locale, meta); err != nil {
 			s.serverError(w, err)
 			return
 		}
@@ -257,7 +261,11 @@ func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*conten
 	p := &content.Post{}
 	p.Title = strings.TrimSpace(r.PostFormValue("title"))
 	p.Description = strings.TrimSpace(r.PostFormValue("description"))
+	p.MetaDescription = strings.TrimSpace(r.PostFormValue("meta_description"))
 	p.TemplateName = s.deps.PostTemplate.File
+	// An unchecked checkbox submits nothing, so the byline is read as
+	// the absence of "show it" rather than the presence of "hide it".
+	p.HideAuthor = r.PostFormValue("show_author") == ""
 
 	feed := r.PostFormValue("feed")
 	if !content.ValidFeed(feed) {
@@ -524,17 +532,19 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiUpdatePostSettings saves the fields behind the in-place editor's
-// post-settings gear: title, date, summary, and thumbnail. Feed and slug
-// stay as they are (the admin form owns those), and the banner at the top
-// of the post is a section, saved with the rest of the page. The date and
-// the images have no draft state — like menus, they are live at once;
-// title and summary are page metadata and go live with the next Publish.
+// post-settings gear: title, date, summary, meta description, byline, and
+// thumbnail. Feed and slug stay as they are (the admin form owns those),
+// and the banner at the top of the post is a section, saved with the rest
+// of the page. The date, the byline, and the images have no draft state —
+// like menus, they are live at once; title, summary, and meta description
+// are page metadata and go live with the next Publish.
 //
-// Title and summary are per-locale, so the save follows the ?locale= the
-// editor was rendered in: editing a French post writes the French
-// metadata row, not the default language's.
-// PUT /api/posts/{id}?locale=fr {"title", "summary", "published_at",
-// "thumbnail_media_id", "thumbnail_url"} -> {ok}
+// The metadata is per-locale, so the save follows the ?locale= the editor
+// was rendered in: editing a French post writes the French metadata row,
+// not the default language's.
+// PUT /api/posts/{id}?locale=fr {"title", "summary", "meta_description",
+// "published_at", "hide_author", "thumbnail_media_id", "thumbnail_url"}
+// -> {ok}
 func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	post, ok := s.postFromURL(w, r)
 	if !ok {
@@ -544,7 +554,9 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title            string `json:"title"`
 		Summary          string `json:"summary"`
+		MetaDescription  string `json:"meta_description"`
 		PublishedAt      string `json:"published_at"`
+		HideAuthor       bool   `json:"hide_author"`
 		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
 		ThumbnailURL     string `json:"thumbnail_url"`
 	}
@@ -560,6 +572,8 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	post.Description = strings.TrimSpace(body.Summary)
+	post.MetaDescription = strings.TrimSpace(body.MetaDescription)
+	post.HideAuthor = body.HideAuthor
 	if v := strings.TrimSpace(body.PublishedAt); v != "" {
 		t, err := time.ParseInLocation(datetimeLocalFormat, v, time.Local)
 		if err != nil {

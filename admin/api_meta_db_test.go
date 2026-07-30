@@ -269,6 +269,70 @@ func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
 	})
 }
 
+// The post-settings gear saves a post's two descriptions and its byline
+// alongside the title: the summary listings show, the meta description
+// search engines get, and whether the post is signed at all.
+func TestAPIUpdatePostSettingsDescriptionsAndByline(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := metaServer(db)
+		ctx := context.Background()
+		post := &content.Post{
+			Page: content.Page{Slug: "news/notice", TemplateName: "post.gohtml",
+				Title: "Notice", Description: "What changed"},
+			Feed: content.FeedNews,
+		}
+		if _, err := s.deps.Content.InsertPost(ctx, post, "en"); err != nil {
+			t.Fatalf("InsertPost: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+			`{"title":"Notice","summary":"What changed","meta_description":"The notice, for search",
+			  "hide_author":true}`, post.PostID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+		}
+
+		meta, err := s.deps.Content.MetaFor(ctx, post.ID, "en")
+		if err != nil {
+			t.Fatalf("MetaFor: %v", err)
+		}
+		if meta.Description != "What changed" || meta.MetaDescription != "The notice, for search" {
+			t.Errorf("meta = %+v, want the summary and the search description side by side", meta)
+		}
+		got, err := s.deps.Content.PostByID(ctx, post.PostID, "en")
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if !got.HideAuthor {
+			t.Error("hide_author was not saved")
+		}
+		if got.MetaTag() != "The notice, for search" {
+			t.Errorf("MetaTag = %q, want the post's own meta description", got.MetaTag())
+		}
+
+		// Clearing it goes back to publishing the summary, rather than
+		// leaving the old words behind on a post that no longer says them.
+		rec = httptest.NewRecorder()
+		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+			`{"title":"Notice","summary":"What changed","meta_description":"","hide_author":false}`,
+			post.PostID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("clearing: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		if got, err = s.deps.Content.PostByID(ctx, post.PostID, "en"); err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if got.MetaDescription != "" || got.MetaTag() != "What changed" {
+			t.Errorf("after clearing: meta description %q, MetaTag %q, want empty and the summary",
+				got.MetaDescription, got.MetaTag())
+		}
+		if got.HideAuthor {
+			t.Error("the byline did not come back")
+		}
+	})
+}
+
 // The post-settings gear saves the title and summary of whichever locale
 // the editor is rendered in. Writing them to the default locale instead
 // puts French words in the English metadata and leaves the French page

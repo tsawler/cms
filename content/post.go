@@ -38,6 +38,12 @@ type Post struct {
 	PublishedAt time.Time // display and ordering date, not a schedule
 	AuthorID    *int64
 	AuthorName  string // resolved from cms_users; "" when the author is gone
+	// HideAuthor drops the byline from the post: a site that publishes as
+	// itself — a notice, a release, a listing — wants the date without
+	// the name of whoever typed it. It hides the byline only; the author
+	// stays recorded, so clearing it brings the same name back. Stated
+	// as "hide" so the zero value is the ordinary bylined post.
+	HideAuthor bool
 
 	// A post's thumbnail is either a library image or a bare URL. The
 	// library is the normal case: the id is stored and ThumbnailMediaID
@@ -72,7 +78,7 @@ func idValue(id *int64) int64 {
 // public listings and feeds read what is published.
 func postColumns(draft bool) string {
 	return pageColumns(draft) + `,
-	po.id, po.feed, po.published_at, po.author_id, COALESCE(u.name, ''),
+	po.id, po.feed, po.published_at, po.author_id, COALESCE(u.name, ''), po.hide_author,
 	po.thumbnail_url,` + postMediaColumns("tm", "tma")
 }
 
@@ -145,8 +151,8 @@ func scanPost(row sqldb.Scanner) (*Post, error) {
 	var p Post
 	var thumb joinedMedia
 	dest := []any{&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
-		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
-		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
+		&p.Title, &p.Description, &p.MetaDescription, &p.CreatedAt, &p.UpdatedAt,
+		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName, &p.HideAuthor,
 		&p.ThumbnailURL}
 	dest = append(dest, thumb.dest()...)
 	err := row.Scan(dest...)
@@ -191,16 +197,16 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, $4, 'draft')`,
-		p.ID, locale, p.Title, p.Description); err != nil {
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return 0, err
 	}
 	p.PostID, err = tx.InsertID(ctx, `
-		INSERT INTO cms_posts (page_id, feed, published_at, author_id,
+		INSERT INTO cms_posts (page_id, feed, published_at, author_id, hide_author,
 			thumbnail_media_id, thumbnail_url)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		p.ID, p.Feed, p.PublishedAt, p.AuthorID,
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		p.ID, p.Feed, p.PublishedAt, p.AuthorID, p.HideAuthor,
 		p.ThumbnailMediaID, p.ThumbnailURL)
 	if err != nil {
 		return 0, err
@@ -244,19 +250,20 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, status)
-		VALUES ($1, $2, $3, $4, 'draft')
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')
 		ON CONFLICT (page_id, locale, status)
-		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
-		p.ID, locale, p.Title, p.Description); err != nil {
+		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
+			meta_description = EXCLUDED.meta_description`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE cms_posts
-		SET feed = $1, published_at = $2,
-			thumbnail_media_id = $3, thumbnail_url = $4
-		WHERE id = $5`,
-		p.Feed, p.PublishedAt, p.ThumbnailMediaID, p.ThumbnailURL,
+		SET feed = $1, published_at = $2, hide_author = $3,
+			thumbnail_media_id = $4, thumbnail_url = $5
+		WHERE id = $6`,
+		p.Feed, p.PublishedAt, p.HideAuthor, p.ThumbnailMediaID, p.ThumbnailURL,
 		p.PostID); err != nil {
 		return err
 	}

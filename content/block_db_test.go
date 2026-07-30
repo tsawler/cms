@@ -157,7 +157,7 @@ func TestBlockDeleteLocaleContent(t *testing.T) {
 		if err := s.UpsertDraftBlock(ctx, p.ID, "body", "fr", content.KindHTML, "<p>fr</p>"); err != nil {
 			t.Fatalf("UpsertDraftBlock(fr): %v", err)
 		}
-		if err := s.UpdateMeta(ctx, p.ID, "fr", "Français", "Description"); err != nil {
+		if err := s.UpdateMeta(ctx, p.ID, "fr", content.PageMeta{Title: "Français", Description: "Description"}); err != nil {
 			t.Fatalf("UpdateMeta(fr): %v", err)
 		}
 
@@ -230,7 +230,7 @@ func TestBlockHasUnpublishedChanges(t *testing.T) {
 		mustBe(t, p.ID, false, "republished")
 
 		// Metadata differing.
-		if err := s.UpdateMeta(ctx, p.ID, defaultLocale, "New Title", ""); err != nil {
+		if err := s.UpdateMeta(ctx, p.ID, defaultLocale, content.PageMeta{Title: "New Title", Description: ""}); err != nil {
 			t.Fatalf("UpdateMeta: %v", err)
 		}
 		mustBe(t, p.ID, true, "metadata edited")
