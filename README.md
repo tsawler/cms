@@ -365,6 +365,16 @@ While editing, the edit bar also offers **Delete** for the current page
 (with a confirmation; the home page can't be deleted — the server refuses
 and the button doesn't appear on it).
 
+The ⋯ menu's **Page settings** holds the two things a page carries that
+aren't on the page: its title — what fills `<title>` in your template and
+what search results show — and its meta description, which `{{cmsHead}}`
+emits as `<meta name="description">`. Both are per-language and both are
+staged like content, so they go live with the next Publish. On a
+translated page the fields start empty with the default language shown
+as a placeholder: type to translate, leave empty to keep following the
+original. Posts keep the same two fields in their **⚙ Post settings**
+pill instead, next to the date and listing image.
+
 The rail's **Snippets** button opens a drawer of ready-made blocks: drag
 one onto a rich region (or click to insert at the cursor), then edit its
 text and images in place like any other content. Snippets come from two
@@ -571,10 +581,13 @@ does two jobs, becoming the background of the post's banner section and
 its card in the listings. You land in the new draft with the banner
 already on it, ready to write. While editing a post in place, a **⚙ Post
 settings** pill pinned to the top-right of the page reopens those
-settings (date, summary, listing image); pill saves are live at once,
-like menus, since they describe the post in listings rather than being
-page content. The creating user is stamped as the author; feed, title,
-and address changes live on the admin form.
+settings — title, summary, date, and listing image. The date and the
+image go live the moment they are saved, like menus, since they order
+and illustrate the post rather than being page content; the title and
+summary are page metadata and reach the site with the next Publish. On a
+translated site the pill edits the language the page is rendered in, so
+a French post gets a French title and summary. The creating user is
+stamped as the author; feed and address changes live on the admin form.
 
 A post has no header field. The banner at the top of a post is a
 **section** in a region of its own, so it is edited on the page with the
@@ -723,8 +736,11 @@ no French exists yet — those regions get a dashed amber outline in edit
 mode. Edit them (the English text is your starting point), save, and the
 French version now exists; anything you don't touch keeps following the
 English original, region by region. Publish applies to all languages at
-once. The ⋯ menu's "Remove this translation" reverts the current
-language back to fallback. Menu labels are translated the same way:
+once. A page's title and meta description translate the same way, in the
+⋯ menu's "Page settings" (a post's, in its ⚙ pill): the fields start
+empty with the English shown as a placeholder, and an empty field keeps
+following the English. The ⋯ menu's "Remove this translation" reverts
+the current language back to fallback. Menu labels are translated the same way:
 right-click a nav item while on the French site and the label you type
 is the French override.
 

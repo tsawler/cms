@@ -54,6 +54,7 @@ export function initShell() {
         '<button id="unpublish" class="dngr" hidden>Unpublish page…</button>' +
         '<button id="del-page" class="dngr" hidden>Delete page…</button>' +
         '<hr id="menu-sep">' +
+        '<button id="meta-btn" hidden>Page settings…</button>' +
         '<button id="dup-page" hidden>Duplicate page…</button>' +
         '<button id="vis-btn" hidden>Make page private…</button>' +
         '<button id="code-btn" hidden>Page CSS &amp; JS…</button>' +

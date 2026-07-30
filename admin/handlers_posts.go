@@ -524,18 +524,25 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiUpdatePostSettings saves the fields behind the in-place editor's
-// post-settings gear: date, summary, and thumbnail. Title, feed, and slug
+// post-settings gear: title, date, summary, and thumbnail. Feed and slug
 // stay as they are (the admin form owns those), and the banner at the top
-// of the post is a section, saved with the rest of the page. These fields
-// have no draft state — like menus, they are live at once.
-// PUT /api/posts/{id} {"summary", "published_at", "thumbnail_media_id",
-// "thumbnail_url"} -> {ok}
+// of the post is a section, saved with the rest of the page. The date and
+// the images have no draft state — like menus, they are live at once;
+// title and summary are page metadata and go live with the next Publish.
+//
+// Title and summary are per-locale, so the save follows the ?locale= the
+// editor was rendered in: editing a French post writes the French
+// metadata row, not the default language's.
+// PUT /api/posts/{id}?locale=fr {"title", "summary", "published_at",
+// "thumbnail_media_id", "thumbnail_url"} -> {ok}
 func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	post, ok := s.postFromURL(w, r)
 	if !ok {
 		return
 	}
+	locale := s.formLocale(r)
 	var body struct {
+		Title            string `json:"title"`
 		Summary          string `json:"summary"`
 		PublishedAt      string `json:"published_at"`
 		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
@@ -547,6 +554,11 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	post.Title = strings.TrimSpace(body.Title)
+	if post.Title == "" && locale == s.deps.DefaultLocale {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Title is required."))
+		return
+	}
 	post.Description = strings.TrimSpace(body.Summary)
 	if v := strings.TrimSpace(body.PublishedAt); v != "" {
 		t, err := time.ParseInLocation(datetimeLocalFormat, v, time.Local)
@@ -558,7 +570,7 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	post.ThumbnailMediaID, post.ThumbnailURL = s.apiPostImage(r.Context(), body.ThumbnailMediaID, body.ThumbnailURL)
 
-	if err := s.deps.Content.UpdatePost(r.Context(), post, s.deps.DefaultLocale); err != nil {
+	if err := s.deps.Content.UpdatePost(r.Context(), post, locale); err != nil {
 		s.deps.Logger.Error("cms admin: api updating post settings", "post", post.PostID, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the post settings failed — try again."))
 		return

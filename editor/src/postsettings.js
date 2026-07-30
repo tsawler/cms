@@ -1,35 +1,50 @@
 /* ------------------------------------------------------------------ *
- * Post settings — the edit bar's gear on blog/news post pages: date,
- * summary, thumbnail, and header image, saved through PUT /api/posts.
- * These fields have no draft state (they order and describe the post in
- * listings), so a save is live at once; the body of the post still goes
- * through the normal draft/publish flow.
+ * Post settings — the edit bar's gear on blog/news post pages: title,
+ * date, summary, thumbnail, and header image, saved through PUT
+ * /api/posts.
+ *
+ * The date and the images are properties of the post and go live the
+ * moment they are saved (they order and illustrate it in listings). The
+ * title and summary are the backing page's metadata: per-locale, and
+ * staged like the rest of the page's content, so they reach the site
+ * with the next Publish. They are read unresolved — see pagemeta.js —
+ * so an untranslated post shows the default language as a placeholder
+ * rather than prefilling a copy of it.
  * ------------------------------------------------------------------ */
 
-import { postInfo, mediaEnabled } from "./state.js";
+import { cfg, postInfo, mediaEnabled } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
+import { fetchMeta, metaFields, metaNote, localeSuffix, afterMetaSave } from "./pagemeta.js";
 
 export function initPostSettings() {
     $("post-settings").addEventListener("click", function () {
         if (!postInfo) return;
-        var fields = [
-            { id: "date", label: "Date", type: "datetime", value: postInfo.publishedAt },
-            { id: "summary", label: "Summary", type: "text", value: postInfo.summary,
-                placeholder: "Shown in listings and feeds" },
-        ];
-        if (mediaEnabled) {
-            fields.push(
-                { id: "thumb", label: "Thumbnail", type: "image",
-                    value: postInfo.thumbnailUrl, mediaId: postInfo.thumbnailMediaId },
-                { id: "header", label: "Header image", type: "image",
-                    value: postInfo.headerUrl, mediaId: postInfo.headerMediaId });
-        }
-        openDialog({
-            message: "Post settings",
-            okLabel: "Save",
-            fields: fields,
+        setMsg("Loading post settings…");
+        fetchMeta().then(function (meta) {
+            setMsg("");
+            var fields = metaFields(meta, {
+                descLabel: "Summary",
+                descHint: "Shown in listings, feeds, and search results",
+            });
+            fields.push({ id: "date", label: "Date", type: "datetime", span: true,
+                value: postInfo.publishedAt });
+            // The banner above a post is a section in the template's
+            // header region, edited on the page like any other; the only
+            // image that belongs to the post itself is its listing
+            // thumbnail.
+            if (mediaEnabled) {
+                fields.push({ id: "thumb", label: "Thumbnail", type: "image", span: true,
+                    value: postInfo.thumbnailUrl, mediaId: postInfo.thumbnailMediaId });
+            }
+            fields.push(metaNote("the title and summary"));
+            return openDialog({
+                message: "Post settings" + localeSuffix(),
+                okLabel: "Save",
+                wide: true,
+                fields: fields,
+            });
         }).then(function (values) {
             if (!values) return;
             // Image fields are absent when media is disabled; keep what is
@@ -42,27 +57,26 @@ export function initPostSettings() {
                 return { url: values[field] || "", id: values[field + "_id"] || 0 };
             }
             var thumb = image("thumb", postInfo.thumbnailUrl, postInfo.thumbnailMediaId);
-            var header = image("header", postInfo.headerUrl, postInfo.headerMediaId);
-            api("/posts/" + postInfo.id, {
+            setMsg("Saving…");
+            // The locale rides in the URL: title and summary are written
+            // to the metadata row of the language being edited.
+            return api("/posts/" + postInfo.id + "?locale=" + encodeURIComponent(cfg.locale), {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    summary: values.summary,
+                    title: values.title,
+                    summary: values.description,
                     published_at: values.date,
                     thumbnail_media_id: thumb.id,
                     thumbnail_url: thumb.id ? "" : thumb.url,
-                    header_media_id: header.id,
-                    header_url: header.id ? "" : header.url,
                 }),
             }).then(function () {
                 postInfo.publishedAt = values.date;
-                postInfo.summary = values.summary;
+                postInfo.summary = values.description;
                 postInfo.thumbnailUrl = thumb.url;
                 postInfo.thumbnailMediaId = thumb.id;
-                postInfo.headerUrl = header.url;
-                postInfo.headerMediaId = header.id;
-                flash("Post settings saved — the page shows them after a reload.");
-            }).catch(function (err) { setMsg(err.message); });
-        });
+                afterMetaSave("Post settings", "the title and summary");
+            });
+        }).catch(function (err) { setMsg(err.message); });
     });
 }

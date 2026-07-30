@@ -680,6 +680,78 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// maxMetaBody bounds a page-metadata save. A title and a description are
+// a line of text each; the room above that is slack, not an invitation.
+const maxMetaBody = 8192
+
+// apiGetPageMeta returns the page's title and meta description for a
+// locale, as stored rather than as resolved: a translation that has none
+// of its own reads back empty, with the default locale's words alongside
+// under "inherited" for the dialog to show as a placeholder.
+// GET /api/pages/{id}/meta?locale=fr
+func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	locale := s.formLocale(r)
+	meta, err := s.deps.Content.MetaFor(r.Context(), page.ID, locale)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api reading page meta", "page", page.ID, "locale", locale, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the page settings."))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"locale":               locale,
+		"title":                meta.Title,
+		"description":          meta.Description,
+		"inheritedTitle":       meta.InheritedTitle,
+		"inheritedDescription": meta.InheritedDescription,
+	})
+}
+
+// apiSavePageMeta saves the page's title and meta description for one
+// locale. Like the admin form's locale tabs it writes the working copy,
+// so the change reaches the site on the next Publish.
+//
+// On a translation an empty field is meaningful: it clears this locale's
+// own value and lets the page fall back to the default language again.
+// The default locale has nothing to fall back to, so there a title is
+// required.
+// PUT /api/pages/{id}/meta  body: {"locale", "title", "description"}
+func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Locale      string `json:"locale"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMetaBody))
+	if err := dec.Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
+		return
+	}
+	if s.requestLocale(body.Locale) != body.Locale {
+		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown language."))
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" && body.Locale == s.deps.DefaultLocale {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Title is required."))
+		return
+	}
+	desc := strings.TrimSpace(body.Description)
+	if err := s.deps.Content.UpdateMeta(r.Context(), page.ID, body.Locale, title, desc); err != nil {
+		s.deps.Logger.Error("cms admin: api saving page meta", "page", page.ID, "locale", body.Locale, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // apiPublish makes the page's draft content live.
 // POST /api/pages/{id}/publish
 func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {

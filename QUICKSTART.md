@@ -758,8 +758,10 @@ The default language stays at `/about`; others live under their code
 switcher; `{{cmsHead}}` emits `hreflang` alternates automatically.
 Translating is in-place editing too: flip the edit bar's language
 switcher, and untranslated regions render the default language with an
-amber outline — edit and save to translate, region by region. Publish
-applies to all languages at once.
+amber outline — edit and save to translate, region by region. The page's
+title and meta description translate in the ⋯ menu's **Page settings**
+(a post's, in its ⚙ pill), where an empty field means "keep showing the
+default language". Publish applies to all languages at once.
 
 ### Login CAPTCHA
 

@@ -143,6 +143,105 @@ func TestPageMetadataLocaleFallback(t *testing.T) {
 	})
 }
 
+// MetaFor is the read behind an editing form, so what it must not do is
+// resolve the fallback: a form that prefilled a translation with the
+// default language would write that copy back on the next save and the
+// page would stop tracking the original.
+func TestPageMetaForReadsRawValues(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		p := seedPage(t, s, content.Page{
+			Slug:        "bilingual",
+			Title:       "English Title",
+			Description: "English description",
+		}, defaultLocale)
+		if err := s.UpdateMeta(ctx, p.ID, "fr", "Titre Français", ""); err != nil {
+			t.Fatalf("UpdateMeta(fr): %v", err)
+		}
+
+		fr, err := s.MetaFor(ctx, p.ID, "fr")
+		if err != nil {
+			t.Fatalf("MetaFor(fr): %v", err)
+		}
+		if fr.Title != "Titre Français" {
+			t.Errorf("fr title = %q, want the stored French title", fr.Title)
+		}
+		// The French description is untranslated: empty as stored, with
+		// the English alongside it as what the page falls back to.
+		if fr.Description != "" {
+			t.Errorf("fr description = %q, want empty — nothing is stored for fr", fr.Description)
+		}
+		if fr.InheritedDescription != "English description" {
+			t.Errorf("fr inherited description = %q, want the English one", fr.InheritedDescription)
+		}
+		if fr.InheritedTitle != "English Title" {
+			t.Errorf("fr inherited title = %q, want the English one", fr.InheritedTitle)
+		}
+
+		// The default locale inherits from nothing, so its own values are
+		// never also reported as what it falls back to.
+		en, err := s.MetaFor(ctx, p.ID, defaultLocale)
+		if err != nil {
+			t.Fatalf("MetaFor(en): %v", err)
+		}
+		if en.Title != "English Title" || en.Description != "English description" {
+			t.Errorf("en meta = %+v, want the stored English values", en)
+		}
+		if en.InheritedTitle != "" || en.InheritedDescription != "" {
+			t.Errorf("en inherited = %q/%q, want both empty", en.InheritedTitle, en.InheritedDescription)
+		}
+
+		// A locale with no row at all reads as entirely untranslated
+		// rather than as an error.
+		de, err := s.MetaFor(ctx, p.ID, "de")
+		if err != nil {
+			t.Fatalf("MetaFor(de): %v", err)
+		}
+		if de.Title != "" || de.Description != "" {
+			t.Errorf("de meta = %+v, want empty — there is no de row", de)
+		}
+		if de.InheritedTitle != "English Title" {
+			t.Errorf("de inherited title = %q, want the English one", de.InheritedTitle)
+		}
+
+		if _, err := s.MetaFor(ctx, p.ID+1000, defaultLocale); !errors.Is(err, content.ErrNotFound) {
+			t.Errorf("MetaFor(missing page) = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// MetaFor reads the working copy, so an edit staged for the next Publish
+// is what the form shows — not what the site is currently serving.
+func TestPageMetaForReadsTheDraft(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		p := seedPage(t, s, content.Page{Slug: "staged", Title: "Live Title"}, defaultLocale)
+		if err := s.Publish(ctx, p.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		if err := s.UpdateMeta(ctx, p.ID, defaultLocale, "Edited Title", "New description"); err != nil {
+			t.Fatalf("UpdateMeta: %v", err)
+		}
+
+		got, err := s.MetaFor(ctx, p.ID, defaultLocale)
+		if err != nil {
+			t.Fatalf("MetaFor: %v", err)
+		}
+		if got.Title != "Edited Title" {
+			t.Errorf("title = %q, want the staged edit", got.Title)
+		}
+		live, err := s.GetBySlug(ctx, "staged", defaultLocale, true)
+		if err != nil {
+			t.Fatalf("GetBySlug(published): %v", err)
+		}
+		if live.Title != "Live Title" {
+			t.Errorf("published title = %q, want the pre-edit one", live.Title)
+		}
+	})
+}
+
 func TestPageUpdateStagesContentButNotSlug(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()

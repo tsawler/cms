@@ -411,6 +411,51 @@ func (s *Store) UpdateMeta(ctx context.Context, pageID int64, locale, title, des
 	return err
 }
 
+// PageMeta is one locale's page metadata exactly as stored, without the
+// default-locale fallback Page.Title and Page.Description carry.
+// Inherited holds what that fallback would supply, so a caller editing a
+// translation can offer the inherited words as a placeholder rather than
+// prefilling the field with them — prefilling would copy the default
+// language into the translation's own row on the next save, and the page
+// would stop tracking the original for good.
+type PageMeta struct {
+	Title       string
+	Description string
+	// The default locale's stored values. Both are empty when the
+	// metadata read is the default locale's own.
+	InheritedTitle       string
+	InheritedDescription string
+}
+
+// MetaFor returns the page's draft metadata for locale as stored: no
+// fallback applied, so an empty field means this locale has none of its
+// own and reads as the default locale's. It is the read behind an
+// editing form, where Page's already-resolved Title and Description
+// cannot tell an inherited value from an authored one.
+func (s *Store) MetaFor(ctx context.Context, pageID int64, locale string) (PageMeta, error) {
+	var m PageMeta
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(m.title, ''), COALESCE(m.description, ''),
+			COALESCE(md.title, ''), COALESCE(md.description, '')
+		FROM cms_pages p
+		LEFT JOIN cms_page_meta m ON m.page_id = p.id AND m.locale = $2 AND m.status = 'draft'
+		LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $3 AND md.status = 'draft'
+		WHERE p.id = $1`, pageID, locale, s.defaultLocale,
+	).Scan(&m.Title, &m.Description, &m.InheritedTitle, &m.InheritedDescription)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PageMeta{}, ErrNotFound
+	}
+	if err != nil {
+		return PageMeta{}, err
+	}
+	// The default locale inherits from nothing; reporting its own values
+	// as inherited would offer them as a placeholder for themselves.
+	if locale == s.defaultLocale {
+		m.InheritedTitle, m.InheritedDescription = "", ""
+	}
+	return m, nil
+}
+
 // Delete removes a page and (via cascade) its metadata and blocks.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	tag, err := s.db.Exec(ctx, "DELETE FROM cms_pages WHERE id = $1", id)

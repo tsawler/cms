@@ -189,6 +189,8 @@ func New(d Deps) http.Handler {
 			r.Put("/api/settings", s.apiSaveSettings)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
+			r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
+			r.Put("/api/pages/{id}/meta", s.apiSavePageMeta)
 			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
 			r.Post("/api/pages/{id}/duplicate", s.apiDuplicatePage)
 			r.Post("/api/pages/{id}/publish", s.apiPublish)

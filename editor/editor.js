@@ -3460,6 +3460,7 @@
     $("revert-locale").hidden = !on || locales.length < 2 || cfg.locale === defaultLocale;
     $("locs").hidden = !on || locales.length < 2;
     $("del-page").hidden = !on || (cfg.slug || "") === "";
+    $("meta-btn").hidden = !on || !!postInfo;
     $("dup-page").hidden = !on || !!postInfo;
     $("vis-btn").hidden = !on || !!postInfo;
     if (on) {
@@ -5163,7 +5164,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button><button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><span class="derr" id="src-err" hidden></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button><button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><span class="derr" id="src-err" hidden></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
@@ -5209,6 +5210,104 @@ body.cms-editing [data-cms-fallback] {
     } catch (e) {
     }
     updateBarButtons();
+  }
+
+  // ../src/pagemeta.js
+  function isTranslation() {
+    return locales.length > 1 && cfg.locale !== defaultLocale;
+  }
+  function localeSuffix() {
+    return locales.length > 1 ? " \u2014 " + cfg.locale.toUpperCase() : "";
+  }
+  function fetchMeta() {
+    return api("/pages/" + pageId + "/meta?locale=" + encodeURIComponent(cfg.locale));
+  }
+  function inheritPlaceholder(inherited, fallback) {
+    if (isTranslation() && inherited) {
+      return defaultLocale.toUpperCase() + ": " + inherited;
+    }
+    return fallback;
+  }
+  function metaFields(meta, opts) {
+    return [
+      {
+        id: "title",
+        label: "Title",
+        type: "text",
+        value: meta.title,
+        span: true,
+        placeholder: inheritPlaceholder(meta.inheritedTitle, "Shown in the browser tab and in search results")
+      },
+      {
+        id: "description",
+        label: opts.descLabel,
+        type: "textarea",
+        rows: 3,
+        span: true,
+        value: meta.description,
+        placeholder: inheritPlaceholder(meta.inheritedDescription, opts.descHint)
+      },
+      // A live count, because the useful length of a description is a
+      // fact about search results rather than about the field.
+      { type: "note", span: true, text: function(v) {
+        var n = (v.description || "").length;
+        if (!n) return "";
+        return n + " characters" + (n > 160 ? " \u2014 search results usually cut off around 160." : "");
+      } }
+    ];
+  }
+  function metaNote(staged) {
+    if (isTranslation()) {
+      return { type: "note", span: true, text: function() {
+        return "Editing the " + cfg.locale.toUpperCase() + " version. Leave a field empty to keep showing the " + defaultLocale.toUpperCase() + " one.";
+      } };
+    }
+    return { type: "note", span: true, text: function() {
+      return "Saved as a draft \u2014 Publish to make " + staged + " live.";
+    } };
+  }
+  function afterMetaSave(what, staged) {
+    if (state.pageStatus === "published") {
+      state.hasUnpublished = true;
+      updateChip();
+      updateBarButtons();
+      flash(what + " saved \u2014 Publish to make " + staged + " live.");
+      return;
+    }
+    flash(what + " saved.");
+  }
+  function initPageSettings() {
+    $("meta-btn").addEventListener("click", function() {
+      setMsg("Loading page settings\u2026");
+      fetchMeta().then(function(meta) {
+        setMsg("");
+        return openDialog({
+          message: "Page settings" + localeSuffix(),
+          okLabel: "Save",
+          wide: true,
+          fields: metaFields(meta, {
+            descLabel: "Meta description",
+            descHint: "The summary search engines show under the page's title"
+          }).concat([metaNote("them")])
+        });
+      }).then(function(values) {
+        if (!values) return;
+        setMsg("Saving\u2026");
+        return api("/pages/" + pageId + "/meta", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locale: cfg.locale,
+            title: values.title,
+            description: values.description
+          })
+        }).then(function() {
+          afterMetaSave("Page settings", "the change");
+        });
+      }).catch(function(err) {
+        setMsg(err.message);
+      });
+    });
   }
 
   // ../src/pagesource.js
@@ -5330,38 +5429,37 @@ body.cms-editing [data-cms-fallback] {
   function initPostSettings() {
     $("post-settings").addEventListener("click", function() {
       if (!postInfo) return;
-      var fields = [
-        { id: "date", label: "Date", type: "datetime", value: postInfo.publishedAt },
-        {
-          id: "summary",
-          label: "Summary",
-          type: "text",
-          value: postInfo.summary,
-          placeholder: "Shown in listings and feeds"
-        }
-      ];
-      if (mediaEnabled) {
-        fields.push(
-          {
+      setMsg("Loading post settings\u2026");
+      fetchMeta().then(function(meta) {
+        setMsg("");
+        var fields = metaFields(meta, {
+          descLabel: "Summary",
+          descHint: "Shown in listings, feeds, and search results"
+        });
+        fields.push({
+          id: "date",
+          label: "Date",
+          type: "datetime",
+          span: true,
+          value: postInfo.publishedAt
+        });
+        if (mediaEnabled) {
+          fields.push({
             id: "thumb",
             label: "Thumbnail",
             type: "image",
+            span: true,
             value: postInfo.thumbnailUrl,
             mediaId: postInfo.thumbnailMediaId
-          },
-          {
-            id: "header",
-            label: "Header image",
-            type: "image",
-            value: postInfo.headerUrl,
-            mediaId: postInfo.headerMediaId
-          }
-        );
-      }
-      openDialog({
-        message: "Post settings",
-        okLabel: "Save",
-        fields
+          });
+        }
+        fields.push(metaNote("the title and summary"));
+        return openDialog({
+          message: "Post settings" + localeSuffix(),
+          okLabel: "Save",
+          wide: true,
+          fields
+        });
       }).then(function(values) {
         if (!values) return;
         function image(field, url, id) {
@@ -5369,29 +5467,26 @@ body.cms-editing [data-cms-fallback] {
           return { url: values[field] || "", id: values[field + "_id"] || 0 };
         }
         var thumb = image("thumb", postInfo.thumbnailUrl, postInfo.thumbnailMediaId);
-        var header = image("header", postInfo.headerUrl, postInfo.headerMediaId);
-        api("/posts/" + postInfo.id, {
+        setMsg("Saving\u2026");
+        return api("/posts/" + postInfo.id + "?locale=" + encodeURIComponent(cfg.locale), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            summary: values.summary,
+            title: values.title,
+            summary: values.description,
             published_at: values.date,
             thumbnail_media_id: thumb.id,
-            thumbnail_url: thumb.id ? "" : thumb.url,
-            header_media_id: header.id,
-            header_url: header.id ? "" : header.url
+            thumbnail_url: thumb.id ? "" : thumb.url
           })
         }).then(function() {
           postInfo.publishedAt = values.date;
-          postInfo.summary = values.summary;
+          postInfo.summary = values.description;
           postInfo.thumbnailUrl = thumb.url;
           postInfo.thumbnailMediaId = thumb.id;
-          postInfo.headerUrl = header.url;
-          postInfo.headerMediaId = header.id;
-          flash("Post settings saved \u2014 the page shows them after a reload.");
-        }).catch(function(err) {
-          setMsg(err.message);
+          afterMetaSave("Post settings", "the title and summary");
         });
+      }).catch(function(err) {
+        setMsg(err.message);
       });
     });
   }
@@ -5453,6 +5548,7 @@ body.cms-editing [data-cms-fallback] {
   initButtons();
   initSaving();
   initPageCode();
+  initPageSettings();
   initSource();
   initPageSource();
   initBarMin();

@@ -70,6 +70,9 @@ export function setEditing(on) {
     $("locs").hidden = !on || locales.length < 2;
     // The home page (empty slug) is never deletable.
     $("del-page").hidden = !on || (cfg.slug || "") === "";
+    // Title and meta description. A post keeps its own in the gear,
+    // next to the date and images they belong with.
+    $("meta-btn").hidden = !on || !!postInfo;
     // Posts are more than their backing page, so only plain pages
     // offer Duplicate.
     $("dup-page").hidden = !on || !!postInfo;
