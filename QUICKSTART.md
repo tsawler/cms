@@ -991,3 +991,60 @@ You now have a complete site. These go deeper:
 Running the CMS's own tests needs Docker: `make test` runs the store suite
 against Postgres, MySQL, and MariaDB in throwaway containers; `make
 test-unit` skips anything needing a database.
+
+## Releasing a new version (maintainers)
+
+Not part of building a site — this is for publishing the `cms` module
+itself. Tag, push the tag, then check that the module proxy sees it:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+curl -s https://proxy.golang.org/github.com/tsawler/cms/@v/list
+```
+
+That list is the thing that matters. `go get`, `go install`, and
+`go run …@latest` resolve `@latest` from it, so a tag missing from the
+list does not exist as far as anyone's Go toolchain is concerned —
+regardless of what GitHub shows.
+
+### If the new tag isn't listed
+
+Ask the proxy for that exact version. Requesting one by name makes it
+fetch from GitHub and rebuild the list:
+
+```sh
+curl -s https://proxy.golang.org/github.com/tsawler/cms/@v/v0.2.0.info
+```
+
+Re-check `@v/list` and the new version appears within seconds.
+
+This is worth remembering because the symptom points at the wrong thing —
+it reads as a broken tag or a missing package, not a stale cache:
+
+```
+go: github.com/tsawler/cms/cmd/cms@latest: module github.com/tsawler/cms@latest
+    found (v0.1.0), but does not contain package github.com/tsawler/cms/cmd/cms
+```
+
+`found (v0.1.0)` is the tell: the toolchain is resolving to an older
+version than the one you tagged.
+
+To confirm a tag is fine while the cache catches up, skip the proxy
+entirely:
+
+```sh
+GOPROXY=direct go run github.com/tsawler/cms/cmd/cms@latest version
+```
+
+### Why it happens
+
+The proxy caches negative results as well as positive ones. This module's
+list sat at `v0.1.0` for a while after the repository went from private to
+public, because the proxy had cached "cannot read this repository" from
+the private era; pushing tags did nothing to dislodge it. Once a module is
+public and warm, new tags normally show up within minutes.
+
+The flip side: once the proxy has served a version, it is cached
+permanently. Deleting a tag does not unpublish it, and neither does making
+the repository private again. Tag deliberately.
