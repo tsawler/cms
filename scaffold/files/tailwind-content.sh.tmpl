@@ -1,0 +1,19 @@
+#!/bin/sh
+# CMS content-CSS build for Tailwind v4, wired up via CMS_TAILWIND_COMMAND
+# in .env. The v4 CLI has no --content flag — it reads sources from the
+# input CSS — so this stages a scratch input that @sources only the
+# synthetic class file the CMS wrote, then runs the standalone CLI
+# (brew install tailwindcss).
+#
+#   $1 = content file holding every class token found in stored content
+#   $2 = path the compiled CSS must be written to
+set -e
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+cp "$1" "$dir/content.html"
+cat > "$dir/input.css" <<'EOF'
+@import "tailwindcss" source(none);
+@plugin "@tailwindcss/typography";
+@source "./content.html";
+EOF
+tailwindcss --input "$dir/input.css" --output "$2"

@@ -15,6 +15,11 @@ database pool and your templates; it hands you two `http.Handler`s.
 A complete reference implementation lives in [`examples/basic`](examples/basic)
 — when in doubt, compare against it.
 
+> **In a hurry?** `go run github.com/tsawler/cms/cmd/cms@latest init mysite`
+> writes everything this guide builds by hand, in one step — see
+> [Starting a new site](README.md#starting-a-new-site). Come back here when
+> you want to know what each piece is doing and why.
+
 ## 1. Prerequisites
 
 - **Go 1.25+**

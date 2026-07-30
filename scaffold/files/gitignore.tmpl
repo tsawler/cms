@@ -1,0 +1,13 @@
+# Local configuration and secrets.
+.env
+
+# Compiled binaries and test output.
+/[[.Program]]
+*.exe
+*.test
+*.out
+[[if .Tailwind]]
+# Build artifact — regenerate with `go generate .`.
+/static/site.css
+[[end]]
+.DS_Store

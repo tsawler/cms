@@ -1,0 +1,164 @@
+// Command [[.Program]] serves the [[.SiteName]] website.
+//
+// It is built on the cms module, github.com/tsawler/cms.
+//
+// Start the database, then:
+//
+//	go run .
+//
+// and visit http://localhost:4000/admin/. On first run an admin account is
+// created from CMS_ADMIN_EMAIL / CMS_ADMIN_PASSWORD in .env.
+//
+// The CMS is a library, not a platform: this file is yours. It owns the
+// HTTP server, the database pool, and the list of templates editors may
+// choose from. The module supplies the admin area, authentication,
+// content storage, migrations, and in-place editing on the public pages.
+package main
+
+import (
+	"context"
+	"database/sql"
+	"embed"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+
+	_ "[[.DriverImport]]" // database/sql driver "[[.Driver]]"
+	"github.com/joho/godotenv"
+	"github.com/tsawler/cms"
+)
+
+//go:embed templates
+var templateFS embed.FS
+
+// defaultDSN is used when DATABASE_URL is unset — it matches the
+// docker-compose.yml in this directory.
+[[if .DSNNeedsParams]]//
+// The four query parameters are required, not decorative: parseTime and
+// loc so timestamps scan into time.Time as UTC, time_zone so the server
+// session agrees with them, and clientFoundRows so an UPDATE reports rows
+// matched rather than rows changed. A DATABASE_URL you supply by hand has
+// to carry them too.
+[[end]]const defaultDSN = `[[.DSN]]`
+
+func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	if err := run(logger); err != nil {
+		logger.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger) error {
+	ctx := context.Background()
+
+	// godotenv never overrides variables already set in the real
+	// environment, so .env is a development convenience only — deployments
+	// should use whatever their platform provides. A missing file is fine.
+	_ = godotenv.Load(".env")
+[[if .Tailwind]]
+	// The compiled stylesheet is a build artifact, like a binary, and is
+	// gitignored: a fresh checkout has to generate it once or every page
+	// renders unstyled.
+	if _, err := os.Stat("static/site.css"); err != nil {
+		logger.Warn("static/site.css not found — run `go generate .` (needs the tailwindcss CLI: brew install tailwindcss)")
+	}
+[[end]]
+	db, err := sql.Open("[[.Driver]]", envOr("DATABASE_URL", defaultDSN))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("connecting to the [[.Engine]] database: %w", err)
+	}
+
+	// Optional features are configured entirely from the environment:
+	// the media library (S3_*), the login CAPTCHA (CAP_*), and content
+	// driven Tailwind rebuilds plus media tuning (CMS_*). See .env and
+	// the module README's variable table.
+	cfg, err := cms.ConfigFromEnv()
+	if err != nil {
+		return err
+	}
+	if cfg.S3 == nil {
+		logger.Warn("S3_ENDPOINT not set — media library disabled")
+	}
+
+	cfg.DB = db
+[[if .NeedsDialect]]	cfg.Dialect = "[[.Dialect]]"
+[[end]]	cfg.Logger = logger
+	cfg.TemplateFS = templateFS
+	cfg.SharedTemplates = []string{"templates/base.gohtml"}
+
+	// The templates an editor may choose when creating a page. Add a file
+	// under templates/pages/ and a line here to offer another.
+	cfg.PageTemplates = []cms.PageTemplate{
+		{File: "templates/pages/home.gohtml", Label: "Home page"},
+		{File: "templates/pages/standard.gohtml", Label: "Standard page"},
+		{File: "templates/pages/canvas.gohtml", Label: "Blank canvas"},
+[[if .Blog]]		{File: "templates/pages/blog.gohtml", Label: "Blog listing"},
+		{File: "templates/pages/news.gohtml", Label: "News listing"},
+[[end]]	}
+[[if .Blog]]
+	// Blog and news posts render with this one. Leaving it at the zero
+	// value disables blog & news entirely.
+	cfg.PostTemplate = cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post"}
+[[end]]
+	// More than one locale? cfg.Locales = []string{"en", "fr"} — the first
+	// is the default and serves unprefixed URLs.
+
+	// Host-specific admin pages mount under {AdminPath}/x/, behind the
+	// CMS's login, session, and CSRF middleware:
+	//
+	//	cfg.AdminSections = []cms.AdminSection{
+	//		{Path: "reports", NavLabel: "Reports", Handler: reportsHandler(db)},
+	//	}
+	//
+	// See examples/basic in the cms module for a worked one.
+
+	c, err := cms.New(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Safe on every startup, including from several instances at once.
+	if err := c.Migrate(ctx); err != nil {
+		return err
+	}
+
+	adminEmail := envOr("CMS_ADMIN_EMAIL", "admin@example.com")
+	adminPassword := envOr("CMS_ADMIN_PASSWORD", "password123")
+	created, err := c.SeedAdmin(ctx, adminEmail, "Site Admin", adminPassword)
+	if err != nil {
+		return err
+	}
+	if created {
+		logger.Warn("created initial admin — change this password",
+			"email", adminEmail, "password", adminPassword)
+	}
+
+	// Give a fresh install something at "/" instead of a 404. A no-op once
+	// the site has any content, so it never fights the editor.
+	if _, err := c.SeedHomePage(ctx, "templates/pages/home.gohtml", "Welcome"); err != nil {
+		return err
+	}
+
+	// c.Handler() routes cfg.AdminPath (default /admin) to the admin area
+	// and everything else to the public site.
+	mux := http.NewServeMux()
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.Handle("/", c.Handler())
+
+	addr := envOr("ADDR", ":4000")
+	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
+	return http.ListenAndServe(addr, mux)
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

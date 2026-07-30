@@ -1,0 +1,41 @@
+{{template "base" .}}
+
+{{define "content"}}
+<section class="mx-auto max-w-4xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{cmsTitle}}</h1>
+    <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
+
+    {{/* cmsFeed returns one page of the feed plus the links around it.
+         Page size comes from Config.PostsPerPage (CMS_POSTS_PER_PAGE);
+         pass a number — {{cmsFeed "blog" 6}} — to override it here. */}}
+    {{$feed := cmsFeed "blog"}}
+    <div class="mt-10 grid gap-8 sm:grid-cols-2">
+        {{range $feed.Posts}}
+        <a href="{{.URL}}" class="group block overflow-hidden rounded-xl border border-slate-200 transition-shadow hover:shadow-md">
+            {{/* .Thumbnail carries every rendition of the image, so the
+                 browser picks one that fits the card instead of scaling
+                 the full-size one down. sizes describes the layout above:
+                 two columns from the sm breakpoint, full width below. */}}
+            {{with .Thumbnail}}
+            <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
+                 width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
+                 loading="lazy" decoding="async" class="h-44 w-full object-cover">
+            {{end}}
+            <div class="p-5">
+                {{if .Draft}}<span class="mb-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Draft</span>{{end}}
+                <h2 class="text-lg font-semibold text-slate-900 group-hover:underline">{{.Title}}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{cmsDate .PublishedAt}}{{with .Author}} · {{.}}{{end}}</p>
+                {{with .Summary}}<p class="mt-2 text-sm text-slate-600">{{.}}</p>{{end}}
+            </div>
+        </a>
+        {{else}}
+        <p class="text-slate-500">No posts yet.</p>
+        {{end}}
+    </div>
+
+    {{/* The ready-made bar, styled by the CMS's own minimal CSS. To style
+         it yourself, range over $feed.Links (and $feed.PrevURL /
+         $feed.NextURL) instead — see news.gohtml. */}}
+    {{cmsPagination $feed}}
+</section>
+{{end}}

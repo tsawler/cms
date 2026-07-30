@@ -1,0 +1,7 @@
+{{template "base" .}}
+
+{{/* Nothing but sections: the page is built entirely out of the blocks an
+     editor adds, with no fixed fields of its own. */}}
+{{define "content"}}
+{{cmsSections "sections"}}
+{{end}}

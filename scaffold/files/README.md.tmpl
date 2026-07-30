@@ -1,0 +1,66 @@
+# [[.SiteName]]
+
+A website built on [github.com/tsawler/cms](https://github.com/tsawler/cms),
+generated with `cms init`.
+
+## Running it
+
+```sh
+docker compose up -d       # start [[.EngineLabel]]
+go mod tidy                # resolve dependencies
+[[if .Tailwind]]go generate .              # compile static/site.css (needs the tailwindcss CLI)
+[[end]]go run .                   # http://localhost:4000
+```
+
+Then sign in at <http://localhost:4000/admin/> with the
+`CMS_ADMIN_EMAIL` / `CMS_ADMIN_PASSWORD` from `.env` — change the password
+straight away. The admin account is created on first startup only.
+
+Once signed in, visit the public site: pages are edited **in place**, by
+clicking the text on the page itself.
+
+## Layout
+
+```
+[[.Program]]/
+├── main.go              # yours — server, database, template list
+├── .env                 # local config, gitignored
+├── docker-compose.yml   # development database[[if .Captcha]] and CAPTCHA[[end]]
+[[if .Tailwind]]├── gen.go               # go:generate line for the stylesheet
+├── tailwind-content.sh  # rebuilds CSS for classes typed into content
+├── assets/input.css     # Tailwind input
+├── static/site.css      # compiled output, gitignored
+[[end]]└── templates/
+    ├── base.gohtml      # shared layout
+    └── pages/           # the templates editors can choose
+        ├── home.gohtml
+        ├── standard.gohtml
+        ├── canvas.gohtml
+[[if .Blog]]        ├── blog.gohtml      # paginated listing
+        ├── news.gohtml      # listing with hand-built pagination
+        └── post.gohtml      # a single blog or news post
+[[end]]```
+
+## Adding a page template
+
+Drop a file in `templates/pages/`, then add a line to `cfg.PageTemplates`
+in `main.go`. The template funcs that make a region editable:
+
+| Func | What it is |
+| --- | --- |
+| `{{cmsText "key"}}` | one editable line of plain text |
+| `{{cmsRegion "key"}}` | a block of editable rich text |
+| `{{cmsImage "key"}}` | an editable image URL |
+| `{{cmsSections "key"}}` | blocks the editor can add and reorder |
+| `{{cmsTitle}}` | the page title, editable in place |
+| `{{cmsNav "main"}}` | a menu managed in the admin area |
+| `{{cmsHead}}` / `{{cmsScripts}}` | required, in `base.gohtml` |
+
+Keys are per page, so two templates may reuse the same name freely.
+
+## Optional features
+
+All configured from `.env`, all off until you set them: the media library
+(`S3_*`), the login CAPTCHA (`CAP_*`), and content-driven Tailwind
+rebuilds (`CMS_TAILWIND_COMMAND`). See the comments in `.env` and the
+module's README for the full variable table.

@@ -1,0 +1,77 @@
+{{define "base"}}<!doctype html>
+<html lang="{{.Locale}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Title}} — [[.SiteName]]</title>
+    <link rel="stylesheet" href="/static/site.css">
+    {{/* cmsHead emits the CMS's own stylesheets and metadata. Required. */}}
+    {{cmsHead}}
+</head>
+<body class="bg-white text-slate-800 antialiased">
+<header class="relative border-b border-slate-200">
+    <div class="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between gap-6">
+        {{/* cmsBrand renders the site name, editable in place. On a site
+             with more than one locale this link needs the locale prefix —
+             see examples/basic in the cms module. */}}
+        <a href="/" class="text-lg font-bold tracking-tight">{{cmsBrand "[[.SiteName]]"}}</a>
+        {{cmsNav "main"}}
+        {{/* Empty until Config.Locales names more than one locale. */}}
+        {{with cmsLocales}}
+        <span class="flex gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {{range .}}
+            {{if .Active}}<span class="text-slate-900">{{.Code}}</span>
+            {{else}}<a href="{{.URL}}" class="hover:text-slate-900">{{.Code}}</a>{{end}}
+            {{end}}
+        </span>
+        {{end}}
+        <style>
+            /* The nav is rendered by the CMS; style it through its stable
+               class names. */
+            .cms-nav{font-size:.875rem;color:#475569}
+            @media (min-width:769px){.cms-nav-list{gap:1.5rem}}
+            .cms-nav-link{text-decoration:none;color:inherit}
+            .cms-nav-link:hover{color:#0f172a}
+            .cms-nav-link.cms-active{color:#0f172a;font-weight:600}
+            .cms-nav-sub .cms-nav-link:hover{background:#f1f5f9}
+            /* Mobile: a full-width sheet under the header instead of the
+               default anchored dropdown card. The header is
+               position:relative so the panel spans edge to edge. */
+            @media (max-width:768px){
+                .cms-nav{position:static;order:1}
+                .cms-nav-list{
+                    left:0;right:0;width:auto;min-width:0;max-width:none;
+                    margin-top:0;padding:.5rem 0 1rem;
+                    background:#fff;border:none;border-top:1px solid #e2e8f0;
+                    border-radius:0;
+                    box-shadow:0 24px 32px -20px rgba(15,23,42,.25);
+                }
+                .cms-nav-list>.cms-nav-item{width:100%}
+                .cms-nav-list .cms-nav-link{
+                    padding:.9rem 1.5rem;font-size:1rem;color:#0f172a;
+                }
+                .cms-nav-list button.cms-nav-toggle{
+                    display:flex;width:100%;align-items:center;
+                    justify-content:space-between;
+                }
+                .cms-nav-sub{padding:0 0 .5rem .75rem}
+                .cms-nav-sub .cms-nav-link{
+                    padding:.55rem 1.5rem;font-size:.95rem;color:#475569;
+                }
+            }
+        </style>
+    </div>
+</header>
+
+<main>{{block "content" .}}{{end}}</main>
+
+<footer class="border-t border-slate-200 mt-16">
+    <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
+        &copy; [[.SiteName]]
+    </div>
+</footer>
+{{/* cmsScripts emits the in-place editor when an editor is signed in,
+     and nothing at all otherwise. Required. */}}
+{{cmsScripts}}
+</body>
+</html>{{end}}

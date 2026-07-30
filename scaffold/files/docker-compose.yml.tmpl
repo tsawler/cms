@@ -1,0 +1,114 @@
+# Development services for [[.SiteName]]:
+#
+#   docker compose up -d
+#
+# The CMS only needs a *sql.DB — any [[.EngineLabel]] will do. Every table it
+# creates is prefixed cms_, so it is safe to share this database with the
+# rest of your application. You never write schema: Migrate() in main.go
+# creates and upgrades everything on startup.
+services:
+[[if eq .Engine "postgres"]]  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: cms
+      POSTGRES_DB: cms
+    ports:
+      # 5433 on the host to stay clear of any Postgres already on 5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cms -d cms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+[[end]][[if eq .Engine "mysql"]]  # --default-time-zone=+00:00 matters: the CMS stores UTC, and anything
+  # else reading this database should see the same clock.
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: cms
+      MYSQL_USER: cms
+      MYSQL_PASSWORD: cms
+      MYSQL_ROOT_PASSWORD: cms
+    command: --default-time-zone=+00:00
+    ports:
+      # 3307 on the host to stay clear of any MySQL already on 3306.
+      - "3307:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ucms", "-pcms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+[[end]][[if eq .Engine "mariadb"]]  # --default-time-zone=+00:00 matters: the CMS stores UTC, and anything
+  # else reading this database should see the same clock.
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: cms
+      MARIADB_USER: cms
+      MARIADB_PASSWORD: cms
+      MARIADB_ROOT_PASSWORD: cms
+    command: --default-time-zone=+00:00
+    ports:
+      # 3308 on the host to stay clear of any MySQL or MariaDB on 3306.
+      - "3308:3306"
+    volumes:
+      - mariadbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+[[end]][[if .Captcha]]
+  # Cap (https://capjs.js.org): a self-hosted proof-of-work CAPTCHA for the
+  # admin login form. One-time setup: open http://localhost:3300, log in
+  # with ADMIN_KEY below, create a site key, then put CAP_URL /
+  # CAP_SITE_KEY / CAP_SECRET in .env. Without those the CMS simply runs
+  # without a CAPTCHA.
+  cap:
+    image: tiago2/cap:3.1
+    ports:
+      # 3300 on the host to stay clear of dev servers that favour 3000.
+      - "3300:3000"
+    environment:
+      # Dashboard password. A development-only value — use a long random
+      # secret (32+ chars) anywhere real.
+      ADMIN_KEY: dev-cap-admin-key-change-me-1234567890
+      REDIS_URL: redis://valkey:6379
+      # Serve the widget JS and WASM from this container (/assets/*) so the
+      # login page needs no third-party CDN.
+      ENABLE_ASSETS_SERVER: "true"
+      # Pinned, not "latest". The widget is a browser dependency of the
+      # login page: "latest" means an upstream release can change its API
+      # or its CSP requirements under a deployment that has not changed at
+      # all. Treat a bump like any other dependency upgrade — change it,
+      # then log in against it before committing.
+      WIDGET_VERSION: "0.1.56"
+      WASM_VERSION: "0.0.7"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    command: valkey-server --save 60 1 --loglevel warning --maxmemory-policy noeviction
+    volumes:
+      - capdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+[[end]]
+volumes:
+[[if eq .Engine "postgres"]]  pgdata:
+[[end]][[if eq .Engine "mysql"]]  mysqldata:
+[[end]][[if eq .Engine "mariadb"]]  mariadbdata:
+[[end]][[if .Captcha]]  capdata:
+[[end]]

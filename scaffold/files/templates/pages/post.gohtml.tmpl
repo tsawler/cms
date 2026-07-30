@@ -1,0 +1,31 @@
+{{template "base" .}}
+
+{{define "content"}}
+{{/* The banner above the article is a sections region of its own, so it is
+     built and styled on the page with the section gear — background image
+     and where to anchor it, content width, corners, height. Empty on a
+     post that has none, and the editor offers "Add a section" here the
+     same as anywhere else. */}}
+{{cmsSections "header"}}
+
+<article>
+    {{/* The banner carries the title as the page's <h1> when there is one
+         — editable, over the picture — so the title is not repeated here;
+         only the date and author line, which the banner has no room for. A
+         post with no banner keeps its own <h1>: the page must have one
+         either way, and cmsTitle makes it the same typed-over-in-place
+         words rather than a read-only echo of the gear's title field. */}}
+    <header class="mx-auto max-w-3xl px-6 {{if cmsHasSections "header"}}pt-8{{else}}pt-12{{end}}">
+        {{if not (cmsHasSections "header")}}
+        <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{cmsTitle}}</h1>
+        {{end}}
+        {{with .Post}}
+        <p class="mt-3 text-sm text-slate-500">
+            {{cmsDate .PublishedAt}}{{with .Author}} · {{.}}{{end}}
+        </p>
+        {{end}}
+    </header>
+
+    {{cmsSections "sections"}}
+</article>
+{{end}}

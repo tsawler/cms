@@ -1,0 +1,27 @@
+{{template "base" .}}
+
+{{define "content"}}
+{{/* cmsText is a single editable line, cmsImage an editable picture, and
+     cmsRegion a block of rich text. Each is keyed by the name given here,
+     so the names must be unique within the page. */}}
+<section class="bg-slate-50 border-b border-slate-200">
+    <div class="mx-auto max-w-4xl px-6 py-20 text-center">
+        <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{cmsText "hero-title"}}</h1>
+        <p class="mt-4 text-lg text-slate-600">{{cmsText "hero-subtitle"}}</p>
+    </div>
+</section>
+
+{{with cmsImage "feature-image"}}
+<section class="mx-auto max-w-4xl px-6">
+    <img src="{{.}}" alt="" data-cms-image="feature-image" class="rounded-xl shadow-md w-full">
+</section>
+{{end}}
+
+<section class="mx-auto max-w-3xl px-6 py-12 prose prose-slate">
+    {{cmsRegion "main"}}
+</section>
+
+{{/* cmsSections is where editors add and reorder whole blocks of layout
+     with the "Add a section" control. */}}
+{{cmsSections "sections"}}
+{{end}}

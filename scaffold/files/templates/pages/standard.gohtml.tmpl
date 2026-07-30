@@ -1,0 +1,12 @@
+{{template "base" .}}
+
+{{define "content"}}
+<section class="mx-auto max-w-3xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900 mb-6">{{cmsText "heading"}}</h1>
+    <div class="prose prose-slate">
+        {{cmsRegion "main"}}
+    </div>
+</section>
+
+{{cmsSections "sections"}}
+{{end}}
