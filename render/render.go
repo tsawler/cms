@@ -468,19 +468,20 @@ func writePagerStep(sb *strings.Builder, class, url, label string) {
 // stubFuncs lets templates parse before real, page-bound funcs are attached
 // at render time via Clone().Funcs().
 var stubFuncs = template.FuncMap{
-	"cmsText":       func(string) string { return "" },
-	"cmsRegion":     func(string) template.HTML { return "" },
-	"cmsImage":      func(string) string { return "" },
-	"cmsSections":   func(string) template.HTML { return "" },
-	"cmsMenu":       func(string) []MenuEntry { return nil },
-	"cmsNav":        func(string) template.HTML { return "" },
-	"cmsBrand":      func(...string) template.HTML { return "" },
-	"cmsHead":       func() template.HTML { return "" },
-	"cmsScripts":    func() template.HTML { return "" },
-	"cmsPosts":      func(string, int) []PostInfo { return nil },
-	"cmsFeed":       func(string, ...int) *FeedPage { return nil },
-	"cmsPagination": func(*FeedPage) template.HTML { return "" },
-	"cmsLocales":    func() []LocaleLink { return nil },
+	"cmsText":        func(string) string { return "" },
+	"cmsRegion":      func(string) template.HTML { return "" },
+	"cmsImage":       func(string) string { return "" },
+	"cmsSections":    func(string) template.HTML { return "" },
+	"cmsHasSections": func(string) bool { return false },
+	"cmsMenu":        func(string) []MenuEntry { return nil },
+	"cmsNav":         func(string) template.HTML { return "" },
+	"cmsBrand":       func(...string) template.HTML { return "" },
+	"cmsHead":        func() template.HTML { return "" },
+	"cmsScripts":     func() template.HTML { return "" },
+	"cmsPosts":       func(string, int) []PostInfo { return nil },
+	"cmsFeed":        func(string, ...int) *FeedPage { return nil },
+	"cmsPagination":  func(*FeedPage) template.HTML { return "" },
+	"cmsLocales":     func() []LocaleLink { return nil },
 }
 
 // EditorScriptPath is the public route the in-place editor script is served
@@ -895,7 +896,14 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			}
 			return template.HTML(sb.String())
 		},
-		"cmsMenu": func(key string) []MenuEntry { return menus[key] },
+		// cmsHasSections answers whether a sections area actually holds
+		// anything, which cmsSections cannot be used for: on an edit
+		// render it always returns its wrapper, empty area or not. A
+		// template asks when the shape of the rest of the page depends on
+		// it — a post whose banner carries the title needs its own
+		// heading only when there is no banner.
+		"cmsHasSections": func(key string) bool { return len(byRegion[key]) > 0 },
+		"cmsMenu":        func(key string) []MenuEntry { return menus[key] },
 		"cmsNav": func(key string) template.HTML {
 			// The login link shows only to logged-out visitors (edit == nil)
 			// when the setting is on and an admin path is known.

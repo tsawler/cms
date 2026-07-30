@@ -590,11 +590,20 @@ else to wire up:
 ```html
 {{cmsSections "header"}}
 <article>
-  <h1>{{.Title}}</h1>
+  {{if cmsHasSections "header"}}<h2>{{.Title}}</h2>{{else}}<h1>{{.Title}}</h1>{{end}}
   {{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
   {{cmsSections "sections"}}
 </article>
 ```
+
+A seeded banner starts with the post's title as the page's `<h1>`, centered
+over the picture and in white or near-black depending on how dark the image
+measures. `{{cmsHasSections "header"}}` reports whether an area actually
+holds anything — which `cmsSections` cannot be used for, since an edit
+render always emits its wrapper — so the template can step its own title
+down to `<h2>` when the banner is carrying the `<h1>`, and keep the `<h1>`
+when there is no banner. Drop the second heading entirely if you would
+rather the title appeared once.
 
 Order tells the CMS what the regions are for: the **last** sections
 region a template declares is its main content, where a new page's

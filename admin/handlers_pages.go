@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"html"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -219,42 +220,77 @@ func (s *server) seedStarterSections(ctx context.Context, pageID int64, template
 	}
 }
 
+// bannerSeed is what a new post's banner section is built from: the
+// picture, the words that start on top of it, and whether the picture is
+// dark enough that those words need to be light.
+type bannerSeed struct {
+	URL   string
+	Title string
+	Dark  bool
+}
+
+// bannerSnippetHTML is a banner's starting block: the post's title,
+// centered, in a colour that stands off the picture behind it.
+//
+// It is the page's <h1>. A banner showing the title is where a reader's
+// eye starts, so it is the heading the page is about, and the template
+// steps its own title down to <h2> when a banner is present (see
+// cmsHasSections). Nothing here forces that on a host template, though —
+// a template that ignores the banner keeps its own <h1>, and a page with
+// two of them is untidy rather than broken.
+//
+// The colour and alignment are inline styles rather than classes. The
+// editor's sanitizer allows exactly these two properties, so they
+// survive an editor-role user re-saving the page — and a class would
+// have to exist in whatever CSS the host site happens to be built with,
+// which the CMS does not get to assume.
+func bannerSnippetHTML(seed bannerSeed) string {
+	color := "#111827"
+	if seed.Dark {
+		color = "#ffffff"
+	}
+	return `<h1 class="cms-snippet" style="text-align:center;color:` + color + `">` +
+		html.EscapeString(seed.Title) + `</h1>`
+}
+
 // seedHeaderSection gives a newly created post the banner its creation
 // form asked for: one section in the template's header region carrying
 // the chosen image as its background. Choosing no image leaves the
 // region empty, and its own "Add section" button is then how a banner
 // gets added later.
 //
-// It gets the same starter snippet a new page's content region does, so
-// the banner is a section like any other from the start: clicking the
-// text brings up the block chrome — drag handle, source, gear, trash —
-// where an empty region would only give a bare caret. Delete the line
-// and the picture stands on its own.
+// It starts with the post's title centered over the picture, both across
+// and down, which is what a banner is; and it is a real snippet block, so
+// clicking it brings up the block chrome — drag handle, source, gear,
+// trash — where an empty region would only give a bare caret. Delete the
+// line and the picture stands on its own.
 //
 // It is also given a height, so that deleting the line leaves a banner
 // rather than nothing: an auto-height section with no content renders as
 // no height at all, however good the picture. Everything about it —
-// height, width, corners, where the image is anchored — is editable on
-// the page afterwards, which is the point of it being a section at all.
-func (s *server) seedHeaderSection(ctx context.Context, pageID int64, templateName, imageURL string) {
-	imageURL = render.ValidBackgroundURL(imageURL)
-	if imageURL == "" {
+// height, width, corners, where the image is anchored, the words and
+// their colour — is editable on the page afterwards, which is the point
+// of it being a section at all.
+func (s *server) seedHeaderSection(ctx context.Context, pageID int64, templateName string, seed bannerSeed) {
+	seed.URL = render.ValidBackgroundURL(seed.URL)
+	if seed.URL == "" {
 		return
 	}
 	names := s.sectionRegions(templateName)
 	if len(names) < 2 {
 		return // no region above the content to put a banner in
 	}
-	seed := []content.SectionInput{{
-		Content: starterSectionHTML,
+	sections := []content.SectionInput{{
+		Content: bannerSnippetHTML(seed),
 		Settings: map[string]string{
 			"bg":      s.deps.SectionStyles.Background("").Key,
 			"width":   s.deps.SectionStyles.Width("").Key,
-			"bgimage": imageURL,
+			"bgimage": seed.URL,
 			"height":  "50",
+			"valign":  "center",
 		},
 	}}
-	if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, names[0], s.deps.DefaultLocale, seed); err != nil {
+	if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, names[0], s.deps.DefaultLocale, sections); err != nil {
 		s.deps.Logger.Error("cms admin: seeding header section", "page", pageID, "region", names[0], "err", err)
 	}
 }

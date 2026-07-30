@@ -74,8 +74,7 @@ func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), form.ID, form.TemplateName)
-	s.seedHeaderSection(r.Context(), form.ID, form.TemplateName,
-		s.postBannerURL(r.Context(), form.ThumbnailMediaID, form.ThumbnailURL))
+	s.seedHeaderSection(r.Context(), form.ID, form.TemplateName, s.postBanner(r.Context(), form))
 	s.contentChanged()
 
 	s.flash(r, s.tr(r, "Post created — now add your content below, or open it on the site to edit in place."))
@@ -383,19 +382,34 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 	s.render(w, status, "post_form", data)
 }
 
-// postBannerURL is the address of the image a post was created with, at
-// the rung a full-width banner wants. A section stores its background as
-// a plain URL rather than a library id, so the rendition has to be
-// chosen here rather than at render time. "" when the post has no image.
-func (s *server) postBannerURL(ctx context.Context, id *int64, fallbackURL string) string {
-	if id != nil && s.deps.Media != nil {
-		if md, err := s.deps.Media.GetByID(ctx, *id, s.deps.DefaultLocale); err == nil {
-			if img := s.deps.Media.ImageFor(md, "web"); img != nil {
-				return img.URL
-			}
-		}
+// postBanner describes the banner a newly created post should start
+// with, from the image it was created with. The address is the full-width
+// rendition — a section stores its background as a plain URL rather than
+// a library id, so the rung has to be chosen here rather than at render
+// time — and the darkness decides what colour the title over it starts
+// out. An image the library does not hold keeps its address and is taken
+// to be light, since there is nothing to measure.
+func (s *server) postBanner(ctx context.Context, p *content.Post) bannerSeed {
+	seed := bannerSeed{URL: p.ThumbnailURL, Title: p.Title}
+	if p.ThumbnailMediaID == nil || s.deps.Media == nil {
+		return seed
 	}
-	return fallbackURL
+	md, err := s.deps.Media.GetByID(ctx, *p.ThumbnailMediaID, s.deps.DefaultLocale)
+	if err != nil {
+		return seed
+	}
+	if img := s.deps.Media.ImageFor(md, "web"); img != nil {
+		seed.URL = img.URL
+	}
+	// A picture too odd to measure — a vector, a rendition that never got
+	// made — leaves the title in the site's own colour rather than
+	// guessing at white.
+	dark, err := s.deps.Media.IsDark(ctx, md)
+	if err != nil {
+		s.deps.Logger.Debug("cms admin: measuring banner image", "media", md.ID, "err", err)
+	}
+	seed.Dark = dark
+	return seed
 }
 
 // postImagePreview is the URL for the small preview beside the post
@@ -499,8 +513,7 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), post.ID, post.TemplateName)
-	s.seedHeaderSection(r.Context(), post.ID, post.TemplateName,
-		s.postBannerURL(r.Context(), post.ThumbnailMediaID, post.ThumbnailURL))
+	s.seedHeaderSection(r.Context(), post.ID, post.TemplateName, s.postBanner(r.Context(), post))
 	s.contentChanged()
 
 	writeJSON(w, http.StatusOK, map[string]any{

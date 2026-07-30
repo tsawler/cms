@@ -677,7 +677,11 @@ carries `.Post` (date, author, listing image, …):
 {{cmsSections "header"}}
 <article>
     <header class="mx-auto max-w-3xl px-6 pt-12">
+        {{if cmsHasSections "header"}}
+        <h2 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h2>
+        {{else}}
         <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h1>
+        {{end}}
         {{with .Post}}<p class="mt-3 text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
     </header>
     {{cmsSections "sections"}}
@@ -688,7 +692,11 @@ carries `.Post` (date, author, listing image, …):
 The banner at the top is a sections region of its own, so editors restyle
 it on the page with the section gear — background image and where to
 anchor it, width, corners, height, text over the top — instead of being
-stuck with one fixed image from a form. Region order is the convention:
+stuck with one fixed image from a form. A seeded banner opens with the
+post's title as the page's `<h1>`, centered over the picture in white or
+near-black depending on how dark the image is; `{{cmsHasSections
+"header"}}` is how the template knows to step its own title down to
+`<h2>`, and to keep the `<h1>` on a post with no banner. Region order is the convention:
 the **last** sections region is the main content (where a new page's
 starter section goes) and the **first** is the banner (where a new post's
 image goes). A post created without an image simply has an empty banner
