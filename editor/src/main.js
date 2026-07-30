@@ -17,6 +17,7 @@
 import { initShell, initLightDom, initBarMin } from "./shell.js";
 import { initDialogs } from "./dialogs.js";
 import { initEditing } from "./editing.js";
+import { initTitle } from "./title.js";
 import { initVideoSlots } from "./videos.js";
 import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
@@ -36,6 +37,7 @@ initShell(); // shadow-DOM chrome first: everything else looks up $(...)
 initDialogs();
 initLightDom(); // TinyMCE toolbar strip + light-DOM editing styles
 initEditing();
+initTitle(); // the page title, where a template prints it with cmsTitle
 initVideoSlots(); // before initButtons: slot clicks beat snippet chrome
 initButtons();
 initSaving();

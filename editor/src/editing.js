@@ -12,6 +12,7 @@ import { lockButtons, hideButtonUI, hideSnipUI, hideImgUI, hideVidUI } from "./b
 import { closeDrawer } from "./snippets.js";
 import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
+import { setTitleEditing } from "./title.js";
 
 export function textRegions() {
     return Array.prototype.slice.call(
@@ -27,7 +28,9 @@ export function htmlRegions() {
 // so its DOM normalizations are rolled back too.
 function takeSnapshot() {
     var regs = [];
-    document.querySelectorAll("[data-cms-region]").forEach(function (el) {
+    // The title marker rides along with the regions: Cancel puts typed
+    // words back the same way it puts content back.
+    document.querySelectorAll("[data-cms-region],[data-cms-title]").forEach(function (el) {
         regs.push({ el: el, html: el.innerHTML });
     });
     var imgs = [];
@@ -101,6 +104,7 @@ export function setEditing(on) {
             el.removeAttribute("contenteditable");
         }
     });
+    setTitleEditing(on);
     if (on) {
         lockButtons(); // after the snapshot, so Cancel restores clean HTML
         setMsg("Loading editor…");
@@ -145,7 +149,8 @@ export function markSectionsDirty(region) {
 }
 
 export function hasUnsaved() {
-    return Object.keys(state.dirty).length > 0 || Object.keys(state.sectionsDirty).length > 0;
+    return Object.keys(state.dirty).length > 0 || Object.keys(state.sectionsDirty).length > 0 ||
+        state.titleDirty;
 }
 
 // updateBarButtons keeps the edit bar honest about the page's state:

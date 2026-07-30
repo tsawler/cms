@@ -87,6 +87,10 @@ export var state = {
     editing: false,
     dirty: {}, // region name -> true
     sectionsDirty: {}, // sections region name -> true
+    titleDirty: false, // the page title ({{cmsTitle}}) was typed in
+    // The last title the server is known to hold, restored when the
+    // heading is emptied. Null until edit mode first reads the page.
+    titleSaved: null,
     imageValues: {}, // image region name -> chosen URL
     mceEditors: {}, // region name -> TinyMCE editor instance
     sectionEditors: [], // {el, ed, region} per section content container

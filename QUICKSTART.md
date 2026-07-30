@@ -180,6 +180,7 @@ The functions available in every template:
 | Function | Renders |
 |---|---|
 | `{{cmsText "key"}}` | short plain text (headlines, labels) |
+| `{{cmsTitle}}` | the page's own title, typed over in place while editing |
 | `{{cmsRegion "key"}}` | rich HTML content (the main editable body) |
 | `{{cmsImage "key"}}` | an image URL from the media library |
 | `{{cmsSections "key"}}` | editor-composed full-width sections |
@@ -195,6 +196,16 @@ The functions available in every template:
 The dot (`.`) each page template receives carries `.Title`,
 `.Description`, `.Slug`, `.Locale`, and `.Post` (nil except on blog/news
 posts).
+
+`{{cmsTitle}}` and `{{.Title}}` print the same words; the difference is
+what an editor can do with them. `{{.Title}}` is plain text, so a heading
+built from it can only be changed through the title field in the edit
+bar's **Page settings** (or a post's gear). `{{cmsTitle}}` is the same
+title made editable where it is shown: click the heading, type, Save —
+and the browser tab and search results follow, because it is one value
+and not a copy. Use it for the heading in the page body, and keep
+`{{.Title}}` in `<title>`, where an editing wrapper would show up as
+markup.
 
 ### The shared layout
 
@@ -676,11 +687,9 @@ carries `.Post` (date, author, listing image, …):
 {{define "content"}}
 {{cmsSections "header"}}
 <article>
-    <header class="mx-auto max-w-3xl px-6 pt-12">
-        {{if cmsHasSections "header"}}
-        <h2 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h2>
-        {{else}}
-        <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h1>
+    <header class="mx-auto max-w-3xl px-6 {{if cmsHasSections "header"}}pt-8{{else}}pt-12{{end}}">
+        {{if not (cmsHasSections "header")}}
+        <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{cmsTitle}}</h1>
         {{end}}
         {{with .Post}}<p class="mt-3 text-sm text-slate-500">{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
     </header>
@@ -695,8 +704,11 @@ anchor it, width, corners, height, text over the top — instead of being
 stuck with one fixed image from a form. A seeded banner opens with the
 post's title as the page's `<h1>`, centered over the picture in white or
 near-black depending on how dark the image is; `{{cmsHasSections
-"header"}}` is how the template knows to step its own title down to
-`<h2>`, and to keep the `<h1>` on a post with no banner. Region order is the convention:
+"header"}}` is how the template knows to leave the title to the banner,
+and to print its own `<h1>` on a post with no banner. Printing it in both
+places would show the same words twice. Either heading is edited where it
+sits: the banner's is a line inside a section, and the no-banner one is
+`{{cmsTitle}}`, the post's title itself. Region order is the convention:
 the **last** sections region is the main content (where a new page's
 starter section goes) and the **first** is the banner (where a new post's
 image goes). A post created without an image simply has an empty banner

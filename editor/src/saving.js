@@ -8,6 +8,7 @@ import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm, openDialog } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
 import { hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
+import { saveTitle } from "./title.js";
 
 /* A save may make the server rebuild its generated Tailwind stylesheet
  * (classes typed into content get compiled CSS). This page's <link> was
@@ -120,9 +121,15 @@ function collectSections(region) {
 export function save() {
     var values = collect();
     var secRegions = Object.keys(state.sectionsDirty);
-    if (Object.keys(values).length === 0 && secRegions.length === 0) return Promise.resolve();
+    var titleDirty = state.titleDirty;
+    if (Object.keys(values).length === 0 && secRegions.length === 0 && !titleDirty) {
+        return Promise.resolve();
+    }
     setMsg("Saving…");
     var chain = Promise.resolve();
+    // The title is page metadata, not a region, so it saves on its own
+    // endpoint — first, so a failure there stops before content moves.
+    if (titleDirty) chain = chain.then(saveTitle);
     if (Object.keys(values).length > 0) {
         chain = chain.then(function () {
             return api("/pages/" + pageId + "/regions", {
@@ -212,6 +219,7 @@ function discardDraft() {
             // reload, then reload to show the reverted content.
             state.dirty = {};
             state.sectionsDirty = {};
+            state.titleDirty = false;
             window.location.reload();
         }).catch(function (err) { setMsg(err.message); });
     });
@@ -235,6 +243,7 @@ export function initSaving() {
             state.dirty = {};
             state.sectionsDirty = {};
             state.imageValues = {};
+            state.titleDirty = false;
             $("save").disabled = true;
             setMsg("");
             updateBarButtons();
@@ -258,6 +267,7 @@ export function initSaving() {
                 // the navigation away from the now-deleted page.
                 state.dirty = {};
                 state.sectionsDirty = {};
+                state.titleDirty = false;
                 window.location.href = body.url || "/";
             }).catch(function (err) { setMsg(err.message); });
         });

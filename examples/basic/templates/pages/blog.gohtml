@@ -2,7 +2,7 @@
 
 {{define "content"}}
 <section class="mx-auto max-w-4xl px-6 py-12">
-    <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{.Title}}</h1>
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{cmsTitle}}</h1>
     <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
 
     {{/* cmsFeed returns one page of the feed plus the links around it.

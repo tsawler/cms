@@ -71,6 +71,11 @@
     // region name -> true
     sectionsDirty: {},
     // sections region name -> true
+    titleDirty: false,
+    // the page title ({{cmsTitle}}) was typed in
+    // The last title the server is known to hold, restored when the
+    // heading is emptied. Null until edit mode first reads the page.
+    titleSaved: null,
     imageValues: {},
     // image region name -> chosen URL
     mceEditors: {},
@@ -3408,6 +3413,94 @@
     });
   }
 
+  // ../src/title.js
+  function clean(text) {
+    return (text || "").replace(/\s+/g, " ").trim();
+  }
+  function titleEls() {
+    return Array.prototype.slice.call(document.querySelectorAll("[data-cms-title]"));
+  }
+  function titleValue() {
+    var els = titleEls();
+    return els.length ? clean(els[0].textContent) : "";
+  }
+  function setTitleValue(text) {
+    titleEls().forEach(function(el) {
+      el.textContent = text;
+    });
+    state.titleSaved = text;
+  }
+  function setTitleEditing(on) {
+    titleEls().forEach(function(el) {
+      if (on) {
+        el.setAttribute("contenteditable", "plaintext-only");
+        if (!el.isContentEditable) el.setAttribute("contenteditable", "true");
+        el.title = "The page title \u2014 shown here, in the browser tab, and in search results";
+      } else {
+        el.removeAttribute("contenteditable");
+        el.removeAttribute("title");
+      }
+    });
+    if (on && state.titleSaved === null) state.titleSaved = titleValue();
+  }
+  function markTitleDirty() {
+    state.titleDirty = true;
+    $("save").disabled = false;
+    updateBarButtons();
+  }
+  function saveTitle() {
+    var value = titleValue();
+    if (value === "") {
+      setTitleValue(state.titleSaved || "");
+      state.titleDirty = false;
+      return Promise.resolve();
+    }
+    return api("/pages/" + pageId + "/meta", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      // No description: the endpoint leaves out what it isn't sent, so
+      // saving a title here can't blank the page's meta description.
+      body: JSON.stringify({ locale: cfg.locale, title: value })
+    }).then(function() {
+      state.titleSaved = value;
+      state.titleDirty = false;
+    });
+  }
+  function initTitle() {
+    document.addEventListener("input", function(e) {
+      if (!state.editing) return;
+      var el = e.target.closest ? e.target.closest("[data-cms-title]") : null;
+      if (!el) return;
+      markTitleDirty();
+      titleEls().forEach(function(other) {
+        if (other !== el) other.textContent = el.textContent;
+      });
+    });
+    document.addEventListener("keydown", function(e) {
+      if (!state.editing || e.key !== "Enter") return;
+      var el = e.target.closest ? e.target.closest("[data-cms-title]") : null;
+      if (!el) return;
+      e.preventDefault();
+      el.blur();
+    });
+    document.addEventListener("focusout", function(e) {
+      if (!state.editing) return;
+      var el = e.target.closest ? e.target.closest("[data-cms-title]") : null;
+      if (!el) return;
+      if (titleValue() === "") {
+        setTitleValue(state.titleSaved || "");
+        setMsg("A page needs a title.");
+        return;
+      }
+      var value = titleValue();
+      if (el.textContent !== value) {
+        titleEls().forEach(function(other) {
+          other.textContent = value;
+        });
+      }
+    });
+  }
+
   // ../src/editing.js
   function textRegions() {
     return Array.prototype.slice.call(
@@ -3421,7 +3514,7 @@
   }
   function takeSnapshot() {
     var regs = [];
-    document.querySelectorAll("[data-cms-region]").forEach(function(el) {
+    document.querySelectorAll("[data-cms-region],[data-cms-title]").forEach(function(el) {
       regs.push({ el, html: el.innerHTML });
     });
     var imgs = [];
@@ -3483,6 +3576,7 @@
         el.removeAttribute("contenteditable");
       }
     });
+    setTitleEditing(on);
     if (on) {
       lockButtons();
       setMsg("Loading editor\u2026");
@@ -3523,7 +3617,7 @@
     updateBarButtons();
   }
   function hasUnsaved() {
-    return Object.keys(state.dirty).length > 0 || Object.keys(state.sectionsDirty).length > 0;
+    return Object.keys(state.dirty).length > 0 || Object.keys(state.sectionsDirty).length > 0 || state.titleDirty;
   }
   function updateBarButtons() {
     var working = state.editing || hasUnsaved();
@@ -4476,9 +4570,13 @@
   function save() {
     var values = collect();
     var secRegions = Object.keys(state.sectionsDirty);
-    if (Object.keys(values).length === 0 && secRegions.length === 0) return Promise.resolve();
+    var titleDirty = state.titleDirty;
+    if (Object.keys(values).length === 0 && secRegions.length === 0 && !titleDirty) {
+      return Promise.resolve();
+    }
     setMsg("Saving\u2026");
     var chain = Promise.resolve();
+    if (titleDirty) chain = chain.then(saveTitle);
     if (Object.keys(values).length > 0) {
       chain = chain.then(function() {
         return api("/pages/" + pageId + "/regions", {
@@ -4562,6 +4660,7 @@
       api("/pages/" + pageId + "/discard", { method: "POST" }).then(function() {
         state.dirty = {};
         state.sectionsDirty = {};
+        state.titleDirty = false;
         window.location.reload();
       }).catch(function(err) {
         setMsg(err.message);
@@ -4585,6 +4684,7 @@
         state.dirty = {};
         state.sectionsDirty = {};
         state.imageValues = {};
+        state.titleDirty = false;
         $("save").disabled = true;
         setMsg("");
         updateBarButtons();
@@ -4612,6 +4712,7 @@
         api("/pages/" + pageId, { method: "DELETE" }).then(function(body) {
           state.dirty = {};
           state.sectionsDirty = {};
+          state.titleDirty = false;
           window.location.href = body.url || "/";
         }).catch(function(err) {
           setMsg(err.message);
@@ -5013,6 +5114,10 @@ body.cms-editing{margin-left:56px}
 .cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
 .cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
 .cms-editing [data-cms-region]:empty::before{content:'Click to edit\u2026';opacity:.4}
+/* The page title reads as editable the same way a text region does. It
+   is inline inside the host's heading, so the outline hugs the words. */
+.cms-editing [data-cms-title]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
+.cms-editing [data-cms-title]:hover,.cms-editing [data-cms-title]:focus{outline-style:solid}
 .cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}
 .cms-editing [data-cms-image]:hover{outline-style:solid}
 /* TinyMCE inline adds its own focus outline; ours is enough. */
@@ -5544,6 +5649,7 @@ body.cms-editing [data-cms-fallback] {
   initDialogs();
   initLightDom();
   initEditing();
+  initTitle();
   initVideoSlots();
   initButtons();
   initSaving();

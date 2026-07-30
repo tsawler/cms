@@ -190,6 +190,85 @@ func TestAPISavePageMeta(t *testing.T) {
 	})
 }
 
+// Typing over the heading on the page saves a title and nothing else.
+// The description is not on screen there, so a body without one means
+// "leave it alone" — sending it as empty would quietly delete the page's
+// meta description every time someone fixed a typo in the heading.
+func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := metaServer(db)
+		ctx := context.Background()
+		page := &content.Page{Slug: "about", TemplateName: "page.gohtml",
+			Title: "About Us", Description: "Who we are"}
+		if _, err := s.deps.Content.Insert(ctx, page, "en"); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+			`{"locale":"en","title":"About the team"}`, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		en, err := s.deps.Content.MetaFor(ctx, page.ID, "en")
+		if err != nil {
+			t.Fatalf("MetaFor(en): %v", err)
+		}
+		if en.Title != "About the team" {
+			t.Errorf("en title = %q, want the new one", en.Title)
+		}
+		if en.Description != "Who we are" {
+			t.Errorf("en description = %q, want it left alone", en.Description)
+		}
+
+		// The other way round holds too: the dialogs are free to save a
+		// description without restating the title.
+		rec = httptest.NewRecorder()
+		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+			`{"locale":"en","description":"The people behind it"}`, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("description-only save: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		if en, err = s.deps.Content.MetaFor(ctx, page.ID, "en"); err != nil {
+			t.Fatalf("MetaFor(en): %v", err)
+		}
+		if en.Title != "About the team" || en.Description != "The people behind it" {
+			t.Errorf("en meta = %+v, want the kept title and the new description", en)
+		}
+
+		// Sending a field empty still means empty — the dialogs clear a
+		// translation that way.
+		rec = httptest.NewRecorder()
+		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+			`{"locale":"en","description":""}`, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("clearing description: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		if en, err = s.deps.Content.MetaFor(ctx, page.ID, "en"); err != nil {
+			t.Fatalf("MetaFor(en): %v", err)
+		}
+		if en.Description != "" {
+			t.Errorf("en description = %q, want it cleared", en.Description)
+		}
+
+		// A title-only save on a translation is judged on the title it
+		// sends, not on the empty description it doesn't.
+		rec = httptest.NewRecorder()
+		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+			`{"locale":"fr","title":"À propos"}`, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("fr title-only save: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		fr, err := s.deps.Content.MetaFor(ctx, page.ID, "fr")
+		if err != nil {
+			t.Fatalf("MetaFor(fr): %v", err)
+		}
+		if fr.Title != "À propos" {
+			t.Errorf("fr title = %q, want the French one", fr.Title)
+		}
+	})
+}
+
 // The post-settings gear saves the title and summary of whichever locale
 // the editor is rendered in. Writing them to the default locale instead
 // puts French words in the English metadata and leaves the French page

@@ -234,10 +234,11 @@ type bannerSeed struct {
 //
 // It is the page's <h1>. A banner showing the title is where a reader's
 // eye starts, so it is the heading the page is about, and the template
-// steps its own title down to <h2> when a banner is present (see
-// cmsHasSections). Nothing here forces that on a host template, though —
-// a template that ignores the banner keeps its own <h1>, and a page with
-// two of them is untidy rather than broken.
+// leaves the title to the banner when one is present (see
+// cmsHasSections), printing its own <h1> only when there is no banner.
+// Nothing here forces that on a host template, though — a template that
+// ignores the banner keeps its own heading, and a page showing the title
+// twice is untidy rather than broken.
 //
 // The colour and alignment are inline styles rather than classes. The
 // editor's sanitizer allows exactly these two properties, so they

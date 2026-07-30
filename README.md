@@ -85,6 +85,7 @@ UI discovers them automatically:
 
 ```html
 <h1>{{cmsText "hero-title"}}</h1>       <!-- short plain text -->
+<h1>{{cmsTitle}}</h1>                   <!-- the page's own title, edited in place -->
 <div>{{cmsRegion "main"}}</div>         <!-- rich HTML content -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
 {{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
@@ -603,7 +604,7 @@ else to wire up:
 ```html
 {{cmsSections "header"}}
 <article>
-  {{if cmsHasSections "header"}}<h2>{{.Title}}</h2>{{else}}<h1>{{.Title}}</h1>{{end}}
+  {{if not (cmsHasSections "header")}}<h1>{{cmsTitle}}</h1>{{end}}
   {{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
   {{cmsSections "sections"}}
 </article>
@@ -613,10 +614,11 @@ A seeded banner starts with the post's title as the page's `<h1>`, centered
 over the picture and in white or near-black depending on how dark the image
 measures. `{{cmsHasSections "header"}}` reports whether an area actually
 holds anything — which `cmsSections` cannot be used for, since an edit
-render always emits its wrapper — so the template can step its own title
-down to `<h2>` when the banner is carrying the `<h1>`, and keep the `<h1>`
-when there is no banner. Drop the second heading entirely if you would
-rather the title appeared once.
+render always emits its wrapper — so the template can leave the title to
+the banner when there is one and print its own `<h1>` when there is not.
+Showing it in both places is the thing to avoid — the same words, twice,
+on one page. Either heading is edited where it sits: the banner's is a
+line of text inside a section, and the no-banner one is `{{cmsTitle}}`.
 
 Order tells the CMS what the regions are for: the **last** sections
 region a template declares is its main content, where a new page's

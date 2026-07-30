@@ -473,6 +473,7 @@ var stubFuncs = template.FuncMap{
 	"cmsImage":       func(string) string { return "" },
 	"cmsSections":    func(string) template.HTML { return "" },
 	"cmsHasSections": func(string) bool { return false },
+	"cmsTitle":       func() template.HTML { return "" },
 	"cmsMenu":        func(string) []MenuEntry { return nil },
 	"cmsNav":         func(string) template.HTML { return "" },
 	"cmsBrand":       func(...string) template.HTML { return "" },
@@ -903,7 +904,16 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		// it — a post whose banner carries the title needs its own
 		// heading only when there is no banner.
 		"cmsHasSections": func(key string) bool { return len(byRegion[key]) > 0 },
-		"cmsMenu":        func(key string) []MenuEntry { return menus[key] },
+		// cmsTitle prints the page's own title — the same words the
+		// admin's title field and the <title> tag carry — as the page's
+		// visible heading. It is not a region: there is one title per
+		// page per locale, stored on the page rather than in a block, so
+		// it takes no key. An edit render wraps it so it can be typed
+		// over in place (see the override below); a plain render is the
+		// escaped text and nothing else, which is why it belongs in the
+		// body and .Title still belongs in <title>.
+		"cmsTitle": func() template.HTML { return template.HTML(html.EscapeString(page.Title)) },
+		"cmsMenu":  func(key string) []MenuEntry { return menus[key] },
 		"cmsNav": func(key string) template.HTML {
 			// The login link shows only to logged-out visitors (edit == nil)
 			// when the setting is on and an admin path is known.
@@ -955,6 +965,13 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		funcs["cmsRegion"] = func(key string) template.HTML {
 			return template.HTML(`<div data-cms-region="` + html.EscapeString(key) +
 				`" data-cms-kind="html"` + fallback(key) + `>` + region(key) + `</div>`)
+		}
+		// The title is page metadata rather than a region, so its marker
+		// carries no region name: the editor saves it to the page's
+		// title field for the locale being edited, the same field the
+		// page-settings dialog writes.
+		funcs["cmsTitle"] = func() template.HTML {
+			return template.HTML(`<span data-cms-title>` + html.EscapeString(page.Title) + `</span>`)
 		}
 		funcs["cmsSections"] = func(key string) template.HTML {
 			var sb strings.Builder

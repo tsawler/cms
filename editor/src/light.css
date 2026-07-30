@@ -11,6 +11,10 @@ body.cms-editing{margin-left:56px}
 .cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
 .cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
 .cms-editing [data-cms-region]:empty::before{content:'Click to edit…';opacity:.4}
+/* The page title reads as editable the same way a text region does. It
+   is inline inside the host's heading, so the outline hugs the words. */
+.cms-editing [data-cms-title]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
+.cms-editing [data-cms-title]:hover,.cms-editing [data-cms-title]:focus{outline-style:solid}
 .cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}
 .cms-editing [data-cms-image]:hover{outline-style:solid}
 /* TinyMCE inline adds its own focus outline; ours is enough. */

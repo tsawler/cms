@@ -20,6 +20,7 @@ var testFS = fstest.MapFS{
 			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
 	"pages/home.gohtml": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
+			`<h2>{{cmsTitle}}</h2>` +
 			`<div>{{cmsRegion "main"}}</div>{{cmsSections "extra"}}{{end}}`)},
 }
 
@@ -141,6 +142,38 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath) {
 		t.Error("plain render leaked editor markers")
+	}
+}
+
+// cmsTitle prints the page's own title, and an edit render wraps it so
+// the heading on the page is the thing an editor types into — the title
+// field and the heading being two views of one value is the whole point
+// of the func.
+func TestRenderTitleIsPlainTextUntilEditMode(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 3, TemplateName: "pages/home.gohtml", Title: `Tools & "Toys"`}
+
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if want := `<h2>Tools &amp; &#34;Toys&#34;</h2>`; !strings.Contains(buf.String(), want) {
+		t.Errorf("plain render: want %s in:\n%s", want, buf.String())
+	}
+	if strings.Contains(buf.String(), "data-cms-title") {
+		t.Error("plain render leaked the editable title marker")
+	}
+
+	buf.Reset()
+	err := r.Render(&buf, Input{Page: page, Locale: "en", Edit: &EditInfo{
+		PageID: 3, AdminPath: "/admin", CSRFToken: "tok", Locale: "en", Status: "draft",
+	}})
+	if err != nil {
+		t.Fatalf("edit Render: %v", err)
+	}
+	want := `<h2><span data-cms-title>Tools &amp; &#34;Toys&#34;</span></h2>`
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("edit render: want %s in:\n%s", want, buf.String())
 	}
 }
 

@@ -718,6 +718,11 @@ func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
 // own value and lets the page fall back to the default language again.
 // The default locale has nothing to fall back to, so there a title is
 // required.
+//
+// A field left out of the body entirely is left alone, which is not the
+// same as sending it empty: the in-place title editor sends a title and
+// no description, and must not take the page's meta description with it.
+// The dialogs send both fields and so overwrite both.
 // PUT /api/pages/{id}/meta  body: {"locale", "title", "description"}
 func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.pageFromURL(w, r)
@@ -725,9 +730,9 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Locale      string `json:"locale"`
-		Title       string `json:"title"`
-		Description string `json:"description"`
+		Locale      string  `json:"locale"`
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMetaBody))
 	if err := dec.Decode(&body); err != nil {
@@ -738,12 +743,28 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Unknown language."))
 		return
 	}
-	title := strings.TrimSpace(body.Title)
+	var title, desc string
+	if body.Title == nil || body.Description == nil {
+		// Only what the body omits is read back; a full save needs no
+		// round trip.
+		stored, err := s.deps.Content.MetaFor(r.Context(), page.ID, body.Locale)
+		if err != nil {
+			s.deps.Logger.Error("cms admin: api reading page meta to save", "page", page.ID, "locale", body.Locale, "err", err)
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
+			return
+		}
+		title, desc = stored.Title, stored.Description
+	}
+	if body.Title != nil {
+		title = strings.TrimSpace(*body.Title)
+	}
+	if body.Description != nil {
+		desc = strings.TrimSpace(*body.Description)
+	}
 	if title == "" && body.Locale == s.deps.DefaultLocale {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Title is required."))
 		return
 	}
-	desc := strings.TrimSpace(body.Description)
 	if err := s.deps.Content.UpdateMeta(r.Context(), page.ID, body.Locale, title, desc); err != nil {
 		s.deps.Logger.Error("cms admin: api saving page meta", "page", page.ID, "locale", body.Locale, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
