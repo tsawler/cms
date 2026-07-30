@@ -262,11 +262,17 @@ export function initSnippets() {
             closeDrawer();
             return;
         }
-        var container = document.querySelector("[data-cms-sections]");
-        if (!container) {
+        // The last sections area is the page's main content — a template
+        // with more than one puts its banner first and its content last,
+        // and "add a section" from the rail means the content. Adding to
+        // a banner is done from the banner's own button, which knows to
+        // stop at one.
+        var areas = document.querySelectorAll("[data-cms-sections]");
+        if (!areas.length) {
             setMsg("This page has no sections area.");
             return;
         }
+        var container = areas[areas.length - 1];
         state.pendingSection = { region: container.getAttribute("data-cms-sections"), after: null };
         openDrawer();
     });

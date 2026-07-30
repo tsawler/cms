@@ -184,6 +184,34 @@ export function injectSectionUI() {
             container.appendChild(addWrap);
         }
     });
+    updateAddButtons();
+}
+
+// bannerRegion is the sections area a template puts above its main
+// content — the post template's header. The convention is the server's
+// (sectionRegions in the admin): with more than one sections area, the
+// first is the banner and the last is the main content. One area alone
+// is the main content and has no banner.
+function bannerRegion() {
+    var all = document.querySelectorAll("[data-cms-sections]");
+    return all.length > 1 ? all[0] : null;
+}
+
+// updateAddButtons takes away the ways of adding to an area that is
+// already full. A banner is one section by definition — a second one
+// underneath is not a banner, it is the top of the page — so once it
+// holds a section, both its own "Add section" button and the ＋ on that
+// section's toolbar go away. Deleting the section brings them back.
+export function updateAddButtons() {
+    var banner = bannerRegion();
+    document.querySelectorAll("[data-cms-sections]").forEach(function (container) {
+        var full = container === banner && !!container.querySelector("[data-cms-section]");
+        var add = container.querySelector(".cms-add-section");
+        if (add) add.hidden = full;
+        container.querySelectorAll('[data-secact="add"]').forEach(function (btn) {
+            btn.hidden = full;
+        });
+    });
 }
 
 function injectSectionToolbar(wrapper) {
@@ -257,6 +285,7 @@ export function initSections() {
                     return true;
                 });
                 wrapper.remove();
+                updateAddButtons(); // an emptied banner can take one again
                 markSectionsDirty(region);
             });
         } else if (act === "src") {
@@ -528,6 +557,7 @@ export function createSection(target, html, settings) {
         state.sectionEditors.push({ el: inner, ed: ed, region: target.region });
     });
     lockButtons(); // the starting snippet may contain a button
+    updateAddButtons(); // a banner that just filled up takes no more
     markSectionsDirty(target.region);
     wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
 }

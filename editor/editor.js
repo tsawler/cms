@@ -921,6 +921,22 @@
         container.appendChild(addWrap);
       }
     });
+    updateAddButtons();
+  }
+  function bannerRegion() {
+    var all = document.querySelectorAll("[data-cms-sections]");
+    return all.length > 1 ? all[0] : null;
+  }
+  function updateAddButtons() {
+    var banner = bannerRegion();
+    document.querySelectorAll("[data-cms-sections]").forEach(function(container) {
+      var full = container === banner && !!container.querySelector("[data-cms-section]");
+      var add = container.querySelector(".cms-add-section");
+      if (add) add.hidden = full;
+      container.querySelectorAll('[data-secact="add"]').forEach(function(btn) {
+        btn.hidden = full;
+      });
+    });
   }
   function injectSectionToolbar(wrapper) {
     if (wrapper.querySelector(".cms-sec-ui")) return;
@@ -991,6 +1007,7 @@
             return true;
           });
           wrapper.remove();
+          updateAddButtons();
           markSectionsDirty(region);
         });
       } else if (act === "src") {
@@ -1264,6 +1281,7 @@
       state.sectionEditors.push({ el: inner, ed, region: target.region });
     });
     lockButtons();
+    updateAddButtons();
     markSectionsDirty(target.region);
     wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -1467,11 +1485,12 @@
         closeDrawer();
         return;
       }
-      var container = document.querySelector("[data-cms-sections]");
-      if (!container) {
+      var areas = document.querySelectorAll("[data-cms-sections]");
+      if (!areas.length) {
         setMsg("This page has no sections area.");
         return;
       }
+      var container = areas[areas.length - 1];
       state.pendingSection = { region: container.getAttribute("data-cms-sections"), after: null };
       openDrawer();
     });
@@ -5012,6 +5031,9 @@ border-radius:999px;padding:6px 9px;cursor:pointer}
 .cms-sec-ui button:hover{background:rgba(255,255,255,.18)}
 .cms-sec-ui button[data-secact='del']{color:#fca5a5}
 .cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}
+/* Hidden when the area it adds to is full; the host page's own reset
+   must not be able to bring it back. */
+.cms-add-section[hidden],.cms-sec-ui button[hidden]{display:none!important}
 .cms-add-section{padding:14px;text-align:center}
 .cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;
 border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
