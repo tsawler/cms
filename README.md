@@ -430,9 +430,10 @@ start from a snippet or empty, and the ⚙ settings offer curated choices
 only — background (Default / Light gray / Dark / Accent), content
 width (Normal / Wide / Full width), and rounded corners (None / Small /
 Medium / Large) by default — alongside a free-form background colour and
-background image. A background image is cropped to cover the section, so
-it comes with a **position** setting naming which of nine anchor points
-survives the crop (centered by default): the difference between a
+background image. The dialog splits into **Layout** and **Background**
+tabs, with a live preview under both. A background image is cropped to
+cover the section, so it comes with two sliders — across and down — that
+place which part of it survives the crop, the difference between a
 portrait's face and its shoulder. The ＋ buttons — on each
 section, at the bottom of the sections area, and on the tool rail — open
 an "Add a section" chooser: start empty, seed the section from any
@@ -455,8 +456,8 @@ Settings use the section-settings vocabulary: `bg`, `width`, and
 `corners` name `SectionStyles` option keys, `height` is
 `"50"`/`"75"`/`"100"` (percent of the screen), `valign` is
 `"center"`/`"bottom"`, and the free-form `bgcolor` (`#rrggbb`),
-`bgimage` (URL) and `bgposition` (`"top"`, `"bottom-left"`, … — centered
-by default) work too. Unknown keys and
+`bgimage` (URL) and `bgposition` — a pair of percentages across and down,
+e.g. `"50% 20%"`, centered by default — work too. Unknown keys and
 invalid values fall back to the defaults. Register your own next to
 ordinary snippets:
 

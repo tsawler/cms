@@ -241,8 +241,15 @@ text-overflow:ellipsis}
 .dlg-overlay.on{display:block}
 .dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
 width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
-box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}
+box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none;
+max-height:88vh;overflow-y:auto}
 .dlg.on{display:block}
+/* Settings panels: wider, and two fields to a row so a tab's worth of
+   controls is taken in at a glance rather than scrolled through. */
+.dlg.wide{width:min(640px,94vw)}
+.dlg.wide #dlg-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.dlg.wide #dlg-fields .fld.span{grid-column:1 / -1}
+@media (max-width:560px){.dlg.wide #dlg-fields{grid-template-columns:1fr}}
 .dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}
 .dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
 font:inherit;font-size:13px;margin-bottom:14px}
@@ -261,6 +268,10 @@ border-radius:6px;background:#fff;cursor:pointer}
 .dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}
 .dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}
 .dlg .crow input,.dlg .irow input{margin:0}
+/* computed note under a field: explanation, not input, so it carries
+   its own spacing and its wrapper carries none */
+.dlg .fld.note{margin:0}
+.dlg .fnote{margin:-4px 0 12px;font-size:11px;line-height:1.45;color:#667085}
 /* range field (slider + numeric input) */
 .dlg .rrow{display:flex;gap:10px;align-items:center}
 .dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}

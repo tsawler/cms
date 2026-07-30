@@ -4,7 +4,7 @@
 
 import { state, mediaEnabled, sectionStyles } from "./state.js";
 import { ICONS } from "./shell.js";
-import { cmsConfirm, openDialog } from "./dialogs.js";
+import { cmsConfirm, openDialog, refreshDialog } from "./dialogs.js";
 import { markSectionsDirty } from "./editing.js";
 import { initInlineEditor } from "./richtext.js";
 import { lockButtons } from "./buttons.js";
@@ -126,7 +126,7 @@ function buildSectionPreview(v, el, resolved, radius) {
     if (v.bgimage) {
         box.style.backgroundImage = "url('" + v.bgimage.replace(/'/g, "%27") + "')";
         box.style.backgroundSize = "cover";
-        box.style.backgroundPosition = bgPositionCSS(v.bgposition);
+        box.style.backgroundPosition = bgPosition(v);
     }
     box.style.justifyContent = v.valign === "center" ? "center"
         : (v.valign === "bottom" ? "flex-end" : "flex-start");
@@ -286,44 +286,60 @@ export function initSections() {
                 flash("Section updated");
             });
         } else if (act === "set") {
+            // Two tabs: how the section is laid out, and what it is
+            // painted with. Each holds four controls, which fits a
+            // dialog without scrolling.
             var setFields = [
-                { id: "bg", label: "Background style", type: "select", value: wrapper.dataset.cmsBg || "",
-                    options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
-                { id: "width", label: "Content width", type: "select", value: wrapper.dataset.cmsWidth || "",
+                { id: "width", label: "Content width", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsWidth || "",
                     options: sectionStyles.widths.map(function (o) { return { value: o.key, label: o.label }; }) },
-            ];
-            if ((sectionStyles.corners || []).length) {
-                setFields.push({ id: "corners", label: "Rounded corners", type: "select",
-                    value: wrapper.dataset.cmsCorners || "",
-                    options: sectionStyles.corners.map(function (o) { return { value: o.key, label: o.label }; }) });
-            }
-            setFields.push(
-                { id: "height", label: "Section height", type: "select", value: wrapper.dataset.cmsHeight || "auto",
+                { id: "height", label: "Section height", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsHeight || "auto",
                     options: [
                         { value: "auto", label: "Auto (fits the content)" },
                         { value: "50", label: "50% of the screen" },
                         { value: "75", label: "75% of the screen" },
                         { value: "100", label: "Full screen" },
                     ] },
-                { id: "valign", label: "Vertical alignment", type: "select", value: wrapper.dataset.cmsValign || "top",
+                { id: "valign", label: "Vertical alignment", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsValign || "top",
                     options: [
                         { value: "top", label: "Top" },
                         { value: "center", label: "Center" },
                         { value: "bottom", label: "Bottom" },
                     ] },
-                { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" });
+            ];
+            if ((sectionStyles.corners || []).length) {
+                setFields.push({ id: "corners", label: "Rounded corners", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsCorners || "",
+                    options: sectionStyles.corners.map(function (o) { return { value: o.key, label: o.label }; }) });
+            }
+            setFields.push(
+                { id: "bg", label: "Background style", type: "select", tab: "Background",
+                    value: wrapper.dataset.cmsBg || "",
+                    options: sectionStyles.backgrounds.map(function (o) { return { value: o.key, label: o.label }; }) },
+                { id: "bgcolor", label: "Background color", type: "color", tab: "Background",
+                    value: wrapper.dataset.cmsBgcolor || "" });
             if (mediaEnabled) {
-                setFields.push({ id: "bgimage", label: "Background image", type: "image",
-                    value: wrapper.dataset.cmsBgimage || "" },
-                // A background image is cropped to cover the section, so
-                // this is what decides which part of it survives.
-                { id: "bgposition", label: "Position of the background image", type: "select",
-                    value: wrapper.dataset.cmsBgposition || "center",
-                    options: BG_POSITIONS });
+                // A background image is cropped to cover the section, and
+                // these two decide which part of it survives the crop.
+                // Both sliders run left to right; their labels say which
+                // edge each end is.
+                var pos = parseBgPosition(wrapper.dataset.cmsBgposition);
+                setFields.push(
+                    { id: "bgimage", label: "Background image", type: "image", tab: "Background",
+                        span: true, value: wrapper.dataset.cmsBgimage || "" },
+                    { id: "bgx", label: "Horizontal position (0 = left, 100 = right)",
+                        type: "range", tab: "Background", min: 0, max: 100, value: String(pos.x) },
+                    { id: "bgy", label: "Vertical position (0 = top, 100 = bottom)",
+                        type: "range", tab: "Background", min: 0, max: 100, value: String(pos.y) },
+                    { type: "note", tab: "Background", span: true, text: bgFitNote(wrapper) });
             }
             openDialog({
                 message: "Section settings",
                 okLabel: "Apply",
+                wide: true,
+                tabs: ["Layout", "Background"],
                 fields: setFields,
                 preview: sectionPreview,
             }).then(function (values) {
@@ -335,37 +351,95 @@ export function initSections() {
     });
 }
 
-// BG_POSITIONS are the anchor points a section's background image can
-// be pinned to, and the CSS behind each. They mirror sectionBGPositions
-// in render.go — the server writes the same styles on a public render,
-// so the two lists have to agree.
-var BG_POSITIONS = [
-    { value: "center", label: "Center" },
-    { value: "top", label: "Top" },
-    { value: "bottom", label: "Bottom" },
-    { value: "left", label: "Left" },
-    { value: "right", label: "Right" },
-    { value: "top-left", label: "Top left" },
-    { value: "top-right", label: "Top right" },
-    { value: "bottom-left", label: "Bottom left" },
-    { value: "bottom-right", label: "Bottom right" },
-];
-var BG_POSITION_CSS = {
-    "top-left": "left top", top: "center top", "top-right": "right top",
-    left: "left center", right: "right center",
-    "bottom-left": "left bottom", bottom: "center bottom", "bottom-right": "right bottom",
-};
+// A background image's anchor is stored as the CSS itself — a pair of
+// percentages, matching sectionBGPositionRe in render.go, since the
+// server writes the same style on a public render. CENTERED is the
+// default and is never stored.
+var BG_POS_RE = /^([0-9]{1,3})% ([0-9]{1,3})%$/;
+var CENTERED = "50% 50%";
 
-// bgPositionCSS is the CSS for an anchor key, centered for the default
-// and for anything unrecognized.
-function bgPositionCSS(key) {
-    return BG_POSITION_CSS[key] || "center";
+// parseBgPosition splits a stored anchor into the two axes the sliders
+// edit, falling back to centered for an unset or unreadable one.
+function parseBgPosition(stored) {
+    var m = BG_POS_RE.exec(stored || "");
+    if (!m) return { x: 50, y: 50 };
+    return { x: pct(m[1]), y: pct(m[2]) };
+}
+
+function pct(v) {
+    var n = parseInt(v, 10);
+    return isNaN(n) ? 50 : Math.max(0, Math.min(100, n));
+}
+
+// bgAspects caches a background image's width/height ratio by address.
+// Only the browser can measure it, and it arrives asynchronously; null
+// marks one still loading, 0 one that failed.
+var bgAspects = {};
+
+function bgAspect(url) {
+    if (url in bgAspects) return bgAspects[url];
+    bgAspects[url] = null;
+    var probe = new Image();
+    probe.addEventListener("load", function () {
+        bgAspects[url] = probe.naturalHeight ? probe.naturalWidth / probe.naturalHeight : 0;
+        refreshDialog(); // the note asked before the answer existed
+    });
+    probe.addEventListener("error", function () {
+        bgAspects[url] = 0;
+        refreshDialog();
+    });
+    probe.src = url;
+    return null;
+}
+
+// bgFitNote explains which of the two position sliders can actually do
+// anything right now. A background image is sized to cover the section,
+// so it is scaled until the tighter of the two axes fits exactly — and
+// that axis then has no slack left to slide along. Which one that is
+// depends on the section's proportions against the image's, so it
+// changes with the section's height and with the width of the screen
+// the page is being read on.
+function bgFitNote(wrapper) {
+    return function (v) {
+        if (!v.bgimage) return "";
+        var aspect = bgAspect(v.bgimage);
+        if (aspect === null) return "Measuring the image…";
+        if (!aspect) return "";
+        var boxW = wrapper.clientWidth || window.innerWidth;
+        var contentEl = wrapper.querySelector("[data-cms-section-content]");
+        var boxH = contentEl ? contentEl.offsetHeight : wrapper.clientHeight;
+        // A chosen height is a minimum: content can still outgrow it.
+        if (v.height !== "auto") {
+            boxH = Math.max(boxH, window.innerHeight * (parseInt(v.height, 10) / 100));
+        }
+        if (!boxW || !boxH) return "";
+        var box = boxW / boxH;
+        if (Math.abs(box - aspect) < 0.02) {
+            return "The image matches this section's shape almost exactly, so neither slider has much to move.";
+        }
+        if (box > aspect) {
+            return "At this size the image already fills the width, so only the vertical slider moves it. " +
+                "The horizontal one takes over on narrower screens.";
+        }
+        return "At this size the image already fills the height, so only the horizontal slider moves it. " +
+            "The vertical one takes over on wider screens.";
+    };
+}
+
+// bgPosition reads the anchor out of a settings object. The dialog
+// carries the two axes apart (one per slider) and stored settings carry
+// them composed, so both shapes are accepted.
+function bgPosition(s) {
+    if (s.bgx !== undefined || s.bgy !== undefined) {
+        return pct(s.bgx) + "% " + pct(s.bgy) + "%";
+    }
+    return BG_POS_RE.test(s.bgposition || "") ? s.bgposition : CENTERED;
 }
 
 // applySectionSettings takes a settings object {bg, width, corners,
-// bgcolor, bgimage, bgposition} and makes the wrapper reflect it:
-// curated options become classes, the free-form background
-// color/image/position become inline styles.
+// bgcolor, bgimage, and the anchor as either bgposition or bgx/bgy} and
+// makes the wrapper reflect it: curated options become classes, the
+// free-form background color/image/position become inline styles.
 function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
@@ -374,7 +448,7 @@ function applySectionSettings(wrapper, s) {
     var image = s.bgimage || "";
     // An anchor without an image has nothing to anchor, and centered is
     // the default — neither is worth storing.
-    var position = image && BG_POSITION_CSS[s.bgposition] ? s.bgposition : "";
+    var position = image ? bgPosition(s) : CENTERED;
     // Height is a minimum, in viewport units — content can still grow
     // a section taller than its chosen height.
     var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
@@ -388,7 +462,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
-    wrapper.dataset.cmsBgposition = position;
+    wrapper.dataset.cmsBgposition = position === CENTERED ? "" : position;
     wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
@@ -398,7 +472,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.style.backgroundColor = color;
     wrapper.style.backgroundImage = image ? "url('" + image.replace(/'/g, "%27") + "')" : "";
     wrapper.style.backgroundSize = image ? "cover" : "";
-    wrapper.style.backgroundPosition = image ? bgPositionCSS(position) : "";
+    wrapper.style.backgroundPosition = image ? position : "";
     var contentEl = wrapper.querySelector("[data-cms-section-content]");
     if (!contentEl) return;
     // Preserve TinyMCE's own classes (mce-content-body etc.) when an

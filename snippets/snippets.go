@@ -26,8 +26,9 @@ import (
 // the section-settings vocabulary: "bg" and "width" name curated
 // SectionStyles option keys, "height" is "50"/"75"/"100", "valign" is
 // "center"/"bottom", "bgcolor" is #rrggbb, "bgimage" is a URL, and
-// "bgposition" anchors that image ("top", "bottom-left", …; centered by
-// default). Unknown keys or invalid values fall back to the defaults,
+// "bgposition" anchors that image as a pair of percentages across and
+// down, e.g. "50% 20%" ("50% 50%" is centered, and is the default).
+// Unknown keys or invalid values fall back to the defaults,
 // same as the section settings dialog. Presets come from config or from
 // the admin snippets UI (which offers the curated settings; the
 // free-form bgcolor/bgimage/bgposition are config-only).

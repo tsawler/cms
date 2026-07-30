@@ -11,11 +11,24 @@ var dlgRequired = ""; // error shown when a required prompt is left empty
 var dlgHasFields = false;
 var dlgValues = {}; // field id -> current value while a dialog is open
 var dlgPreview = null; // optional live-preview renderer (values, container)
+var dlgNotes = []; // {el, text(values)} notes recomputed on every change
 
-// dlgChanged re-renders the dialog's preview pane; every field
-// builder calls it after updating dlgValues.
+// dlgChanged re-renders the dialog's live parts — computed notes and the
+// preview pane; every field builder calls it after updating dlgValues.
 function dlgChanged() {
+    dlgNotes.forEach(function (n) {
+        var text = n.text(dlgValues);
+        n.el.textContent = text;
+        n.el.hidden = !text;
+    });
     if (dlgPreview) dlgPreview(dlgValues, $("dlg-preview"));
+}
+
+// refreshDialog re-runs those live parts for a value that arrives late —
+// an image whose proportions are only known once the browser has loaded
+// it, say. A no-op when no dialog is open.
+export function refreshDialog() {
+    if (dlgResolve) dlgChanged();
 }
 
 // isDialogOpen lets the global Escape handler know whether a dialog is
@@ -39,6 +52,7 @@ export function openDialog(opts) {
         });
         dlgHasFields = defs.length > 0;
         dlgValues = {};
+        dlgNotes = [];
         $("dlg-msg").textContent = opts.message;
         var input = $("dlg-input");
         input.hidden = !opts.prompt;
@@ -49,7 +63,22 @@ export function openDialog(opts) {
         defs.forEach(function (f) {
             var wrap = document.createElement("div");
             wrap.className = "fld";
+            // In a wide dialog's two-column grid, f.span gives a field
+            // the full width — for the ones a half-row would cramp.
+            if (f.span) wrap.classList.add("span");
             if (f.tab) wrap.dataset.tab = f.tab;
+            // A note is explanation rather than input: no label, no
+            // value, and its text is recomputed from the other fields
+            // every time one of them changes.
+            if (f.type === "note") {
+                wrap.classList.add("note");
+                var note = document.createElement("p");
+                note.className = "fnote";
+                dlgNotes.push({ el: note, text: f.text });
+                wrap.appendChild(note);
+                fields.appendChild(wrap);
+                return;
+            }
             var label = document.createElement("label");
             label.textContent = f.label;
             wrap.appendChild(label);
@@ -94,6 +123,9 @@ export function openDialog(opts) {
         var ok = $("dlg-ok");
         ok.textContent = opts.okLabel || "OK";
         ok.classList.toggle("danger", !!opts.danger);
+        // opts.wide gives a settings dialog room to breathe — the
+        // default width suits a question, not a panel of controls.
+        $("dlg").classList.toggle("wide", !!opts.wide);
         $("dlg-overlay").classList.add("on");
         $("dlg").classList.add("on");
         (opts.prompt ? input : ok).focus();

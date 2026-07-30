@@ -635,41 +635,33 @@ func ValidSectionVAlign(s string) string {
 	return ""
 }
 
-// sectionBGPositions maps the anchor points a section's background image
-// can be pinned to onto the CSS that pins it there. A background image
-// is cropped to cover the section, so which part of it survives the crop
-// is the difference between a portrait's face and its shoulder. "center"
-// is the default and is deliberately absent: it is where a background
-// image sits anyway, so leaving it unstored keeps a section's settings
-// describing only what was actually chosen.
-var sectionBGPositions = map[string]string{
-	"top-left":     "left top",
-	"top":          "center top",
-	"top-right":    "right top",
-	"left":         "left center",
-	"right":        "right center",
-	"bottom-left":  "left bottom",
-	"bottom":       "center bottom",
-	"bottom-right": "right bottom",
-}
+// A section's background image is cropped to cover the section, so where
+// it is anchored decides which part of it survives — the difference
+// between a portrait's face and its shoulder. The anchor is stored as
+// the CSS itself: a pair of percentages, which is the whole of what the
+// editor's two sliders can express. "0% 0%" puts the image's top-left
+// corner against the section's, "100% 100%" its bottom-right.
+var sectionBGPositionRe = regexp.MustCompile(`^([0-9]{1,3})% ([0-9]{1,3})%$`)
 
-// ValidBackgroundPosition returns the value if it is one of the eight
-// non-default anchor points for a section's background image, or ""
-// otherwise — which covers "center" as well as anything unknown, both of
-// which render centered.
+// centeredBackground is the default anchor, and is deliberately never
+// stored: it is where a background image sits anyway, so leaving it out
+// keeps a section's settings describing only what was actually chosen.
+const centeredBackground = "50% 50%"
+
+// ValidBackgroundPosition returns the value if it is a pair of
+// percentages in range and not the centered default, or "" otherwise.
+// "" renders centered.
 func ValidBackgroundPosition(s string) string {
-	if _, ok := sectionBGPositions[s]; ok {
-		return s
+	m := sectionBGPositionRe.FindStringSubmatch(s)
+	if m == nil || s == centeredBackground {
+		return ""
 	}
-	return ""
-}
-
-// backgroundPositionCSS is the CSS behind a validated anchor point.
-func backgroundPositionCSS(key string) string {
-	if css, ok := sectionBGPositions[key]; ok {
-		return css
+	for _, pct := range m[1:] {
+		if n, err := strconv.Atoi(pct); err != nil || n > 100 {
+			return ""
+		}
 	}
-	return "center"
+	return s
 }
 
 // DefaultEditorStyles is the Tailwind-first default Styles menu, used when
@@ -1056,8 +1048,11 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		style += "background-color:" + bgColor + ";"
 	}
 	if bgImage != "" {
-		style += "background-image:url('" + bgImage + "');background-size:cover;background-position:" +
-			backgroundPositionCSS(bgPos) + ";"
+		pos := bgPos
+		if pos == "" {
+			pos = "center"
+		}
+		style += "background-image:url('" + bgImage + "');background-size:cover;background-position:" + pos + ";"
 	}
 	if style != "" {
 		sb.WriteString(` style="` + html.EscapeString(style) + `"`)

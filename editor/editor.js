@@ -869,7 +869,7 @@
     if (v.bgimage) {
       box.style.backgroundImage = "url('" + v.bgimage.replace(/'/g, "%27") + "')";
       box.style.backgroundSize = "cover";
-      box.style.backgroundPosition = bgPositionCSS(v.bgposition);
+      box.style.backgroundPosition = bgPosition(v);
     }
     box.style.justifyContent = v.valign === "center" ? "center" : v.valign === "bottom" ? "flex-end" : "flex-start";
     var widths = sectionStyles.widths;
@@ -877,10 +877,10 @@
     for (var i = 0; i < widths.length; i++) {
       if (widths[i].key === v.width) idx = i;
     }
-    var pct = widths.length > 1 ? 50 + idx / (widths.length - 1) * 45 : 70;
+    var pct2 = widths.length > 1 ? 50 + idx / (widths.length - 1) * 45 : 70;
     var content = document.createElement("div");
     content.style.cssText = "margin:12px auto;flex:0 0 auto;display:flex;flex-direction:column;gap:6px";
-    content.style.width = pct + "%";
+    content.style.width = pct2 + "%";
     var dark = !!v.bgimage || isDarkColor(resolved);
     for (var j = 0; j < 3; j++) {
       var line = document.createElement("div");
@@ -1024,40 +1024,20 @@
       } else if (act === "set") {
         var setFields = [
           {
-            id: "bg",
-            label: "Background style",
-            type: "select",
-            value: wrapper.dataset.cmsBg || "",
-            options: sectionStyles.backgrounds.map(function(o) {
-              return { value: o.key, label: o.label };
-            })
-          },
-          {
             id: "width",
             label: "Content width",
             type: "select",
+            tab: "Layout",
             value: wrapper.dataset.cmsWidth || "",
             options: sectionStyles.widths.map(function(o) {
               return { value: o.key, label: o.label };
             })
-          }
-        ];
-        if ((sectionStyles.corners || []).length) {
-          setFields.push({
-            id: "corners",
-            label: "Rounded corners",
-            type: "select",
-            value: wrapper.dataset.cmsCorners || "",
-            options: sectionStyles.corners.map(function(o) {
-              return { value: o.key, label: o.label };
-            })
-          });
-        }
-        setFields.push(
+          },
           {
             id: "height",
             label: "Section height",
             type: "select",
+            tab: "Layout",
             value: wrapper.dataset.cmsHeight || "auto",
             options: [
               { value: "auto", label: "Auto (fits the content)" },
@@ -1070,37 +1050,83 @@
             id: "valign",
             label: "Vertical alignment",
             type: "select",
+            tab: "Layout",
             value: wrapper.dataset.cmsValign || "top",
             options: [
               { value: "top", label: "Top" },
               { value: "center", label: "Center" },
               { value: "bottom", label: "Bottom" }
             ]
+          }
+        ];
+        if ((sectionStyles.corners || []).length) {
+          setFields.push({
+            id: "corners",
+            label: "Rounded corners",
+            type: "select",
+            tab: "Layout",
+            value: wrapper.dataset.cmsCorners || "",
+            options: sectionStyles.corners.map(function(o) {
+              return { value: o.key, label: o.label };
+            })
+          });
+        }
+        setFields.push(
+          {
+            id: "bg",
+            label: "Background style",
+            type: "select",
+            tab: "Background",
+            value: wrapper.dataset.cmsBg || "",
+            options: sectionStyles.backgrounds.map(function(o) {
+              return { value: o.key, label: o.label };
+            })
           },
-          { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" }
+          {
+            id: "bgcolor",
+            label: "Background color",
+            type: "color",
+            tab: "Background",
+            value: wrapper.dataset.cmsBgcolor || ""
+          }
         );
         if (mediaEnabled) {
+          var pos = parseBgPosition(wrapper.dataset.cmsBgposition);
           setFields.push(
             {
               id: "bgimage",
               label: "Background image",
               type: "image",
+              tab: "Background",
+              span: true,
               value: wrapper.dataset.cmsBgimage || ""
             },
-            // A background image is cropped to cover the section, so
-            // this is what decides which part of it survives.
             {
-              id: "bgposition",
-              label: "Position of the background image",
-              type: "select",
-              value: wrapper.dataset.cmsBgposition || "center",
-              options: BG_POSITIONS
-            }
+              id: "bgx",
+              label: "Horizontal position (0 = left, 100 = right)",
+              type: "range",
+              tab: "Background",
+              min: 0,
+              max: 100,
+              value: String(pos.x)
+            },
+            {
+              id: "bgy",
+              label: "Vertical position (0 = top, 100 = bottom)",
+              type: "range",
+              tab: "Background",
+              min: 0,
+              max: 100,
+              value: String(pos.y)
+            },
+            { type: "note", tab: "Background", span: true, text: bgFitNote(wrapper) }
           );
         }
         openDialog({
           message: "Section settings",
           okLabel: "Apply",
+          wide: true,
+          tabs: ["Layout", "Background"],
           fields: setFields,
           preview: sectionPreview
         }).then(function(values) {
@@ -1111,29 +1137,61 @@
       }
     });
   }
-  var BG_POSITIONS = [
-    { value: "center", label: "Center" },
-    { value: "top", label: "Top" },
-    { value: "bottom", label: "Bottom" },
-    { value: "left", label: "Left" },
-    { value: "right", label: "Right" },
-    { value: "top-left", label: "Top left" },
-    { value: "top-right", label: "Top right" },
-    { value: "bottom-left", label: "Bottom left" },
-    { value: "bottom-right", label: "Bottom right" }
-  ];
-  var BG_POSITION_CSS = {
-    "top-left": "left top",
-    top: "center top",
-    "top-right": "right top",
-    left: "left center",
-    right: "right center",
-    "bottom-left": "left bottom",
-    bottom: "center bottom",
-    "bottom-right": "right bottom"
-  };
-  function bgPositionCSS(key) {
-    return BG_POSITION_CSS[key] || "center";
+  var BG_POS_RE = /^([0-9]{1,3})% ([0-9]{1,3})%$/;
+  var CENTERED = "50% 50%";
+  function parseBgPosition(stored) {
+    var m = BG_POS_RE.exec(stored || "");
+    if (!m) return { x: 50, y: 50 };
+    return { x: pct(m[1]), y: pct(m[2]) };
+  }
+  function pct(v) {
+    var n = parseInt(v, 10);
+    return isNaN(n) ? 50 : Math.max(0, Math.min(100, n));
+  }
+  var bgAspects = {};
+  function bgAspect(url) {
+    if (url in bgAspects) return bgAspects[url];
+    bgAspects[url] = null;
+    var probe = new Image();
+    probe.addEventListener("load", function() {
+      bgAspects[url] = probe.naturalHeight ? probe.naturalWidth / probe.naturalHeight : 0;
+      refreshDialog();
+    });
+    probe.addEventListener("error", function() {
+      bgAspects[url] = 0;
+      refreshDialog();
+    });
+    probe.src = url;
+    return null;
+  }
+  function bgFitNote(wrapper) {
+    return function(v) {
+      if (!v.bgimage) return "";
+      var aspect = bgAspect(v.bgimage);
+      if (aspect === null) return "Measuring the image\u2026";
+      if (!aspect) return "";
+      var boxW = wrapper.clientWidth || window.innerWidth;
+      var contentEl = wrapper.querySelector("[data-cms-section-content]");
+      var boxH = contentEl ? contentEl.offsetHeight : wrapper.clientHeight;
+      if (v.height !== "auto") {
+        boxH = Math.max(boxH, window.innerHeight * (parseInt(v.height, 10) / 100));
+      }
+      if (!boxW || !boxH) return "";
+      var box = boxW / boxH;
+      if (Math.abs(box - aspect) < 0.02) {
+        return "The image matches this section's shape almost exactly, so neither slider has much to move.";
+      }
+      if (box > aspect) {
+        return "At this size the image already fills the width, so only the vertical slider moves it. The horizontal one takes over on narrower screens.";
+      }
+      return "At this size the image already fills the height, so only the horizontal slider moves it. The vertical one takes over on wider screens.";
+    };
+  }
+  function bgPosition(s) {
+    if (s.bgx !== void 0 || s.bgy !== void 0) {
+      return pct(s.bgx) + "% " + pct(s.bgy) + "%";
+    }
+    return BG_POS_RE.test(s.bgposition || "") ? s.bgposition : CENTERED;
   }
   function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
@@ -1141,7 +1199,7 @@
     var corner = cornerOption(s.corners);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
-    var position = image && BG_POSITION_CSS[s.bgposition] ? s.bgposition : "";
+    var position = image ? bgPosition(s) : CENTERED;
     var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
     var valign = { center: 1, bottom: 1 }[s.valign] ? s.valign : "top";
     wrapper.dataset.cmsBg = bg.key;
@@ -1151,7 +1209,7 @@
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
-    wrapper.dataset.cmsBgposition = position;
+    wrapper.dataset.cmsBgposition = position === CENTERED ? "" : position;
     wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
@@ -1160,7 +1218,7 @@
     wrapper.style.backgroundColor = color;
     wrapper.style.backgroundImage = image ? "url('" + image.replace(/'/g, "%27") + "')" : "";
     wrapper.style.backgroundSize = image ? "cover" : "";
-    wrapper.style.backgroundPosition = image ? bgPositionCSS(position) : "";
+    wrapper.style.backgroundPosition = image ? position : "";
     var contentEl = wrapper.querySelector("[data-cms-section-content]");
     if (!contentEl) return;
     var mce = (contentEl.className || "").split(/\s+/).filter(function(c) {
@@ -3962,8 +4020,17 @@
   var dlgHasFields = false;
   var dlgValues = {};
   var dlgPreview = null;
+  var dlgNotes = [];
   function dlgChanged() {
+    dlgNotes.forEach(function(n) {
+      var text = n.text(dlgValues);
+      n.el.textContent = text;
+      n.el.hidden = !text;
+    });
     if (dlgPreview) dlgPreview(dlgValues, $("dlg-preview"));
+  }
+  function refreshDialog() {
+    if (dlgResolve) dlgChanged();
   }
   function isDialogOpen() {
     return !!dlgResolve;
@@ -3979,6 +4046,7 @@
       });
       dlgHasFields = defs.length > 0;
       dlgValues = {};
+      dlgNotes = [];
       $("dlg-msg").textContent = opts.message;
       var input = $("dlg-input");
       input.hidden = !opts.prompt;
@@ -3989,7 +4057,17 @@
       defs.forEach(function(f) {
         var wrap = document.createElement("div");
         wrap.className = "fld";
+        if (f.span) wrap.classList.add("span");
         if (f.tab) wrap.dataset.tab = f.tab;
+        if (f.type === "note") {
+          wrap.classList.add("note");
+          var note = document.createElement("p");
+          note.className = "fnote";
+          dlgNotes.push({ el: note, text: f.text });
+          wrap.appendChild(note);
+          fields.appendChild(wrap);
+          return;
+        }
         var label = document.createElement("label");
         label.textContent = f.label;
         wrap.appendChild(label);
@@ -4033,6 +4111,7 @@
       var ok = $("dlg-ok");
       ok.textContent = opts.okLabel || "OK";
       ok.classList.toggle("danger", !!opts.danger);
+      $("dlg").classList.toggle("wide", !!opts.wide);
       $("dlg-overlay").classList.add("on");
       $("dlg").classList.add("on");
       (opts.prompt ? input : ok).focus();
@@ -4823,8 +4902,15 @@ text-overflow:ellipsis}
 .dlg-overlay.on{display:block}
 .dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
 width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
-box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none}
+box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none;
+max-height:88vh;overflow-y:auto}
 .dlg.on{display:block}
+/* Settings panels: wider, and two fields to a row so a tab's worth of
+   controls is taken in at a glance rather than scrolled through. */
+.dlg.wide{width:min(640px,94vw)}
+.dlg.wide #dlg-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.dlg.wide #dlg-fields .fld.span{grid-column:1 / -1}
+@media (max-width:560px){.dlg.wide #dlg-fields{grid-template-columns:1fr}}
 .dlg p{margin:0 0 14px;font-size:14px;line-height:1.45}
 .dlg input{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
 font:inherit;font-size:13px;margin-bottom:14px}
@@ -4843,6 +4929,10 @@ border-radius:6px;background:#fff;cursor:pointer}
 .dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}
 .dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}
 .dlg .crow input,.dlg .irow input{margin:0}
+/* computed note under a field: explanation, not input, so it carries
+   its own spacing and its wrapper carries none */
+.dlg .fld.note{margin:0}
+.dlg .fnote{margin:-4px 0 12px;font-size:11px;line-height:1.45;color:#667085}
 /* range field (slider + numeric input) */
 .dlg .rrow{display:flex;gap:10px;align-items:center}
 .dlg .rrow input[type=range]{flex:1;width:auto;margin:0;padding:0}
