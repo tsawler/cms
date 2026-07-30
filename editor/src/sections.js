@@ -126,7 +126,7 @@ function buildSectionPreview(v, el, resolved, radius) {
     if (v.bgimage) {
         box.style.backgroundImage = "url('" + v.bgimage.replace(/'/g, "%27") + "')";
         box.style.backgroundSize = "cover";
-        box.style.backgroundPosition = "center";
+        box.style.backgroundPosition = bgPositionCSS(v.bgposition);
     }
     box.style.justifyContent = v.valign === "center" ? "center"
         : (v.valign === "bottom" ? "flex-end" : "flex-start");
@@ -158,7 +158,8 @@ function buildSectionPreview(v, el, resolved, radius) {
 }
 
 export function injectSectionUI() {
-    document.querySelectorAll("[data-cms-sections]").forEach(function (container) {
+    var containers = document.querySelectorAll("[data-cms-sections]");
+    containers.forEach(function (container) {
         container.querySelectorAll("[data-cms-section]").forEach(injectSectionToolbar);
         if (!container.querySelector(".cms-add-section")) {
             var addWrap = document.createElement("div");
@@ -169,6 +170,16 @@ export function injectSectionUI() {
             btn.type = "button";
             btn.setAttribute("data-secact", "addend");
             btn.textContent = "＋ Add section";
+            // One sections area on the page needs no name; several — a
+            // post's banner above its body, say — are indistinguishable
+            // without one, and both buttons otherwise read as "the place
+            // to add content". The name is the template's own.
+            if (containers.length > 1) {
+                var tag = document.createElement("span");
+                tag.className = "cms-add-region";
+                tag.textContent = container.getAttribute("data-cms-sections");
+                btn.appendChild(tag);
+            }
             addWrap.appendChild(btn);
             container.appendChild(addWrap);
         }
@@ -303,7 +314,12 @@ export function initSections() {
                 { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" });
             if (mediaEnabled) {
                 setFields.push({ id: "bgimage", label: "Background image", type: "image",
-                    value: wrapper.dataset.cmsBgimage || "" });
+                    value: wrapper.dataset.cmsBgimage || "" },
+                // A background image is cropped to cover the section, so
+                // this is what decides which part of it survives.
+                { id: "bgposition", label: "Position of the background image", type: "select",
+                    value: wrapper.dataset.cmsBgposition || "center",
+                    options: BG_POSITIONS });
             }
             openDialog({
                 message: "Section settings",
@@ -319,16 +335,46 @@ export function initSections() {
     });
 }
 
+// BG_POSITIONS are the anchor points a section's background image can
+// be pinned to, and the CSS behind each. They mirror sectionBGPositions
+// in render.go — the server writes the same styles on a public render,
+// so the two lists have to agree.
+var BG_POSITIONS = [
+    { value: "center", label: "Center" },
+    { value: "top", label: "Top" },
+    { value: "bottom", label: "Bottom" },
+    { value: "left", label: "Left" },
+    { value: "right", label: "Right" },
+    { value: "top-left", label: "Top left" },
+    { value: "top-right", label: "Top right" },
+    { value: "bottom-left", label: "Bottom left" },
+    { value: "bottom-right", label: "Bottom right" },
+];
+var BG_POSITION_CSS = {
+    "top-left": "left top", top: "center top", "top-right": "right top",
+    left: "left center", right: "right center",
+    "bottom-left": "left bottom", bottom: "center bottom", "bottom-right": "right bottom",
+};
+
+// bgPositionCSS is the CSS for an anchor key, centered for the default
+// and for anything unrecognized.
+function bgPositionCSS(key) {
+    return BG_POSITION_CSS[key] || "center";
+}
+
 // applySectionSettings takes a settings object {bg, width, corners,
-// bgcolor, bgimage} and makes the wrapper reflect it: curated options
-// become classes, the free-form background color/image become inline
-// styles.
+// bgcolor, bgimage, bgposition} and makes the wrapper reflect it:
+// curated options become classes, the free-form background
+// color/image/position become inline styles.
 function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
+    // An anchor without an image has nothing to anchor, and centered is
+    // the default — neither is worth storing.
+    var position = image && BG_POSITION_CSS[s.bgposition] ? s.bgposition : "";
     // Height is a minimum, in viewport units — content can still grow
     // a section taller than its chosen height.
     var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
@@ -342,6 +388,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
+    wrapper.dataset.cmsBgposition = position;
     wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
@@ -351,7 +398,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.style.backgroundColor = color;
     wrapper.style.backgroundImage = image ? "url('" + image.replace(/'/g, "%27") + "')" : "";
     wrapper.style.backgroundSize = image ? "cover" : "";
-    wrapper.style.backgroundPosition = image ? "center" : "";
+    wrapper.style.backgroundPosition = image ? bgPositionCSS(position) : "";
     var contentEl = wrapper.querySelector("[data-cms-section-content]");
     if (!contentEl) return;
     // Preserve TinyMCE's own classes (mce-content-body etc.) when an
@@ -378,6 +425,7 @@ export function reapplySectionClasses() {
             valign: wrapper.dataset.cmsValign,
             bgcolor: wrapper.dataset.cmsBgcolor,
             bgimage: wrapper.dataset.cmsBgimage,
+            bgposition: wrapper.dataset.cmsBgposition,
         });
     });
 }

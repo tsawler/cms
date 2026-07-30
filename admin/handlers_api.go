@@ -560,6 +560,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 			VAlign  string `json:"valign"`
 			BGColor string `json:"bgcolor"`
 			BGImage string `json:"bgimage"`
+			BGPos   string `json:"bgposition"`
 			HTML    string `json:"html"`
 		} `json:"sections"`
 	}
@@ -620,6 +621,12 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		}
 		if u := render.ValidBackgroundURL(sec.BGImage); u != "" {
 			settings["bgimage"] = u
+		}
+		// Which part of a background image survives the crop only means
+		// anything when there is one, and centered is the default, so
+		// neither case is stored.
+		if p := render.ValidBackgroundPosition(sec.BGPos); p != "" && settings["bgimage"] != "" {
+			settings["bgposition"] = p
 		}
 		inputs[i] = content.SectionInput{Content: html, Settings: settings}
 	}

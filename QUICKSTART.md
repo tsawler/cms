@@ -668,13 +668,13 @@ PostTemplate: cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post
 ```
 
 `templates/pages/post.gohtml` is a page template whose dot additionally
-carries `.Post` (date, author, header image, …):
+carries `.Post` (date, author, listing image, …):
 
 ```html
 {{template "base" .}}
 
 {{define "content"}}
-{{with .Post}}{{with .Header}}<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw" width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" class="h-64 w-full object-cover">{{end}}{{end}}
+{{cmsSections "header"}}
 <article>
     <header class="mx-auto max-w-3xl px-6 pt-12">
         <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">{{.Title}}</h1>
@@ -685,14 +685,23 @@ carries `.Post` (date, author, header image, …):
 {{end}}
 ```
 
+The banner at the top is a sections region of its own, so editors restyle
+it on the page with the section gear — background image and where to
+anchor it, width, corners, height, text over the top — instead of being
+stuck with one fixed image from a form. Region order is the convention:
+the **last** sections region is the main content (where a new page's
+starter section goes) and the **first** is the banner (where a new post's
+image goes). A post created without an image simply has an empty banner
+region, which offers its own "Add section" button.
+
 Posts are created from the tool rail's **Post** button (title, feed,
-summary, date, images up front) or under **Blog & News** in the admin,
-and then **edited in place exactly like pages** — a post is an ordinary
-page whose slug lives under `blog/` or `news/`.
+summary, date, image up front) or under **Blog & News** in the
+admin, and then **edited in place exactly like pages** — a post is an
+ordinary page whose slug lives under `blog/` or `news/`.
 
 For the listing page, create a page at slug `blog` (or `news`) whose
 template ranges over `{{cmsPosts "blog" 12}}` — each entry has `.Title`,
-`.Summary`, `.URL`, `.PublishedAt`, `.Author`, `.Thumbnail`, `.Header`,
+`.Summary`, `.URL`, `.PublishedAt`, `.Author`, `.Thumbnail`,
 and `.Draft` (true only for editors, so you can badge drafts). RSS is
 automatic at `/blog/rss.xml` and `/news/rss.xml`.
 
@@ -714,23 +723,21 @@ Page size is `CMS_POSTS_PER_PAGE` (default 10), or per listing with
 `examples/basic` shows both — `blog.gohtml` the ready-made bar,
 `news.gohtml` a hand-built one.
 
-`.Thumbnail` and `.Header` are the post's images with their renditions
-resolved — `.URL` is sized for the slot (card size for a thumbnail, full
-width for a header), `.Srcset` lists the rest, `.Width`/`.Height` are the
-intrinsic size of `.URL`, and `.Alt` comes from the media library. Both
-are nil when the post has no such image, so `{{with}}` is the natural way
-to use them:
+`.Thumbnail` is the post's listing image with its renditions resolved —
+`.URL` is sized for a card, `.Srcset` lists the rest, `.Width`/`.Height`
+are the intrinsic size of `.URL`, and `.Alt` comes from the media
+library. It is nil when the post has no image, so `{{with}}` is the
+natural way to use it:
 
 ```html
-{{with or .Thumbnail .Header}}
+{{with .Thumbnail}}
 <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
      width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" loading="lazy">
 {{end}}
 ```
 
 Write `sizes` yourself — only your template knows how wide the image ends
-up. `.ThumbnailURL` and `.HeaderURL` still work if you only want a
-string.
+up. `.ThumbnailURL` still works if you only want a string.
 
 ### Multiple languages
 

@@ -39,28 +39,26 @@ type Post struct {
 	AuthorID    *int64
 	AuthorName  string // resolved from cms_users; "" when the author is gone
 
-	// A post's two images are each either a library image or a bare URL.
-	// The library is the normal case: the id is stored and the *MediaID
-	// and *Media fields are set, which lets the renderer pick the
-	// rendition that fits the slot and build a srcset from the rest.
-	// The URL fields carry images the library does not hold — an absolute
-	// URL elsewhere, or a path the host site serves itself — and are empty
+	// A post's thumbnail is either a library image or a bare URL. The
+	// library is the normal case: the id is stored and ThumbnailMediaID
+	// and Thumbnail are set, which lets the renderer pick the rendition
+	// that fits the slot and build a srcset from the rest. The URL field
+	// carries an image the library does not hold — an absolute URL
+	// elsewhere, or a path the host site serves itself — and is empty
 	// whenever an id is set.
+	//
+	// The banner at the top of a post is not here: it is a section in the
+	// post template's header region, so it comes with the settings every
+	// section has and follows the draft/publish flow.
 	ThumbnailMediaID *int64
 	ThumbnailURL     string       // optional listing thumbnail, when not from the library
 	Thumbnail        *media.Media // joined library record, nil when there is none
-	HeaderMediaID    *int64
-	HeaderURL        string // optional header/banner image, when not from the library
-	Header           *media.Media
 }
 
 // ThumbnailMediaIDValue returns the thumbnail's media id, or 0 when the
 // post has no library thumbnail — convenient in templates, where pointers
 // are awkward to compare.
 func (p *Post) ThumbnailMediaIDValue() int64 { return idValue(p.ThumbnailMediaID) }
-
-// HeaderMediaIDValue is ThumbnailMediaIDValue for the header image.
-func (p *Post) HeaderMediaIDValue() int64 { return idValue(p.HeaderMediaID) }
 
 func idValue(id *int64) int64 {
 	if id == nil {
@@ -75,11 +73,10 @@ func idValue(id *int64) int64 {
 func postColumns(draft bool) string {
 	return pageColumns(draft) + `,
 	po.id, po.feed, po.published_at, po.author_id, COALESCE(u.name, ''),
-	po.thumbnail_url, po.header_url,` +
-		postMediaColumns("tm", "tma") + "," + postMediaColumns("hm", "hma")
+	po.thumbnail_url,` + postMediaColumns("tm", "tma")
 }
 
-// postMediaColumns lists one joined image's columns: everything
+// postMediaColumns lists the joined image's columns: everything
 // media.Manager needs to build its renditions, plus the alt text for the
 // render's locale. They are all NULL when the post has no such image.
 func postMediaColumns(item, meta string) string {
@@ -99,9 +96,7 @@ func postJoins(draft bool) string {
 	LEFT JOIN cms_page_meta md ON md.page_id = p.id AND md.locale = $2 AND md.status = '` + status + `'
 	LEFT JOIN cms_users u ON u.id = po.author_id
 	LEFT JOIN cms_media tm ON tm.id = po.thumbnail_media_id
-	LEFT JOIN cms_media_meta tma ON tma.media_id = tm.id AND tma.locale = $1
-	LEFT JOIN cms_media hm ON hm.id = po.header_media_id
-	LEFT JOIN cms_media_meta hma ON hma.media_id = hm.id AND hma.locale = $1`
+	LEFT JOIN cms_media_meta tma ON tma.media_id = tm.id AND tma.locale = $1`
 	if draft {
 		j += `
 	LEFT JOIN cms_page_drafts d ON d.page_id = p.id`
@@ -148,13 +143,12 @@ func (j *joinedMedia) record() (*int64, *media.Media) {
 
 func scanPost(row sqldb.Scanner) (*Post, error) {
 	var p Post
-	var thumb, header joinedMedia
+	var thumb joinedMedia
 	dest := []any{&p.ID, &p.Slug, &p.TemplateName, &p.Status, &p.Visibility, &p.HeadCSS, &p.BodyJS,
 		&p.Title, &p.Description, &p.CreatedAt, &p.UpdatedAt,
 		&p.PostID, &p.Feed, &p.PublishedAt, &p.AuthorID, &p.AuthorName,
-		&p.ThumbnailURL, &p.HeaderURL}
+		&p.ThumbnailURL}
 	dest = append(dest, thumb.dest()...)
-	dest = append(dest, header.dest()...)
 	err := row.Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -163,7 +157,6 @@ func scanPost(row sqldb.Scanner) (*Post, error) {
 		return nil, err
 	}
 	p.ThumbnailMediaID, p.Thumbnail = thumb.record()
-	p.HeaderMediaID, p.Header = header.record()
 	return &p, nil
 }
 
@@ -205,10 +198,10 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 	}
 	p.PostID, err = tx.InsertID(ctx, `
 		INSERT INTO cms_posts (page_id, feed, published_at, author_id,
-			thumbnail_media_id, thumbnail_url, header_media_id, header_url)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			thumbnail_media_id, thumbnail_url)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
 		p.ID, p.Feed, p.PublishedAt, p.AuthorID,
-		p.ThumbnailMediaID, p.ThumbnailURL, p.HeaderMediaID, p.HeaderURL)
+		p.ThumbnailMediaID, p.ThumbnailURL)
 	if err != nil {
 		return 0, err
 	}
@@ -261,11 +254,10 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE cms_posts
 		SET feed = $1, published_at = $2,
-			thumbnail_media_id = $3, thumbnail_url = $4,
-			header_media_id = $5, header_url = $6
-		WHERE id = $7`,
+			thumbnail_media_id = $3, thumbnail_url = $4
+		WHERE id = $5`,
 		p.Feed, p.PublishedAt, p.ThumbnailMediaID, p.ThumbnailURL,
-		p.HeaderMediaID, p.HeaderURL, p.PostID); err != nil {
+		p.PostID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

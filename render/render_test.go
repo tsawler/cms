@@ -357,7 +357,7 @@ func TestRenderSections(t *testing.T) {
 func TestRenderPostsData(t *testing.T) {
 	fsys := fstest.MapFS{
 		"pages/post.gohtml": &fstest.MapFile{Data: []byte(
-			`{{with .Post}}<img src="{{.HeaderURL}}"><time>{{.PublishedAt.Format "2006-01-02"}}</time><i>{{.Author}}</i>{{end}}` +
+			`{{with .Post}}<img src="{{.ThumbnailURL}}"><time>{{.PublishedAt.Format "2006-01-02"}}</time><i>{{.Author}}</i>{{end}}` +
 				`<ul>{{range cmsPosts "blog" 5}}<li{{if .Draft}} class="draft"{{end}}><a href="{{.URL}}">{{.Title}}</a> {{.Summary}}</li>{{end}}</ul>`)},
 	}
 	r, err := New(fsys, nil, []PageTemplate{{File: "pages/post.gohtml", Label: "Post"}}, nil)
@@ -366,9 +366,9 @@ func TestRenderPostsData(t *testing.T) {
 	}
 	page := &content.Page{ID: 1, TemplateName: "pages/post.gohtml", Title: "Launch"}
 	post := &content.Post{
-		Page:      content.Page{Slug: "blog/launch", Title: "Launch", Description: "We shipped", Status: content.StatusPublished},
-		Feed:      content.FeedBlog,
-		HeaderURL: "/cms/media/header.webp",
+		Page:         content.Page{Slug: "blog/launch", Title: "Launch", Description: "We shipped", Status: content.StatusPublished},
+		Feed:         content.FeedBlog,
+		ThumbnailURL: "/cms/media/thumb.webp",
 	}
 	post.PublishedAt = time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
 	post.AuthorName = "Pat Writer"
@@ -391,7 +391,7 @@ func TestRenderPostsData(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`<img src="/cms/media/header.webp">`,
+		`<img src="/cms/media/thumb.webp">`,
 		`<time>2026-07-01</time>`,
 		`<i>Pat Writer</i>`,
 		`<li><a href="/blog/launch">Launch</a> We shipped</li>`,

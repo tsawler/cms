@@ -16,7 +16,7 @@
                  browser picks one that fits the card instead of scaling
                  the full-size one down. sizes describes the layout above:
                  two columns from the sm breakpoint, full width below. */}}
-            {{with or .Thumbnail .Header}}
+            {{with .Thumbnail}}
             <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
                  width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
                  loading="lazy" decoding="async" class="h-44 w-full object-cover">

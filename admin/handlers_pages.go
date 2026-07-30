@@ -172,20 +172,41 @@ func (s *server) pageCreate(w http.ResponseWriter, r *http.Request) {
 // editable instead of an empty void.
 const starterSectionHTML = `<p class="cms-snippet">Write your text here.</p>`
 
-// seedStarterSections gives a newly created page a first section holding
-// a simple text snippet — but only when the template's editable regions
-// are all sections regions (a "blank canvas" shape). Templates with text
-// or rich regions already have visible placeholders, so they're left
-// alone. Seeding failure is logged rather than fatal: the page exists
-// and is fully usable either way.
-func (s *server) seedStarterSections(ctx context.Context, pageID int64, templateName string) {
-	var sectionRegions []string
+// sectionRegions lists a template's sections regions in source order —
+// but only when every editable region it declares is one (the "blank
+// canvas" shape). Templates with text or rich regions already have
+// visible placeholders and want no seeded content, so they get nil.
+//
+// Order carries meaning once a template has more than one: the first is
+// the banner above the content — the post template's header region — and
+// the last is the main content area. That is what decides where a new
+// page's starter section goes, and where a new post's banner does.
+func (s *server) sectionRegions(templateName string) []string {
+	var names []string
 	for _, region := range s.deps.Renderer.Regions(templateName) {
 		if region.Kind != "sections" {
-			return
+			return nil
 		}
-		sectionRegions = append(sectionRegions, region.Name)
+		names = append(names, region.Name)
 	}
+	return names
+}
+
+// seedStarterSections gives a newly created page a first section holding
+// a simple text snippet, in its main content region. Seeding failure is
+// logged rather than fatal: the page exists and is fully usable either
+// way.
+//
+// Only the content region is seeded. A banner region above it starts
+// empty on purpose — a post with no image chosen has no banner until
+// someone adds one, and an empty region still offers its own "Add
+// section" button.
+func (s *server) seedStarterSections(ctx context.Context, pageID int64, templateName string) {
+	names := s.sectionRegions(templateName)
+	if len(names) == 0 {
+		return
+	}
+	main := names[len(names)-1]
 	seed := []content.SectionInput{{
 		Content: starterSectionHTML,
 		Settings: map[string]string{
@@ -193,10 +214,48 @@ func (s *server) seedStarterSections(ctx context.Context, pageID int64, template
 			"width": s.deps.SectionStyles.Width("").Key,
 		},
 	}}
-	for _, name := range sectionRegions {
-		if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, name, s.deps.DefaultLocale, seed); err != nil {
-			s.deps.Logger.Error("cms admin: seeding starter section", "page", pageID, "region", name, "err", err)
-		}
+	if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, main, s.deps.DefaultLocale, seed); err != nil {
+		s.deps.Logger.Error("cms admin: seeding starter section", "page", pageID, "region", main, "err", err)
+	}
+}
+
+// seedHeaderSection gives a newly created post the banner its creation
+// form asked for: one section in the template's header region carrying
+// the chosen image as its background. Choosing no image leaves the
+// region empty, and its own "Add section" button is then how a banner
+// gets added later.
+//
+// It gets the same starter snippet a new page's content region does, so
+// the banner is a section like any other from the start: clicking the
+// text brings up the block chrome — drag handle, source, gear, trash —
+// where an empty region would only give a bare caret. Delete the line
+// and the picture stands on its own.
+//
+// It is also given a height, so that deleting the line leaves a banner
+// rather than nothing: an auto-height section with no content renders as
+// no height at all, however good the picture. Everything about it —
+// height, width, corners, where the image is anchored — is editable on
+// the page afterwards, which is the point of it being a section at all.
+func (s *server) seedHeaderSection(ctx context.Context, pageID int64, templateName, imageURL string) {
+	imageURL = render.ValidBackgroundURL(imageURL)
+	if imageURL == "" {
+		return
+	}
+	names := s.sectionRegions(templateName)
+	if len(names) < 2 {
+		return // no region above the content to put a banner in
+	}
+	seed := []content.SectionInput{{
+		Content: starterSectionHTML,
+		Settings: map[string]string{
+			"bg":      s.deps.SectionStyles.Background("").Key,
+			"width":   s.deps.SectionStyles.Width("").Key,
+			"bgimage": imageURL,
+			"height":  "50",
+		},
+	}}
+	if err := s.deps.Content.ReplaceDraftSections(ctx, pageID, names[0], s.deps.DefaultLocale, seed); err != nil {
+		s.deps.Logger.Error("cms admin: seeding header section", "page", pageID, "region", names[0], "err", err)
 	}
 }
 

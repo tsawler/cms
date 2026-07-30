@@ -321,30 +321,45 @@ machinery is keyed to `cms_pages`/`cms_blocks` — so **a post is a page**
 (slug prefixed `blog/` or `news/`, rendered by `Config.PostTemplate`, a
 template parsed like a PageTemplate but hidden from the page-template
 choosers) **plus one `cms_posts` row**: feed, display date, author, and
-optional thumbnail/header image URLs. The page's per-locale title and
-description double as the post's title and summary, so phase 7 gets
-post localization for free.
+an optional thumbnail. The page's per-locale title and description double
+as the post's title and summary, so phase 7 gets post localization for
+free.
+
+The same reasoning later took the header image out of that row. A post
+once stored a banner image the template drew above the article, which
+meant a second, poorer vocabulary for something sections already did
+properly: the field could name a picture and nothing else — no width, no
+corners, no say in which part of it survived being cropped to a banner —
+and it went live the moment it was set, outside the draft/publish flow.
+So the banner became an ordinary section in a region of its own
+(`{{cmsSections "header"}}` above the article), and the columns went
+away. The gain is the same one as making a post a page: the section gear,
+its settings, the preview, drafts, and translation all already existed.
 
 Consequences fall out rather than being built: the in-place editor works
 on posts unchanged (it only ever sees a page id); publish/discard/preview
 reuse the page endpoints; deleting the backing page cascades away the
 post; menu items may link to posts. The backing pages are hidden from
 the admin Pages list — posts are managed under Blog & News (list with
-feed filter tabs, form with feed/date/summary/images, same
+feed filter tabs, form with feed/date/summary/thumbnail, same
 draft-publish-discard-delete verbs as pages). Posts are created there or
 from the editor tool rail's "Post" button — a dialog taking title, feed,
-summary, date, and an image via the media picker (the image's web
-rendition becomes the header, its generated thumb rendition the
-thumbnail); `POST /api/posts` then navigates straight into the new
-draft, the same shape as New page. On a post's page in edit mode, a
+summary, date, and one image via the media picker, which becomes both the
+listing thumbnail and the background of a banner section seeded into the
+template's header region; `POST /api/posts` then navigates straight into
+the new draft, the same shape as New page. Seeding keeps the old
+one-picture-one-click convenience without keeping the old coupling: what
+lands is an ordinary section, and everything about it is editable
+afterwards. On a post's page in edit mode, a
 "⚙ Post settings" pill pinned top-right (discoverable next to the
-title, unlike a bar icon) edits date, summary, thumbnail, and header
+title, unlike a bar icon) edits date, summary, and thumbnail
 (`PUT /api/posts/{id}`); like menus these have no draft state — they
-describe the post in listings, so saves are live at once. Post creation
-stamps the creating user as the author, fixed thereafter.
+describe the post in listings, so saves are live at once. The banner is
+not among them: it is a section, saved with the rest of the page. Post
+creation stamps the creating user as the author, fixed thereafter.
 
 Templates see posts two ways: on a post's own page the dot carries
-`.Post` (feed, date, author, image URLs — nil on ordinary pages), and
+`.Post` (feed, date, author, thumbnail — nil on ordinary pages), and
 any template can call `{{cmsPosts "blog" 12}}` for render-ready listing
 entries (public renders get published posts; editors also get drafts,
 flagged so templates can badge them). Listing pages are just pages using
@@ -482,9 +497,10 @@ cms_page_meta     page_id, locale, title, description            -- SEO per loca
 cms_blocks        id, page_id, region, sort, snippet_key (nullable), html, locale, status
 cms_page_assets   page_id, kind (css|js), inline_content, media_id
 cms_posts         id, page_id (unique FK), feed (blog|news), published_at, author_id,
-                  thumbnail_media_id, thumbnail_url, header_media_id, header_url
-                  -- images are library ids, so the renderer picks the rendition each
-                  --   slot needs; the _url columns hold images from outside the library
+                  thumbnail_media_id, thumbnail_url
+                  -- the thumbnail is a library id, so the renderer picks the rendition
+                  --   a listing needs; thumbnail_url holds an image from outside it
+                  -- the banner above a post is a section, not a column (4.3)
                   -- slug/status/title/summary live on the backing page (4.3)
 cms_media         id, store_key, filename, mime, width, height, size, uploaded_by
                   -- store_key is relative to the media root: no row embeds S3_KEY_PREFIX

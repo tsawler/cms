@@ -1,11 +1,12 @@
 {{template "base" .}}
 
 {{define "content"}}
-{{with .Post}}{{with .Header}}
-<img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw"
-     width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
-     decoding="async" class="h-64 w-full object-cover sm:h-80">
-{{end}}{{end}}
+{{/* The banner above the article is a sections region of its own, so it
+     is built and styled on the page with the section gear — background
+     image and where to anchor it, content width, corners, height. Empty
+     on a post that has none, and the editor offers "Add a section" here
+     the same as anywhere else. */}}
+{{cmsSections "header"}}
 
 <article>
     <header class="mx-auto max-w-3xl px-6 pt-12">

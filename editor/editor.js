@@ -869,7 +869,7 @@
     if (v.bgimage) {
       box.style.backgroundImage = "url('" + v.bgimage.replace(/'/g, "%27") + "')";
       box.style.backgroundSize = "cover";
-      box.style.backgroundPosition = "center";
+      box.style.backgroundPosition = bgPositionCSS(v.bgposition);
     }
     box.style.justifyContent = v.valign === "center" ? "center" : v.valign === "bottom" ? "flex-end" : "flex-start";
     var widths = sectionStyles.widths;
@@ -899,7 +899,8 @@
     return box;
   }
   function injectSectionUI() {
-    document.querySelectorAll("[data-cms-sections]").forEach(function(container) {
+    var containers = document.querySelectorAll("[data-cms-sections]");
+    containers.forEach(function(container) {
       container.querySelectorAll("[data-cms-section]").forEach(injectSectionToolbar);
       if (!container.querySelector(".cms-add-section")) {
         var addWrap = document.createElement("div");
@@ -910,6 +911,12 @@
         btn.type = "button";
         btn.setAttribute("data-secact", "addend");
         btn.textContent = "\uFF0B Add section";
+        if (containers.length > 1) {
+          var tag = document.createElement("span");
+          tag.className = "cms-add-region";
+          tag.textContent = container.getAttribute("data-cms-sections");
+          btn.appendChild(tag);
+        }
         addWrap.appendChild(btn);
         container.appendChild(addWrap);
       }
@@ -1073,12 +1080,23 @@
           { id: "bgcolor", label: "Background color", type: "color", value: wrapper.dataset.cmsBgcolor || "" }
         );
         if (mediaEnabled) {
-          setFields.push({
-            id: "bgimage",
-            label: "Background image",
-            type: "image",
-            value: wrapper.dataset.cmsBgimage || ""
-          });
+          setFields.push(
+            {
+              id: "bgimage",
+              label: "Background image",
+              type: "image",
+              value: wrapper.dataset.cmsBgimage || ""
+            },
+            // A background image is cropped to cover the section, so
+            // this is what decides which part of it survives.
+            {
+              id: "bgposition",
+              label: "Position of the background image",
+              type: "select",
+              value: wrapper.dataset.cmsBgposition || "center",
+              options: BG_POSITIONS
+            }
+          );
         }
         openDialog({
           message: "Section settings",
@@ -1093,12 +1111,37 @@
       }
     });
   }
+  var BG_POSITIONS = [
+    { value: "center", label: "Center" },
+    { value: "top", label: "Top" },
+    { value: "bottom", label: "Bottom" },
+    { value: "left", label: "Left" },
+    { value: "right", label: "Right" },
+    { value: "top-left", label: "Top left" },
+    { value: "top-right", label: "Top right" },
+    { value: "bottom-left", label: "Bottom left" },
+    { value: "bottom-right", label: "Bottom right" }
+  ];
+  var BG_POSITION_CSS = {
+    "top-left": "left top",
+    top: "center top",
+    "top-right": "right top",
+    left: "left center",
+    right: "right center",
+    "bottom-left": "left bottom",
+    bottom: "center bottom",
+    "bottom-right": "right bottom"
+  };
+  function bgPositionCSS(key) {
+    return BG_POSITION_CSS[key] || "center";
+  }
   function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
+    var position = image && BG_POSITION_CSS[s.bgposition] ? s.bgposition : "";
     var height = { 50: 1, 75: 1, 100: 1 }[s.height] ? s.height : "auto";
     var valign = { center: 1, bottom: 1 }[s.valign] ? s.valign : "top";
     wrapper.dataset.cmsBg = bg.key;
@@ -1108,6 +1151,7 @@
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
     wrapper.dataset.cmsBgimage = image;
+    wrapper.dataset.cmsBgposition = position;
     wrapper.className = [bg.class, corner.class].filter(Boolean).join(" ");
     wrapper.style.minHeight = height === "auto" ? "" : height + "vh";
     wrapper.style.display = valign === "top" ? "" : "flex";
@@ -1116,7 +1160,7 @@
     wrapper.style.backgroundColor = color;
     wrapper.style.backgroundImage = image ? "url('" + image.replace(/'/g, "%27") + "')" : "";
     wrapper.style.backgroundSize = image ? "cover" : "";
-    wrapper.style.backgroundPosition = image ? "center" : "";
+    wrapper.style.backgroundPosition = image ? bgPositionCSS(position) : "";
     var contentEl = wrapper.querySelector("[data-cms-section-content]");
     if (!contentEl) return;
     var mce = (contentEl.className || "").split(/\s+/).filter(function(c) {
@@ -1133,7 +1177,8 @@
         height: wrapper.dataset.cmsHeight,
         valign: wrapper.dataset.cmsValign,
         bgcolor: wrapper.dataset.cmsBgcolor,
-        bgimage: wrapper.dataset.cmsBgimage
+        bgimage: wrapper.dataset.cmsBgimage,
+        bgposition: wrapper.dataset.cmsBgposition
       });
     });
   }
@@ -1210,10 +1255,17 @@
   function openDrawer() {
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
-    $("drawer-hint").textContent = state.pendingSection ? "Choose a starting point for the section." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
+    $("drawer-hint").textContent = state.pendingSection ? "Click a starting point for the new section." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
     $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
+    applyDrawerDrag();
     updateRail();
+  }
+  function applyDrawerDrag() {
+    var allow = !state.pendingSection;
+    $("snip-list").querySelectorAll("[data-cms-draggable]").forEach(function(card) {
+      card.draggable = allow;
+    });
   }
   function closeDrawer() {
     $("drawer").classList.remove("on");
@@ -1262,7 +1314,7 @@
         card.appendChild(nm);
         card.appendChild(thumb);
         card.appendChild(desc);
-        card.draggable = !sn.settings;
+        if (!sn.settings) card.setAttribute("data-cms-draggable", "");
         card.addEventListener("dragstart", function(e) {
           e.dataTransfer.setData("text/html", sn.html);
           e.dataTransfer.setData("text/plain", sn.name);
@@ -1279,6 +1331,7 @@
         });
         list.appendChild(card);
       });
+      applyDrawerDrag();
     }).catch(function(err) {
       list.innerHTML = "";
       var span = document.createElement("span");
@@ -1424,7 +1477,7 @@
       { id: "date", label: "Date", type: "datetime", value: datetimeNow() }
     ];
     if (mediaEnabled) {
-      fields.push({ id: "image", label: "Image", type: "image", value: "" });
+      fields.push({ id: "image", label: "Header & listing image", type: "image", value: "" });
     }
     openDialog({
       message: "Create a new post",
@@ -1444,7 +1497,6 @@
           feed: values.feed,
           summary: values.summary || "",
           published_at: values.date || "",
-          header_media_id: values.image_id || 0,
           thumbnail_media_id: values.image_id || 0
         })
       }).then(function(body) {
@@ -4316,6 +4368,7 @@
         valign: wrapper.dataset.cmsValign || "",
         bgcolor: wrapper.dataset.cmsBgcolor || "",
         bgimage: wrapper.dataset.cmsBgimage || "",
+        bgposition: wrapper.dataset.cmsBgposition || "",
         html
       });
     });
@@ -4720,6 +4773,9 @@ cursor:grab;background:#fff}
 /* Section presets: inline-insert mode hides them; add-a-section mode
    lists them first, clickable rather than draggable. */
 .snip.preset{cursor:pointer}
+/* Adding a section: every card is a click target, so none of them
+   should invite the drag that cannot create one. */
+.dlist.sections-mode .snip{cursor:pointer}
 .dlist:not(.sections-mode) .snip.preset{display:none}
 .dlist.sections-mode .snip.preset{order:-1}
 .snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;
@@ -4870,6 +4926,9 @@ border-radius:999px;padding:6px 9px;cursor:pointer}
 .cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;
 border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
 .cms-add-section button:hover{background:#dbe4fa}
+/* Names the area a button adds to, on pages with more than one. */
+.cms-add-region{margin-left:7px;padding:2px 7px;border-radius:999px;
+background:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}
 
 /* Buttons (a.cms-btn): click while editing for gear/trash chrome. */
 .cms-editing a.cms-btn{cursor:pointer}

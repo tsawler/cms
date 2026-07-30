@@ -52,21 +52,31 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 // seeds the schema that preceded it, and lets Run apply the real embedded
 // file. Posts pointing at a library image must come out holding its id;
 // posts pointing anywhere else must keep the address they had.
-// dropPostMediaColumns removes the two columns 0023 adds, so the migration
-// can be applied again for real. MySQL and MariaDB refuse to drop a column
-// a foreign key still uses, and their constraint names are generated, so
-// the names are read back from information_schema rather than assumed;
-// Postgres drops the constraint with the column and needs none of this.
-func dropPostMediaColumns(t *testing.T, db *sqldb.DB) {
+// rewindPostMedia puts cms_posts back the shape 0023 found it in — the two
+// URL columns, no media ids — so the migration can be applied again for
+// real. header_url has to be put back as well as taken away: 0024 dropped
+// the header pair for good, and 0023's backfill reads that column, so
+// replaying it needs the column there. Replaying 0024 on top takes it away
+// again, which is where the test finishes.
+//
+// MySQL and MariaDB refuse to drop a column a foreign key still uses, and
+// their constraint names are generated, so the names are read back from
+// information_schema rather than assumed; Postgres drops the constraint
+// with the column and needs none of this.
+func rewindPostMedia(t *testing.T, db *sqldb.DB) {
 	t.Helper()
 	ctx := context.Background()
 
+	// TEXT columns take a DEFAULT only in parentheses on MySQL/MariaDB.
+	headerURL := "ALTER TABLE cms_posts ADD COLUMN header_url TEXT NOT NULL DEFAULT ''"
 	if db.Dialect().Name() != "postgres" {
+		headerURL = "ALTER TABLE cms_posts ADD COLUMN header_url TEXT NOT NULL DEFAULT ('')"
+
 		rows, err := db.Query(ctx, `
 			SELECT DISTINCT constraint_name
 			FROM information_schema.key_column_usage
 			WHERE table_schema = DATABASE() AND table_name = 'cms_posts'
-			  AND column_name IN ('thumbnail_media_id', 'header_media_id')
+			  AND column_name = 'thumbnail_media_id'
 			  AND referenced_table_name = 'cms_media'`)
 		if err != nil {
 			t.Fatalf("reading foreign keys: %v", err)
@@ -86,11 +96,28 @@ func dropPostMediaColumns(t *testing.T, db *sqldb.DB) {
 		}
 	}
 
-	for _, col := range []string{"thumbnail_media_id", "header_media_id"} {
-		if _, err := db.Exec(ctx, "ALTER TABLE cms_posts DROP COLUMN "+col); err != nil {
-			t.Fatalf("dropping %s: %v", col, err)
-		}
+	if _, err := db.Exec(ctx, "ALTER TABLE cms_posts DROP COLUMN thumbnail_media_id"); err != nil {
+		t.Fatalf("dropping thumbnail_media_id: %v", err)
 	}
+	if _, err := db.Exec(ctx, headerURL); err != nil {
+		t.Fatalf("restoring header_url: %v", err)
+	}
+}
+
+// hasColumn reports whether cms_posts still has the named column.
+func hasColumn(t *testing.T, db *sqldb.DB, column string) bool {
+	t.Helper()
+	scope := "table_schema = DATABASE()"
+	if db.Dialect().Name() == "postgres" {
+		scope = "table_schema = current_schema()"
+	}
+	var n int
+	if err := db.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE `+scope+` AND table_name = 'cms_posts' AND column_name = $1`, column).Scan(&n); err != nil {
+		t.Fatalf("looking up column %s: %v", column, err)
+	}
+	return n > 0
 }
 
 func TestPostMediaBackfill(t *testing.T) {
@@ -98,9 +125,9 @@ func TestPostMediaBackfill(t *testing.T) {
 		ctx := context.Background()
 		quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-		dropPostMediaColumns(t, db)
-		if _, err := db.Exec(ctx, "DELETE FROM cms_schema_migrations WHERE version = 23"); err != nil {
-			t.Fatalf("forgetting migration 23: %v", err)
+		rewindPostMedia(t, db)
+		if _, err := db.Exec(ctx, "DELETE FROM cms_schema_migrations WHERE version IN (23, 24)"); err != nil {
+			t.Fatalf("forgetting migrations 23 and 24: %v", err)
 		}
 
 		// One library image, and the URLs a pre-0023 picker would have
@@ -136,7 +163,7 @@ func TestPostMediaBackfill(t *testing.T) {
 		bare := seed("blog/no-images", "", "")
 
 		if err := migrations.Run(ctx, db, quiet); err != nil {
-			t.Fatalf("re-applying 0023: %v", err)
+			t.Fatalf("re-applying 0023 and 0024: %v", err)
 		}
 
 		read := func(id int64) (mediaID sql.NullInt64, url string) {
@@ -155,13 +182,12 @@ func TestPostMediaBackfill(t *testing.T) {
 			t.Errorf("library-backed post = id %v / url %q, want id %d / empty",
 				got, url, mediaID)
 		}
-		var headerID sql.NullInt64
-		if err := db.QueryRow(ctx,
-			"SELECT header_media_id FROM cms_posts WHERE id = $1", library).Scan(&headerID); err != nil {
-			t.Fatalf("reading header id: %v", err)
-		}
-		if !headerID.Valid || headerID.Int64 != mediaID {
-			t.Errorf("header_media_id = %v, want %d", headerID, mediaID)
+		// 0024 ran on top and took the header pair away again — the banner
+		// at the top of a post is a section now, not a column.
+		for _, col := range []string{"header_media_id", "header_url"} {
+			if hasColumn(t, db, col) {
+				t.Errorf("cms_posts still has %s after 0024", col)
+			}
 		}
 
 		// An address the library does not hold is exactly what the URL

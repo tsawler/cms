@@ -359,11 +359,10 @@ type templateData struct {
 	// everything. Templates render it with {{.Pager.HTML}} — the same bar
 	// the public site's {{cmsPagination}} draws.
 	Pager *render.Pager
-	// Small preview URLs for the post form's two image pickers, resolved
-	// from whichever the post holds — a library image's thumbnail
-	// rendition, or an external URL as it stands. "" when unset.
-	FormPostThumb  string
-	FormPostHeader string
+	// Small preview URL for the post form's image picker, resolved from
+	// whichever the post holds — a library image's thumbnail rendition,
+	// or an external URL as it stands. "" when unset.
+	FormPostThumb string
 
 	// Media pages.
 	MediaEnabled bool

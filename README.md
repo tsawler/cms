@@ -429,7 +429,11 @@ each section has a control pill (↑ ↓ ＋ ⚙ ✕) in edit mode, new sections
 start from a snippet or empty, and the ⚙ settings offer curated choices
 only — background (Default / Light gray / Dark / Accent), content
 width (Normal / Wide / Full width), and rounded corners (None / Small /
-Medium / Large) by default. The ＋ buttons — on each
+Medium / Large) by default — alongside a free-form background colour and
+background image. A background image is cropped to cover the section, so
+it comes with a **position** setting naming which of nine anchor points
+survives the crop (centered by default): the difference between a
+portrait's face and its shoulder. The ＋ buttons — on each
 section, at the bottom of the sections area, and on the tool rail — open
 an "Add a section" chooser: start empty, seed the section from any
 snippet, or pick a **section preset** (below).
@@ -450,8 +454,9 @@ a landing page without touching the settings dialog.
 Settings use the section-settings vocabulary: `bg`, `width`, and
 `corners` name `SectionStyles` option keys, `height` is
 `"50"`/`"75"`/`"100"` (percent of the screen), `valign` is
-`"center"`/`"bottom"`, and the free-form `bgcolor` (`#rrggbb`) and
-`bgimage` (URL) work too. Unknown keys and
+`"center"`/`"bottom"`, and the free-form `bgcolor` (`#rrggbb`),
+`bgimage` (URL) and `bgposition` (`"top"`, `"bottom-left"`, … — centered
+by default) work too. Unknown keys and
 invalid values fall back to the defaults. Register your own next to
 ordinary snippets:
 
@@ -469,7 +474,8 @@ Snippets: append(
 Admins can create presets after deployment too: the snippet form at
 `/admin/snippets` has a "Section preset" type with the curated settings
 (background, width, rounded corners, height, vertical alignment); the
-free-form `bgcolor` and `bgimage` settings are config-only. Everything after creation is
+free-form `bgcolor`, `bgimage`, and `bgposition` settings are
+config-only. Everything after creation is
 ordinary: the preset's settings land in the section's ⚙ dialog, its HTML
 is normal editable content, and neither remembers where it came from.
 
@@ -560,30 +566,44 @@ created from the editor tool rail's **Post** button or under
 **Blog & News** in the admin. The rail dialog takes everything up front:
 title, feed (Blog or News), summary, date/time, and an image chosen
 through the media picker (browse the library or upload) — that one image
-fills both slots, rendered at header size on the post and at card size in
-the listings, since a post stores which library image it uses rather than
-one fixed address. You land in the
-new draft ready to write. While editing a post in place, a **⚙ Post
+does two jobs, becoming the background of the post's banner section and
+its card in the listings. You land in the new draft with the banner
+already on it, ready to write. While editing a post in place, a **⚙ Post
 settings** pill pinned to the top-right of the page reopens those
-settings (date, summary, thumbnail,
-header image — each image separately changeable); gear saves are live at
-once, like menus, since they describe the post in listings rather than
-being page content. The creating user is stamped as the author; feed,
-title, and address changes live on the admin form.
+settings (date, summary, listing image); pill saves are live at once,
+like menus, since they describe the post in listings rather than being
+page content. The creating user is stamped as the author; feed, title,
+and address changes live on the admin form.
 
-The post template is a page template that additionally receives the
-post's metadata as `.Post` (nil on ordinary pages):
+A post has no header field. The banner at the top of a post is a
+**section** in a region of its own, so it is edited on the page with the
+same gear as every other section — background image and where to anchor
+it, content width, rounded corners, height, vertical alignment, and any
+text laid over it — and it follows the draft/publish flow rather than
+going live the moment it is chosen. Creating a post with an image seeds
+that section with it; creating one without leaves the region empty, and
+its own "Add section" button is how a banner gets added later. Give the
+post template a sections region above the article and there is nothing
+else to wire up:
 
 ```html
-{{with .Post}}{{with .Header}}
-  <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="100vw"
-       width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
-       class="h-64 w-full object-cover">
-{{end}}{{end}}
-<h1>{{.Title}}</h1>
-{{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
-{{cmsSections "sections"}}
+{{cmsSections "header"}}
+<article>
+  <h1>{{.Title}}</h1>
+  {{with .Post}}<p>{{.PublishedAt.Format "January 2, 2006"}}{{with .Author}} · {{.}}{{end}}</p>{{end}}
+  {{cmsSections "sections"}}
+</article>
 ```
+
+Order tells the CMS what the regions are for: the **last** sections
+region a template declares is its main content, where a new page's
+starter section goes, and the **first** — when there is more than one —
+is the banner, where a new post's chosen image goes. While editing, each
+"Add section" button is tagged with its region's name so the two areas
+are told apart.
+
+The post template is a page template that additionally receives the
+post's metadata as `.Post` (nil on ordinary pages).
 
 Any template can list posts with `cmsPosts` — feed name and a limit
 (≤ 0 for all), newest first. It does not paginate; for a listing that
@@ -592,7 +612,7 @@ walks the whole feed see [Paginated listings](#paginated-listings) below:
 ```html
 {{range cmsPosts "blog" 12}}
   <a href="{{.URL}}">
-    {{with or .Thumbnail .Header}}
+    {{with .Thumbnail}}
       <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="(min-width: 640px) 21rem, 100vw"
            width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" loading="lazy">
     {{end}}
@@ -604,7 +624,7 @@ walks the whole feed see [Paginated listings](#paginated-listings) below:
 ```
 
 Each entry carries `Feed`, `Title`, `Summary` (the page description),
-`URL`, `PublishedAt`, `Author`, `Thumbnail`, `Header`, and `Draft`.
+`URL`, `PublishedAt`, `Author`, `Thumbnail`, and `Draft`.
 
 #### Paginated listings
 
@@ -651,17 +671,15 @@ a 404. Page 1's links omit `page=` altogether, so the canonical listing
 URL stays the bare one, and any other query parameters on the URL are
 carried across pages.
 
-`Thumbnail` and `Header` are the post's images with every rendition
-resolved, and are nil when the post has none. Each has `URL` (a default
-`src` sized for its slot — card size for a thumbnail, full width for a
-header), `Srcset` (every rendition, so the browser can pick a better
-one), `Width` and `Height` (the intrinsic size of `URL`, which stops the
-page reflowing as images arrive), and `Alt` from the media library.
-Write `sizes` yourself: only your template knows the layout.
+`Thumbnail` is the post's listing image with every rendition resolved,
+and is nil when the post has none. It has `URL` (a default `src` at card
+size), `Srcset` (every rendition, so the browser can pick a better one),
+`Width` and `Height` (the intrinsic size of `URL`, which stops the page
+reflowing as images arrive), and `Alt` from the media library. Write
+`sizes` yourself: only your template knows the layout.
 
-`ThumbnailURL` and `HeaderURL` are still there for templates that just
-want one string, and hold the same address as `.Thumbnail.URL` and
-`.Header.URL`.
+`ThumbnailURL` is still there for templates that just want one string,
+and holds the same address as `.Thumbnail.URL`.
 
 The public sees published posts only; logged-in editors also see drafts
 (`Draft` is true, so listing templates can badge them — see

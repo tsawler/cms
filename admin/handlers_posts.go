@@ -74,6 +74,8 @@ func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), form.ID, form.TemplateName)
+	s.seedHeaderSection(r.Context(), form.ID, form.TemplateName,
+		s.postBannerURL(r.Context(), form.ThumbnailMediaID, form.ThumbnailURL))
 	s.contentChanged()
 
 	s.flash(r, s.tr(r, "Post created — now add your content below, or open it on the site to edit in place."))
@@ -290,18 +292,16 @@ func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*conten
 	switch {
 	case s.deps.Media != nil:
 		p.ThumbnailMediaID, p.ThumbnailURL = s.parsePostImage(r, "thumbnail")
-		p.HeaderMediaID, p.HeaderURL = s.parsePostImage(r, "header")
 	case existing != nil:
 		p.ThumbnailMediaID, p.ThumbnailURL = existing.ThumbnailMediaID, existing.ThumbnailURL
-		p.HeaderMediaID, p.HeaderURL = existing.HeaderMediaID, existing.HeaderURL
 	}
 
 	return p, errs
 }
 
-// parsePostImage reads one of the post form's image pickers, whose select
-// holds a library id, "keep" (hold on to an image that is not in the
-// library, carried in the hidden field beside it), or "" for none. An id
+// parsePostImage reads the post form's image picker, whose select holds
+// a library id, "keep" (hold on to an image that is not in the library,
+// carried in the hidden field beside it), or "" for none. An id
 // naming something that is not a library image is treated as none rather
 // than failing the save: it can only come from a tampered form or an image
 // deleted while the form was open.
@@ -368,8 +368,8 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 		}
 	}
 
-	// The thumbnail and header pickers (and any image regions) choose
-	// from the media library.
+	// The thumbnail picker (and any image regions) chooses from the
+	// media library.
 	if s.deps.Media != nil {
 		items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{Kind: media.KindImage})
 		if err != nil {
@@ -378,15 +378,29 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 		}
 		data.Media = s.deps.Media.Views(items)
 		data.FormPostThumb = s.postImagePreview(r.Context(), post.Thumbnail, post.ThumbnailMediaID, post.ThumbnailURL)
-		data.FormPostHeader = s.postImagePreview(r.Context(), post.Header, post.HeaderMediaID, post.HeaderURL)
 	}
 
 	s.render(w, status, "post_form", data)
 }
 
-// postImagePreview is the URL for the small preview beside a post form's
-// image picker: a library image's thumbnail rendition, or an external URL
-// as it stands.
+// postBannerURL is the address of the image a post was created with, at
+// the rung a full-width banner wants. A section stores its background as
+// a plain URL rather than a library id, so the rendition has to be
+// chosen here rather than at render time. "" when the post has no image.
+func (s *server) postBannerURL(ctx context.Context, id *int64, fallbackURL string) string {
+	if id != nil && s.deps.Media != nil {
+		if md, err := s.deps.Media.GetByID(ctx, *id, s.deps.DefaultLocale); err == nil {
+			if img := s.deps.Media.ImageFor(md, "web"); img != nil {
+				return img.URL
+			}
+		}
+	}
+	return fallbackURL
+}
+
+// postImagePreview is the URL for the small preview beside the post
+// form's image picker: a library image's thumbnail rendition, or an
+// external URL as it stands.
 //
 // md is nil on a form re-rendered after a validation error, which was
 // parsed from the submission and so carries the id without the joined
@@ -418,10 +432,9 @@ func (s *server) postImages() render.PostImages {
 // apiCreatePost creates a draft post from the editor's "new post" dialog:
 // the title names it, the feed places it, the slug is derived from the
 // title (numeric suffix when taken), and the creating user becomes the
-// author. Summary, date, and images are optional.
+// author. Summary, date, and thumbnail are optional.
 // POST /api/posts {"title", "feed", "summary", "published_at",
-// "thumbnail_media_id", "thumbnail_url", "header_media_id", "header_url"}
-// -> {ok, id, url}
+// "thumbnail_media_id", "thumbnail_url"} -> {ok, id, url}
 func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title            string `json:"title"`
@@ -430,8 +443,6 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 		PublishedAt      string `json:"published_at"` // datetime-local format; "" = now
 		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
 		ThumbnailURL     string `json:"thumbnail_url"`
-		HeaderMediaID    int64  `json:"header_media_id"`
-		HeaderURL        string `json:"header_url"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
@@ -465,7 +476,6 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	post.ThumbnailMediaID, post.ThumbnailURL = s.apiPostImage(r.Context(), body.ThumbnailMediaID, body.ThumbnailURL)
-	post.HeaderMediaID, post.HeaderURL = s.apiPostImage(r.Context(), body.HeaderMediaID, body.HeaderURL)
 	var err error
 	for i := 1; i <= 50; i++ {
 		tail := base
@@ -489,6 +499,8 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedStarterSections(r.Context(), post.ID, post.TemplateName)
+	s.seedHeaderSection(r.Context(), post.ID, post.TemplateName,
+		s.postBannerURL(r.Context(), post.ThumbnailMediaID, post.ThumbnailURL))
 	s.contentChanged()
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -499,11 +511,12 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiUpdatePostSettings saves the fields behind the in-place editor's
-// post-settings gear: date, summary, thumbnail, and header image. Title,
-// feed, and slug stay as they are (the admin form owns those). These
-// fields have no draft state — like menus, they are live at once.
+// post-settings gear: date, summary, and thumbnail. Title, feed, and slug
+// stay as they are (the admin form owns those), and the banner at the top
+// of the post is a section, saved with the rest of the page. These fields
+// have no draft state — like menus, they are live at once.
 // PUT /api/posts/{id} {"summary", "published_at", "thumbnail_media_id",
-// "thumbnail_url", "header_media_id", "header_url"} -> {ok}
+// "thumbnail_url"} -> {ok}
 func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 	post, ok := s.postFromURL(w, r)
 	if !ok {
@@ -514,8 +527,6 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		PublishedAt      string `json:"published_at"`
 		ThumbnailMediaID int64  `json:"thumbnail_media_id"`
 		ThumbnailURL     string `json:"thumbnail_url"`
-		HeaderMediaID    int64  `json:"header_media_id"`
-		HeaderURL        string `json:"header_url"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	if err := dec.Decode(&body); err != nil {
@@ -533,7 +544,6 @@ func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
 		post.PublishedAt = t
 	}
 	post.ThumbnailMediaID, post.ThumbnailURL = s.apiPostImage(r.Context(), body.ThumbnailMediaID, body.ThumbnailURL)
-	post.HeaderMediaID, post.HeaderURL = s.apiPostImage(r.Context(), body.HeaderMediaID, body.HeaderURL)
 
 	if err := s.deps.Content.UpdatePost(r.Context(), post, s.deps.DefaultLocale); err != nil {
 		s.deps.Logger.Error("cms admin: api updating post settings", "post", post.PostID, "err", err)

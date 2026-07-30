@@ -174,21 +174,20 @@ type PostInfo struct {
 	PublishedAt time.Time
 	Author      string
 
-	// Thumbnail and Header are the post's images with every rendition
-	// resolved — src, srcset, and intrinsic size — and are nil when the
-	// post has none. Prefer them to the bare URLs: a listing card that
-	// uses .Thumbnail gets an image sized for a card, where .ThumbnailURL
-	// alone leaves the browser to download it and scale it down.
+	// Thumbnail is the post's listing image with every rendition resolved
+	// — src, srcset, and intrinsic size — and is nil when the post has
+	// none. Prefer it to the bare URL: a listing card that uses
+	// .Thumbnail gets an image sized for a card, where .ThumbnailURL
+	// alone leaves the browser to download a full-width one and scale it
+	// down. A post's banner is not here — it is a section in the post
+	// template's header region.
 	Thumbnail *media.Image
-	Header    *media.Image
-	// ThumbnailURL and HeaderURL are the same images' default src, for
-	// templates that want one string. "" when the post has no such image.
+	// ThumbnailURL is that image's default src, for templates that want
+	// one string. "" when the post has no thumbnail.
 	ThumbnailURL string
-	HeaderURL    string
-	// The library ids behind those images, 0 when the image is external or
-	// unset. The in-place editor's post-settings dialog round-trips them.
+	// The library id behind it, 0 when the image is external or unset.
+	// The in-place editor's post-settings dialog round-trips it.
 	ThumbnailMediaID int64
-	HeaderMediaID    int64
 
 	Draft bool // only ever true on editor renders
 }
@@ -325,18 +324,13 @@ func PostInfoFor(p *content.Post, localePrefix string, images PostImages) *PostI
 		PublishedAt:      p.PublishedAt,
 		Author:           p.AuthorName,
 		ThumbnailMediaID: p.ThumbnailMediaIDValue(),
-		HeaderMediaID:    p.HeaderMediaIDValue(),
 		Draft:            p.Status != content.StatusPublished,
 	}
-	// A listing card is a few hundred pixels wide and a header spans the
-	// page, so the two slots want different rungs of the ladder.
+	// A listing card is a few hundred pixels wide, so it takes the card
+	// rung of the ladder rather than the full-width one.
 	info.Thumbnail = postImage(p.Thumbnail, p.ThumbnailURL, "card", images)
-	info.Header = postImage(p.Header, p.HeaderURL, "web", images)
 	if info.Thumbnail != nil {
 		info.ThumbnailURL = info.Thumbnail.URL
-	}
-	if info.Header != nil {
-		info.HeaderURL = info.Header.URL
 	}
 	return info
 }
@@ -639,6 +633,43 @@ func ValidSectionVAlign(s string) string {
 		return s
 	}
 	return ""
+}
+
+// sectionBGPositions maps the anchor points a section's background image
+// can be pinned to onto the CSS that pins it there. A background image
+// is cropped to cover the section, so which part of it survives the crop
+// is the difference between a portrait's face and its shoulder. "center"
+// is the default and is deliberately absent: it is where a background
+// image sits anyway, so leaving it unstored keeps a section's settings
+// describing only what was actually chosen.
+var sectionBGPositions = map[string]string{
+	"top-left":     "left top",
+	"top":          "center top",
+	"top-right":    "right top",
+	"left":         "left center",
+	"right":        "right center",
+	"bottom-left":  "left bottom",
+	"bottom":       "center bottom",
+	"bottom-right": "right bottom",
+}
+
+// ValidBackgroundPosition returns the value if it is one of the eight
+// non-default anchor points for a section's background image, or ""
+// otherwise — which covers "center" as well as anything unknown, both of
+// which render centered.
+func ValidBackgroundPosition(s string) string {
+	if _, ok := sectionBGPositions[s]; ok {
+		return s
+	}
+	return ""
+}
+
+// backgroundPositionCSS is the CSS behind a validated anchor point.
+func backgroundPositionCSS(key string) string {
+	if css, ok := sectionBGPositions[key]; ok {
+		return css
+	}
+	return "center"
 }
 
 // DefaultEditorStyles is the Tailwind-first default Styles menu, used when
@@ -973,6 +1004,7 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	corner := r.sections.Corner(b.Settings["corners"])
 	bgColor := ValidBackgroundColor(b.Settings["bgcolor"])
 	bgImage := ValidBackgroundURL(b.Settings["bgimage"])
+	bgPos := ValidBackgroundPosition(b.Settings["bgposition"])
 	height := ValidSectionHeight(b.Settings["height"])
 	valign := ValidSectionVAlign(b.Settings["valign"])
 
@@ -1001,6 +1033,9 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		if bgImage != "" {
 			sb.WriteString(` data-cms-bgimage="` + html.EscapeString(bgImage) + `"`)
 		}
+		if bgPos != "" {
+			sb.WriteString(` data-cms-bgposition="` + bgPos + `"`)
+		}
 	}
 	if wrapCls := strings.TrimSpace(bg.Class + " " + corner.Class); wrapCls != "" {
 		sb.WriteString(` class="` + html.EscapeString(wrapCls) + `"`)
@@ -1021,7 +1056,8 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		style += "background-color:" + bgColor + ";"
 	}
 	if bgImage != "" {
-		style += "background-image:url('" + bgImage + "');background-size:cover;background-position:center;"
+		style += "background-image:url('" + bgImage + "');background-size:cover;background-position:" +
+			backgroundPositionCSS(bgPos) + ";"
 	}
 	if style != "" {
 		sb.WriteString(` style="` + html.EscapeString(style) + `"`)
@@ -1072,12 +1108,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 			"feed":        edit.Post.Feed,
 			"summary":     edit.Post.Summary,
 			"publishedAt": edit.Post.PublishedAt.Local().Format("2006-01-02T15:04"),
-			// Both forms of each image: the id is what a save writes back,
-			// the URL is what the dialog shows as a preview.
+			// Both forms of the thumbnail: the id is what a save writes
+			// back, the URL is what the dialog shows as a preview.
 			"thumbnailMediaId": edit.Post.ThumbnailMediaID,
 			"thumbnailUrl":     edit.Post.ThumbnailURL,
-			"headerMediaId":    edit.Post.HeaderMediaID,
-			"headerUrl":        edit.Post.HeaderURL,
 		})
 		if err == nil {
 			postJSON = string(b)

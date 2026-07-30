@@ -111,6 +111,7 @@ function collectSections(region) {
             corners: wrapper.dataset.cmsCorners || "",
             height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
             bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
+            bgposition: wrapper.dataset.cmsBgposition || "",
             html: html });
     });
     return out;

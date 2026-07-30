@@ -191,6 +191,9 @@ cursor:grab;background:#fff}
 /* Section presets: inline-insert mode hides them; add-a-section mode
    lists them first, clickable rather than draggable. */
 .snip.preset{cursor:pointer}
+/* Adding a section: every card is a click target, so none of them
+   should invite the drag that cannot create one. */
+.dlist.sections-mode .snip{cursor:pointer}
 .dlist:not(.sections-mode) .snip.preset{display:none}
 .dlist.sections-mode .snip.preset{order:-1}
 .snip .stag{margin-left:8px;padding:2px 7px;border-radius:999px;background:#e8edfc;

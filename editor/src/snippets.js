@@ -76,13 +76,28 @@ export function openDrawer() {
     $("drawer").classList.add("on");
     $("drawer-title").textContent = state.pendingSection ? "Add a section" : "Snippets";
     $("drawer-hint").textContent = state.pendingSection
-        ? "Choose a starting point for the section."
+        ? "Click a starting point for the new section."
         : "Drag a snippet onto the page, or click one to insert it at the cursor.";
     // Section presets are whole-section starting points, not inline
     // blocks — the list shows them (first) only when adding a section.
     $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
+    applyDrawerDrag();
     updateRail();
+}
+
+// applyDrawerDrag turns dragging off for as long as a section is
+// pending. A drop is handled by TinyMCE, which lands the markup at the
+// drop caret in some existing rich region — it cannot create the section
+// that was just asked for, and closing the drawer afterwards discards
+// the pending one. So the snippet ends up somewhere the editor never
+// meant to put it, with no new section anywhere. Clicking is the only
+// thing that can do the job, so it is the only thing offered.
+function applyDrawerDrag() {
+    var allow = !state.pendingSection;
+    $("snip-list").querySelectorAll("[data-cms-draggable]").forEach(function (card) {
+        card.draggable = allow;
+    });
 }
 export function closeDrawer() {
     $("drawer").classList.remove("on");
@@ -136,8 +151,10 @@ function loadSnippets() {
             // Drag: TinyMCE accepts text/html drops and inserts the
             // markup at the drop caret inside any rich region. Presets
             // aren't draggable — their settings only mean something on
-            // a section wrapper, which a drop can't create.
-            card.draggable = !sn.settings;
+            // a section wrapper, which a drop can't create. The marker
+            // says this card may drag at all; applyDrawerDrag decides
+            // whether it does right now.
+            if (!sn.settings) card.setAttribute("data-cms-draggable", "");
             card.addEventListener("dragstart", function (e) {
                 e.dataTransfer.setData("text/html", sn.html);
                 e.dataTransfer.setData("text/plain", sn.name);
@@ -157,6 +174,9 @@ function loadSnippets() {
             card.addEventListener("click", function () { chooseSnippet(sn); });
             list.appendChild(card);
         });
+        // The list arrives after the drawer opened, so the cards learn
+        // here whether dragging is on for the mode they arrived into.
+        applyDrawerDrag();
     }).catch(function (err) {
         list.innerHTML = "";
         var span = document.createElement("span");
@@ -312,9 +332,11 @@ export function newPostDialog(feed) {
         { id: "date", label: "Date", type: "datetime", value: datetimeNow() },
     ];
     if (mediaEnabled) {
-        // One image serves both slots: the site renders it at header size
-        // at the top of the post and at card size in the listings.
-        fields.push({ id: "image", label: "Image", type: "image", value: "" });
+        // One image serves both slots: it becomes the background of the
+        // post's banner section and its card in the listings. Leaving it
+        // empty means no banner, and the header region's own "Add
+        // section" button is how one gets added later.
+        fields.push({ id: "image", label: "Header & listing image", type: "image", value: "" });
     }
     openDialog({
         message: "Create a new post",
@@ -334,7 +356,6 @@ export function newPostDialog(feed) {
                 feed: values.feed,
                 summary: values.summary || "",
                 published_at: values.date || "",
-                header_media_id: values.image_id || 0,
                 thumbnail_media_id: values.image_id || 0,
             }),
         }).then(function (body) {

@@ -63,6 +63,10 @@ func TestDefaultSectionPresetSettings(t *testing.T) {
 				if render.ValidBackgroundURL(val) != val {
 					t.Errorf("preset %q: invalid bgimage %q", sn.Name, val)
 				}
+			case "bgposition":
+				if render.ValidBackgroundPosition(val) != val {
+					t.Errorf("preset %q: invalid bgposition %q", sn.Name, val)
+				}
 			default:
 				t.Errorf("preset %q: unknown setting %q", sn.Name, key)
 			}

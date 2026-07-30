@@ -55,7 +55,6 @@ func TestPostInsertAndGet(t *testing.T) {
 			PublishedAt:  when,
 			AuthorID:     &author.ID,
 			ThumbnailURL: "/img/thumb.png",
-			HeaderURL:    "/img/header.png",
 		})
 		if post.PostID == 0 {
 			t.Fatal("InsertPost did not set the post id")
@@ -560,31 +559,28 @@ func seedImage(t *testing.T, db *sqldb.DB, storeKey, filename string, w, h int) 
 	return id
 }
 
-// A post's images are library references, and reads join enough of the
+// A post's thumbnail is a library reference, and reads join enough of the
 // media row for the renderer to build every rendition from it.
 func TestPostImagesJoinTheLibrary(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()
 		s := content.NewStore(db, defaultLocale)
 		thumbID := seedImage(t, db, "aaaaaaaaaaaaaaaaaaaaaaaa", "card.jpg", 2000, 1000)
-		headerID := seedImage(t, db, "bbbbbbbbbbbbbbbbbbbbbbbb", "banner.jpg", 3000, 1200)
 
 		post := seedPost(t, s, content.Post{
 			Page:             content.Page{Slug: "blog/with-images", Title: "With images"},
 			ThumbnailMediaID: &thumbID,
-			HeaderMediaID:    &headerID,
 		})
 
 		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
 		if err != nil {
 			t.Fatalf("PostByID: %v", err)
 		}
-		if got.ThumbnailMediaIDValue() != thumbID || got.HeaderMediaIDValue() != headerID {
-			t.Fatalf("media ids = %d/%d, want %d/%d",
-				got.ThumbnailMediaIDValue(), got.HeaderMediaIDValue(), thumbID, headerID)
+		if got.ThumbnailMediaIDValue() != thumbID {
+			t.Fatalf("media id = %d, want %d", got.ThumbnailMediaIDValue(), thumbID)
 		}
-		if got.Thumbnail == nil || got.Header == nil {
-			t.Fatal("the joined media records did not come back")
+		if got.Thumbnail == nil {
+			t.Fatal("the joined media record did not come back")
 		}
 		if got.Thumbnail.StoreKey != "aaaaaaaaaaaaaaaaaaaaaaaa" || got.Thumbnail.VariantExt != ".webp" {
 			t.Errorf("thumbnail joined %q/%q, want the seeded key and variant ext",
@@ -594,8 +590,8 @@ func TestPostImagesJoinTheLibrary(t *testing.T) {
 			t.Errorf("thumbnail dimensions = %dx%d, want 2000x1000",
 				got.Thumbnail.Width, got.Thumbnail.Height)
 		}
-		if got.Header.Alt != "Alt for banner.jpg" {
-			t.Errorf("header alt = %q, want the library's", got.Header.Alt)
+		if got.Thumbnail.Alt != "Alt for card.jpg" {
+			t.Errorf("thumbnail alt = %q, want the library's", got.Thumbnail.Alt)
 		}
 		// A listing read walks the same joins.
 		posts, err := s.Posts(ctx, content.FeedBlog, defaultLocale, false, 0)
@@ -620,11 +616,11 @@ func TestPostWithoutImages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PostByID: %v", err)
 		}
-		if got.Thumbnail != nil || got.Header != nil {
+		if got.Thumbnail != nil {
 			t.Error("a post with no images came back with joined media")
 		}
-		if got.ThumbnailMediaID != nil || got.HeaderMediaID != nil {
-			t.Error("a post with no images came back with media ids")
+		if got.ThumbnailMediaID != nil {
+			t.Error("a post with no images came back with a media id")
 		}
 	})
 }

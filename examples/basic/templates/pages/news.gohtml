@@ -9,7 +9,7 @@
     <div class="mt-10 divide-y divide-slate-200">
         {{range $feed.Posts}}
         <a href="{{.URL}}" class="group flex gap-5 py-6">
-            {{with or .Thumbnail .Header}}
+            {{with .Thumbnail}}
             <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="7rem"
                  width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"
                  loading="lazy" decoding="async" class="h-20 w-28 flex-none rounded-lg object-cover">

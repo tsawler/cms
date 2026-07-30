@@ -25,11 +25,12 @@ import (
 // alignment) to the new section along with the HTML. Keys and values are
 // the section-settings vocabulary: "bg" and "width" name curated
 // SectionStyles option keys, "height" is "50"/"75"/"100", "valign" is
-// "center"/"bottom", "bgcolor" is #rrggbb, "bgimage" is a URL. Unknown
-// keys or invalid values fall back to the defaults, same as the section
-// settings dialog. Presets come from config or from the admin snippets
-// UI (which offers the curated settings; the free-form bgcolor/bgimage
-// are config-only).
+// "center"/"bottom", "bgcolor" is #rrggbb, "bgimage" is a URL, and
+// "bgposition" anchors that image ("top", "bottom-left", …; centered by
+// default). Unknown keys or invalid values fall back to the defaults,
+// same as the section settings dialog. Presets come from config or from
+// the admin snippets UI (which offers the curated settings; the
+// free-form bgcolor/bgimage/bgposition are config-only).
 type Snippet struct {
 	ID        int64
 	Name      string
