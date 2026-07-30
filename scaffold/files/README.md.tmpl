@@ -29,6 +29,7 @@ clicking the text on the page itself.
 [[if .Tailwind]]├── gen.go               # go:generate line for the stylesheet
 ├── tailwind-content.sh  # rebuilds CSS for classes typed into content
 ├── assets/input.css     # Tailwind input
+├── assets/theme.css     # fonts and other theme tokens — start here
 ├── static/site.css      # compiled output, gitignored
 [[end]]└── templates/
     ├── base.gohtml      # shared layout
@@ -41,7 +42,52 @@ clicking the text on the page itself.
         └── post.gohtml      # a single blog or news post
 [[end]]```
 
-## Adding a page template
+[[if .Tailwind]]## Theme and typography
+
+`assets/theme.css` holds this site's design tokens — fonts to begin with,
+and colors, spacing or breakpoints as you add them. Everything else reads
+from it, so it is the first file to edit:
+
+```css
+@theme {
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", ui-serif, Georgia, serif;
+}
+```
+
+Then load the webfont in `templates/base.gohtml` — there is a commented-out
+example in the `<head>`, above the stylesheet link — and rebuild with
+`go generate .`. Body copy and headings are already wired to those two
+tokens in `assets/input.css`, so nothing else has to change.
+
+Headings are styled there as plain CSS rules (`h1, h2, h3, h4`) rather
+than utility classes, deliberately: headings an editor creates inside a
+rich region arrive as bare `<h2>`/`<h3>` with no class, so a utility would
+never reach them.
+
+### Why theme.css is its own file
+
+This site compiles **two** Tailwind stylesheets:
+
+| Build | Input | Output | Scans |
+| --- | --- | --- | --- |
+| `go generate .` | `assets/input.css` | `static/site.css` | `templates/` |
+| the CMS, on save | `tailwind-content.sh` | `/cms/content-<hash>.css` | classes stored in content |
+
+The second exists because editors can put classes in the database, where
+the first build's scanner cannot see them. Both `@import "./theme.css"`,
+and they have to: the content build is a complete Tailwind build that
+emits its own theme, and `{{cmsHead}}` links it *after* `static/site.css`.
+Customize a token in `input.css` alone and the content stylesheet quietly
+resets it — a redefined `--font-sans` would take the whole site back to
+the default typeface.
+
+The same split is why a font editors can *apply* needs the shared file. A
+class that only ever appears in content — `font-display` from an
+`EditorStyles` entry — is compiled by the content build, and a build that
+never saw `--font-display` emits nothing for it.
+
+[[end]]## Adding a page template
 
 Drop a file in `templates/pages/`, then add a line to `cfg.PageTemplates`
 in `main.go`. The template funcs that make a region editable:

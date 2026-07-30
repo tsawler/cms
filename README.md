@@ -48,6 +48,12 @@ It creates the directory and its `go.mod` if they do not exist, and pins
 the `cms` requirement to the version of the generator you ran, so the
 generated `main.go` and the library it compiles against stay in step.
 
+The generated project keeps its theme — fonts to begin with — in
+`assets/theme.css`, which both Tailwind builds import. That is the file to
+edit first, and the generated `README.md` explains why it is separate;
+[keeping the two builds on one theme](#keep-the-two-builds-on-one-theme)
+below is the short version.
+
 Useful flags — see `cms init -h` for the rest:
 
 | Flag | Default | Effect |
@@ -350,12 +356,34 @@ Tailwind: &cms.TailwindConfig{
 },
 ```
 
-The command runs your Tailwind (your version, your theme). Builds are
+The command runs your Tailwind — your version, your plugins, and your
+theme *as far as the input CSS you point it at declares one*. Builds are
 asynchronous, serialized, and skipped when the class set is unchanged; a
 failed build logs and keeps the previous stylesheet. Setups whose CLI
 can't take an ad-hoc content file (e.g. Tailwind v4 auto-detection) can
 point `Command` at a wrapper script that copies `{content}` where their
 build expects it.
+
+#### Keep the two builds on one theme
+
+This is a second, independent Tailwind build, and `{{cmsHead}}` links its
+output *after* the site stylesheet — so where the two disagree, this one
+wins. A v4 wrapper script whose input is a bare `@import "tailwindcss"`
+therefore re-emits `@layer theme { :root { … } }` with Tailwind's stock
+values, overwriting anything the site build customized: redefine
+`--font-sans` (or any other theme token) in the site's `input.css` and
+the generated stylesheet silently resets it site-wide. The same gap runs
+the other way for classes: a `font-display` an editor applies exists only
+in the database, so it is this build's job to compile — and a build that
+never saw `--font-display` emits nothing for it.
+
+The fix is to keep theme tokens in a file both builds `@import`.
+`cms init` already generates that arrangement — `assets/theme.css`, wired
+into `assets/input.css` and `tailwind-content.sh` — so a scaffolded site
+only has to edit the tokens. For the same thing built by hand, see
+[custom fonts](QUICKSTART.md#custom-fonts) in the quickstart, including
+why a wrapper script that stages its input in `mktemp` has to copy that
+file in rather than reference it.
 
 ### Customizing the menu
 
@@ -374,7 +402,9 @@ c, err := cms.New(cms.Config{
         // block instead ("p", "h2", ...).
         {Label: "Lead paragraph", Class: "text-lg text-slate-600", Block: "p"},
         // Fonts are styles too: name the *role*, not the typeface. The
-        // template must already load any webfont the class uses.
+        // template must already load any webfont the class uses, and the
+        // theme that defines --font-display has to reach both Tailwind
+        // builds — see QUICKSTART.md#custom-fonts.
         {Label: "Display type", Class: "font-display"},
         // Entries sharing a Group fold into a submenu with that title,
         // placed where the group's first member appears. Handy once a

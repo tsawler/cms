@@ -196,6 +196,53 @@ func TestScriptIsExecutable(t *testing.T) {
 	}
 }
 
+// TestBothBuildsShareTheme guards the one thing about the generated
+// styling setup that fails silently. The site build and the CMS's
+// content build are separate Tailwind runs, and {{cmsHead}} links the
+// content stylesheet last — so if only one of them imports theme.css,
+// the other's stock theme wins and a customized token (a redefined
+// --font-sans, say) is reset site-wide with nothing logged and no build
+// error. The symptom is "my font works locally and not in production",
+// which is a miserable thing to debug, so pin it here instead.
+func TestBothBuildsShareTheme(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Write(dir, Options{Tailwind: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	theme := read(t, dir, "assets/theme.css")
+	if !strings.Contains(theme, "@theme") {
+		t.Error("assets/theme.css declares no @theme block")
+	}
+	for _, token := range []string{"--font-body", "--font-display"} {
+		if !strings.Contains(theme, token) {
+			t.Errorf("assets/theme.css does not define %s", token)
+		}
+	}
+
+	// Both builds must pull the same file in.
+	for _, f := range []string{"assets/input.css", "tailwind-content.sh"} {
+		if got := read(t, dir, f); !strings.Contains(got, `@import "./theme.css"`) {
+			t.Errorf(`%s does not @import "./theme.css", so the two Tailwind builds can disagree on the theme`, f)
+		}
+	}
+
+	// The content build runs from a scratch directory, so importing the
+	// theme is only half of it — the file has to be copied in beside the
+	// input, or the import resolves to nothing.
+	if got := read(t, dir, "tailwind-content.sh"); !strings.Contains(got, "cp assets/theme.css") {
+		t.Error("tailwind-content.sh imports theme.css but never copies it into the scratch directory")
+	}
+
+	// The tokens are useless if nothing consumes them.
+	css := read(t, dir, "assets/input.css")
+	for _, use := range []string{"var(--font-body)", "var(--font-display)"} {
+		if !strings.Contains(css, use) {
+			t.Errorf("assets/input.css defines no rule using %s", use)
+		}
+	}
+}
+
 func TestSiteNameDefaultsToDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "my-cool_site")
 	if _, err := Write(dir, Options{}); err != nil {

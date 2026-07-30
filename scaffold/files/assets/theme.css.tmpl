@@ -1,0 +1,34 @@
+/* Theme tokens (Tailwind v4) — fonts first, but colors, spacing and
+ * breakpoints belong here too. This is the site's design vocabulary.
+ *
+ * It is a separate file, rather than an @theme block inside input.css,
+ * because TWO Tailwind builds have to agree on it:
+ *
+ *   assets/input.css     -> static/site.css          this project's markup
+ *   tailwind-content.sh  -> /cms/content-<hash>.css  classes typed into
+ *                                                    content, read from
+ *                                                    the database
+ *
+ * Both @import this file, so a token customized here reaches both. A token
+ * customized directly in input.css would not: the content build would keep
+ * Tailwind's stock value for it, and since {{cmsHead}} links that
+ * stylesheet *after* static/site.css, the stock value would win. Redefine
+ * --font-sans in input.css alone and it is silently reset site-wide.
+ *
+ * The same split is why a font an editor applies compiles at all. A class
+ * that only ever appears in content — say font-display from an
+ * EditorStyles entry — is the content build's job, and a build that never
+ * saw --font-display emits no rule for it.
+ *
+ * The defaults below resolve to Tailwind's own stack, so they change
+ * nothing until you edit them. To use a real typeface: set it here, then
+ * load the webfont in templates/base.gohtml. */
+@theme {
+  /* Body copy. */
+  --font-body: var(--font-sans);
+
+  /* Headings — including the ones editors create inside a rich region.
+   * Name the role ("display"), not the typeface, so a later redesign is
+   * one edit here rather than a hunt through templates and content. */
+  --font-display: var(--font-sans);
+}

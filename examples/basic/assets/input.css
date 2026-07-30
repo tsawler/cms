@@ -11,6 +11,11 @@
 @import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
+/* Fonts, colors, spacing — everything this site customizes about
+ * Tailwind's theme. Its own file because tailwind-content.sh imports it
+ * too; see the comments there and in theme.css. */
+@import "./theme.css";
+
 /* The site's own markup. */
 @source "../templates";
 
@@ -20,3 +25,20 @@
  * content uses them; listing them here keeps the editor styled even
  * before first save. */
 @source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-3xl rounded-full aspect-video border border-b border-b-2 border-slate-200 border-slate-300 p-1 p-2 p-4 align-top font-semibold w-auto odd:bg-slate-50 overflow-x-auto");
+
+/* Theme classes an editor could apply — keeps them compiled even before
+ * any content uses them. Add to this list when you add EditorStyles. */
+@source inline("font-display font-body");
+
+/* Typography, applied as CSS rather than utility classes: headings
+ * written inside a rich region arrive as bare <h2>/<h3> with no class for
+ * a utility to hook onto. Unlayered on purpose — layered CSS always loses
+ * to unlayered CSS, so these hold regardless of the order the site and
+ * content stylesheets happen to load in. */
+body {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+}

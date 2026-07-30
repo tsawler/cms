@@ -108,11 +108,13 @@ type Options struct {
 	// and news are disabled and the admin area does not offer them.
 	Blog bool
 
-	// Tailwind adds assets/input.css, gen.go, and tailwind-content.sh, and
-	// wires CMS_TAILWIND_COMMAND in .env so classes typed into content get
-	// compiled CSS without a redeploy. Without it the generated templates
-	// still carry their Tailwind classes — you supply static/site.css
-	// however you like.
+	// Tailwind adds assets/input.css, assets/theme.css, gen.go, and
+	// tailwind-content.sh, and wires CMS_TAILWIND_COMMAND in .env so
+	// classes typed into content get compiled CSS without a redeploy.
+	// Both builds import theme.css, which is what keeps a customized theme
+	// from being reset by the content stylesheet. Without it the generated
+	// templates still carry their Tailwind classes — you supply
+	// static/site.css however you like.
 	Tailwind bool
 
 	// Captcha adds the Cap and Valkey services to docker-compose.yml for
@@ -173,6 +175,8 @@ var manifest = []file{
 	{src: "gen.go.tmpl", dst: "gen.go", mode: 0o644, when: ifStyles},
 	{src: "tailwind-content.sh.tmpl", dst: "tailwind-content.sh", mode: 0o755, when: ifStyles},
 	{src: "assets/input.css.tmpl", dst: "assets/input.css", mode: 0o644, when: ifStyles},
+	// The theme both Tailwind builds import — see TestBothBuildsShareTheme.
+	{src: "assets/theme.css.tmpl", dst: "assets/theme.css", mode: 0o644, when: ifStyles},
 	// static/site.css is a build artifact and gitignored, so the directory
 	// would not survive a clone without this.
 	{src: "gitkeep.tmpl", dst: "static/.gitkeep", mode: 0o644, when: ifStyles},

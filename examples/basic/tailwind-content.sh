@@ -5,15 +5,23 @@
 # synthetic class file the CMS wrote, then runs the standalone CLI
 # (brew install tailwindcss).
 #
+# This is a second, independent Tailwind build, so it needs the same theme
+# the site build uses or the two stylesheets disagree — and this one is
+# linked last, so it wins. assets/theme.css is copied into the scratch
+# directory rather than imported from where it lives, because a relative
+# @import cannot reach back out of /tmp.
+#
 #   $1 = content file holding every class token found in stored content
 #   $2 = path the compiled CSS must be written to
 set -e
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 cp "$1" "$dir/content.html"
+cp assets/theme.css "$dir/theme.css"
 cat > "$dir/input.css" <<'EOF'
 @import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
+@import "./theme.css";
 @source "./content.html";
 EOF
 tailwindcss --input "$dir/input.css" --output "$2"
