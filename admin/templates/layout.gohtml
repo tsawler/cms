@@ -6,6 +6,12 @@
     <meta name="robots" content="noindex">
     <title>{{block "title" .}}CMS{{end}}</title>
     <link rel="stylesheet" href="{{.AdminPath}}/static/admin.css">
+    {{- /* The module's pagination styles (render.PagerCSS), so the admin's
+           bar and the public site's are one definition rather than two
+           that drift. Served as a file, not inlined: the admin's CSP
+           allows no inline styles. It states no colors of its own, so it
+           picks up the admin's ink from currentColor. */}}
+    <link rel="stylesheet" href="{{.AdminPath}}{{.PagerCSSPath}}">
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
     {{if .PageScript}}<script src="{{.AdminPath}}/static/{{.PageScript}}" defer></script>{{end}}
 </head>

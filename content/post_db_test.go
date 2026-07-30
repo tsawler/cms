@@ -3,6 +3,8 @@ package content_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -302,6 +304,124 @@ func TestPostsFiltering(t *testing.T) {
 	})
 }
 
+func TestPostsPageWindowsAndCounts(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+
+		// Seven blog posts a day apart, plus one news post that must not
+		// leak into a blog page or its count.
+		base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		for i := range 7 {
+			seedPost(t, s, content.Post{
+				Page:        content.Page{Slug: "blog/post-" + strconv.Itoa(i), Title: "Post " + strconv.Itoa(i)},
+				Feed:        content.FeedBlog,
+				PublishedAt: base.Add(time.Duration(i) * 24 * time.Hour),
+			})
+		}
+		seedPost(t, s, content.Post{
+			Page:        content.Page{Slug: "news/item", Title: "News"},
+			Feed:        content.FeedNews,
+			PublishedAt: base.Add(100 * 24 * time.Hour),
+		})
+
+		slugsOf := func(posts []content.Post) []string {
+			out := make([]string, len(posts))
+			for i, p := range posts {
+				out[i] = p.Slug
+			}
+			return out
+		}
+		page := func(limit, offset int) []string {
+			t.Helper()
+			posts, err := s.PostsPage(ctx, content.FeedBlog, defaultLocale, false, limit, offset)
+			if err != nil {
+				t.Fatalf("PostsPage(%d, %d): %v", limit, offset, err)
+			}
+			return slugsOf(posts)
+		}
+
+		// Newest first, three to a page, and the offset slides the window
+		// without repeating or skipping a post.
+		if want := []string{"blog/post-6", "blog/post-5", "blog/post-4"}; !slices.Equal(page(3, 0), want) {
+			t.Errorf("page 1 = %v, want %v", page(3, 0), want)
+		}
+		if want := []string{"blog/post-3", "blog/post-2", "blog/post-1"}; !slices.Equal(page(3, 3), want) {
+			t.Errorf("page 2 = %v, want %v", page(3, 3), want)
+		}
+		// The last page is short, and past the end there is nothing.
+		if want := []string{"blog/post-0"}; !slices.Equal(page(3, 6), want) {
+			t.Errorf("page 3 = %v, want %v", page(3, 6), want)
+		}
+		if got := page(3, 9); len(got) != 0 {
+			t.Errorf("page past the end = %v, want none", got)
+		}
+		// Every page together is every post, in order and once each.
+		var walked []string
+		for off := 0; off < 7; off += 3 {
+			walked = append(walked, page(3, off)...)
+		}
+		if want := []string{"blog/post-6", "blog/post-5", "blog/post-4", "blog/post-3",
+			"blog/post-2", "blog/post-1", "blog/post-0"}; !slices.Equal(walked, want) {
+			t.Errorf("walking every page = %v, want %v", walked, want)
+		}
+		// An offset without a limit is meaningless and ignored.
+		if got := page(0, 3); len(got) != 7 {
+			t.Errorf("offset without limit returned %d posts, want all 7", len(got))
+		}
+
+		// Counts match what the pages hold, per feed and overall.
+		count := func(feed content.Feed, publishedOnly bool) int {
+			t.Helper()
+			n, err := s.CountPosts(ctx, feed, publishedOnly)
+			if err != nil {
+				t.Fatalf("CountPosts(%q, %v): %v", feed, publishedOnly, err)
+			}
+			return n
+		}
+		if got := count(content.FeedBlog, false); got != 7 {
+			t.Errorf("CountPosts(blog) = %d, want 7", got)
+		}
+		if got := count(content.FeedNews, false); got != 1 {
+			t.Errorf("CountPosts(news) = %d, want 1", got)
+		}
+		if got := count("", false); got != 8 {
+			t.Errorf("CountPosts(all) = %d, want 8", got)
+		}
+		// Nothing is published yet, so the public count is zero...
+		if got := count(content.FeedBlog, true); got != 0 {
+			t.Errorf("CountPosts(blog, published) = %d, want 0 while all are drafts", got)
+		}
+		// ...and publishing two, one of them private, counts only the one
+		// the public listing would show — the same filter the page uses.
+		published := []string{"blog/post-6", "blog/post-5"}
+		for _, slug := range published {
+			p, err := s.GetBySlug(ctx, slug, defaultLocale, false)
+			if err != nil {
+				t.Fatalf("GetBySlug(%q): %v", slug, err)
+			}
+			if err := s.Publish(ctx, p.ID); err != nil {
+				t.Fatalf("Publish(%q): %v", slug, err)
+			}
+			if slug == "blog/post-5" {
+				if err := s.SetVisibility(ctx, p.ID, content.VisibilityPrivate); err != nil {
+					t.Fatalf("SetVisibility(%q): %v", slug, err)
+				}
+			}
+		}
+		if got := count(content.FeedBlog, true); got != 1 {
+			t.Errorf("CountPosts(blog, published) = %d, want 1", got)
+		}
+		pub, err := s.PostsPage(ctx, content.FeedBlog, defaultLocale, true, 3, 0)
+		if err != nil {
+			t.Fatalf("PostsPage(published): %v", err)
+		}
+		if want := []string{"blog/post-6"}; !slices.Equal(slugsOf(pub), want) {
+			t.Errorf("public page 1 = %v, want %v", slugsOf(pub), want)
+		}
+	})
+}
+
 func TestPostAllNonPostExcludesPosts(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()
@@ -326,6 +446,81 @@ func TestPostAllNonPostExcludesPosts(t *testing.T) {
 			if got[i] != want[i] {
 				t.Fatalf("AllNonPost = %v, want %v", got, want)
 			}
+		}
+	})
+}
+
+// The admin Pages list's window and count. Posts' backing pages must stay
+// out of both, or the page count promises rows the table will not show.
+func TestAllNonPostPageWindowsAndCounts(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+
+		// Seven ordinary pages, named so slug order is predictable, plus
+		// two posts whose backing pages must not appear.
+		for i := range 7 {
+			seedPage(t, s, content.Page{Slug: "page-" + strconv.Itoa(i)}, defaultLocale)
+		}
+		seedPost(t, s, content.Post{Page: content.Page{Slug: "blog/b", Title: "B"}, Feed: content.FeedBlog})
+		seedPost(t, s, content.Post{Page: content.Page{Slug: "news/n", Title: "N"}, Feed: content.FeedNews})
+
+		page := func(limit, offset int) []string {
+			t.Helper()
+			pages, err := s.AllNonPostPage(ctx, defaultLocale, limit, offset)
+			if err != nil {
+				t.Fatalf("AllNonPostPage(%d, %d): %v", limit, offset, err)
+			}
+			out := make([]string, len(pages))
+			for i, p := range pages {
+				out[i] = p.Slug
+			}
+			return out
+		}
+
+		// Slug order, three to a page, the window sliding cleanly.
+		if want := []string{"page-0", "page-1", "page-2"}; !slices.Equal(page(3, 0), want) {
+			t.Errorf("page 1 = %v, want %v", page(3, 0), want)
+		}
+		if want := []string{"page-3", "page-4", "page-5"}; !slices.Equal(page(3, 3), want) {
+			t.Errorf("page 2 = %v, want %v", page(3, 3), want)
+		}
+		if want := []string{"page-6"}; !slices.Equal(page(3, 6), want) {
+			t.Errorf("page 3 = %v, want %v", page(3, 6), want)
+		}
+		if got := page(3, 9); len(got) != 0 {
+			t.Errorf("page past the end = %v, want none", got)
+		}
+		// Every page together is every page, once each and in order — and
+		// no post's backing page among them.
+		var walked []string
+		for off := 0; off < 7; off += 3 {
+			walked = append(walked, page(3, off)...)
+		}
+		want := []string{"page-0", "page-1", "page-2", "page-3", "page-4", "page-5", "page-6"}
+		if !slices.Equal(walked, want) {
+			t.Errorf("walking every page = %v, want %v", walked, want)
+		}
+		// An offset without a limit is meaningless and ignored.
+		if got := page(0, 3); len(got) != 7 {
+			t.Errorf("offset without limit returned %d pages, want all 7", len(got))
+		}
+
+		// The count matches, and likewise excludes the posts.
+		n, err := s.CountNonPost(ctx)
+		if err != nil {
+			t.Fatalf("CountNonPost: %v", err)
+		}
+		if n != 7 {
+			t.Errorf("CountNonPost = %d, want 7 (posts excluded)", n)
+		}
+		// AllNonPost keeps its old meaning: everything, unwindowed.
+		all, err := s.AllNonPost(ctx, defaultLocale)
+		if err != nil {
+			t.Fatalf("AllNonPost: %v", err)
+		}
+		if len(all) != n {
+			t.Errorf("AllNonPost returned %d pages but CountNonPost said %d", len(all), n)
 		}
 	})
 }

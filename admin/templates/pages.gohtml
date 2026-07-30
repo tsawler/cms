@@ -30,4 +30,9 @@
     {{end}}
     </tbody>
 </table>
+
+{{/* The module's pagination bar (render.Pager.HTML), the same one the
+     posts list and the public site's {{cmsPagination}} draw. It renders
+     nothing while the pages fit on a single page. */}}
+{{with .Pager}}{{.HTML}}{{end}}
 {{end}}

@@ -293,6 +293,17 @@ func (s *Store) PostByPageID(ctx context.Context, pageID int64, locale string, d
 // publishedOnly, draft and private posts are omitted (the public view);
 // without, editors see everything. A non-positive limit returns everything.
 func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOnly bool, limit int) ([]Post, error) {
+	return s.PostsPage(ctx, feed, locale, publishedOnly, limit, 0)
+}
+
+// PostsPage is Posts with an offset: the window of limit posts starting
+// offset in from the newest, which is what a paginated listing asks for.
+// A non-positive limit still returns everything, offset and all — there is
+// no window to slide without one.
+//
+// The ordering is total (published_at, then id), so no post can straddle
+// two pages or be skipped between them the way an ordering with ties can.
+func (s *Store) PostsPage(ctx context.Context, feed Feed, locale string, publishedOnly bool, limit, offset int) ([]Post, error) {
 	q := `SELECT ` + postColumns(!publishedOnly) + postJoins(!publishedOnly) + ` WHERE ($3 = '' OR po.feed = $3)`
 	if publishedOnly {
 		q += ` AND p.status = 'published' AND p.visibility = 'public'`
@@ -302,6 +313,10 @@ func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOn
 	if limit > 0 {
 		q += ` LIMIT $4`
 		args = append(args, limit)
+		if offset > 0 {
+			q += ` OFFSET $5`
+			args = append(args, offset)
+		}
 	}
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
@@ -316,15 +331,52 @@ func (s *Store) Posts(ctx context.Context, feed Feed, locale string, publishedOn
 	})
 }
 
+// CountPosts is how many posts Posts would return for the same feed and
+// publishedOnly with no limit — what a paginated listing needs to know how
+// many pages it has. It takes no locale: the locale joins only decide
+// which title a post is listed under, never whether it is listed.
+func (s *Store) CountPosts(ctx context.Context, feed Feed, publishedOnly bool) (int, error) {
+	q := `SELECT COUNT(*) FROM cms_posts po JOIN cms_pages p ON p.id = po.page_id
+		WHERE ($1 = '' OR po.feed = $1)`
+	if publishedOnly {
+		q += ` AND p.status = 'published' AND p.visibility = 'public'`
+	}
+	var n int
+	if err := s.db.QueryRow(ctx, q, feed).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // AllNonPost returns every page that is not a post's backing page, ordered
 // by slug — the admin Pages list, where posts appear under Blog & News
 // instead.
 func (s *Store) AllNonPost(ctx context.Context, locale string) ([]Page, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT `+pageColumns(true)+`
-		FROM cms_pages p`+pageMetaJoins(1, 2, true)+`
+	return s.AllNonPostPage(ctx, locale, 0, 0)
+}
+
+// AllNonPostPage is AllNonPost windowed: the limit pages starting offset in
+// from the first. A non-positive limit returns everything, offset and all —
+// there is no window to slide without one.
+//
+// Slugs are unique, so ordering by slug is a total order: no page can
+// straddle two pages of the list or be skipped between them.
+func (s *Store) AllNonPostPage(ctx context.Context, locale string, limit, offset int) ([]Page, error) {
+	q := `
+		SELECT ` + pageColumns(true) + `
+		FROM cms_pages p` + pageMetaJoins(1, 2, true) + `
 		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)
-		ORDER BY p.slug`, locale, s.defaultLocale)
+		ORDER BY p.slug`
+	args := []any{locale, s.defaultLocale}
+	if limit > 0 {
+		q += ` LIMIT $3`
+		args = append(args, limit)
+		if offset > 0 {
+			q += ` OFFSET $4`
+			args = append(args, offset)
+		}
+	}
+	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -335,4 +387,19 @@ func (s *Store) AllNonPost(ctx context.Context, locale string) ([]Page, error) {
 		}
 		return *p, nil
 	})
+}
+
+// CountNonPost is how many pages AllNonPost would return — what the admin's
+// paginated Pages list needs to size its page links. It takes no locale:
+// the metadata joins only decide which title a page is listed under, never
+// whether it is listed.
+func (s *Store) CountNonPost(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM cms_pages p
+		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)`).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }

@@ -108,8 +108,21 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 }()
 
 func (s *server) pagesList(w http.ResponseWriter, r *http.Request) {
-	// Posts' backing pages are managed under Blog & News, not here.
-	pages, err := s.deps.Content.AllNonPost(r.Context(), s.deps.DefaultLocale)
+	// Posts' backing pages are managed under Blog & News, not here — so
+	// the count excludes them exactly as the window does, and the page
+	// count describes what the table shows.
+	total, err := s.deps.Content.CountNonPost(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	// Count, then clamp, then fetch — so a ?page= past the end reads the
+	// last real page rather than a window off the end of the list.
+	pager := render.NewPager(listPage(r), s.perPage(), total, s.listPageURL(r))
+	pager.PrevLabel, pager.NextLabel = s.tr(r, "Previous"), s.tr(r, "Next")
+
+	pages, err := s.deps.Content.AllNonPostPage(r.Context(), s.deps.DefaultLocale,
+		pager.PerPage, pager.Offset())
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -117,6 +130,7 @@ func (s *server) pagesList(w http.ResponseWriter, r *http.Request) {
 	data := s.newTemplateData(r)
 	data.Pages = pages
 	data.PageTemplates = s.deps.Renderer.PageTemplates()
+	data.Pager = pager
 	s.render(w, http.StatusOK, "pages", data)
 }
 

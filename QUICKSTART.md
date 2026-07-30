@@ -185,7 +185,9 @@ The functions available in every template:
 | `{{cmsSections "key"}}` | editor-composed full-width sections |
 | `{{cmsNav "key"}}` | a complete menu (markup, dropdowns, mobile toggle) |
 | `{{cmsMenu "key"}}` | raw menu entries, if you want to own the markup |
-| `{{cmsPosts "blog" 10}}` | blog/news entries for listing pages |
+| `{{cmsPosts "blog" 10}}` | the newest N blog/news entries |
+| `{{cmsFeed "blog"}}` | one `?page=`-worth of a feed, for paginated listings |
+| `{{cmsPagination $feed}}` | a ready-made Previous / 1 2 3 / Next bar |
 | `{{cmsLocales}}` | language-switcher links (multi-locale sites) |
 | `{{cmsHead}}` | meta description, per-page CSS, hreflang — put in `<head>` |
 | `{{cmsScripts}}` | per-page JS — put before `</body>` |
@@ -694,6 +696,24 @@ template ranges over `{{cmsPosts "blog" 12}}` — each entry has `.Title`,
 and `.Draft` (true only for editors, so you can badge drafts). RSS is
 automatic at `/blog/rss.xml` and `/news/rss.xml`.
 
+`cmsPosts` shows the newest N and stops. To page through the whole feed,
+use `cmsFeed` — same entries, one page at a time, paginated server-side
+from `?page=`:
+
+```html
+{{$feed := cmsFeed "blog"}}
+{{range $feed.Posts}}<a href="{{.URL}}"><h2>{{.Title}}</h2></a>{{end}}
+{{cmsPagination $feed}}
+```
+
+Page size is `CMS_POSTS_PER_PAGE` (default 10), or per listing with
+`{{cmsFeed "blog" 6}}`. `{{cmsPagination}}` emits the bar for you under
+`cms-pager*` classes; to own the markup, range over `$feed.Links`
+(`.Number`, `.URL`, `.Current`, `.Ellipsis`) and use `$feed.PrevURL`,
+`$feed.NextURL`, `$feed.Page`, `$feed.TotalPages` and `$feed.HasPages`.
+`examples/basic` shows both — `blog.gohtml` the ready-made bar,
+`news.gohtml` a hand-built one.
+
 `.Thumbnail` and `.Header` are the post's images with their renditions
 resolved — `.URL` is sized for the slot (card size for a thumbnail, full
 width for a header), `.Srcset` lists the rest, `.Width`/`.Height` are the
@@ -848,6 +868,8 @@ Every variable it reads:
 | --- | --- | --- |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
+| `CMS_POSTS_PER_PAGE` | `10` | Posts per page in a paginated `{{cmsFeed}}` listing. Invalid or non-positive is a startup error. |
+| `CMS_ADMIN_PER_PAGE` | `25` | Rows per page in the admin's Blog & News and Pages lists. Invalid or non-positive is a startup error. |
 | `S3_ENDPOINT` | unset (media library disabled) | S3-compatible endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
 | `S3_BUCKET` | — | Bucket for uploaded media. |
 | `S3_ACCESS_KEY` | — | Object-store access key. |

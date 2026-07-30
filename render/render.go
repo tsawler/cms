@@ -193,10 +193,118 @@ type PostInfo struct {
 	Draft bool // only ever true on editor renders
 }
 
-// PostLister supplies a feed's posts, newest first, for {{cmsPosts}}. A
-// non-positive limit means no limit. Nil disables the func (it returns
-// nothing).
-type PostLister func(feed string, limit int) []PostInfo
+// PostLister supplies a feed's posts, newest first, for {{cmsPosts}} and
+// {{cmsFeed}}. offset skips that many posts from the newest; a
+// non-positive limit means no limit (and no offset). total is how long the
+// feed is in full, but only when count is set — pagination needs it to
+// size its page links, and a plain {{cmsPosts}} does not, so the extra
+// query is not worth running unasked. Nil disables both funcs.
+type PostLister func(feed string, limit, offset int, count bool) (posts []PostInfo, total int)
+
+// DefaultPostsPerPage is how many posts a paginated listing shows when
+// neither the host's Config.PostsPerPage nor the template says otherwise.
+const DefaultPostsPerPage = 10
+
+// Pager is where one page of a list sits in the whole of it, and how to
+// reach the others — the state any paginated list needs, whatever it is
+// listing. FeedPage embeds one for {{cmsFeed}} and the admin builds them
+// for its own tables, so every paginated list in the CMS draws the same
+// bar from the same code.
+type Pager struct {
+	Page    int // 1-based, always within [1, TotalPages]
+	PerPage int
+	// Total is the list's full length and TotalPages how many pages that
+	// makes. TotalPages is at least 1, so an empty list is one empty page
+	// rather than a list with no pages at all.
+	Total      int
+	TotalPages int
+	// PrevURL and NextURL are the adjacent pages, empty at either end.
+	PrevURL string
+	NextURL string
+	// Links is the numbered bar: every page in a short list, and in a
+	// long one the ends, the pages around the current one, and ellipses
+	// for the gaps.
+	Links []PageLink
+	// PrevLabel and NextLabel caption the end buttons. NewPager writes
+	// English; a caller with a translator to hand overwrites them (the
+	// admin does, since its UI is bilingual).
+	PrevLabel string
+	NextLabel string
+}
+
+// NewPager works out the numbering for a list of total items shown perPage
+// at a time. page is the one asked for, clamped into range — a number past
+// the end lands on the last real page rather than on an empty one. url
+// builds the link to a page number; nil yields a bare "?page=n".
+//
+// The count has to be known first, so the usual order is: count, NewPager,
+// then fetch Offset()..PerPage. That way an out-of-range page is corrected
+// before the window is read rather than after.
+func NewPager(page, perPage, total int, url func(int) string) *Pager {
+	if perPage <= 0 {
+		perPage = DefaultPostsPerPage
+	}
+	if total < 0 {
+		total = 0
+	}
+	p := &Pager{
+		PerPage: perPage, Total: total, TotalPages: 1,
+		PrevLabel: "Previous", NextLabel: "Next",
+	}
+	if total > 0 {
+		p.TotalPages = (total + perPage - 1) / perPage
+	}
+	p.Page = min(max(page, 1), p.TotalPages)
+	if url == nil {
+		url = func(n int) string { return "?page=" + strconv.Itoa(n) }
+	}
+	if p.Page > 1 {
+		p.PrevURL = url(p.Page - 1)
+	}
+	if p.Page < p.TotalPages {
+		p.NextURL = url(p.Page + 1)
+	}
+	p.Links = pageLinks(p, url)
+	return p
+}
+
+// Offset is how many items to skip to reach this page — the OFFSET of the
+// query that fills it.
+func (p *Pager) Offset() int {
+	if p == nil || p.Page < 1 {
+		return 0
+	}
+	return (p.Page - 1) * p.PerPage
+}
+
+// HasPages reports whether the list runs to more than one page — what a
+// template asks before drawing pagination at all. Safe on a nil Pager.
+func (p *Pager) HasPages() bool { return p != nil && p.TotalPages > 1 }
+
+// FeedPage is one page of a paginated post listing — what
+// {{cmsFeed "blog"}} returns. Posts holds that page's posts and the
+// embedded Pager says where the page sits in the feed, so a template can
+// draw its own pagination from the numbers ({{$feed.Page}},
+// {{range $feed.Links}}) or hand the whole value to {{cmsPagination}}.
+type FeedPage struct {
+	Feed  string     // "blog" or "news"
+	Posts []PostInfo // this page's posts, newest first
+	Pager
+}
+
+// HasPages shadows the embedded Pager's so it stays safe on a nil
+// *FeedPage, which is what {{cmsFeed}} yields for an unknown feed.
+func (f *FeedPage) HasPages() bool { return f != nil && f.TotalPages > 1 }
+
+// PageLink is one entry in the numbered part of a pagination bar. An
+// Ellipsis entry stands for the pages skipped in a long list: it has no
+// number and no URL.
+type PageLink struct {
+	Number   int
+	URL      string
+	Current  bool
+	Ellipsis bool
+}
 
 // PostImages resolves a post's library image into the renditions a
 // template can use. prefer names the rendition wanted as the default src.
@@ -248,20 +356,137 @@ func postImage(md *media.Media, fallbackURL, prefer string, images PostImages) *
 	return &media.Image{URL: fallbackURL}
 }
 
+// feedPage assembles what {{cmsFeed}} returns: the requested page of the
+// feed and the links around it. override is the template's optional
+// per-page argument, which beats the host's Config.PostsPerPage.
+func feedPage(in Input, feed string, override []int) *FeedPage {
+	per := in.PostsPerPage
+	if len(override) > 0 && override[0] > 0 {
+		per = override[0]
+	}
+	url := func(n int) string { return listingURL(in, n) }
+	f := &FeedPage{Feed: feed}
+	if in.Posts == nil {
+		f.Pager = *NewPager(1, per, 0, url)
+		return f
+	}
+
+	// The window and the count come from one lister call, so the usual
+	// page costs one round of queries. Only a ?page= past the end — a
+	// stale bookmark, a crawler counting up — pays for a second: the
+	// pager clamps it to the last real page, and that page is fetched
+	// rather than showing the empty window originally asked for.
+	page := max(in.PageNumber, 1)
+	posts, total := in.Posts(feed, per, (page-1)*per, true)
+	f.Pager = *NewPager(page, per, total, url)
+	if f.Page != page {
+		posts, _ = in.Posts(feed, per, f.Offset(), false)
+	}
+	f.Posts = posts
+	return f
+}
+
+// listingURL is the link to listing page n, from the host's builder or —
+// with no request behind the render — a bare query string.
+func listingURL(in Input, n int) string {
+	if in.PageURL != nil {
+		return in.PageURL(n)
+	}
+	return "?page=" + strconv.Itoa(n)
+}
+
+// pageLinks builds the numbered bar: every page in a short list, and in a
+// long one the first page, the last, and pagerWindow pages either side of
+// the current one, with an Ellipsis entry standing for each gap.
+func pageLinks(p *Pager, url func(int) string) []PageLink {
+	const pagerWindow = 2
+	if p.TotalPages < 2 {
+		return nil
+	}
+	links := make([]PageLink, 0, 2*pagerWindow+5)
+	prev := 0
+	for n := 1; n <= p.TotalPages; n++ {
+		near := n >= p.Page-pagerWindow && n <= p.Page+pagerWindow
+		if !near && n != 1 && n != p.TotalPages {
+			continue
+		}
+		if prev != 0 && n != prev+1 {
+			links = append(links, PageLink{Ellipsis: true})
+		}
+		links = append(links, PageLink{Number: n, URL: url(n), Current: n == p.Page})
+		prev = n
+	}
+	return links
+}
+
+// HTML is the ready-made bar: previous, the numbered links, next. It
+// renders nothing for a list that fits on one page. Like cmsNav it is
+// plain classes over minimal markup (styled by PagerCSS, which
+// {{cmsHead}} inlines on the public site and the admin layout inlines for
+// its own tables), so a stylesheet can restyle it entirely; callers
+// wanting different markup range over the Pager's fields instead.
+//
+// {{cmsPagination}} is this method, and the admin's lists call it
+// directly, so both bars are the same bar.
+func (f *Pager) HTML() template.HTML {
+	if !f.HasPages() {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(`<nav class="cms-pager" aria-label="Pagination">`)
+	writePagerStep(&sb, "cms-pager-prev", f.PrevURL, f.PrevLabel)
+	sb.WriteString(`<ul class="cms-pager-list">`)
+	for _, l := range f.Links {
+		sb.WriteString(`<li class="cms-pager-item">`)
+		switch {
+		case l.Ellipsis:
+			sb.WriteString(`<span class="cms-pager-gap" aria-hidden="true">&hellip;</span>`)
+		case l.Current:
+			// aria-current marks the page you are on; the number is not
+			// a link because it goes nowhere.
+			sb.WriteString(`<span class="cms-pager-link cms-pager-current" aria-current="page">` +
+				strconv.Itoa(l.Number) + `</span>`)
+		default:
+			sb.WriteString(`<a class="cms-pager-link" href="` + html.EscapeString(l.URL) +
+				`" aria-label="Page ` + strconv.Itoa(l.Number) + `">` + strconv.Itoa(l.Number) + `</a>`)
+		}
+		sb.WriteString(`</li>`)
+	}
+	sb.WriteString(`</ul>`)
+	writePagerStep(&sb, "cms-pager-next", f.NextURL, f.NextLabel)
+	sb.WriteString(`</nav>`)
+	return template.HTML(sb.String())
+}
+
+// writePagerStep writes one of the two end buttons. At the end of the feed
+// there is nowhere to go, and it becomes a dimmed span rather than
+// vanishing, so the bar keeps its shape as the visitor pages through.
+func writePagerStep(sb *strings.Builder, class, url, label string) {
+	if url == "" {
+		sb.WriteString(`<span class="cms-pager-step ` + class + ` cms-pager-off" aria-hidden="true">` +
+			label + `</span>`)
+		return
+	}
+	sb.WriteString(`<a class="cms-pager-step ` + class + `" href="` + html.EscapeString(url) + `" rel="` +
+		strings.TrimPrefix(class, "cms-pager-") + `">` + label + `</a>`)
+}
+
 // stubFuncs lets templates parse before real, page-bound funcs are attached
 // at render time via Clone().Funcs().
 var stubFuncs = template.FuncMap{
-	"cmsText":     func(string) string { return "" },
-	"cmsRegion":   func(string) template.HTML { return "" },
-	"cmsImage":    func(string) string { return "" },
-	"cmsSections": func(string) template.HTML { return "" },
-	"cmsMenu":     func(string) []MenuEntry { return nil },
-	"cmsNav":      func(string) template.HTML { return "" },
-	"cmsBrand":    func(...string) template.HTML { return "" },
-	"cmsHead":     func() template.HTML { return "" },
-	"cmsScripts":  func() template.HTML { return "" },
-	"cmsPosts":    func(string, int) []PostInfo { return nil },
-	"cmsLocales":  func() []LocaleLink { return nil },
+	"cmsText":       func(string) string { return "" },
+	"cmsRegion":     func(string) template.HTML { return "" },
+	"cmsImage":      func(string) string { return "" },
+	"cmsSections":   func(string) template.HTML { return "" },
+	"cmsMenu":       func(string) []MenuEntry { return nil },
+	"cmsNav":        func(string) template.HTML { return "" },
+	"cmsBrand":      func(...string) template.HTML { return "" },
+	"cmsHead":       func() template.HTML { return "" },
+	"cmsScripts":    func() template.HTML { return "" },
+	"cmsPosts":      func(string, int) []PostInfo { return nil },
+	"cmsFeed":       func(string, ...int) *FeedPage { return nil },
+	"cmsPagination": func(*FeedPage) template.HTML { return "" },
+	"cmsLocales":    func() []LocaleLink { return nil },
 }
 
 // EditorScriptPath is the public route the in-place editor script is served
@@ -554,9 +779,20 @@ type Input struct {
 	// Post is set when the page backs a blog or news post; it becomes the
 	// template dot's .Post.
 	Post *PostInfo
-	// Posts feeds {{cmsPosts}} on listing templates. Nil makes the func
-	// return nothing.
+	// Posts feeds {{cmsPosts}} and {{cmsFeed}} on listing templates. Nil
+	// makes both funcs return nothing.
 	Posts PostLister
+	// PostsPerPage sizes a {{cmsFeed}} page. Zero uses
+	// DefaultPostsPerPage; a template may override it per listing.
+	PostsPerPage int
+	// PageNumber is the listing page this request asked for (?page=N).
+	// Zero and below mean the first page, and so does a number past the
+	// end — {{cmsFeed}} clamps it to a page that exists.
+	PageNumber int
+	// PageURL builds the URL of listing page n, for {{cmsFeed}}'s
+	// prev/next and numbered links. Nil falls back to a bare "?page=n",
+	// which is right for a render with no request behind it.
+	PageURL func(n int) string
 	// Locales is the site's configured locale list ([0] = default), for
 	// {{cmsLocales}} and hreflang links. Nil or single-entry disables
 	// both.
@@ -653,7 +889,17 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			if in.Posts == nil {
 				return nil
 			}
-			return in.Posts(feed, limit)
+			posts, _ := in.Posts(feed, limit, 0, false)
+			return posts
+		},
+		"cmsFeed": func(feed string, perPage ...int) *FeedPage {
+			return feedPage(in, feed, perPage)
+		},
+		"cmsPagination": func(f *FeedPage) template.HTML {
+			if f == nil {
+				return ""
+			}
+			return f.HTML()
 		},
 		"cmsLocales": func() []LocaleLink { return localeLinks(in) },
 	}
@@ -1050,6 +1296,42 @@ const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
 	`background:none;color:inherit;border:none;border-radius:0;box-shadow:none}` +
 	`}`
 
+// PagerCSS is the functional minimum for cmsPagination markup: one
+// centered row of evenly sized targets, with the current page and the dead
+// end buttons told apart from live links.
+//
+// It states no colors of its own. Everything is currentColor mixed with
+// transparency, so the bar inherits the host's palette and stays legible
+// on a dark background as readily as a light one — the CMS knows neither.
+// The current page is outlined rather than filled for the same reason: a
+// fill needs a second color to contrast against. Plain classes throughout,
+// so a host stylesheet can take the whole thing over.
+const PagerCSS = `.cms-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;` +
+	`gap:.35em;margin:2.5em 0;font-size:.9375em;line-height:1}` +
+	`.cms-pager ul{list-style:none;margin:0;padding:0}` +
+	`.cms-pager-list{display:flex;flex-wrap:wrap;align-items:center;gap:.25em}` +
+	// One shared box for numbers and end buttons: the min-width keeps
+	// single- and double-digit pages the same size, so the row does not
+	// jitter as the visitor pages past 9.
+	`.cms-pager-link,.cms-pager-step{display:inline-block;box-sizing:border-box;min-width:2.5em;` +
+	`padding:.6em .85em;border:1px solid transparent;border-radius:.4em;` +
+	`text-align:center;text-decoration:none;color:inherit}` +
+	// Borders appear on hover rather than sitting on every number, which
+	// keeps a long bar from reading as a row of boxes. The grey pair is a
+	// fallback for browsers without color-mix.
+	`a.cms-pager-link:hover,a.cms-pager-step:hover{border-color:rgba(128,128,128,.35);` +
+	`background:rgba(128,128,128,.12)}` +
+	`a.cms-pager-link:hover,a.cms-pager-step:hover{` +
+	`border-color:color-mix(in srgb,currentColor 30%,transparent);` +
+	`background:color-mix(in srgb,currentColor 10%,transparent)}` +
+	`.cms-pager-current{font-weight:700;border-color:rgba(128,128,128,.55)}` +
+	`.cms-pager-current{border-color:color-mix(in srgb,currentColor 55%,transparent)}` +
+	// The end buttons are wider than a digit and should not be padded out
+	// to a square, and at the end of the feed they dim in place.
+	`.cms-pager-step{min-width:0;font-weight:500}` +
+	`.cms-pager-off{opacity:.35}` +
+	`.cms-pager-gap{display:inline-block;padding:.6em .2em;opacity:.5}`
+
 // navJS toggles cmsNav dropdowns and the mobile hamburger: click
 // opens/closes (one dropdown at a time), clicking elsewhere or Escape
 // closes. The hamburger sets .cms-nav-open on its nav; clicking outside
@@ -1129,7 +1411,7 @@ func localeLinks(in Input) []LocaleLink {
 // HeadCSS is written raw; editing it is restricted to admins.
 func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	var sb strings.Builder
-	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + "</style>\n")
+	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
 	// hreflang alternates need absolute URLs, so they require BaseURL.
 	if in.BaseURL != "" && len(in.Locales) > 1 {
 		for _, l := range localeLinks(in) {

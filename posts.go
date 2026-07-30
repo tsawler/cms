@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,29 +30,73 @@ func (c *CMS) postImages() render.PostImages {
 	return c.media.ImageFor
 }
 
-// postLister returns the {{cmsPosts}} data source for one render: the
-// public sees published posts only, editors also see drafts (flagged, so
-// listing templates can badge them). Nil when blog & news is disabled.
+// postLister returns the {{cmsPosts}} and {{cmsFeed}} data source for one
+// render: the public sees published posts only, editors also see drafts
+// (flagged, so listing templates can badge them). Nil when blog & news is
+// disabled.
+//
+// The count runs against the same publishedOnly filter as the window, so a
+// paginated listing's page count always describes the posts it is actually
+// showing — an editor paging through drafts included.
 func (c *CMS) postLister(ctx context.Context, locale string, editing bool) render.PostLister {
 	if !c.postsEnabled() {
 		return nil
 	}
 	prefix := render.LocalePrefix(locale, c.cfg.Locales[0])
 	images := c.postImages()
-	return func(feed string, limit int) []render.PostInfo {
+	return func(feed string, limit, offset int, count bool) ([]render.PostInfo, int) {
 		if !content.ValidFeed(feed) {
-			return nil
+			return nil, 0
 		}
-		posts, err := c.content.Posts(ctx, content.Feed(feed), locale, !editing, limit)
+		total := 0
+		if count {
+			n, err := c.content.CountPosts(ctx, content.Feed(feed), !editing)
+			if err != nil {
+				c.cfg.Logger.Error("cms: counting posts", "feed", feed, "err", err)
+				return nil, 0
+			}
+			total = n
+		}
+		posts, err := c.content.PostsPage(ctx, content.Feed(feed), locale, !editing, limit, offset)
 		if err != nil {
 			c.cfg.Logger.Error("cms: listing posts", "feed", feed, "err", err)
-			return nil
+			return nil, 0
 		}
 		out := make([]render.PostInfo, 0, len(posts))
 		for i := range posts {
 			out = append(out, *render.PostInfoFor(&posts[i], prefix, images))
 		}
-		return out
+		return out, total
+	}
+}
+
+// listingPage is the page a paginated listing was asked for: the ?page= of
+// the request, or 1 when there is none. A number that does not parse is
+// treated as 1 rather than as a 404 — the page itself is perfectly valid,
+// and {{cmsFeed}} clamps a number past the end to the last real page.
+func listingPage(r *http.Request) int {
+	n, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
+}
+
+// listingPageURL builds the links {{cmsFeed}} hands to {{cmsPagination}}:
+// this same URL with the page number swapped. Any other query parameters —
+// a filter the host site added, a campaign tag — are carried along, and
+// page one carries no page= at all, so the canonical listing URL stays the
+// bare one.
+func listingPageURL(r *http.Request) func(int) string {
+	return func(n int) string {
+		q := r.URL.Query()
+		if n <= 1 {
+			q.Del("page")
+		} else {
+			q.Set("page", strconv.Itoa(n))
+		}
+		u := url.URL{Path: r.URL.Path, RawQuery: q.Encode()}
+		return u.String()
 	}
 }
 

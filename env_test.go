@@ -15,7 +15,8 @@ var envVars = []string{
 	"S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET",
 	"S3_KEY_PREFIX", "S3_APPLY_PUBLIC_POLICY",
 	"CAP_URL", "CAP_INTERNAL_URL", "CAP_SITE_KEY", "CAP_SECRET", "CAP_WIDGET",
-	"CMS_REMEMBER_DAYS", "CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
+	"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE",
+	"CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
 	"CMS_SITE_URL",
 }
@@ -84,6 +85,8 @@ func TestConfigFromEnvFull(t *testing.T) {
 		"CAP_SECRET":             "sk-x",
 		"CAP_WIDGET":             "visible",
 		"CMS_REMEMBER_DAYS":      "14",
+		"CMS_POSTS_PER_PAGE":     "6",
+		"CMS_ADMIN_PER_PAGE":     "40",
 		"CMS_MEDIA_WEBP_QUALITY": "0.5",
 		"CMS_MEDIA_MAX_VIDEO_MB": "128",
 		"CMS_TAILWIND_COMMAND":   "./tw.sh {content} {output}",
@@ -116,6 +119,12 @@ func TestConfigFromEnvFull(t *testing.T) {
 	if cfg.RememberFor != 14*24*time.Hour {
 		t.Errorf("RememberFor = %v, want 336h", cfg.RememberFor)
 	}
+	if cfg.PostsPerPage != 6 {
+		t.Errorf("PostsPerPage = %v, want 6", cfg.PostsPerPage)
+	}
+	if cfg.AdminPerPage != 40 {
+		t.Errorf("AdminPerPage = %v, want 40", cfg.AdminPerPage)
+	}
 	if cfg.MediaWebPQuality != 0.5 {
 		t.Errorf("MediaWebPQuality = %v, want 0.5", cfg.MediaWebPQuality)
 	}
@@ -136,6 +145,8 @@ func TestConfigFromEnvFull(t *testing.T) {
 func TestConfigFromEnvMalformed(t *testing.T) {
 	for envVar, bad := range map[string]string{
 		"CMS_REMEMBER_DAYS":      "soon",
+		"CMS_POSTS_PER_PAGE":     "lots",
+		"CMS_ADMIN_PER_PAGE":     "many",
 		"CMS_MEDIA_WEBP_QUALITY": "high",
 		"CMS_MEDIA_MAX_VIDEO_MB": "big",
 		"CMS_MEDIA_ADOPT":        "sometimes",
@@ -147,12 +158,15 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 		}
 	}
 
-	// Zero and negative "remember me" days are as wrong as non-numeric.
-	for _, bad := range []string{"0", "-3"} {
-		clearEnv(t)
-		t.Setenv("CMS_REMEMBER_DAYS", bad)
-		if _, err := ConfigFromEnv(); err == nil {
-			t.Errorf("CMS_REMEMBER_DAYS=%q: expected an error, got nil", bad)
+	// Zero and negative "remember me" days are as wrong as non-numeric,
+	// and so is a page that holds no posts.
+	for _, k := range []string{"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE"} {
+		for _, bad := range []string{"0", "-3"} {
+			clearEnv(t)
+			t.Setenv(k, bad)
+			if _, err := ConfigFromEnv(); err == nil {
+				t.Errorf("%s=%q: expected an error, got nil", k, bad)
+			}
 		}
 	}
 }

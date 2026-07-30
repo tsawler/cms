@@ -24,6 +24,11 @@ import (
 //     CAP_WIDGET (=visible) → Captcha. Setting CAP_URL enables the
 //     login CAPTCHA.
 //   - CMS_REMEMBER_DAYS → RememberFor, in days.
+//   - CMS_POSTS_PER_PAGE → PostsPerPage, how many posts a paginated blog
+//     or news listing shows on one page.
+//   - CMS_ADMIN_PER_PAGE → AdminPerPage, how many rows a paginated admin
+//     list shows on one page. Separate from CMS_POSTS_PER_PAGE, which
+//     sizes the public listing.
 //   - CMS_MEDIA_WEBP_QUALITY → MediaWebPQuality.
 //   - CMS_MEDIA_MAX_VIDEO_MB → MediaMaxVideoMB.
 //   - CMS_MEDIA_ADOPT (when-empty | off | reconcile) → MediaAdopt, which
@@ -79,6 +84,22 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("cms: CMS_REMEMBER_DAYS %q is not a positive number of days", v)
 		}
 		cfg.RememberFor = time.Duration(d) * 24 * time.Hour
+	}
+
+	if v := os.Getenv("CMS_POSTS_PER_PAGE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("cms: CMS_POSTS_PER_PAGE %q is not a positive number of posts", v)
+		}
+		cfg.PostsPerPage = n
+	}
+
+	if v := os.Getenv("CMS_ADMIN_PER_PAGE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("cms: CMS_ADMIN_PER_PAGE %q is not a positive number of rows", v)
+		}
+		cfg.AdminPerPage = n
 	}
 
 	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {

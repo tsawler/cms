@@ -276,6 +276,11 @@ var frStrings = map[string]string{
 	"news":                                 "nouvelles",
 	"No posts yet — write your first one.": "Aucun billet pour l'instant — rédigez votre premier.",
 
+	// Pagination bar (render.Pager's end buttons; the numbers need no
+	// translating).
+	"Previous": "Précédent",
+	"Next":     "Suivant",
+
 	// Post form.
 	"Edit post":     "Modifier le billet",
 	"Back to posts": "Retour aux billets",

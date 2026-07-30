@@ -55,6 +55,10 @@ type Deps struct {
 	// direct package use) behaves sensibly.
 	RememberFor time.Duration
 
+	// PerPage is how many rows a paginated admin list shows on one page.
+	// The zero value falls back to DefaultPerPage, like RememberFor.
+	PerPage int
+
 	// SiteBaseURL returns the site's absolute public base
 	// ("scheme://host", no trailing slash) for the given request, so the
 	// admin can offer links that work when pasted somewhere else. Nil
@@ -147,6 +151,12 @@ func New(d Deps) http.Handler {
 	r.Use(s.csrf)
 	r.Use(secureHeaders(capOrigin))
 
+	// The module's pagination styles, served as a real stylesheet rather
+	// than inlined in the layout: the admin's CSP carries no
+	// style-src 'unsafe-inline', so an inline <style> would be dropped by
+	// the browser. Registered before the embedded static tree so this
+	// literal path wins over its wildcard.
+	r.Get(pagerCSSPath, servePagerCSS)
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(static)))
 
 	r.Get("/login", s.loginForm)
@@ -290,6 +300,11 @@ type templateData struct {
 	// browsers rather than documents.
 	PageWide bool
 
+	// PagerCSSPath is where the layout links the shared pagination
+	// stylesheet from, relative to AdminPath. A field rather than a
+	// template constant because only Go knows the route.
+	PagerCSSPath string
+
 	// SiteBase is the site's absolute public base for this request; see
 	// Abs. Empty when Deps.SiteBaseURL is unset, which leaves links
 	// site-relative.
@@ -340,6 +355,10 @@ type templateData struct {
 	Posts        []content.Post
 	FormPost     *content.Post
 	FeedFilter   string // active feed filter on the posts list ("", "blog", "news")
+	// Pager is the paging state of a list page, nil on pages that show
+	// everything. Templates render it with {{.Pager.HTML}} — the same bar
+	// the public site's {{cmsPagination}} draws.
+	Pager *render.Pager
 	// Small preview URLs for the post form's two image pickers, resolved
 	// from whichever the post holds — a library image's thumbnail
 	// rendition, or an external URL as it stands. "" when unset.
@@ -444,6 +463,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		MediaEnabled: s.deps.Media != nil,
 		Locales:      s.deps.Locales,
 		EditLocale:   s.deps.DefaultLocale,
+		PagerCSSPath: pagerCSSPath,
 	}
 	if s.deps.SiteBaseURL != nil {
 		td.SiteBase = s.deps.SiteBaseURL(r)

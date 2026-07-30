@@ -5,8 +5,12 @@
     <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{.Title}}</h1>
     <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
 
+    {{/* cmsFeed returns one page of the feed plus the links around it.
+         Page size comes from Config.PostsPerPage (CMS_POSTS_PER_PAGE);
+         pass a number — {{cmsFeed "blog" 6}} — to override it here. */}}
+    {{$feed := cmsFeed "blog"}}
     <div class="mt-10 grid gap-8 sm:grid-cols-2">
-        {{range cmsPosts "blog" 12}}
+        {{range $feed.Posts}}
         <a href="{{.URL}}" class="group block overflow-hidden rounded-xl border border-slate-200 transition-shadow hover:shadow-md">
             {{/* .Thumbnail carries every rendition of the image, so the
                  browser picks one that fits the card instead of scaling
@@ -28,5 +32,10 @@
         <p class="text-slate-500">No posts yet.</p>
         {{end}}
     </div>
+
+    {{/* The ready-made bar, styled by the CMS's own minimal CSS. To style
+         it yourself, range over $feed.Links (and $feed.PrevURL /
+         $feed.NextURL) instead — see news.gohtml. */}}
+    {{cmsPagination $feed}}
 </section>
 {{end}}

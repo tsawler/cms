@@ -23,7 +23,21 @@ func (s *server) postsList(w http.ResponseWriter, r *http.Request) {
 	if !content.ValidFeed(feed) {
 		feed = ""
 	}
-	posts, err := s.deps.Content.Posts(r.Context(), content.Feed(feed), s.deps.DefaultLocale, false, 0)
+	// The admin sees drafts and private posts, so it counts them too:
+	// publishedOnly is false here exactly as it is for the window below,
+	// which keeps the page count describing what the table shows.
+	total, err := s.deps.Content.CountPosts(r.Context(), content.Feed(feed), false)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	// Count, then clamp, then fetch — so a ?page= past the end reads the
+	// last real page rather than a window off the end of the list.
+	pager := render.NewPager(listPage(r), s.perPage(), total, s.listPageURL(r))
+	pager.PrevLabel, pager.NextLabel = s.tr(r, "Previous"), s.tr(r, "Next")
+
+	posts, err := s.deps.Content.PostsPage(r.Context(), content.Feed(feed),
+		s.deps.DefaultLocale, false, pager.PerPage, pager.Offset())
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -31,6 +45,7 @@ func (s *server) postsList(w http.ResponseWriter, r *http.Request) {
 	data := s.newTemplateData(r)
 	data.Posts = posts
 	data.FeedFilter = feed
+	data.Pager = pager
 	s.render(w, http.StatusOK, "posts", data)
 }
 

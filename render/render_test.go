@@ -2,6 +2,8 @@ package render
 
 import (
 	"bytes"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -371,14 +373,16 @@ func TestRenderPostsData(t *testing.T) {
 	post.PublishedAt = time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
 	post.AuthorName = "Pat Writer"
 
-	lister := func(feed string, limit int) []PostInfo {
-		if feed != "blog" || limit != 5 {
-			t.Errorf("lister called with (%q, %d)", feed, limit)
+	// cmsPosts is the unpaginated func: no offset, and no count, since
+	// nothing downstream of it needs the feed's length.
+	lister := func(feed string, limit, offset int, count bool) ([]PostInfo, int) {
+		if feed != "blog" || limit != 5 || offset != 0 || count {
+			t.Errorf("lister called with (%q, %d, %d, %v)", feed, limit, offset, count)
 		}
 		return []PostInfo{
 			{Title: "Launch", Summary: "We shipped", URL: "/blog/launch"},
 			{Title: "WIP", URL: "/blog/wip", Draft: true},
-		}
+		}, 0
 	}
 
 	var buf bytes.Buffer
@@ -405,6 +409,263 @@ func TestRenderPostsData(t *testing.T) {
 	}
 	if got := buf.String(); got != "<ul></ul>" {
 		t.Errorf("plain render: got %q, want empty list only", got)
+	}
+}
+
+// pagedRenderer parses a template that exercises cmsFeed's numbers and
+// cmsPagination's markup together.
+func pagedRenderer(t *testing.T) *Renderer {
+	t.Helper()
+	fsys := fstest.MapFS{
+		"pages/blog.gohtml": &fstest.MapFile{Data: []byte(
+			`{{$f := cmsFeed "blog"}}<p>page {{$f.Page}}/{{$f.TotalPages}} of {{$f.Total}} per {{$f.PerPage}}</p>` +
+				`<ul>{{range $f.Posts}}<li>{{.Title}}</li>{{end}}</ul>{{cmsPagination $f}}`)},
+	}
+	r, err := New(fsys, nil, []PageTemplate{{File: "pages/blog.gohtml", Label: "Blog"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return r
+}
+
+// pagedLister stands in for a feed of total posts, returning the window it
+// is asked for and recording the calls so a test can assert the offset.
+func pagedLister(total int, calls *[][3]int) PostLister {
+	return func(feed string, limit, offset int, count bool) ([]PostInfo, int) {
+		*calls = append(*calls, [3]int{limit, offset, btoi(count)})
+		var out []PostInfo
+		for i := offset; i < offset+limit && i < total; i++ {
+			out = append(out, PostInfo{Title: "Post " + strconv.Itoa(i)})
+		}
+		if !count {
+			return out, 0
+		}
+		return out, total
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func TestRenderFeedPagination(t *testing.T) {
+	r := pagedRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/blog.gohtml", Title: "Blog"}
+	render := func(in Input) string {
+		t.Helper()
+		in.Page, in.Locale = page, "en"
+		var buf bytes.Buffer
+		if err := r.Render(&buf, in); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		return buf.String()
+	}
+
+	// Page two of 25 posts, five to a page: the lister is asked for the
+	// right window, and asked to count, exactly once.
+	var calls [][3]int
+	out := render(Input{Posts: pagedLister(25, &calls), PostsPerPage: 5, PageNumber: 2})
+	if len(calls) != 1 || calls[0] != [3]int{5, 5, 1} {
+		t.Errorf("lister calls = %v, want one (limit 5, offset 5, count)", calls)
+	}
+	if !strings.Contains(out, "<p>page 2/5 of 25 per 5</p>") {
+		t.Errorf("wrong page numbers:\n%s", out)
+	}
+	for _, want := range []string{
+		`<li>Post 5</li>`, `<li>Post 9</li>`,
+		`<a class="cms-pager-step cms-pager-prev" href="?page=1" rel="prev">Previous</a>`,
+		`<a class="cms-pager-step cms-pager-next" href="?page=3" rel="next">Next</a>`,
+		`<span class="cms-pager-link cms-pager-current" aria-current="page">2</span>`,
+		`<a class="cms-pager-link" href="?page=4" aria-label="Page 4">4</a>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Post 4") || strings.Contains(out, "Post 10") {
+		t.Errorf("page 2 leaked a neighbouring page's posts:\n%s", out)
+	}
+
+	// The ends of the feed have no link to step to, and say so without
+	// dropping the button.
+	calls = nil
+	out = render(Input{Posts: pagedLister(25, &calls), PostsPerPage: 5, PageNumber: 1})
+	if !strings.Contains(out, `<span class="cms-pager-step cms-pager-prev cms-pager-off" aria-hidden="true">Previous</span>`) {
+		t.Errorf("first page should have a dead Previous:\n%s", out)
+	}
+	calls = nil
+	out = render(Input{Posts: pagedLister(25, &calls), PostsPerPage: 5, PageNumber: 5})
+	if !strings.Contains(out, `cms-pager-next cms-pager-off`) {
+		t.Errorf("last page should have a dead Next:\n%s", out)
+	}
+
+	// A ?page= past the end clamps to the last real page and refetches,
+	// rather than showing an empty listing.
+	calls = nil
+	out = render(Input{Posts: pagedLister(25, &calls), PostsPerPage: 5, PageNumber: 99})
+	if !strings.Contains(out, "<p>page 5/5 of 25 per 5</p>") || !strings.Contains(out, "<li>Post 20</li>") {
+		t.Errorf("page past the end did not clamp to the last page:\n%s", out)
+	}
+	if len(calls) != 2 || calls[1] != [3]int{5, 20, 0} {
+		t.Errorf("clamping calls = %v, want a second fetch at offset 20", calls)
+	}
+
+	// A feed that fits on one page is one page, with no bar at all.
+	calls = nil
+	out = render(Input{Posts: pagedLister(3, &calls), PostsPerPage: 5})
+	if !strings.Contains(out, "<p>page 1/1 of 3 per 5</p>") || strings.Contains(out, "cms-pager") {
+		t.Errorf("single-page feed should render no pagination:\n%s", out)
+	}
+
+	// An empty feed is still one page, not zero.
+	calls = nil
+	if out = render(Input{Posts: pagedLister(0, &calls), PostsPerPage: 5}); !strings.Contains(out, "<p>page 1/1 of 0 per 5</p>") {
+		t.Errorf("empty feed:\n%s", out)
+	}
+
+	// Without a lister the funcs are inert but must not panic on the
+	// FeedPage they hand back.
+	if out = render(Input{}); !strings.Contains(out, "<p>page 1/1 of 0 per "+strconv.Itoa(DefaultPostsPerPage)+"</p>") {
+		t.Errorf("render without a lister:\n%s", out)
+	}
+}
+
+func TestRenderFeedPerPageAndPageURL(t *testing.T) {
+	// The template's own page size beats Input.PostsPerPage, and PageURL
+	// builds the links.
+	fsys := fstest.MapFS{
+		"pages/blog.gohtml": &fstest.MapFile{Data: []byte(
+			`{{$f := cmsFeed "blog" 2}}{{$f.PerPage}}|{{$f.TotalPages}}|{{$f.PrevURL}}|{{$f.NextURL}}` +
+				`{{range $f.Links}}[{{if .Ellipsis}}...{{else}}{{.Number}}={{.URL}}{{end}}]{{end}}`)},
+	}
+	r, err := New(fsys, nil, []PageTemplate{{File: "pages/blog.gohtml", Label: "Blog"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var calls [][3]int
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{
+		Page: &content.Page{ID: 1, TemplateName: "pages/blog.gohtml"}, Locale: "en",
+		Posts: pagedLister(9, &calls), PostsPerPage: 100, PageNumber: 3,
+		PageURL: func(n int) string { return "/blog?p=" + strconv.Itoa(n) },
+	}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	// 9 posts at the template's 2 per page is 5 pages, not 1 at 100.
+	if !strings.HasPrefix(out, "2|5|/blog?p=2|/blog?p=4") {
+		t.Errorf("per-page override or step URLs wrong:\n%s", out)
+	}
+	if want := "[1=/blog?p=1][2=/blog?p=2][3=/blog?p=3][4=/blog?p=4][5=/blog?p=5]"; !strings.Contains(out, want) {
+		t.Errorf("links = %s, want %s", out, want)
+	}
+}
+
+// NewPager is the shared entry point both the public listings and the
+// admin's tables build their bar from, so its arithmetic — page clamping,
+// offsets, the empty case — has to hold on its own.
+func TestNewPager(t *testing.T) {
+	url := func(n int) string { return "/x?page=" + strconv.Itoa(n) }
+
+	// 47 items at 10 a page is 5 pages, the last one short.
+	p := NewPager(3, 10, 47, url)
+	if p.Page != 3 || p.TotalPages != 5 || p.Offset() != 20 || p.Total != 47 {
+		t.Errorf("page 3 of 47/10: %+v (offset %d)", p, p.Offset())
+	}
+	if p.PrevURL != "/x?page=2" || p.NextURL != "/x?page=4" {
+		t.Errorf("step URLs: prev=%q next=%q", p.PrevURL, p.NextURL)
+	}
+	if !p.HasPages() {
+		t.Error("5 pages should report HasPages")
+	}
+
+	// Both ends: no link off the edge.
+	if first := NewPager(1, 10, 47, url); first.PrevURL != "" || first.NextURL == "" {
+		t.Errorf("first page: prev=%q next=%q", first.PrevURL, first.NextURL)
+	}
+	if last := NewPager(5, 10, 47, url); last.NextURL != "" || last.PrevURL == "" {
+		t.Errorf("last page: prev=%q next=%q", last.PrevURL, last.NextURL)
+	}
+
+	// Out of range in either direction clamps into it, so Offset never
+	// points off the end of the list (or before its start).
+	for _, asked := range []int{6, 99, 0, -4} {
+		got := NewPager(asked, 10, 47, url)
+		if got.Page < 1 || got.Page > got.TotalPages {
+			t.Errorf("page %d clamped to %d, outside 1..%d", asked, got.Page, got.TotalPages)
+		}
+		if got.Offset() < 0 || got.Offset() >= got.Total {
+			t.Errorf("page %d gave offset %d, outside 0..%d", asked, got.Offset(), got.Total)
+		}
+	}
+
+	// An empty list is one empty page, not zero pages, and draws no bar.
+	empty := NewPager(1, 10, 0, url)
+	if empty.TotalPages != 1 || empty.Page != 1 || empty.Offset() != 0 {
+		t.Errorf("empty list: %+v", empty)
+	}
+	if empty.HasPages() || empty.HTML() != "" {
+		t.Errorf("empty list should draw no bar, got %q", empty.HTML())
+	}
+
+	// A nonsense page size falls back rather than dividing by zero.
+	if got := NewPager(1, 0, 30, url); got.PerPage != DefaultPostsPerPage {
+		t.Errorf("perPage 0 fell back to %d, want %d", got.PerPage, DefaultPostsPerPage)
+	}
+	// A nil URL builder still yields usable links.
+	if got := NewPager(1, 10, 30, nil); got.NextURL != "?page=2" {
+		t.Errorf("nil url builder gave next=%q, want ?page=2", got.NextURL)
+	}
+	// Default labels are English; the admin overwrites them.
+	if got := NewPager(1, 10, 30, url); got.PrevLabel != "Previous" || got.NextLabel != "Next" {
+		t.Errorf("labels = %q/%q", got.PrevLabel, got.NextLabel)
+	}
+}
+
+func TestPageLinksEllipsizeLongFeeds(t *testing.T) {
+	// Twenty pages: the ends, the current page and two either side, and
+	// an ellipsis for each gap.
+	p := &Pager{Page: 10, TotalPages: 20}
+	var got []string
+	for _, l := range pageLinks(p, func(n int) string { return "" }) {
+		if l.Ellipsis {
+			got = append(got, "...")
+			continue
+		}
+		got = append(got, strconv.Itoa(l.Number))
+	}
+	want := []string{"1", "...", "8", "9", "10", "11", "12", "...", "20"}
+	if !slices.Equal(got, want) {
+		t.Errorf("pageLinks(10 of 20) = %v, want %v", got, want)
+	}
+
+	// Near the start there is no gap to elide on the left.
+	p = &Pager{Page: 2, TotalPages: 20}
+	got = nil
+	for _, l := range pageLinks(p, func(n int) string { return "" }) {
+		if l.Ellipsis {
+			got = append(got, "...")
+			continue
+		}
+		got = append(got, strconv.Itoa(l.Number))
+	}
+	want = []string{"1", "2", "3", "4", "...", "20"}
+	if !slices.Equal(got, want) {
+		t.Errorf("pageLinks(2 of 20) = %v, want %v", got, want)
+	}
+
+	// A short feed shows every page, ungapped.
+	p = &Pager{Page: 1, TotalPages: 4}
+	if links := pageLinks(p, func(n int) string { return "" }); len(links) != 4 {
+		t.Errorf("pageLinks(1 of 4) returned %d links, want 4", len(links))
+	}
+	// One page is no bar.
+	if links := pageLinks(&Pager{Page: 1, TotalPages: 1}, func(int) string { return "" }); links != nil {
+		t.Errorf("pageLinks(1 of 1) = %v, want none", links)
 	}
 }
 

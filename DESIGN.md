@@ -348,7 +348,45 @@ Templates see posts two ways: on a post's own page the dot carries
 any template can call `{{cmsPosts "blog" 12}}` for render-ready listing
 entries (public renders get published posts; editors also get drafts,
 flagged so templates can badge them). Listing pages are just pages using
-a listing template, created wherever the host wants them. RSS is served
+a listing template, created wherever the host wants them.
+
+Listings paginate server-side. `{{cmsFeed "blog"}}` reads `?page=` off
+the request and returns one page — a `LIMIT`/`OFFSET` window plus a
+`COUNT(*)`, so the query cost does not grow with the feed — along with
+the prev/next and numbered links to reach the rest; `{{cmsPagination}}`
+renders those as markup, the same data-or-markup pair as `cmsMenu` and
+`cmsNav`. Page size is `Config.PostsPerPage` (`CMS_POSTS_PER_PAGE`,
+default 10), overridable per listing from the template. The ordering is
+total — `published_at` then `id` — so no post can straddle two pages or
+be skipped between them, and the count runs the same published-only
+filter as the window, so an editor paging through drafts sees a page
+count that matches what they are being shown. A page number past the end
+clamps to the last real page rather than 404ing or showing an empty
+listing: a listing URL with a junk page number is still a valid page.
+`{{cmsPosts}}` stays as it was, the unpaginated newest-N func, since
+plenty of listings (a homepage's "latest three") want exactly that and
+should not pay for a count.
+
+The admin's Blog & News and Pages lists page the same way, off the same
+`render.Pager` and the same `render.PagerCSS`, so there is one pagination
+bar in the codebase rather than an admin one and a site one that drift.
+The shared pieces — `perPage`, `listPage`, `listPageURL`, and the
+stylesheet route — live in `admin/pagination.go`; a list handler counts,
+builds a pager, then fetches its window, in that order. Two things differ
+from the public site. Its page size is `Config.AdminPerPage`
+(`CMS_ADMIN_PER_PAGE`, default 25), separate from `PostsPerPage` because
+an editor's table wants far more rows than a blog page and tuning one
+must not disturb the other; it sizes every paginated admin list, since a
+per-list knob would be configuration nobody asked for. And its links carry `AdminPath` — the admin
+router runs with its mount prefix stripped, so a link built from
+`r.URL.Path` alone would point at the public site. The bar's stylesheet
+is *served*, at `{AdminPath}/static/pager.css`, not inlined: the admin's
+CSP has no `style-src 'unsafe-inline'`, so an inline `<style>` reaches
+the browser and is silently dropped. The feed tab (`?feed=blog`) rides
+along in the page links, so paging the Blog tab does not drop you back
+into All, and the Pages list's count excludes posts' backing pages
+exactly as its window does, so the page count never promises rows the
+table will not show. RSS is served
 at fixed paths `/blog/rss.xml` and `/news/rss.xml` (dots can't appear in
 page slugs, so the paths are free), taking channel metadata from the
 published listing page at the feed's slug when one exists. The

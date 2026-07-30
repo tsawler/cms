@@ -586,7 +586,8 @@ post's metadata as `.Post` (nil on ordinary pages):
 ```
 
 Any template can list posts with `cmsPosts` — feed name and a limit
-(≤ 0 for all), newest first:
+(≤ 0 for all), newest first. It does not paginate; for a listing that
+walks the whole feed see [Paginated listings](#paginated-listings) below:
 
 ```html
 {{range cmsPosts "blog" 12}}
@@ -604,6 +605,51 @@ Any template can list posts with `cmsPosts` — feed name and a limit
 
 Each entry carries `Feed`, `Title`, `Summary` (the page description),
 `URL`, `PublishedAt`, `Author`, `Thumbnail`, `Header`, and `Draft`.
+
+#### Paginated listings
+
+`cmsPosts` shows the newest N posts and stops; older posts are reachable
+only by their own URL. For a listing that walks the whole feed, use
+`cmsFeed` instead. It returns one page of posts plus everything needed to
+link to the others, and reads the page number from `?page=` on the
+request — the query runs `LIMIT`/`OFFSET` server-side, so a long feed
+never loads more than a page's worth of rows:
+
+```html
+{{$feed := cmsFeed "blog"}}
+{{range $feed.Posts}}
+  <a href="{{.URL}}"><h2>{{.Title}}</h2></a>
+{{end}}
+{{cmsPagination $feed}}
+```
+
+Page size comes from `Config.PostsPerPage` (`CMS_POSTS_PER_PAGE`, default
+10). Pass a number to override it for one listing: `{{cmsFeed "blog" 6}}`.
+
+`{{cmsPagination $feed}}` emits a ready-made bar — Previous, numbered
+page links, Next — under `cms-pager*` classes your stylesheet can
+restyle, the same arrangement as `cmsNav`. To own the markup instead,
+build it from the `FeedPage` fields:
+
+| Field | What it holds |
+| --- | --- |
+| `.Posts` | this page's posts, the same `PostInfo` entries `cmsPosts` returns |
+| `.Page`, `.TotalPages` | where this page sits; `TotalPages` is at least 1 |
+| `.Total`, `.PerPage` | posts in the whole feed, and per page |
+| `.PrevURL`, `.NextURL` | adjacent pages; empty at either end |
+| `.Links` | the numbered bar: `.Number`, `.URL`, `.Current`, `.Ellipsis` |
+| `.HasPages` | true when the feed runs to more than one page |
+
+`.Links` shows every page in a short feed; in a long one it shows the
+first page, the last, the two either side of the current one, and an
+`.Ellipsis` entry for each gap. `examples/basic` has both versions —
+`blog.gohtml` calls `cmsPagination`, `news.gohtml` draws its own.
+
+A `?page=` past the end of the feed lands on the last real page rather
+than an empty listing, and one that is not a number is page 1; neither is
+a 404. Page 1's links omit `page=` altogether, so the canonical listing
+URL stays the bare one, and any other query parameters on the URL are
+carried across pages.
 
 `Thumbnail` and `Header` are the post's images with every rendition
 resolved, and are nil when the post has none. Each has `URL` (a default
@@ -989,8 +1035,9 @@ own stylesheet defines.
 The example loads variables from a `.env` file — `examples/basic/.env`
 first, falling back to one at the repo root — without overriding
 anything already set in the real environment. The `CMS_TAILWIND_*`,
-`S3_*`, and `CAP_*` variables plus `CMS_SITE_URL`, `CMS_REMEMBER_DAYS`
-and the two `CMS_MEDIA_*` knobs are read by `cms.ConfigFromEnv`, which any host can
+`S3_*`, and `CAP_*` variables plus `CMS_SITE_URL`, `CMS_REMEMBER_DAYS`,
+`CMS_POSTS_PER_PAGE`, `CMS_ADMIN_PER_PAGE` and the two `CMS_MEDIA_*` knobs are read by
+`cms.ConfigFromEnv`, which any host can
 use to fill those `Config` fields; the rest are the example's own.
 Everything read:
 
@@ -1003,6 +1050,8 @@ Everything read:
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
+| `CMS_POSTS_PER_PAGE` | `10` | How many posts a paginated `{{cmsFeed}}` listing shows per page. An invalid or non-positive value is a startup error. A template can override it per listing with `{{cmsFeed "blog" 6}}`. |
+| `CMS_ADMIN_PER_PAGE` | `25` | How many rows a paginated admin list shows per page (Blog & News, and Pages). Separate from `CMS_POSTS_PER_PAGE`: an editor's table wants more rows than a public listing. An invalid or non-positive value is a startup error. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
 | `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |

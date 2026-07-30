@@ -171,6 +171,26 @@ type Config struct {
 	// own set, so different pages may define the same block names.
 	PageTemplates []PageTemplate
 
+	// PostsPerPage is how many posts a paginated listing shows on one
+	// page — {{cmsFeed "blog"}} and the ?page= links it builds. Zero, the
+	// default, uses render.DefaultPostsPerPage (10); negative values are
+	// invalid. A listing template can override it per feed with
+	// {{cmsFeed "blog" 6}}, and {{cmsPosts}} ignores it entirely, being
+	// the unpaginated "newest N" func. Set it from the environment with
+	// CMS_POSTS_PER_PAGE; see ConfigFromEnv.
+	PostsPerPage int
+
+	// AdminPerPage is how many rows a paginated admin list shows on one
+	// page — Blog & News, and Pages. Zero, the default, uses
+	// admin.DefaultPerPage (25); negative values are invalid. Set it from
+	// the environment with CMS_ADMIN_PER_PAGE; see ConfigFromEnv.
+	//
+	// It is deliberately separate from PostsPerPage: that one sizes the
+	// public listing, where the number is a design decision about the
+	// site, and an editor's table wants far more rows than a blog page
+	// does. Tuning one must not disturb the other.
+	AdminPerPage int
+
 	// PostTemplate is the page template blog and news posts render with.
 	// A post is an ordinary page underneath — its slug lives under blog/
 	// or news/ and its body is edited in place like any page, sections
@@ -322,6 +342,18 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.RememberFor <= 0 {
 		cfg.RememberFor = 30 * 24 * time.Hour
 	}
+	if cfg.PostsPerPage < 0 {
+		return nil, fmt.Errorf("cms: PostsPerPage must not be negative, got %d", cfg.PostsPerPage)
+	}
+	if cfg.PostsPerPage == 0 {
+		cfg.PostsPerPage = render.DefaultPostsPerPage
+	}
+	if cfg.AdminPerPage < 0 {
+		return nil, fmt.Errorf("cms: AdminPerPage must not be negative, got %d", cfg.AdminPerPage)
+	}
+	if cfg.AdminPerPage == 0 {
+		cfg.AdminPerPage = admin.DefaultPerPage
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -439,6 +471,7 @@ func New(cfg Config) (*CMS, error) {
 		DefaultLocale:  cfg.Locales[0],
 		Locales:        cfg.Locales,
 		RememberFor:    cfg.RememberFor,
+		PerPage:        cfg.AdminPerPage,
 	})
 	return c, nil
 }
@@ -780,6 +813,12 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		BaseURL:   c.siteBaseURL(r),
 		Site:      site,
 		AdminPath: c.cfg.AdminPath,
+		// Pagination for {{cmsFeed}} listings. Every page render carries
+		// it: which template paginates is the template's business, and
+		// none of this costs a query until one calls the func.
+		PostsPerPage: c.cfg.PostsPerPage,
+		PageNumber:   listingPage(r),
+		PageURL:      listingPageURL(r),
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)

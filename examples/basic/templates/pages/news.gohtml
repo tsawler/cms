@@ -5,8 +5,9 @@
     <h1 class="text-3xl font-bold tracking-tight text-slate-900">{{.Title}}</h1>
     <div class="prose prose-slate mt-4">{{cmsRegion "intro"}}</div>
 
+    {{$feed := cmsFeed "news"}}
     <div class="mt-10 divide-y divide-slate-200">
-        {{range cmsPosts "news" 20}}
+        {{range $feed.Posts}}
         <a href="{{.URL}}" class="group flex gap-5 py-6">
             {{with or .Thumbnail .Header}}
             <img src="{{.URL}}" srcset="{{.Srcset}}" sizes="7rem"
@@ -25,5 +26,60 @@
         <p class="py-6 text-slate-500">No news yet.</p>
         {{end}}
     </div>
+
+    {{/* Pagination drawn by hand from the FeedPage, where blog.gohtml
+         just calls {{cmsPagination}}. The fields are the same either way;
+         this is the version to copy when the bar has to match the site's
+         own design. */}}
+    {{if $feed.HasPages}}
+    {{/* Previous and Next hold the outer edges and the numbers sit
+         between them, so the bar keeps its shape as you page through. At
+         either end the button stays put and greys out rather than
+         disappearing and shifting everything sideways. */}}
+    <nav class="mt-12 flex items-center justify-between gap-4 border-t border-slate-200 pt-6 text-sm"
+         aria-label="Pagination">
+        {{if $feed.PrevURL}}
+        <a href="{{$feed.PrevURL}}" rel="prev"
+           class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900">
+            <span aria-hidden="true">&larr;</span> Previous
+        </a>
+        {{else}}
+        <span class="inline-flex items-center gap-1.5 px-3 py-2 font-medium text-slate-300">
+            <span aria-hidden="true">&larr;</span> Previous
+        </span>
+        {{end}}
+
+        {{/* The numbers are the first thing to go when there is no room
+             for them; Previous and Next alone still walk the feed. */}}
+        <span class="hidden items-center gap-1 sm:flex">
+            {{range $feed.Links}}
+                {{if .Ellipsis}}
+                <span class="px-1.5 text-slate-300" aria-hidden="true">&hellip;</span>
+                {{else if .Current}}
+                <span aria-current="page"
+                      class="min-w-9 rounded-lg bg-slate-900 px-3 py-2 text-center font-semibold text-white">{{.Number}}</span>
+                {{else}}
+                <a href="{{.URL}}" aria-label="Page {{.Number}}"
+                   class="min-w-9 rounded-lg px-3 py-2 text-center font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900">{{.Number}}</a>
+                {{end}}
+            {{end}}
+        </span>
+
+        {{/* Below the numbers' breakpoint, a plain "Page 2 of 5" keeps
+             your place visible when the numbered links are hidden. */}}
+        <span class="text-slate-400 sm:hidden">Page {{$feed.Page}} of {{$feed.TotalPages}}</span>
+
+        {{if $feed.NextURL}}
+        <a href="{{$feed.NextURL}}" rel="next"
+           class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900">
+            Next <span aria-hidden="true">&rarr;</span>
+        </a>
+        {{else}}
+        <span class="inline-flex items-center gap-1.5 px-3 py-2 font-medium text-slate-300">
+            Next <span aria-hidden="true">&rarr;</span>
+        </span>
+        {{end}}
+    </nav>
+    {{end}}
 </section>
 {{end}}
