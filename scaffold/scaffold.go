@@ -202,11 +202,11 @@ type templateData struct {
 	// site named 6" Nails would otherwise end the Go string early.
 	SiteNameHTML string
 	Program      string
-	Slug        string
-	Engine      string
-	EngineLabel string
-	Dialect     string
-	Driver      string
+	Slug         string
+	Engine       string
+	EngineLabel  string
+	Dialect      string
+	Driver       string
 
 	DriverImport string
 	DSN          string
