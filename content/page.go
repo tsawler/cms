@@ -218,10 +218,12 @@ func (s *Store) GetByID(ctx context.Context, id int64, locale string) (*Page, er
 // reads as the site serves it; without, it reads as the working copy, which
 // is what the editor and preview want.
 func (s *Store) GetBySlug(ctx context.Context, slug, locale string, publishedOnly bool) (*Page, error) {
+	// The site page is excluded here rather than only at the router: it is
+	// not a page, and nothing that resolves a URL should ever land on it.
 	q := `
 		SELECT ` + pageColumns(!publishedOnly) + `
 		FROM cms_pages p` + pageMetaJoins(2, 3, !publishedOnly) + `
-		WHERE p.slug = $1`
+		WHERE p.slug = $1 AND NOT p.is_system`
 	if publishedOnly {
 		q += ` AND p.status = 'published'`
 	}
@@ -234,6 +236,7 @@ func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT `+pageColumns(true)+`
 		FROM cms_pages p`+pageMetaJoins(1, 2, true)+`
+		WHERE NOT p.is_system
 		ORDER BY p.slug`, locale, s.defaultLocale)
 	if err != nil {
 		return nil, err
@@ -253,7 +256,8 @@ func (s *Store) Counts(ctx context.Context) (pages, posts int, err error) {
 	err = s.db.QueryRow(ctx, `
 		SELECT
 			(SELECT count(*) FROM cms_pages p
-			 WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)),
+			 WHERE NOT p.is_system
+			   AND NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)),
 			(SELECT count(*) FROM cms_posts)`).Scan(&pages, &posts)
 	return pages, posts, err
 }
@@ -485,9 +489,11 @@ func (s *Store) MetaFor(ctx context.Context, pageID int64, locale string) (PageM
 	return m, nil
 }
 
-// Delete removes a page and (via cascade) its metadata and blocks.
+// Delete removes a page and (via cascade) its metadata and blocks. The
+// site page is not deletable — losing it would take every shared region
+// with it — so it reads as not found.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	tag, err := s.db.Exec(ctx, "DELETE FROM cms_pages WHERE id = $1", id)
+	tag, err := s.db.Exec(ctx, "DELETE FROM cms_pages WHERE id = $1 AND NOT is_system", id)
 	if err != nil {
 		return err
 	}

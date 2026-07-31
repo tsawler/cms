@@ -17,7 +17,8 @@ var testFS = fstest.MapFS{
 		`{{define "base"}}<html><head>{{cmsHead}}</head><body>` +
 			`<nav>{{range cmsMenu "main"}}<a href="{{.URL}}"{{if .Active}} class="act"{{end}}>{{.Label}}</a>{{end}}</nav>` +
 			`{{cmsNav "main"}}` +
-			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}{{cmsScripts}}</body></html>{{end}}`)},
+			`<h1>{{cmsText "site-name"}}</h1>{{block "content" .}}{{end}}` +
+			`<footer>{{cmsShared "footer" "<p>&copy; Acme</p>"}}</footer>{{cmsScripts}}</body></html>{{end}}`)},
 	"pages/home.gohtml": &fstest.MapFile{Data: []byte(
 		`{{template "base" .}}{{define "content"}}{{if .Title}}<p>{{cmsText "tagline"}}</p>{{end}}` +
 			`<h2>{{cmsTitle}}</h2>` +
@@ -888,6 +889,125 @@ func TestEditRenderMarksFallbackRegions(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "data-cms-fallback") {
 		t.Error("public render leaked fallback markers")
+	}
+}
+
+// A shared region is the site's content rather than the page's: it renders
+// on every page from one stored copy, falls back to the template's own
+// markup while nobody has filled it, and never appears among the page's
+// regions.
+func TestRenderSharedRegion(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 4, TemplateName: "pages/home.gohtml", Title: "Home"}
+
+	// Nothing stored: the template's fallback markup stands in.
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), "<p>&copy; Acme</p>") {
+		t.Errorf("empty shared region did not fall back to the template's markup:\n%s", buf.String())
+	}
+
+	// Stored content replaces it, and comes from Shared rather than Blocks.
+	shared := []content.Block{{PageID: 99, Region: "footer", Kind: content.KindHTML,
+		Content: `<p>Call <a href="/contact">us</a></p>`}}
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Shared: shared, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<p>Call <a href="/contact">us</a></p>`) {
+		t.Errorf("shared content missing:\n%s", out)
+	}
+	if strings.Contains(out, "&copy; Acme") {
+		t.Error("fallback rendered even though the region has content")
+	}
+
+	// A page region named "footer" is a different region: page blocks must
+	// not leak into the shared one.
+	buf.Reset()
+	err := r.Render(&buf, Input{Page: page, Locale: "en",
+		Blocks: []content.Block{{Region: "footer", Kind: content.KindHTML, Content: "<p>page footer</p>"}}})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(buf.String(), "page footer") {
+		t.Error("a page block filled the shared region")
+	}
+}
+
+// In edit mode a shared region is marked like any other, but its name
+// carries the shared prefix — that is what tells the editor to save it to
+// the site instead of to the page it is standing on.
+func TestRenderSharedRegionEditMarkers(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 4, TemplateName: "pages/home.gohtml", Title: "Home"}
+	shared := []content.Block{{Region: "footer", Kind: content.KindHTML, Locale: "en", Content: "<p>Bye</p>"}}
+
+	var buf bytes.Buffer
+	err := r.Render(&buf, Input{Page: page, Shared: shared, Locale: "en",
+		Edit: &EditInfo{PageID: 4, AdminPath: "/admin", Locale: "en"}})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), `<div data-cms-region="site:footer" data-cms-kind="html"><p>Bye</p></div>`) {
+		t.Errorf("shared region marker missing or unprefixed:\n%s", buf.String())
+	}
+
+	// Untranslated shared content is badged the same way page content is.
+	buf.Reset()
+	err = r.Render(&buf, Input{Page: page, Shared: shared, Locale: "fr",
+		Edit: &EditInfo{PageID: 4, AdminPath: "/admin", Locale: "fr"}})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), `data-cms-region="site:footer" data-cms-kind="html" data-cms-fallback="1"`) {
+		t.Errorf("untranslated shared region not badged:\n%s", buf.String())
+	}
+}
+
+// Shared regions are collected across every template, because the content
+// they name is reached from whichever page an editor happens to be on —
+// and they are kept out of any one page's region list.
+func TestSharedRegionsAreSiteWideAndNotPageRegions(t *testing.T) {
+	fsys := fstest.MapFS{
+		"base.gohtml": &fstest.MapFile{Data: []byte(
+			`{{define "base"}}<html><body>{{block "content" .}}{{end}}` +
+				`<footer>{{cmsShared "footer"}}</footer></body></html>{{end}}`)},
+		"pages/a.gohtml": &fstest.MapFile{Data: []byte(
+			`{{template "base" .}}{{define "content"}}{{cmsRegion "main"}}{{end}}`)},
+		"pages/b.gohtml": &fstest.MapFile{Data: []byte(
+			`{{template "base" .}}{{define "content"}}{{cmsShared "contact-strip"}}{{cmsRegion "main"}}{{end}}`)},
+	}
+	r, err := New(fsys, []string{"base.gohtml"}, []PageTemplate{
+		{File: "pages/a.gohtml", Label: "A"}, {File: "pages/b.gohtml", Label: "B"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, file := range []string{"pages/a.gohtml", "pages/b.gohtml"} {
+		for _, region := range r.Regions(file) {
+			if region.Kind == KindShared {
+				t.Errorf("%s: Regions returned shared region %q", file, region.Name)
+			}
+		}
+	}
+
+	var names []string
+	for _, region := range r.SharedRegions() {
+		if region.Kind != KindShared {
+			t.Errorf("SharedRegions returned kind %q", region.Kind)
+		}
+		names = append(names, region.Name)
+	}
+	// "footer" is declared by the layout both pages share, so it must come
+	// back once rather than once per template.
+	want := []string{"contact-strip", "footer"}
+	slices.Sort(names)
+	if !slices.Equal(names, want) {
+		t.Errorf("SharedRegions: got %v, want %v", names, want)
 	}
 }
 

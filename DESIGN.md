@@ -310,6 +310,63 @@ draft state**: they are site-wide, so "publish on which page?" has no
 good answer; changes are live at once. Labels get per-locale variants
 when phase 7 lands.
 
+### 4.2.1 Shared regions — content the site owns, not a page
+
+A footer is the same on every page, so requiring an editor to build one
+per page is asking them to maintain the same paragraph in twenty places.
+But regions are keyed `(page, region, locale)`, and the whole editing
+stack — save, sanitize, draft/publish, translate — is keyed to a page id.
+
+So `{{cmsShared "footer"}}` is an ordinary rich region whose content
+belongs to **one reserved system page** (slug `__site`, `is_system` on
+`cms_pages`). Nothing about blocks, sanitization, snapshots, or locale
+fallback changes; only the id the rows hang off does. It is the same
+trade as posts being pages (4.3): reuse the machinery rather than grow a
+parallel one. The alternative — a nullable `page_id` plus an owner
+column — would give every block query a variant and leave the UNIQUE key
+meaning less than it does now.
+
+Consequences, in order of how much thought they took:
+
+- **The read costs nothing extra.** A page render already loads its
+  blocks; the shared ones come back in the same query, the site page
+  reached by an uncorrelated subquery on its slug rather than by an id
+  resolved in a round trip of its own. Locale fallback is decided per
+  (page, region) rather than per region, so a translated shared footer
+  cannot stop an untranslated page region of the same name from falling
+  back.
+- **Markers are namespaced.** An edit render emits
+  `data-cms-region="site:footer"`; the editor collects and saves it like
+  any other region, and the save endpoint splits the submitted map on the
+  prefix. So the editor needed no new code path, and a page region named
+  "footer" stays a different region from the shared one.
+- **Region names are validated against the union of all templates.**
+  Shared content has no template of its own — it is reached from
+  whichever page the editor is standing on — so `SharedRegions()` unions
+  what every template set declares, and `Regions()` (the page's own list,
+  which drives the admin form) filters shared regions out.
+- **Publish rides along; discard does not.** There is no page to publish
+  shared content "on", so publishing any page publishes it, and the
+  status chip counts unpublished shared edits so the chip is not lying
+  about the page in front of you. Discard deliberately does not ride
+  along: reverting page A's draft should not silently delete footer work
+  done on page B. The cost is that undoing a shared edit before
+  publishing means editing it back, which is the cheaper mistake.
+- **An empty region renders the template's own markup.** `{{cmsShared
+  "footer" "<p>&copy; Acme</p>"}}` shows the fallback until someone
+  edits, which is what makes "every site has a footer by default" true
+  with no seeding step — and in edit mode the fallback is the starting
+  point for the first edit, the same trick untranslated regions use.
+- **The system page is not a page.** It is filtered out of listings,
+  counts, and slug lookup, and refuses to be deleted. It is also
+  recreated on demand if it goes missing, so an emptied database (a test
+  harness truncating between cases) heals rather than losing the ability
+  to save shared content.
+
+Shared regions are rich HTML only. `cmsText`, `cmsImage`, and
+`cmsSections` all exist to be placed by a page's own layout, and a
+site-wide sections stack is a page in a layout slot, not a region.
+
 ### 4.3 Blog & news — posts are pages
 
 Requirement 5 could have been a parallel content pipeline (`cms_posts` +
@@ -492,7 +549,8 @@ non-technical users.
 ```
 cms_users         id, email, name, password_hash (argon2id), role (admin|editor), active
 cms_sessions      token, data, expiry
-cms_pages         id, slug, template_name, status (draft|published), sort, parent_id
+cms_pages         id, slug, template_name, status (draft|published), sort, parent_id,
+                  is_system  -- the reserved __site row owning shared regions (4.2.1)
 cms_page_meta     page_id, locale, title, description            -- SEO per locale
 cms_blocks        id, page_id, region, sort, snippet_key (nullable), html, locale, status
 cms_page_assets   page_id, kind (css|js), inline_content, media_id

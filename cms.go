@@ -731,7 +731,9 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	if editing {
 		blockStatus = content.StatusDraft
 	}
-	blocks, err := c.content.EffectiveBlocks(r.Context(), page.ID, locale, blockStatus)
+	// The page's own blocks and the site's shared ones ({{cmsShared}})
+	// come back from one query: every page renders both.
+	blocks, shared, err := c.content.EffectiveBlocksWithShared(r.Context(), page.ID, locale, blockStatus)
 	if err != nil {
 		c.cfg.Logger.Error("cms: loading blocks", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
@@ -779,6 +781,16 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 				c.cfg.Logger.Error("cms: checking unpublished changes", "slug", slug, "err", err)
 				hasUnpublished = false
 			}
+			// Shared regions are on this page too, so saved-but-unlive
+			// footer edits are unpublished changes here as much as the
+			// page's own are — and Publish makes both live.
+			if !hasUnpublished {
+				sharedChanged, err := c.content.HasSharedUnpublishedChanges(r.Context())
+				if err != nil {
+					c.cfg.Logger.Error("cms: checking shared unpublished changes", "err", err)
+				}
+				hasUnpublished = sharedChanged
+			}
 		}
 		edit = &render.EditInfo{
 			PageID:         page.ID,
@@ -804,6 +816,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	if err := c.renderer.Render(w, render.Input{
 		Page:      page,
 		Blocks:    blocks,
+		Shared:    shared,
 		Locale:    locale,
 		Menus:     menus,
 		Edit:      edit,

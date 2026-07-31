@@ -188,6 +188,7 @@ The functions available in every template:
 | `{{cmsText "key"}}` | short plain text (headlines, labels) |
 | `{{cmsTitle}}` | the page's own title, typed over in place while editing |
 | `{{cmsRegion "key"}}` | rich HTML content (the main editable body) |
+| `{{cmsShared "key"}}` | rich HTML stored once for the whole site (a footer) |
 | `{{cmsImage "key"}}` | an image URL from the media library |
 | `{{cmsSections "key"}}` | editor-composed full-width sections |
 | `{{cmsNav "key"}}` | a complete menu (markup, dropdowns, mobile toggle) |
@@ -240,7 +241,7 @@ markup.
 
 <footer class="border-t border-slate-200 mt-16">
     <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
-        © My Site
+        {{cmsShared "footer" "<p>&copy; My Site</p>"}}
     </div>
 </footer>
 {{cmsScripts}}
@@ -327,6 +328,12 @@ Conventions worth knowing:
 - **Keys are per-page.** `{{cmsRegion "main"}}` on two different pages is
   two independent pieces of content. Pages that switch template later
   keep content in regions both templates share.
+- **`{{cmsShared}}` is the exception**, and is what a footer wants: its
+  content is stored once for the site, so putting one in your layout
+  gives every page an editable footer without anyone creating it page by
+  page. It takes optional fallback markup —
+  `{{cmsShared "footer" "<p>&copy; My Site</p>"}}` — shown until an
+  editor fills it in. Publishing any page publishes shared edits with it.
 - Templates are parsed at startup — restart the server after editing
   them. The file extension is your choice (`.gohtml` plays best with
   editor tooling), but pages store their template's *path*, so renaming

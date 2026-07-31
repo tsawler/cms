@@ -389,7 +389,7 @@ func (s *server) finishContentSave(w http.ResponseWriter, r *http.Request, pageI
 		published = s.tr(r, "Post published.")
 	}
 	if r.PostFormValue("action") == "publish" {
-		if err := s.deps.Content.Publish(r.Context(), pageID); err != nil {
+		if err := s.publishWithShared(r.Context(), pageID); err != nil {
 			s.serverError(w, err)
 			return
 		}
@@ -457,6 +457,66 @@ func (s *server) saveRegions(ctx context.Context, pageID int64, templateName str
 		}
 	}
 	return nil
+}
+
+// splitSharedRegions separates the shared regions out of a submitted
+// region map by their marker prefix (see render.SharedRegionPrefix),
+// returning the page's own values and the shared ones under their bare
+// names. The editor sends both in one request because it collects
+// whatever regions were edited, and on any given page those can be a
+// mixture of the page's and the site's.
+func splitSharedRegions(values map[string]string) (page, shared map[string]string) {
+	page = make(map[string]string, len(values))
+	shared = map[string]string{}
+	for name, value := range values {
+		if bare, ok := render.SharedRegionName(name); ok {
+			shared[bare] = value
+			continue
+		}
+		page[name] = value
+	}
+	return page, shared
+}
+
+// saveSharedRegions writes shared-region values as draft blocks on the
+// site page. Like saveRegions it stores only regions a template actually
+// declares — the union across every template, since shared content has no
+// template of its own — and sanitizes HTML from non-admins.
+//
+// Shared regions are rich HTML only: a footer is a block of content, and
+// the text/image/sections kinds all exist to be placed by a page's own
+// layout.
+func (s *server) saveSharedRegions(ctx context.Context, values map[string]string, isAdmin bool, locale string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	for _, region := range s.deps.Renderer.SharedRegions() {
+		value, ok := values[region.Name]
+		if !ok {
+			continue
+		}
+		if !isAdmin {
+			value = editorHTMLPolicy.Sanitize(value)
+		}
+		if err := s.deps.Content.UpsertSharedBlock(ctx, region.Name, locale,
+			content.KindHTML, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishWithShared makes a page's draft live, and the site's shared
+// content along with it. Shared regions render on every page, so there is
+// no page they could be published "on" — they ride along with whichever
+// page the editor publishes, which is also the page they were edited on.
+// Publishing twice over unchanged shared content is a no-op, so this costs
+// nothing when nobody has touched the footer.
+func (s *server) publishWithShared(ctx context.Context, pageID int64) error {
+	if err := s.deps.Content.Publish(ctx, pageID); err != nil {
+		return err
+	}
+	return s.deps.Content.PublishShared(ctx)
 }
 
 // validImageURL accepts empty (no image), app-relative, or http(s) URLs.
@@ -530,7 +590,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	locale := s.formLocale(r)
-	blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), page.ID, locale, content.StatusDraft)
+	blocks, shared, err := s.deps.Content.EffectiveBlocksWithShared(r.Context(), page.ID, locale, content.StatusDraft)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -545,6 +605,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Renderer.Render(w, render.Input{
 		Page:    page,
 		Blocks:  blocks,
+		Shared:  shared,
 		Locale:  locale,
 		Menus:   menus,
 		Locales: s.deps.Locales,

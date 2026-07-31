@@ -364,7 +364,8 @@ func (s *Store) AllNonPostPage(ctx context.Context, locale string, limit, offset
 	q := `
 		SELECT ` + pageColumns(true) + `
 		FROM cms_pages p` + pageMetaJoins(1, 2, true) + `
-		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)
+		WHERE NOT p.is_system
+		  AND NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)
 		ORDER BY p.slug`
 	args := []any{locale, s.defaultLocale}
 	if limit > 0 {
@@ -396,7 +397,8 @@ func (s *Store) CountNonPost(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM cms_pages p
-		WHERE NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)`).Scan(&n)
+		WHERE NOT p.is_system
+		  AND NOT EXISTS (SELECT 1 FROM cms_posts po WHERE po.page_id = p.id)`).Scan(&n)
 	if err != nil {
 		return 0, err
 	}

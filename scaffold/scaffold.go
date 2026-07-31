@@ -23,6 +23,7 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"html"
 	"io/fs"
 	"os"
 	"path"
@@ -195,8 +196,12 @@ var manifest = []file{
 // referenced by name in files/*.tmpl, so renaming one is a breaking change
 // to those templates — TestGeneratedProjectMatchesExample catches it.
 type templateData struct {
-	SiteName    string
-	Program     string
+	SiteName string
+	// SiteNameHTML is SiteName escaped for use inside a quoted template
+	// argument that is also HTML — the footer's {{cmsShared}} fallback. A
+	// site named 6" Nails would otherwise end the Go string early.
+	SiteNameHTML string
+	Program      string
 	Slug        string
 	Engine      string
 	EngineLabel string
@@ -239,8 +244,10 @@ func Write(dir string, opts Options) ([]Result, error) {
 	}
 	program := filepath.Base(abs)
 
+	siteName := cmp(opts.SiteName, titleCase(program))
 	data := templateData{
-		SiteName:       cmp(opts.SiteName, titleCase(program)),
+		SiteName:       siteName,
+		SiteNameHTML:   html.EscapeString(siteName),
 		Program:        program,
 		Slug:           slugify(program),
 		Engine:         string(opts.Engine),

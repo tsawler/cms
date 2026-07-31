@@ -2,6 +2,7 @@ package render
 
 import (
 	"path"
+	"sort"
 	"text/template/parse"
 )
 
@@ -9,14 +10,61 @@ import (
 // {{cmsRegion "key"}}, {{cmsImage "key"}}, or {{cmsSections "key"}}.
 type Region struct {
 	Name string
-	Kind string // "text", "html", "image", or "sections"
+	Kind string // "text", "html", "image", "sections", or "shared"
 }
+
+// KindShared is the Kind of a region declared with {{cmsShared "key"}}:
+// content stored once for the whole site rather than per page. Regions
+// never returns one — a shared region is not the page's to save — and
+// SharedRegions returns nothing else.
+const KindShared = "shared"
 
 // Regions walks the parse tree of a page template (and every template it
 // invokes) and returns the editable regions it declares, in source order,
 // deduplicated. This is how the admin UI knows which content fields to show
 // for a page without the developer maintaining a separate region list.
+//
+// Shared regions are left out: they belong to the site, not to any page
+// that happens to render them (see SharedRegions).
 func (r *Renderer) Regions(templateFile string) []Region {
+	out := r.declaredRegions(templateFile)
+	kept := out[:0]
+	for _, region := range out {
+		if region.Kind != KindShared {
+			kept = append(kept, region)
+		}
+	}
+	return kept
+}
+
+// SharedRegions returns every shared region ({{cmsShared "key"}}) any of
+// the host's templates declares, deduplicated. Shared content has no
+// template of its own to be validated against — it is reached from
+// whichever page an editor happens to be on — so this union is what a save
+// checks a region name against.
+func (r *Renderer) SharedRegions() []Region {
+	var out []Region
+	seen := map[string]bool{}
+	// Sorted, so the list does not shuffle with map iteration order.
+	files := make([]string, 0, len(r.sets))
+	for file := range r.sets {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	for _, file := range files {
+		for _, region := range r.declaredRegions(file) {
+			if region.Kind == KindShared && !seen[region.Name] {
+				seen[region.Name] = true
+				out = append(out, region)
+			}
+		}
+	}
+	return out
+}
+
+// declaredRegions is Regions without the shared filter — every region the
+// template set declares, in source order.
+func (r *Renderer) declaredRegions(templateFile string) []Region {
 	set, ok := r.sets[templateFile]
 	if !ok {
 		return nil
@@ -54,6 +102,8 @@ func (r *Renderer) Regions(templateFile string) []Region {
 							record("image", str.Text)
 						case "cmsSections":
 							record("sections", str.Text)
+						case "cmsShared":
+							record(KindShared, str.Text)
 						}
 					}
 				}

@@ -74,7 +74,11 @@
 
 <footer class="border-t border-slate-200 mt-16">
     <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
-        &copy; [[.SiteName]]
+        {{/* cmsShared is an editable region stored once for the whole
+             site, so this footer is editable in place on every page and
+             nobody has to build one page by page. The second argument is
+             what shows until someone edits it. */}}
+        {{cmsShared "footer" "<p>&copy; [[.SiteNameHTML]]</p>"}}
     </div>
 </footer>
 {{/* cmsScripts emits the in-place editor when an editor is signed in,

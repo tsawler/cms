@@ -63,7 +63,10 @@
 
 <footer class="border-t border-slate-200 mt-16">
     <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
-        Built with the cms module.
+        {{/* A shared region: stored once for the site, edited in place on
+             whichever page you happen to be on, and rendered on all of
+             them. The second argument shows until someone edits it. */}}
+        {{cmsShared "footer" "<p>Built with the cms module.</p>"}}
     </div>
 </footer>
 {{cmsScripts}}

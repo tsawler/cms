@@ -221,7 +221,7 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	locale := s.formLocale(r)
-	blocks, err := s.deps.Content.EffectiveBlocks(r.Context(), post.ID, locale, content.StatusDraft)
+	blocks, shared, err := s.deps.Content.EffectiveBlocksWithShared(r.Context(), post.ID, locale, content.StatusDraft)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -236,6 +236,7 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 	err = s.deps.Renderer.Render(w, render.Input{
 		Page:    &post.Page,
 		Blocks:  blocks,
+		Shared:  shared,
 		Locale:  locale,
 		Menus:   menus,
 		Post:    render.PostInfoFor(post, render.LocalePrefix(locale, s.deps.DefaultLocale), s.postImages()),

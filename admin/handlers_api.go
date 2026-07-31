@@ -32,7 +32,10 @@ func jsonError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// apiSaveRegions stores in-place edits as draft blocks.
+// apiSaveRegions stores in-place edits as draft blocks. Region names
+// carrying the shared prefix ("site:footer") are the site's, not the
+// page's, and are stored against the site page instead — the editor sends
+// whatever was edited on screen, and that can be a mixture of the two.
 // POST /api/pages/{id}/regions  body: {"regions": {"name": "content", ...}}
 func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.pageFromURL(w, r)
@@ -55,9 +58,16 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isAdmin := s.currentUser(r).Role.IsAdmin()
-	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, body.Regions, isAdmin,
-		s.requestLocale(body.Locale)); err != nil {
+	locale := s.requestLocale(body.Locale)
+	pageValues, sharedValues := splitSharedRegions(body.Regions)
+	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, pageValues, isAdmin,
+		locale); err != nil {
 		s.deps.Logger.Error("cms admin: api saving regions", "page", page.ID, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
+		return
+	}
+	if err := s.saveSharedRegions(r.Context(), sharedValues, isAdmin, locale); err != nil {
+		s.deps.Logger.Error("cms admin: api saving shared regions", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
 		return
 	}
@@ -781,14 +791,15 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// apiPublish makes the page's draft content live.
+// apiPublish makes the page's draft content live, and the site's shared
+// content with it (see publishWithShared).
 // POST /api/pages/{id}/publish
 func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.pageFromURL(w, r)
 	if !ok {
 		return
 	}
-	if err := s.deps.Content.Publish(r.Context(), page.ID); err != nil {
+	if err := s.publishWithShared(r.Context(), page.ID); err != nil {
 		s.deps.Logger.Error("cms admin: api publishing", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Publishing failed — try again."))
 		return

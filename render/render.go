@@ -504,6 +504,7 @@ func writePagerStep(sb *strings.Builder, class, url, label string) {
 var stubFuncs = template.FuncMap{
 	"cmsText":        func(string) string { return "" },
 	"cmsRegion":      func(string) template.HTML { return "" },
+	"cmsShared":      func(string, ...string) template.HTML { return "" },
 	"cmsImage":       func(string) string { return "" },
 	"cmsSections":    func(string) template.HTML { return "" },
 	"cmsHasSections": func(string) bool { return false },
@@ -523,6 +524,19 @@ var stubFuncs = template.FuncMap{
 // EditorScriptPath is the public route the in-place editor script is served
 // from.
 const EditorScriptPath = "/cms/editor/editor.js"
+
+// SharedRegionPrefix namespaces shared regions in the marker attributes an
+// edit render emits: {{cmsShared "footer"}} becomes
+// data-cms-region="site:footer". The prefix is what tells the editor to
+// save that region to the site rather than to the page it is standing on,
+// and it keeps a page region named "footer" distinct from the shared one.
+const SharedRegionPrefix = "site:"
+
+// SharedRegionName strips the marker prefix from a region name, reporting
+// whether it was there — the server side of SharedRegionPrefix.
+func SharedRegionName(marker string) (string, bool) {
+	return strings.CutPrefix(marker, SharedRegionPrefix)
+}
 
 // EditorStyle is one entry in the in-place editor's "Styles" menu. Styles
 // apply CSS classes — never inline styles — so the host site's stylesheet
@@ -831,6 +845,10 @@ func (r *Renderer) contentCSSHref() string {
 type Input struct {
 	Page   *content.Page
 	Blocks []content.Block
+	// Shared holds the site's shared-region blocks — what {{cmsShared}}
+	// renders. They are the same on every page, so they arrive alongside
+	// the page's own rather than being looked up per region.
+	Shared []content.Block
 	Locale string
 	Menus  map[string][]MenuEntry
 	// Edit produces the editable variant of the page; see EditInfo. Nil
@@ -911,9 +929,37 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		return sb.String()
 	}
 
+	bySharedRegion := make(map[string][]content.Block)
+	for _, b := range in.Shared {
+		bySharedRegion[b.Region] = append(bySharedRegion[b.Region], b)
+	}
+	// A shared region the site has never filled renders the template's own
+	// fallback markup, so a footer says something sensible from the first
+	// request rather than leaving an empty band until someone edits it.
+	// In edit mode the fallback lands inside the editable wrapper, which
+	// makes it the starting point for the first edit — the same trick
+	// untranslated regions use.
+	sharedRegion := func(key string, fallback []string) string {
+		var sb strings.Builder
+		for _, b := range bySharedRegion[key] {
+			sb.WriteString(b.Content)
+		}
+		if sb.Len() == 0 && len(fallback) > 0 {
+			return fallback[0]
+		}
+		return sb.String()
+	}
+
 	funcs := template.FuncMap{
 		"cmsText":   func(key string) string { return text(key) },
 		"cmsRegion": func(key string) template.HTML { return template.HTML(region(key)) },
+		// cmsShared is cmsRegion for content the whole site shares — a
+		// footer, a contact strip — so a template can carry one on every
+		// page without an editor having to create it on each. The optional
+		// second argument is the markup to show while the region is empty.
+		"cmsShared": func(key string, fallback ...string) template.HTML {
+			return template.HTML(sharedRegion(key, fallback))
+		},
 		"cmsImage": func(key string) string {
 			for _, b := range byRegion[key] {
 				if b.Kind == content.KindImage {
@@ -1012,6 +1058,21 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		funcs["cmsRegion"] = func(key string) template.HTML {
 			return template.HTML(`<div data-cms-region="` + html.EscapeString(key) +
 				`" data-cms-kind="html"` + fallback(key) + `>` + region(key) + `</div>`)
+		}
+		// A shared region is marked like any other, but its name carries
+		// the shared prefix: the editor saves it to the site rather than
+		// to this page, and a page region of the same name stays a
+		// different region.
+		sharedFallback := func(key string) string {
+			blocks := bySharedRegion[key]
+			if len(blocks) == 0 || blocks[0].Locale == "" || blocks[0].Locale == locale {
+				return ""
+			}
+			return ` data-cms-fallback="1"`
+		}
+		funcs["cmsShared"] = func(key string, fb ...string) template.HTML {
+			return template.HTML(`<div data-cms-region="` + html.EscapeString(SharedRegionPrefix+key) +
+				`" data-cms-kind="html"` + sharedFallback(key) + `>` + sharedRegion(key, fb) + `</div>`)
 		}
 		// The title is page metadata rather than a region, so its marker
 		// carries no region name: the editor saves it to the page's

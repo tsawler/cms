@@ -138,6 +138,7 @@ UI discovers them automatically:
 <h1>{{cmsText "hero-title"}}</h1>       <!-- short plain text -->
 <h1>{{cmsTitle}}</h1>                   <!-- the page's own title, edited in place -->
 <div>{{cmsRegion "main"}}</div>         <!-- rich HTML content -->
+<div>{{cmsShared "footer"}}</div>       <!-- rich HTML shared by every page -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
 {{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
 <head> ... {{cmsHead}} ... </head>      <!-- meta description + per-page CSS -->
@@ -917,6 +918,58 @@ dropdown parents (whose own `URL` is empty):
 
 Hand-rolled navs render the same data but aren't right-click editable —
 the in-place menu editor only attaches to `cmsNav` markup.
+
+## Shared regions: one footer for the whole site
+
+A footer is the same on every page, so nobody should have to build one
+page by page. `{{cmsShared "key"}}` is a rich region like `cmsRegion`,
+except that its content is stored once for the site and rendered on every
+page that uses the template:
+
+```html
+<footer class="border-t mt-16">
+  <div class="mx-auto max-w-4xl px-6 py-8 text-sm text-slate-500">
+    {{cmsShared "footer" "<p>&copy; Example Site</p>"}}
+  </div>
+</footer>
+```
+
+Put it in your layout and every page has an editable footer from the
+first request — no page to create, nothing to seed. The optional second
+argument is markup to show while the region is empty, so a fresh site
+says something sensible; it disappears the moment an editor saves
+content, and comes back if they empty the region again.
+
+Editing works exactly as it does for page content: an editor clicks into
+the footer on whichever page they are on, TinyMCE opens inline, snippets
+and images drop in, and **Save draft** stages the change. What differs is
+scope, and it is worth being clear with editors about it:
+
+- **Nothing goes live until a Publish, but any page's Publish makes it
+  live.** Shared content has no page of its own to be published from, so
+  it rides along with whichever page the editor publishes — the same page
+  they were editing it on. The status chip counts unpublished shared
+  edits, so a page showing "Unpublished edits" may be reporting a footer
+  change rather than one of its own.
+- **Discard is page-only.** Discarding a page's draft leaves shared edits
+  alone rather than silently throwing away work done elsewhere on the
+  site. To undo a footer change before publishing, edit it back.
+- Translations work per region as everywhere else: a shared region with
+  no content in the current locale renders the default language with the
+  usual dashed amber "not translated" badge, and editing it writes that
+  locale's copy.
+
+Templates may declare as many shared regions as they like
+(`{{cmsShared "footer"}}`, `{{cmsShared "contact-strip"}}`), and a shared
+region and a page region may safely have the same name — they are
+different regions. Shared regions are rich HTML only; there is no shared
+equivalent of `cmsText`, `cmsImage`, or `cmsSections`.
+
+Under the hood the content lives in `cms_blocks` like everything else,
+against one reserved system page (slug `__site`) that never appears in
+the admin's Pages list and is not reachable as a URL. That is what lets
+shared content reuse drafts, publishing, sanitization, and locales
+unchanged.
 
 ## Site settings: brand & menu alignment
 

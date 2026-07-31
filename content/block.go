@@ -44,12 +44,16 @@ func (s *Store) BlocksFor(ctx context.Context, pageID int64, locale string, stat
 	if err != nil {
 		return nil, err
 	}
-	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Block, error) {
-		var b Block
-		err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
-			&b.Kind, &b.SnippetKey, &b.Content, sqldb.JSONInto(&b.Settings))
-		return b, err
-	})
+	return sqldb.CollectRows(rows, scanBlock)
+}
+
+// scanBlock reads one block row in the column order every block query
+// selects.
+func scanBlock(row sqldb.Scanner) (Block, error) {
+	var b Block
+	err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
+		&b.Kind, &b.SnippetKey, &b.Content, sqldb.JSONInto(&b.Settings))
+	return b, err
 }
 
 // EffectiveBlocks returns a page's blocks for locale with region-level
@@ -62,36 +66,7 @@ func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string
 	if locale == s.defaultLocale {
 		return s.BlocksFor(ctx, pageID, locale, status)
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT id, page_id, region, locale, status, sort, kind, snippet_key, content, settings
-		FROM cms_blocks
-		WHERE page_id = $1 AND locale IN ($2, $3) AND status = $4
-		ORDER BY region, sort`, pageID, locale, s.defaultLocale, status)
-	if err != nil {
-		return nil, err
-	}
-	all, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (Block, error) {
-		var b Block
-		err := row.Scan(&b.ID, &b.PageID, &b.Region, &b.Locale, &b.Status, &b.Sort,
-			&b.Kind, &b.SnippetKey, &b.Content, sqldb.JSONInto(&b.Settings))
-		return b, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	localized := map[string]bool{}
-	for _, b := range all {
-		if b.Locale == locale {
-			localized[b.Region] = true
-		}
-	}
-	out := all[:0]
-	for _, b := range all {
-		if b.Locale == locale || !localized[b.Region] {
-			out = append(out, b)
-		}
-	}
-	return out, nil
+	return s.effectiveBlocks(ctx, pageID, false, locale, status)
 }
 
 // HasUnpublishedChanges reports whether a page has edits that the site is
