@@ -35,7 +35,12 @@
         <span class="cms-crumb-sep" aria-hidden="true">/</span>
         <strong>{{.T "Search results"}}</strong>
         {{else if .CurrentFolder}}
-        <a href="{{.AdminPath}}/media?tab={{.MediaTab}}">{{.T "All media"}}</a>
+        {{- /* data-crumb-root: inside a folder this crumb is both the way
+               back to the root and somewhere to drop files to send them
+               there. Only in this branch — during a search there is no
+               folder you are standing in to move things out of. */}}
+        <a href="{{.AdminPath}}/media?tab={{.MediaTab}}" data-crumb-root
+           title="{{.T "Move out of this folder"}}">{{.T "All media"}}</a>
         <span class="cms-crumb-sep" aria-hidden="true">/</span>
         <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
         <strong>{{.CurrentFolder.Name}}</strong>
@@ -134,6 +139,15 @@
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-selbar-clear" data-sel-clear>{{.T "Clear"}}</button>
     </div>
 
+    {{- /* Where a drag-and-drop move is submitted. It carries no controls
+           of its own: the destination is written in on drop, and the ids
+           come from the selection like every other bulk action, which is
+           why a drag starts by selecting what it is dragging. */}}
+    <form method="post" action="{{.AdminPath}}/media/bulk/move" data-sel-form data-drag-move hidden>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="folder" value="">
+    </form>
+
     <div class="cms-browser-body">
         <div class="cms-items-wrap">
             {{- /* Column headings, list view only. Clicking one sorts. */}}
@@ -167,7 +181,11 @@
                 {{end}}
 
                 {{range .Entries}}
-                <li class="cms-item" role="option" aria-selected="false"
+                {{- /* draggable: files are dragged onto a folder to file
+                       them, or onto the "All media" crumb to send them back
+                       to the root. Folder entries are not draggable —
+                       folders are flat, so there is nowhere to drag one. */}}
+                <li class="cms-item" role="option" aria-selected="false" draggable="true"
                     data-id="{{.ID}}"
                     data-open="{{.OriginalURL}}"
                     {{- /* Not data-copy: that attribute marks a
@@ -190,7 +208,11 @@
                     data-thumb="{{.ThumbURL}}">
                     <span class="cms-item-thumb">
                         {{if .ThumbURL}}
-                        <img src="{{.ThumbURL}}" alt="" loading="lazy">
+                        {{- /* draggable="false": an <img> is draggable by
+                               default and, being the innermost draggable
+                               element, would win over the entry around it —
+                               dragging the picture instead of the file. */}}
+                        <img src="{{.ThumbURL}}" alt="" loading="lazy" draggable="false">
                         {{else if eq .Kind "video"}}
                         <span class="cms-item-sheet cms-item-sheet-video" aria-hidden="true">
                             <span class="cms-item-ext">{{if .Ext}}{{slice .Ext 1}}{{end}}</span>

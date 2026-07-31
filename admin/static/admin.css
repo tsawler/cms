@@ -606,12 +606,15 @@ body.cms-dragging .cms-table {
     background: var(--cms-spruce-tint);
     border-color: var(--cms-spruce-line);
 }
-/* Dragging files over a folder: this is where they will land. */
+/* Dragging files over a folder: this is where they will land. Shared by
+   uploads from the desktop and by entries dragged within the listing. */
 .cms-item.cms-drop-target {
     background: var(--cms-spruce-tint);
     border-color: var(--cms-spruce);
     border-style: dashed;
 }
+/* The entries in flight, so it reads as moving them rather than copying. */
+.cms-dragging-items .cms-item.cms-selected { opacity: .45; }
 
 .cms-item-thumb {
     display: flex;
@@ -888,6 +891,15 @@ body.cms-dragging .cms-table {
 }
 .cms-crumb-sep { color: var(--cms-muted); }
 .cms-crumb-delete { margin-left: auto; }
+/* Dropping files on the root crumb sends them out of the folder. The
+   outline sits outside the link so the target grows without the text
+   shifting the crumbs along with it. */
+.cms-crumbs a.cms-drop-target {
+    background: var(--cms-spruce-tint);
+    border-radius: var(--cms-radius);
+    outline: 1px dashed var(--cms-spruce);
+    outline-offset: 3px;
+}
 
 /* Grid/list toggle in the path bar */
 .cms-view-toggle { display: flex; gap: .25rem; margin-right: .35rem; }

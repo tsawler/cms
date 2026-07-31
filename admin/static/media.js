@@ -627,6 +627,109 @@
     });
 
     // ---------------------------------------------------------------
+    // Drag to move
+    //
+    // Files are dragged onto a folder to file them, or onto the "All
+    // media" crumb to send them back to the root. This is an accelerator
+    // for the selection bar, never the only way: the move dropdown and
+    // the ↑ All media button do the same work for anyone who can't drag.
+    //
+    // Uploads from the desktop are a different gesture handled above, and
+    // the two never collide — an OS drag carries "Files", this one
+    // carries a type of our own, and each ignores what it doesn't own.
+    // ---------------------------------------------------------------
+    var DRAG_TYPE = "application/x-cms-media";
+    var dragForm = document.querySelector("[data-drag-move]");
+    var dropEl = null;
+
+    // Only the types are readable during a drag — getData is withheld
+    // until drop — so the payload is what marks a drag as one of ours.
+    function draggingItems(e) {
+        var types = e.dataTransfer && e.dataTransfer.types;
+        if (!types) return false;
+        for (var i = 0; i < types.length; i++) {
+            if (types[i] === DRAG_TYPE) return true;
+        }
+        return false;
+    }
+
+    function markDrop(el) {
+        if (dropEl === el) return;
+        if (dropEl) dropEl.classList.remove("cms-drop-target");
+        dropEl = el;
+        if (dropEl) dropEl.classList.add("cms-drop-target");
+    }
+
+    function fileIDs() {
+        return selected()
+            .map(function (x) { return x.getAttribute("data-id"); })
+            .filter(Boolean);
+    }
+
+    itemsEl.addEventListener("dragstart", function (e) {
+        var el = e.target.closest ? e.target.closest(".cms-item") : null;
+        // Folders have no id and nowhere to go; neither has anything to drag.
+        if (!el || !el.getAttribute("data-id")) { e.preventDefault(); return; }
+
+        // Dragging something outside the selection makes it the selection,
+        // the way a file manager does — otherwise the drop would move
+        // whatever happened to be selected instead of what was grabbed.
+        if (!isSelected(el)) { selectOnly(el); sync(); }
+
+        var ids = fileIDs();
+        if (!ids.length) { e.preventDefault(); return; }
+        e.dataTransfer.setData(DRAG_TYPE, ids.join(","));
+        e.dataTransfer.effectAllowed = "move";
+        itemsEl.classList.add("cms-dragging-items");
+    });
+
+    itemsEl.addEventListener("dragend", function () {
+        itemsEl.classList.remove("cms-dragging-items");
+        markDrop(null);
+    });
+
+    // dropTarget wires one destination. `folder` is what the move form
+    // posts: a folder id, or "root" for unfiled.
+    function dropTarget(el, folder) {
+        if (!el || !folder) return;
+
+        function over(e) {
+            if (!draggingItems(e)) return;
+            e.preventDefault(); // without this the drop never fires
+            e.dataTransfer.dropEffect = "move";
+            markDrop(el);
+        }
+        el.addEventListener("dragenter", over);
+        el.addEventListener("dragover", over);
+
+        el.addEventListener("dragleave", function (e) {
+            // Crossing onto a child fires leave on the parent; those are
+            // not departures, and acting on them makes the target flicker.
+            if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+            if (dropEl === el) markDrop(null);
+        });
+
+        el.addEventListener("drop", function (e) {
+            if (!draggingItems(e)) return;
+            e.preventDefault(); // a drop on a link would otherwise navigate
+            markDrop(null);
+            if (!dragForm || !fileIDs().length) return;
+            dragForm.querySelector("input[name=folder]").value = folder;
+            // The shared [data-sel-form] handler fills in the ids.
+            dragForm.requestSubmit();
+        });
+    }
+
+    // Folder entries only exist at the root, and the crumb only inside a
+    // folder, so exactly one of these is ever wired on a given view.
+    function wireDropTargets() {
+        items.filter(isFolder).forEach(function (el) {
+            dropTarget(el, el.getAttribute("data-folder-id"));
+        });
+        dropTarget(document.querySelector("[data-crumb-root]"), "root");
+    }
+
+    // ---------------------------------------------------------------
     // View toggle and sorting, both remembered per browser
     // ---------------------------------------------------------------
     var viewToggle = document.querySelector("[data-view-toggle]");
@@ -705,5 +808,8 @@
     });
 
     applySort();
+    // After applySort, which is what fills `items`. Sorting re-appends the
+    // same nodes rather than rebuilding them, so wiring once holds.
+    wireDropTargets();
     sync();
 })();
