@@ -45,11 +45,16 @@
         <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
         <strong>{{.CurrentFolder.Name}}</strong>
         <span class="cms-muted cms-crumb-count">{{.CurrentFolder.Count}}</span>
+        {{- /* Only an empty folder can be deleted, so a folder with files
+               in it shows the button disabled and says why, rather than
+               hiding it and leaving you to wonder where it went. The
+               server refuses either way. */}}
         <form method="post" action="{{.AdminPath}}/media/folders/{{.CurrentFolder.ID}}/delete" class="cms-crumb-delete"
-              data-confirm="{{.T "Delete this folder? Its files will be kept and become unfiled."}}">
+              data-confirm="{{.T "Delete this folder?"}}">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <input type="hidden" name="tab" value="{{.MediaTab}}">
-            <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{.T "Delete folder"}}</button>
+            <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm"
+                    {{if gt .CurrentFolder.Count 0}}disabled title="{{.T "Move or delete its files first — this folder isn't empty."}}"{{end}}>{{.T "Delete folder"}}</button>
         </form>
         {{else}}
         <strong>{{.T "All media"}}</strong>
@@ -131,10 +136,23 @@
             </select>
         </form>
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-copy>{{.T "Copy link"}}</button>
-        <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form
+        <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form data-sel-delete
               data-confirm="{{.T "Delete the selected files? Pages still using them will break."}}">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm">{{.T "Delete"}}</button>
+        </form>
+        {{- /* Selecting a folder puts its own delete here, in place of the
+               file one — the action you reach for when a folder is what you
+               have selected. Same rule as the crumb button: only an empty
+               folder goes, and a full one says why. The action carries the
+               folder id, so it is written in when the selection changes. */}}
+        <form method="post" data-sel-folder-delete hidden
+              data-action-template="{{.AdminPath}}/media/folders/{id}/delete"
+              data-confirm="{{.T "Delete this folder?"}}">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <input type="hidden" name="tab" value="{{.MediaTab}}">
+            <button type="submit" class="cms-btn cms-btn-danger cms-btn-sm"
+                    data-t-notempty="{{.T "Move or delete its files first — this folder isn't empty."}}">{{.T "Delete folder"}}</button>
         </form>
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-selbar-clear" data-sel-clear>{{.T "Clear"}}</button>
     </div>
@@ -167,6 +185,7 @@
                 <li class="cms-item cms-item-folder" role="option" aria-selected="false"
                     data-open="{{$.AdminPath}}/media?tab={{$.MediaTab}}&folder={{.ID}}"
                     data-folder-id="{{.ID}}"
+                    data-count="{{.Count}}"
                     data-name="{{.Name}}">
                     <span class="cms-item-thumb">
                         <svg class="cms-folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>

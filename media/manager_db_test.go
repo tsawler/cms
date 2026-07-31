@@ -436,16 +436,53 @@ func TestMediaFolders(t *testing.T) {
 			t.Fatalf("Move(into folder): %v", err)
 		}
 
-		// Deleting a folder unfiles its contents rather than deleting them.
-		if err := m.DeleteFolder(ctx, photos.ID); err != nil {
-			t.Fatalf("DeleteFolder: %v", err)
+		// A folder with files in it is refused, and nothing about it moves.
+		// Deleting one used to unfile its contents, scattering in a click
+		// the files an editor had just gathered.
+		if err := m.DeleteFolder(ctx, photos.ID); !errors.Is(err, ErrFolderNotEmpty) {
+			t.Errorf("DeleteFolder(non-empty) = %v, want ErrFolderNotEmpty", err)
 		}
 		got, err = m.GetByID(ctx, md.ID, "en")
 		if err != nil {
-			t.Fatalf("GetByID after DeleteFolder: %v", err)
+			t.Fatalf("GetByID after refused DeleteFolder: %v", err)
 		}
-		if got.FolderID != nil {
-			t.Errorf("folder_id = %v, want nil after its folder was deleted", got.FolderID)
+		if got.FolderID == nil || *got.FolderID != photos.ID {
+			t.Errorf("folder_id = %v, want the file still filed in %d", got.FolderID, photos.ID)
+		}
+		folders, err = m.Folders(ctx)
+		if err != nil {
+			t.Fatalf("Folders after refused DeleteFolder: %v", err)
+		}
+		found := false
+		for _, f := range folders {
+			if f.ID == photos.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("the folder was deleted even though it still held a file")
+		}
+
+		// Emptied, the same folder goes.
+		if err := m.Move(ctx, md.ID, nil); err != nil {
+			t.Fatalf("Move(unfiled): %v", err)
+		}
+		if err := m.DeleteFolder(ctx, photos.ID); err != nil {
+			t.Fatalf("DeleteFolder(empty): %v", err)
+		}
+		folders, err = m.Folders(ctx)
+		if err != nil {
+			t.Fatalf("Folders after DeleteFolder: %v", err)
+		}
+		for _, f := range folders {
+			if f.ID == photos.ID {
+				t.Error("the emptied folder is still there after being deleted")
+			}
+		}
+
+		// Deleting it again is not an error: two tabs can both submit.
+		if err := m.DeleteFolder(ctx, photos.ID); err != nil {
+			t.Errorf("DeleteFolder(already gone) = %v, want nil", err)
 		}
 	})
 }

@@ -350,7 +350,10 @@
     var upBtn = selbar.querySelector("[data-sel-up]"); // rendered only inside a folder
     var copyBtn = selbar.querySelector("[data-sel-copy]");
     var clearBtn = selbar.querySelector("[data-sel-clear]");
-    var deleteForm = selbar.querySelector("form[data-confirm]");
+    // Both delete forms carry data-confirm, so each is found by its own
+    // marker rather than by having the only confirmation in the bar.
+    var deleteForm = selbar.querySelector("[data-sel-delete]");
+    var folderDeleteForm = selbar.querySelector("[data-sel-folder-delete]");
     var inspector = document.querySelector("[data-inspector]");
     var inspectorToggle = document.querySelector("[data-inspector-toggle]");
 
@@ -469,11 +472,16 @@
         }
 
         if (e.key === "Delete" || e.key === "Backspace") {
-            if (selected().some(function (x) { return x.getAttribute("data-id"); })) {
+            // Whichever delete the selection is showing is the one the key
+            // presses — including the folder one, so a folder selected with
+            // the arrows is deleted the same way a file is.
+            var form = folderDeleteForm && !folderDeleteForm.hidden ? folderDeleteForm : deleteForm;
+            var submit = form.querySelector("button[type=submit]");
+            if (!submit.disabled) {
                 e.preventDefault();
                 // requestSubmit, not submit, so the confirmation still runs;
                 // naming the button gives the dialog its label and tone.
-                deleteForm.requestSubmit(deleteForm.querySelector("button[type=submit]"));
+                form.requestSubmit(submit);
             }
             return;
         }
@@ -507,12 +515,30 @@
             ? countEl.getAttribute("data-t-one")
             : (countEl.getAttribute("data-t-many") || "{n}").replace("{n}", sel.length);
 
-        // Moving and deleting need files; a folder in the selection has
-        // neither an id nor anywhere to be moved to.
+        // Moving needs files; a folder in the selection has neither an id
+        // nor anywhere to be moved to.
         moveSel.disabled = files.length === 0;
         moveSel.value = "";
         if (upBtn) upBtn.disabled = files.length === 0;
         deleteForm.querySelector("button").disabled = files.length === 0;
+
+        // One folder on its own is deleted as a folder. Any file in the
+        // selection means the file Delete is the one that was meant, and a
+        // second folder makes the target ambiguous, so both fall back.
+        var folder = sel.length === 1 && files.length === 0 && isFolder(sel[0]) ? sel[0] : null;
+        if (folderDeleteForm) {
+            folderDeleteForm.hidden = !folder;
+            deleteForm.hidden = !!folder;
+            if (folder) {
+                folderDeleteForm.action = folderDeleteForm.getAttribute("data-action-template")
+                    .replace("{id}", folder.getAttribute("data-folder-id"));
+                var btn = folderDeleteForm.querySelector("button");
+                var empty = Number(folder.getAttribute("data-count") || 0) === 0;
+                btn.disabled = !empty;
+                if (empty) btn.removeAttribute("title");
+                else btn.title = btn.getAttribute("data-t-notempty") || "";
+            }
+        }
 
         // Reuse the shared [data-copy] handler by handing it the URL.
         var single = files.length === 1 ? files[0].getAttribute("data-url") : "";

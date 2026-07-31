@@ -331,17 +331,24 @@ func TestMediaManifestsTrackMutations(t *testing.T) {
 			t.Errorf("manifest folder = %v, want Album", mf.Folder)
 		}
 
-		// Deleting the folder unfiles the item, which its manifest must
-		// reflect or a restore would refile it into a folder that is gone.
-		if err := m.DeleteFolder(ctx, folder.ID); err != nil {
-			t.Fatalf("DeleteFolder: %v", err)
+		// Moving the item out unfiles it, which its manifest must reflect
+		// or a restore would refile it into a folder it no longer sits in.
+		// Since a folder can only be deleted once empty, this is now the
+		// only way a filed item loses its folder.
+		if err := m.Move(ctx, md.ID, nil); err != nil {
+			t.Fatalf("Move(unfiled): %v", err)
 		}
 		mf, err = m.readManifest(ctx, manifestKey)
 		if err != nil {
-			t.Fatalf("readManifest after DeleteFolder: %v", err)
+			t.Fatalf("readManifest after Move: %v", err)
 		}
 		if mf.Folder != nil {
-			t.Errorf("manifest still names folder %v after it was deleted", mf.Folder)
+			t.Errorf("manifest still names folder %v after the item left it", mf.Folder)
+		}
+
+		// The folder it left is empty now, so it can go.
+		if err := m.DeleteFolder(ctx, folder.ID); err != nil {
+			t.Fatalf("DeleteFolder(empty): %v", err)
 		}
 
 		// Deleting the item takes its manifest with it, so a later restore

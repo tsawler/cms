@@ -29,6 +29,9 @@ var (
 	// ErrBadFolderKind is returned for a kind that isn't image, file, or
 	// video.
 	ErrBadFolderKind = errors.New("media: unknown folder kind")
+	// ErrFolderNotEmpty is returned by DeleteFolder for a folder that
+	// still holds media.
+	ErrFolderNotEmpty = errors.New("media: the folder still has files in it")
 )
 
 // Folders returns all folders — every kind — with their item counts,
@@ -77,30 +80,36 @@ func (m *Manager) CreateFolder(ctx context.Context, name string, kind Kind) (*Fo
 	return f, nil
 }
 
-// DeleteFolder removes a folder; its contents become unfiled (the media
-// rows' folder_id is nulled by the foreign key).
+// DeleteFolder removes a folder, but only an empty one — a folder still
+// holding media comes back ErrFolderNotEmpty and is left alone. Deleting
+// it used to unfile its contents, which scattered in one click the files
+// an editor had just gathered; emptying it first says the same thing
+// deliberately, and the files stay where they can be seen while you do.
+//
+// Deleting a folder that is already gone is not an error: two tabs open
+// on the same folder can both submit the delete.
 func (m *Manager) DeleteFolder(ctx context.Context, id int64) error {
-	// The children have to be identified before the delete, because the
-	// foreign key clears their folder_id as it goes.
-	rows, err := m.db.Query(ctx, "SELECT id FROM cms_media WHERE folder_id = $1", id)
+	// One statement, so a file moved in concurrently can't be orphaned by
+	// a delete that checked the folder was empty a moment earlier.
+	tag, err := m.db.Exec(ctx, `
+		DELETE FROM cms_media_folders
+		WHERE id = $1
+		  AND NOT EXISTS (SELECT 1 FROM cms_media WHERE folder_id = $1)`, id)
 	if err != nil {
 		return err
 	}
-	orphaned, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (int64, error) {
-		var mediaID int64
-		err := row.Scan(&mediaID)
-		return mediaID, err
-	})
-	if err != nil {
-		return err
-	}
-
-	if _, err := m.db.Exec(ctx, "DELETE FROM cms_media_folders WHERE id = $1", id); err != nil {
-		return err
-	}
-
-	for _, mediaID := range orphaned {
-		m.syncManifest(ctx, mediaID)
+	if tag.RowsAffected() == 0 {
+		// Nothing was deleted: either the folder holds media, or it was
+		// never there. Only the first is worth reporting.
+		var n int
+		if err := m.db.QueryRow(ctx,
+			"SELECT count(*) FROM cms_media WHERE folder_id = $1", id).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return ErrFolderNotEmpty
+		}
+		return nil
 	}
 	m.syncFoldersManifest(ctx)
 	return nil

@@ -31,6 +31,11 @@ const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, 
 
 const unsafeSVGMsg = "That SVG can't be used — it contains scripts or other active content."
 
+// folderNotEmptyMsg explains a refused folder delete. The media template
+// puts the same words on the disabled button, so the reason reads the same
+// whether you hover it or manage to submit anyway.
+const folderNotEmptyMsg = "Move or delete its files first — this folder isn't empty."
+
 func (s *server) mediaList(w http.ResponseWriter, r *http.Request) {
 	s.renderMediaList(w, r, http.StatusOK, "")
 }
@@ -380,18 +385,28 @@ func (s *server) mediaFolderCreate(w http.ResponseWriter, r *http.Request) {
 	s.backToMedia(w, r)
 }
 
-// mediaFolderDelete removes a folder; its contents become unfiled.
+// mediaFolderDelete removes a folder, which the media package allows only
+// while it is empty.
 func (s *server) mediaFolderDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	if err := s.deps.Media.DeleteFolder(r.Context(), id); err != nil {
+	err = s.deps.Media.DeleteFolder(r.Context(), id)
+	if errors.Is(err, media.ErrFolderNotEmpty) {
+		// The template disables the button for a folder with files in it,
+		// so getting here means a stale page or a hand-made request. The
+		// folder is still there, and so is the view it was deleted from.
+		s.flash(r, s.tr(r, folderNotEmptyMsg))
+		s.backToMedia(w, r)
+		return
+	}
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.flash(r, s.tr(r, "Folder deleted — its files are now unfiled."))
+	s.flash(r, s.tr(r, "Folder deleted."))
 	// The Referer points into the folder that just vanished, so go back
 	// to the root view on the tab the delete form was on instead.
 	http.Redirect(w, r, s.deps.AdminPath+"/media?tab="+mediaTab(r.PostFormValue("tab")), http.StatusSeeOther)
