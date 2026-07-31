@@ -14,8 +14,12 @@ services:
       POSTGRES_PASSWORD: cms
       POSTGRES_DB: cms
     ports:
-      # 5433 on the host to stay clear of any Postgres already on 5432.
-      - "5433:5432"
+      # Postgres' standard port, so psql and other tools connect with no
+      # flags. If something is already listening on 5432 — a local
+      # Postgres install, another project's container — compose will fail
+      # to bind: change the host side here and the port in DATABASE_URL
+      # (.env) together.
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

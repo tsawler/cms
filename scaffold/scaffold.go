@@ -63,7 +63,7 @@ var engines = map[Engine]engineInfo{
 		dialect:      "postgres",
 		driver:       "pgx",
 		driverImport: "github.com/jackc/pgx/v5/stdlib",
-		dsn:          "postgres://cms:cms@localhost:5433/cms?sslmode=disable",
+		dsn:          "postgres://cms:cms@localhost:5432/cms?sslmode=disable",
 	},
 	// parseTime and loc make timestamps scan into time.Time as UTC,
 	// time_zone makes the server session agree with them, and

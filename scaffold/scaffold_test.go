@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -193,6 +195,44 @@ func TestScriptIsExecutable(t *testing.T) {
 	}
 	if info.Mode()&0o111 == 0 {
 		t.Errorf("tailwind-content.sh mode is %v, want the execute bit set", info.Mode())
+	}
+}
+
+// TestDSNPortMatchesComposePort pins the generated DSN to the port the
+// generated compose file publishes. They live in different files — the
+// engines table here, the service definition in the template — so moving
+// one and not the other produces a project that starts its database
+// happily and then fails to connect to it, which reads as a broken
+// scaffold rather than a one-character mistake.
+func TestDSNPortMatchesComposePort(t *testing.T) {
+	// hostPort pulls the host side out of a "HOST:CONTAINER" mapping.
+	publishedRe := regexp.MustCompile(`-\s*"(\d+):\d+"`)
+
+	for _, engine := range Engines() {
+		t.Run(string(engine), func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := Write(dir, Options{Engine: engine}); err != nil {
+				t.Fatal(err)
+			}
+
+			// The DSN reaches .env and main.go from the same field, so
+			// checking the rendered .env covers both.
+			env := read(t, dir, ".env")
+			// postgres://…@localhost:5432/… and …@tcp(localhost:3307)/…
+			// both put the port right after "localhost:".
+			dsnPort := regexp.MustCompile(`localhost:(\d+)`).FindStringSubmatch(env)
+			if dsnPort == nil {
+				t.Fatalf(".env carries no recognizable DSN port:\n%s", env)
+			}
+
+			var ports []string
+			for _, m := range publishedRe.FindAllStringSubmatch(read(t, dir, "docker-compose.yml"), -1) {
+				ports = append(ports, m[1])
+			}
+			if !slices.Contains(ports, dsnPort[1]) {
+				t.Errorf("DSN connects to port %s, but docker-compose.yml publishes %v", dsnPort[1], ports)
+			}
+		})
 	}
 }
 
