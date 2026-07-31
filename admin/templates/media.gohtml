@@ -103,12 +103,26 @@
     <div class="cms-selbar" data-selbar hidden>
         <span class="cms-selbar-count" data-sel-count aria-live="polite"
               data-t-one="{{.T "1 selected"}}" data-t-many="{{.T "{n} selected"}}"></span>
+        {{- /* Standing inside a folder, leaving it is the move people reach
+               for first, so it gets a button rather than a line buried in the
+               destination list. "No folder" named that destination by what it
+               lacks, which is not how someone in a folder thinks about
+               getting out of it. */}}
+        {{if .CurrentFolder}}
+        <form method="post" action="{{.AdminPath}}/media/bulk/move" data-sel-form>
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <input type="hidden" name="folder" value="root">
+            <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-up
+                    title="{{.T "Move out of this folder"}}">↑ {{.T "All media"}}</button>
+        </form>
+        {{end}}
         <form method="post" action="{{.AdminPath}}/media/bulk/move" class="cms-selbar-move" data-sel-form>
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <select name="folder" data-sel-move aria-label="{{.T "Move to"}}">
                 <option value="">{{.T "Move to…"}}</option>
-                <option value="root">{{.T "No folder"}}</option>
-                {{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+                {{- /* The folder you are already in is not somewhere to go. */}}
+                <option value="root">{{if .CurrentFolder}}↑ {{.T "All media"}}{{else}}{{.T "No folder"}}{{end}}</option>
+                {{range .Folders}}{{if not (and $.CurrentFolder (eq $.CurrentFolder.ID .ID))}}<option value="{{.ID}}">{{.Name}}</option>{{end}}{{end}}
             </select>
         </form>
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-copy>{{.T "Copy link"}}</button>

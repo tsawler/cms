@@ -1369,3 +1369,28 @@ overwritten by the next build (and marked `linguist-generated`).
 - `Config.AdminPath` (default `/admin`) is where `Handler()` serves the
   admin area. If you wire `Admin()` yourself instead, the mount point
   must match it.
+
+## License
+
+This project is licensed under the **Mozilla Public License 2.0** — see
+[LICENSE](LICENSE).
+
+MPL-2.0 is file-level copyleft: you can import this module into an
+application under any license, including a closed-source or commercial
+one, and mounting the CMS in your app does not affect how you license
+that app. What the license asks is that if you modify this project's own
+source files and distribute the result, those modified files stay under
+MPL-2.0 and their source is made available.
+
+### Third-party components
+
+Bundled and imported components keep their own licenses:
+
+- **TinyMCE 6** (`editor/tinymce/`) — MIT, vendored and self-hosted; this
+  is the last MIT-licensed release, and the version bundled here is
+  deliberately pinned to it. See `editor/tinymce/license.txt`.
+- **pako 2.1.0** (`admin/static/pako_inflate.min.js`) — MIT AND Zlib,
+  vendored for the Cap proof-of-work captcha; the license banner is in
+  the file itself.
+- Go dependencies are MIT, BSD, Apache-2.0, or MPL-2.0 — see `go.mod` and
+  each module's own license.

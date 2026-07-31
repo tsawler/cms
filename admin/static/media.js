@@ -347,6 +347,7 @@
     var selbar = document.querySelector("[data-selbar]");
     var countEl = selbar.querySelector("[data-sel-count]");
     var moveSel = selbar.querySelector("[data-sel-move]");
+    var upBtn = selbar.querySelector("[data-sel-up]"); // rendered only inside a folder
     var copyBtn = selbar.querySelector("[data-sel-copy]");
     var clearBtn = selbar.querySelector("[data-sel-clear]");
     var deleteForm = selbar.querySelector("form[data-confirm]");
@@ -510,6 +511,7 @@
         // neither an id nor anywhere to be moved to.
         moveSel.disabled = files.length === 0;
         moveSel.value = "";
+        if (upBtn) upBtn.disabled = files.length === 0;
         deleteForm.querySelector("button").disabled = files.length === 0;
 
         // Reuse the shared [data-copy] handler by handing it the URL.
