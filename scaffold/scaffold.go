@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 	"unicode"
@@ -197,16 +198,31 @@ var manifest = []file{
 // to those templates — TestGeneratedProjectMatchesExample catches it.
 type templateData struct {
 	SiteName string
-	// SiteNameHTML is SiteName escaped for use inside a quoted template
-	// argument that is also HTML — the footer's {{cmsShared}} fallback. A
-	// site named 6" Nails would otherwise end the Go string early.
+	// SiteNameHTML is SiteName escaped as HTML, for the places a template
+	// puts it into markup directly: the <title>, and the {{cmsShared}}
+	// footer fallback, whose argument the renderer emits as raw HTML.
+	// Escaping also removes the quote that would otherwise close the
+	// template argument early, leaving a template that compiles but fails
+	// to parse when the first request renders it.
+	//
+	// The backslash is escaped as an entity for the same reason, since
+	// HTML escaping leaves it alone: inside the footer's quoted argument a
+	// site named A \q B is an invalid Go escape sequence and fails the
+	// same way. As an entity it survives both contexts and still renders
+	// as a backslash.
 	SiteNameHTML string
-	Program      string
-	Slug         string
-	Engine       string
-	EngineLabel  string
-	Dialect      string
-	Driver       string
+	// SiteNameArg is SiteName as a complete Go-quoted string literal —
+	// quotes included, so the template writes {{cmsBrand [[.SiteNameArg]]}}
+	// rather than wrapping it. It is for funcs that escape their own
+	// output, {{cmsBrand}} being the one: handing that an HTML-escaped
+	// name renders the entities instead of the name.
+	SiteNameArg string
+	Program     string
+	Slug        string
+	Engine      string
+	EngineLabel string
+	Dialect     string
+	Driver      string
 
 	DriverImport string
 	DSN          string
@@ -221,6 +237,15 @@ type templateData struct {
 	Blog     bool
 	Tailwind bool
 	Captcha  bool
+}
+
+// htmlLiteral escapes a value for HTML that is also sitting inside a Go
+// template's quoted argument — the footer's {{cmsShared}} fallback is both
+// at once. HTML escaping alone leaves the backslash, which the template
+// parser then reads as the start of an escape sequence, so it becomes an
+// entity too.
+func htmlLiteral(s string) string {
+	return strings.ReplaceAll(html.EscapeString(s), `\`, "&#92;")
 }
 
 // Write generates the starter files into dir, creating it if necessary,
@@ -247,7 +272,8 @@ func Write(dir string, opts Options) ([]Result, error) {
 	siteName := cmp(opts.SiteName, titleCase(program))
 	data := templateData{
 		SiteName:       siteName,
-		SiteNameHTML:   html.EscapeString(siteName),
+		SiteNameHTML:   htmlLiteral(siteName),
+		SiteNameArg:    strconv.Quote(siteName),
 		Program:        program,
 		Slug:           slugify(program),
 		Engine:         string(opts.Engine),

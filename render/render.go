@@ -521,6 +521,21 @@ var stubFuncs = template.FuncMap{
 	"cmsLocales":     func() []LocaleLink { return nil },
 }
 
+// CheckTemplate parses src as a page template, with the cms template funcs
+// stubbed, and returns the parse error if there is one. It needs no
+// database, request, or rendered page, which is what makes it usable from
+// a test.
+//
+// Page templates are parsed when the server first renders them, so a
+// malformed one compiles perfectly well and fails only in front of a
+// visitor. Host applications can point this at their own templates to
+// find that at build time instead; the scaffold uses it on the templates
+// `cms init` writes.
+func CheckTemplate(name, src string) error {
+	_, err := template.New(name).Funcs(stubFuncs).Parse(src)
+	return err
+}
+
 // EditorScriptPath is the public route the in-place editor script is served
 // from.
 const EditorScriptPath = "/cms/editor/editor.js"

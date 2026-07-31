@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{.Title}} — [[.SiteName]]</title>
+    <title>{{.Title}} — [[.SiteNameHTML]]</title>
 [[if .Tailwind]]    {{/* Webfonts load here, before the stylesheet that uses them. Name
          the typeface in assets/theme.css to match. Example:
 
@@ -21,7 +21,7 @@
         {{/* cmsBrand renders the site name, editable in place. On a site
              with more than one locale this link needs the locale prefix —
              see examples/basic in the cms module. */}}
-        <a href="/" class="text-lg font-bold tracking-tight">{{cmsBrand "[[.SiteName]]"}}</a>
+        <a href="/" class="text-lg font-bold tracking-tight">{{cmsBrand [[.SiteNameArg]]}}</a>
         {{cmsNav "main"}}
         {{/* Empty until Config.Locales names more than one locale. */}}
         {{with cmsLocales}}

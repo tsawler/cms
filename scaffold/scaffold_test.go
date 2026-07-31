@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/tsawler/cms/render"
 )
 
 // TestManifestCoversEmbeddedFiles pins the two halves together: a starter
@@ -356,4 +358,79 @@ func read(t *testing.T, dir, name string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// TestGeneratedTemplatesParse is the runtime half of what
+// TestGeneratedProjectBuilds cannot see. Page templates are parsed when
+// the server first renders them, so a generated template with a broken
+// action still compiles and still passes the build test — it fails in
+// front of the site's first visitor instead.
+//
+// The site name is the thing most likely to break one, because it is
+// interpolated into quoted template arguments ({{cmsBrand "…"}}, the
+// {{cmsShared}} fallback). A name carrying a quote closed the argument and
+// left an unparseable template; one carrying < put markup in the <title>.
+// Hence a deliberately hostile name here rather than a tidy one.
+func TestGeneratedTemplatesParse(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		SiteName: `6" Nails \q Co & <b>`,
+		Engine:   Postgres,
+		Blog:     true, // writes the most template files
+		Tailwind: true,
+	}
+	if _, err := Write(dir, opts); err != nil {
+		t.Fatal(err)
+	}
+
+	checked := 0
+	root := filepath.Join(dir, "templates")
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".gohtml") {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		checked++
+		rel, _ := filepath.Rel(dir, p)
+		if err := render.CheckTemplate(d.Name(), string(b)); err != nil {
+			t.Errorf("%s does not parse, so the generated site fails on its first request: %v", rel, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	if checked == 0 {
+		t.Fatal("no .gohtml templates were generated, so this test proved nothing")
+	}
+	t.Logf("parsed %d generated templates", checked)
+
+	// Parsing is necessary but not sufficient: the escaping has to suit
+	// each context, and the wrong one still parses. {{cmsBrand}} escapes
+	// its own output, so it takes the name plain — handed an HTML-escaped
+	// one it renders the entities at the top of every page.
+	base := read(t, dir, "templates/base.gohtml")
+	if want := `{{cmsBrand "6\" Nails \\q Co & <b>"}}`; !strings.Contains(base, want) {
+		t.Errorf("cmsBrand is not passed the plain name.\n got: %s\nwant to contain: %s",
+			firstLineWith(base, "cmsBrand"), want)
+	}
+	// The {{cmsShared}} fallback is the opposite: the renderer emits it as
+	// raw HTML, so it has to arrive escaped.
+	if want := "&#92;q Co &amp; &lt;b&gt;"; !strings.Contains(base, want) {
+		t.Errorf("the footer fallback is not HTML-escaped; want it to contain %s", want)
+	}
+}
+
+// firstLineWith returns the first line of s containing sub, for error
+// messages that would otherwise print a whole template.
+func firstLineWith(s, sub string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, sub) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return "(no matching line)"
 }
