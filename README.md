@@ -906,7 +906,15 @@ right-click any menu item (long-press on touch) to set its text, link it
 to a page (searchable picker; the URL follows slug renames, and the item
 disappears if the page is deleted) or a web address, open it in a new
 tab, or turn a top-level item into a dropdown — a label-only item that
-holds other items, one level deep. "＋" chips add items, and dragging
+holds other items, one level deep.
+
+A "web address" is a site-relative path (`/contact`), an `https://`,
+`http://`, `mailto:` or `tel:` URL, or a same-page anchor (`#pricing`) —
+a one-page site's nav is made of anchors. A bare `#` is refused, since it
+links nowhere. Note that `#pricing` only resolves on a page that has that
+anchor, so on a site with more than one page `/#pricing` is usually what
+is meant: the nav renders on every page, and the bare form does nothing
+on the others. "＋" chips add items, and dragging
 rearranges them, including into and out of a dropdown. Items linking to
 draft pages show only for logged-in editors until the page is published,
 and items linking to private pages (visibility "Private" in the page

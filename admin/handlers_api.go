@@ -329,12 +329,21 @@ func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"menu": menu, "items": out})
 }
 
-// validMenuURL accepts site-relative paths and the handful of absolute
-// schemes a menu legitimately links to.
+// validMenuURL accepts site-relative paths, same-page anchors, and the
+// handful of absolute schemes a menu legitimately links to.
+//
+// A leading "#" is a fragment reference and can never become a scheme, so
+// "#pricing" is safe to allow however it is written — but a bare "#" is
+// a link to nowhere, and rejecting it catches the half-filled field
+// rather than storing a nav item that quietly does nothing. Anchors are
+// worth supporting because a one-page site's nav is made of them; on a
+// site with more than one page "/#pricing" is usually meant instead,
+// since a bare "#pricing" only resolves on the page that has the anchor.
 func validMenuURL(u string) bool {
 	return strings.HasPrefix(u, "/") ||
 		strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") ||
-		strings.HasPrefix(u, "mailto:") || strings.HasPrefix(u, "tel:")
+		strings.HasPrefix(u, "mailto:") || strings.HasPrefix(u, "tel:") ||
+		(strings.HasPrefix(u, "#") && len(u) > 1)
 }
 
 // menuItemInput validates one submitted menu item and converts it for
@@ -365,7 +374,7 @@ func (s *server) menuItemInput(item menuItemJSON) (content.MenuItemInput, string
 	url := strings.TrimSpace(item.URL)
 	if !validMenuURL(url) {
 		return content.MenuItemInput{},
-			"Custom links need a web address like https://… or a path like /contact."
+			"Custom links need a web address like https://…, a path like /contact, or an anchor like #pricing."
 	}
 	in.URL = url
 	return in, ""

@@ -356,8 +356,11 @@ function modalOK() {
         mmError("Choose the page the item links to.");
         return;
     }
-    if (kind === "url" && !/^(\/|https?:\/\/|mailto:|tel:)/.test(url)) {
-        mmError("Enter a web address like https://… or a path like /contact.");
+    // Mirrors validMenuURL in admin/handlers_api.go — keep the two in
+    // step, or the server rejects what this accepted. A lone "#" is a
+    // link to nowhere, so the anchor branch needs a character after it.
+    if (kind === "url" && !/^(\/|https?:\/\/|mailto:|tel:|#.)/.test(url)) {
+        mmError("Enter a web address like https://…, a path like /contact, or an anchor like #pricing.");
         return;
     }
     var it = m.item;

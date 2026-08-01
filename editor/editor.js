@@ -3084,8 +3084,8 @@
       mmError("Choose the page the item links to.");
       return;
     }
-    if (kind === "url" && !/^(\/|https?:\/\/|mailto:|tel:)/.test(url)) {
-      mmError("Enter a web address like https://\u2026 or a path like /contact.");
+    if (kind === "url" && !/^(\/|https?:\/\/|mailto:|tel:|#.)/.test(url)) {
+      mmError("Enter a web address like https://\u2026, a path like /contact, or an anchor like #pricing.");
       return;
     }
     var it = m.item;
