@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -241,6 +242,56 @@ type Config struct {
 	// like that.
 	MediaAdopt MediaAdoptMode
 
+	// TemplateFuncs are the host application's own template functions,
+	// callable from page templates alongside the cms* funcs. Register as
+	// many as the site needs; the usual reason is to reach data the CMS
+	// does not own — a product catalogue, a vehicle table — from inside a
+	// CMS-managed page:
+	//
+	//	TemplateFuncs: template.FuncMap{
+	//	    "featuredVehicles": func(n int) []Vehicle { ... },
+	//	    "vehicleCount":     func() int { ... },
+	//	}
+	//
+	// and then, in a page template:
+	//
+	//	{{range featuredVehicles 3}}<h3>{{.Name}}</h3>{{end}}
+	//
+	// Templates parse against this map, so it must name every function
+	// they call. Names inside the reserved cms* namespace are refused, so
+	// a later CMS release can add funcs without breaking a host.
+	//
+	// The implementations here are used as-is unless RequestFuncs
+	// replaces them per request — which is what a function that queries a
+	// database usually wants, for the request's context. A function
+	// registered only here is shared by every render and must be safe for
+	// concurrent use.
+	//
+	// These functions run inside the page template with the host's full
+	// trust: one returning template.HTML bypasses the editor's content
+	// sanitizer entirely, so never interpolate untrusted input into it.
+	TemplateFuncs template.FuncMap
+
+	// RequestFuncs binds TemplateFuncs to a request. It is called once
+	// per page render, and whatever it returns replaces the matching
+	// entries in TemplateFuncs for that render alone; names it omits keep
+	// their declared implementation. This is where a function gets the
+	// request's context for a query it must not outlive, or the URL it
+	// needs to read a query parameter:
+	//
+	//	RequestFuncs: func(r *http.Request) template.FuncMap {
+	//	    return template.FuncMap{
+	//	        "featuredVehicles": func(n int) []Vehicle {
+	//	            return store.Featured(r.Context(), n)
+	//	        },
+	//	    }
+	//	}
+	//
+	// Only names TemplateFuncs declared can be called — page templates
+	// were parsed against that set — so this needs TemplateFuncs to be
+	// set, and New refuses the combination that isn't.
+	RequestFuncs func(*http.Request) template.FuncMap
+
 	// EditorStyles populates the in-place editor's Styles menu — named,
 	// on-brand text styles that apply CSS classes. Nil gets the
 	// Tailwind-first defaults (render.DefaultEditorStyles); an empty
@@ -370,6 +421,16 @@ func New(cfg Config) (*CMS, error) {
 		// the default choices; an empty non-nil slice opts out.
 		cfg.SectionStyles.Corners = render.DefaultSectionStyles().Corners
 	}
+	// Host template funcs: reject reserved names here rather than at the
+	// first render, and refuse RequestFuncs on its own — templates parse
+	// against TemplateFuncs, so a name declared only per request is one
+	// no template could ever have compiled a call to.
+	if err := render.ValidateFuncNames(cfg.TemplateFuncs); err != nil {
+		return nil, err
+	}
+	if cfg.RequestFuncs != nil && len(cfg.TemplateFuncs) == 0 {
+		return nil, fmt.Errorf("cms: RequestFuncs needs TemplateFuncs to declare the function names")
+	}
 	if err := admin.ValidateSections(cfg.AdminSections); err != nil {
 		return nil, err
 	}
@@ -407,7 +468,8 @@ func New(cfg Config) (*CMS, error) {
 			hidden = append(hidden, cfg.PostTemplate)
 		}
 		var err error
-		renderer, err = render.New(cfg.TemplateFS, cfg.SharedTemplates, cfg.PageTemplates, cfg.SectionStyles, hidden...)
+		renderer, err = render.NewWithFuncs(cfg.TemplateFS, cfg.SharedTemplates,
+			cfg.PageTemplates, cfg.SectionStyles, cfg.TemplateFuncs, hidden...)
 		if err != nil {
 			return nil, err
 		}
@@ -458,6 +520,7 @@ func New(cfg Config) (*CMS, error) {
 		Users:          users,
 		Content:        contentStore,
 		Renderer:       renderer,
+		RequestFuncs:   cfg.RequestFuncs,
 		Media:          mediaManager,
 		Snippets:       snippets.NewStore(db),
 		Captcha:        capClient,
@@ -832,10 +895,24 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		PostsPerPage: c.cfg.PostsPerPage,
 		PageNumber:   listingPage(r),
 		PageURL:      listingPageURL(r),
+		// Host template funcs bound to this request, so a query they run
+		// carries the request's context. Nil when the host registered
+		// none, or none that need the request.
+		Funcs: c.requestFuncs(r),
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 	}
+}
+
+// requestFuncs asks the host to bind its template functions to this
+// request. Nil when Config.RequestFuncs is unset, which leaves the
+// renderer using the implementations Config.TemplateFuncs declared.
+func (c *CMS) requestFuncs(r *http.Request) template.FuncMap {
+	if c.cfg.RequestFuncs == nil {
+		return nil
+	}
+	return c.cfg.RequestFuncs(r)
 }
 
 // sessionUser returns the logged-in, active CMS user for a public page

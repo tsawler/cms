@@ -145,6 +145,10 @@ UI discovers them automatically:
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
 
+Templates can also call the host's *own* functions, for the parts of a
+page that come from your tables rather than from an editor — see
+[host data in CMS pages](#host-data-in-cms-pages).
+
 ## Databases
 
 | Engine | Minimum | Driver | `Config.Dialect` |
@@ -994,6 +998,116 @@ Menu alignment (left / center / right) adds a `cms-nav-left` /
 the nav grow (`flex:1`) inside your header's flexbox and justifies the
 items within it. "Theme default" adds no class and leaves your layout
 alone.
+
+## Host data in CMS pages
+
+Some of a page isn't content. A dealership's "fresh on the lot" strip, a
+shop's best sellers, a clinic's next available appointments — those come
+from the host's own tables, change when the data changes rather than when
+someone rewrites a sentence, and have fields no arrangement of text slots
+models honestly. `Config.TemplateFuncs` lets page templates call the
+host's own functions alongside the `cms*` ones, so one page can mix both:
+
+Start with the type the templates want. Returning display-ready strings
+keeps `{{.Price}}` in the template instead of a pipeline of formatting
+funcs:
+
+```go
+type Vehicle struct {
+    Name, Detail, Price, Terms, PhotoURL, URL string
+}
+
+type VehicleStore struct{ db *sql.DB }
+
+func (s *VehicleStore) Featured(ctx context.Context, n int) []Vehicle { ... }
+func (s *VehicleStore) Count(ctx context.Context) int                 { ... }
+```
+
+Register as many functions as the site needs — it is a `FuncMap`, so a
+page may call several:
+
+```go
+vehicles := &VehicleStore{db: db}
+
+c, err := cms.New(cms.Config{
+    // ...
+    // Declares the names page templates may call. These implementations
+    // are used as-is by any render that supplies no replacement.
+    TemplateFuncs: template.FuncMap{
+        "featuredVehicles": func(n int) []Vehicle { return vehicles.Featured(context.Background(), n) },
+        "vehicleCount":     func() int { return vehicles.Count(context.Background()) },
+    },
+    // Optional: rebind the same names per request, so each query carries
+    // that request's context and is cancelled when the visitor leaves.
+    RequestFuncs: func(r *http.Request) template.FuncMap {
+        return template.FuncMap{
+            "featuredVehicles": func(n int) []Vehicle { return vehicles.Featured(r.Context(), n) },
+            "vehicleCount":     func() int { return vehicles.Count(r.Context()) },
+        }
+    },
+})
+```
+
+In the template they look like any other func, and sit happily beside the
+`cms*` ones — the heading is content, the cards are data:
+
+```html
+<h2>{{cmsText "inventory-title"}}</h2>          <!-- marketing owns the words -->
+<p>{{cmsText "inventory-lede"}}</p>
+<p>{{vehicleCount}} on the lot right now</p>
+
+<div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+  {{range featuredVehicles 3}}
+    <a href="{{.URL}}">
+      <img src="{{.PhotoURL}}" alt="{{.Name}}" loading="lazy">
+      <h3>{{.Name}}</h3>
+      <p>{{.Detail}}</p>
+      <span>{{.Price}}</span> <span>{{.Terms}}</span>
+    </a>
+  {{else}}
+    <p>Nothing on the lot right now — check back shortly.</p>
+  {{end}}
+</div>
+```
+
+An editor cannot type over a card, and nobody has to remember to edit the
+home page when a car sells. Give `{{range}}` an `{{else}}` branch: an
+empty result is a normal state, and without one the section renders as a
+heading over nothing.
+
+Rules of thumb:
+
+- **`TemplateFuncs` declares the names.** Page templates are parsed
+  against it, so every function a template calls must appear there — a
+  name that doesn't fails at startup with `function "featuredVehicles"
+  not defined`. `RequestFuncs` only *replaces* implementations for one
+  render: names it omits keep their declared version, and a name
+  appearing only there is unreachable, because no template could have
+  compiled a call to it. `New` refuses `RequestFuncs` without
+  `TemplateFuncs` for that reason.
+- **The `cms*` prefix is reserved.** `New` rejects a host func whose name
+  starts with `cms`, so a later release can add template funcs without
+  silently losing to (or shadowing) a host's.
+- **A func registered only in `TemplateFuncs` is shared by every render**
+  and must be safe for concurrent use. Anything needing per-request state
+  belongs in `RequestFuncs`.
+- **They run with the host's full trust.** A func returning
+  `template.HTML` bypasses the editor's content sanitizer entirely, so
+  never interpolate untrusted input into one.
+- **Their markup lives in your template files**, which your Tailwind build
+  already scans — so data-driven markup needs no safelisting and never
+  involves the generated content stylesheet.
+- Host funcs are bound in the admin's page and post **previews** too, so a
+  preview renders what a visitor gets.
+
+Hosts that validate templates at build time with `render.CheckTemplate`
+should switch to `render.CheckTemplateFuncs`, passing the same map, or
+every template calling a host func reports a spurious "function not
+defined".
+
+`examples/wheels` shows the whole arrangement: `vehicles.go` is the store
+and the two maps, and `templates/pages/home.gohtml` ranges over the result
+between two `cmsText` slots.
 
 ## Custom admin pages
 

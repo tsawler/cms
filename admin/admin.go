@@ -31,11 +31,18 @@ var staticFS embed.FS
 
 // Deps is everything the admin area needs from the rest of the CMS.
 type Deps struct {
-	Sessions       *scs.SessionManager
-	Users          *auth.Store
-	Content        *content.Store
-	Renderer       *render.Renderer // nil when the host has not configured templates
-	Media          *media.Manager   // nil when the host has not configured an object store
+	Sessions *scs.SessionManager
+	Users    *auth.Store
+	Content  *content.Store
+	Renderer *render.Renderer // nil when the host has not configured templates
+	// RequestFuncs binds the host's template functions
+	// (Config.TemplateFuncs) to a request, for the page and post
+	// previews. Previews run the same page templates the public site
+	// does, so a function that reads the request's context has to be
+	// bound here too or it behaves subtly differently under preview than
+	// in front of a visitor. Nil when the host registered none.
+	RequestFuncs   func(*http.Request) template.FuncMap
+	Media          *media.Manager // nil when the host has not configured an object store
 	Snippets       *snippets.Store
 	Captcha        *captcha.Client       // nil when login CAPTCHA is not configured
 	ConfigSnippets []snippets.Snippet    // host-registered palette entries
@@ -83,6 +90,15 @@ func (s *server) requestLocale(l string) string {
 		}
 	}
 	return s.deps.DefaultLocale
+}
+
+// hostFuncs binds the host's template functions to a preview request, or
+// returns nil so the renderer keeps the implementations the host declared.
+func (s *server) hostFuncs(r *http.Request) template.FuncMap {
+	if s.deps.RequestFuncs == nil {
+		return nil
+	}
+	return s.deps.RequestFuncs(r)
 }
 
 // formLocale is requestLocale over the request's "locale" query or form

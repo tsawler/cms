@@ -205,6 +205,11 @@ The dot (`.`) each page template receives carries `.Title`,
 `.Description`, `.Slug`, `.Locale`, and `.Post` (nil except on blog/news
 posts).
 
+That list is the CMS's half. Templates can also call functions **you**
+register, for the parts of a page that come from your own tables rather
+than from an editor — see [host data in a CMS
+page](#host-data-in-a-cms-page) in step 9.
+
 `{{cmsTitle}}` and `{{.Title}}` print the same words; the difference is
 what an editor can do with them. `{{.Title}}` is plain text, so a heading
 built from it can only be changed through the title field in the edit
@@ -966,6 +971,109 @@ in a `csrf_token` field or the `X-CSRF-Token` header. Redirects need
 redirect lands in the wrong place. A working `reportsSection` is in
 `examples/basic/main.go`.
 
+### Host data in a CMS page
+
+Not every part of a page is content. A dealership's "fresh on the lot"
+strip, a shop's best sellers, a clinic's next available slots — those live
+in *your* tables, change when the data changes rather than when someone
+rewrites a sentence, and have fields (price, trim, photo) that no
+arrangement of editable text slots models honestly.
+
+Modelling them as `cmsText` slots looks fine for a week. Then a car sells,
+and someone has to remember to edit the home page.
+
+`Config.TemplateFuncs` publishes your own functions to page templates, so
+one page can mix both. Start with the type the template wants — return
+display-ready strings and `{{.Price}}` stays a field rather than a
+pipeline of formatting funcs:
+
+```go
+type Vehicle struct {
+    Name, Detail, Price, PhotoURL, URL string
+}
+
+type VehicleStore struct{ db *sql.DB }
+
+func (s *VehicleStore) Featured(ctx context.Context, n int) []Vehicle {
+    // SELECT … FROM vehicles WHERE sold_at IS NULL AND featured
+    // ORDER BY listed_at DESC LIMIT $1  — run with ctx.
+}
+
+func (s *VehicleStore) Count(ctx context.Context) int { ... }
+```
+
+Register it. This is a `FuncMap`, so add as many functions as the page
+needs:
+
+```go
+vehicles := &VehicleStore{db: db}
+
+cfg.TemplateFuncs = template.FuncMap{
+    "featuredVehicles": func(n int) []Vehicle { return vehicles.Featured(context.Background(), n) },
+    "vehicleCount":     func() int { return vehicles.Count(context.Background()) },
+}
+
+// Optional but usually right: rebind the same names per request, so a
+// query carries that request's context and dies with it.
+cfg.RequestFuncs = func(r *http.Request) template.FuncMap {
+    return template.FuncMap{
+        "featuredVehicles": func(n int) []Vehicle { return vehicles.Featured(r.Context(), n) },
+        "vehicleCount":     func() int { return vehicles.Count(r.Context()) },
+    }
+}
+```
+
+Then call them in a page template like any other func:
+
+```html
+<h2>{{cmsText "inventory-title"}}</h2>   <!-- content: an editor owns this -->
+<p>{{cmsText "inventory-lede"}}</p>
+
+<div class="grid gap-6 sm:grid-cols-3">
+  {{range featuredVehicles 3}}                <!-- data: your table owns this -->
+    <a href="{{.URL}}">
+      <img src="{{.PhotoURL}}" alt="{{.Name}}" loading="lazy">
+      <h3>{{.Name}}</h3><p>{{.Detail}}</p><span>{{.Price}}</span>
+    </a>
+  {{else}}
+    <p>Nothing on the lot right now — check back shortly.</p>
+  {{end}}
+</div>
+```
+
+Four things to know:
+
+- **`TemplateFuncs` declares the names.** Templates are parsed against it
+  at startup, so a name missing from it fails with `function
+  "featuredVehicles" not defined`. `RequestFuncs` only swaps
+  implementations for one render; a name appearing only there is
+  unreachable, and `New` rejects `RequestFuncs` without `TemplateFuncs`.
+- **`cms*` is reserved**, so a future release can add template funcs
+  without colliding with yours. `New` refuses a host func named `cmsFoo`.
+- **A func in `TemplateFuncs` alone is shared by every render** and must
+  be concurrency-safe. Per-request state belongs in `RequestFuncs`.
+- **They run with your full trust.** A func returning `template.HTML`
+  skips the editor's content sanitizer, so never interpolate untrusted
+  input into one.
+
+Always give `{{range}}` an `{{else}}`: an empty result is a normal state,
+and without one the section renders as a heading over nothing.
+
+Two conveniences fall out of this. The markup lives in your template
+files, which your Tailwind build already scans — so data-driven markup
+needs no safelisting and never touches the generated content stylesheet.
+And detail pages (`/inventory/{slug}`) are plain host routes, registered
+on your mux ahead of `c.Handler()`; only the pages the CMS renders need
+the funcs.
+
+If you validate templates at build time with `render.CheckTemplate`,
+switch to `render.CheckTemplateFuncs` and pass the same map, or every
+template calling a host func reports a spurious parse failure.
+
+`examples/wheels` is a worked version: `vehicles.go` holds the store and
+both maps, and `templates/pages/home.gohtml` ranges over the result
+between two `cmsText` slots.
+
 ### Content-driven Tailwind rebuilds
 
 Superadmins can type any class into content through the HTML source
@@ -1089,6 +1197,11 @@ You now have a complete site. These go deeper:
   everything in step 9 wired up: Docker, Tailwind, S3 media, CAPTCHA, blog &
   news, and a custom admin section. Postgres by default; MySQL and MariaDB
   behind compose profiles.
+- [`examples/wheels`](examples/wheels) — a design mockup turned into a
+  working site: a custom Tailwind v4 theme shared by both builds, an
+  editor vocabulary in the site's own palette, all copy seeded as content
+  rather than defaulted in templates, and a data-driven vehicle strip
+  through `TemplateFuncs`.
 - [`examples/mariadb`](examples/mariadb) — the opposite end: the smallest
   host that does something real. MariaDB, hand-written CSS, no Tailwind, no
   build step. The one to read if you're not using Tailwind, since it shows

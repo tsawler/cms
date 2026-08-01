@@ -242,6 +242,7 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 		Post:    render.PostInfoFor(post, render.LocalePrefix(locale, s.deps.DefaultLocale), s.postImages()),
 		Locales: s.deps.Locales,
 		Site:    site,
+		Funcs:   s.hostFuncs(r),
 	})
 	if err != nil {
 		s.serverError(w, err)

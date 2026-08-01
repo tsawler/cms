@@ -610,6 +610,7 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		Menus:   menus,
 		Locales: s.deps.Locales,
 		Site:    site,
+		Funcs:   s.hostFuncs(r),
 	}); err != nil {
 		s.serverError(w, err)
 	}

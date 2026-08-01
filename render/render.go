@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/datefmt"
@@ -499,6 +500,57 @@ func writePagerStep(sb *strings.Builder, class, url, label string) {
 		strings.TrimPrefix(class, "cms-pager-") + `">` + label + `</a>`)
 }
 
+// FuncNamePrefix is the namespace the CMS reserves for its own template
+// functions. Host functions may not start with it, so a host can add
+// however many of its own as it likes without ever colliding with a func
+// a later CMS release introduces.
+const FuncNamePrefix = "cms"
+
+// ValidateFuncNames checks a host's template functions for names the CMS
+// cannot accept: anything inside the reserved cms* namespace, and anything
+// that is not a legal template identifier (templates call funcs by name,
+// so an unusable name is a silent no-op rather than an error the host
+// would otherwise see).
+func ValidateFuncNames(m template.FuncMap) error {
+	for name := range m {
+		if strings.HasPrefix(name, FuncNamePrefix) {
+			return fmt.Errorf("render: template func %q uses the reserved %q prefix", name, FuncNamePrefix)
+		}
+		if !validFuncName(name) {
+			return fmt.Errorf("render: template func %q is not a valid identifier", name)
+		}
+	}
+	return nil
+}
+
+func validFuncName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_' || unicode.IsLetter(r):
+		case i > 0 && unicode.IsDigit(r):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// mergeFuncs copies src over dst, skipping the reserved namespace. New
+// validates host funcs up front, so a reserved name reaching here means a
+// caller assembled a FuncMap by hand; dropping it keeps the CMS's own
+// funcs working rather than letting a page silently lose {{cmsHead}}.
+func mergeFuncs(dst, src template.FuncMap) {
+	for name, fn := range src {
+		if strings.HasPrefix(name, FuncNamePrefix) {
+			continue
+		}
+		dst[name] = fn
+	}
+}
+
 // stubFuncs lets templates parse before real, page-bound funcs are attached
 // at render time via Clone().Funcs().
 var stubFuncs = template.FuncMap{
@@ -531,9 +583,35 @@ var stubFuncs = template.FuncMap{
 // visitor. Host applications can point this at their own templates to
 // find that at build time instead; the scaffold uses it on the templates
 // `cms init` writes.
+//
+// A host that registers its own template functions (Config.TemplateFuncs)
+// must use CheckTemplateFuncs instead, or every template calling one of
+// them reports a spurious "function not defined".
 func CheckTemplate(name, src string) error {
-	_, err := template.New(name).Funcs(stubFuncs).Parse(src)
+	return CheckTemplateFuncs(name, src, nil)
+}
+
+// CheckTemplateFuncs is CheckTemplate with the host's own template
+// functions declared alongside the cms ones. Only the names and
+// signatures matter here — the funcs are never called — so a build-time
+// check can pass the same map the server does.
+func CheckTemplateFuncs(name, src string, host template.FuncMap) error {
+	_, err := template.New(name).Funcs(parseFuncs(host)).Parse(src)
 	return err
+}
+
+// parseFuncs is the name set templates parse against: the CMS's stubs plus
+// whatever the host declared.
+func parseFuncs(host template.FuncMap) template.FuncMap {
+	if len(host) == 0 {
+		return stubFuncs
+	}
+	out := make(template.FuncMap, len(stubFuncs)+len(host))
+	for name, fn := range stubFuncs {
+		out[name] = fn
+	}
+	mergeFuncs(out, host)
+	return out
 }
 
 // EditorScriptPath is the public route the in-place editor script is served
@@ -792,6 +870,10 @@ type Renderer struct {
 	sets      map[string]*template.Template // keyed by PageTemplate.File
 	templates []PageTemplate
 	sections  *SectionStyles
+	// hostFuncs are the host application's own template functions, as
+	// declared at construction: they name what templates may call, and
+	// stand in on any render that supplies no per-request replacement.
+	hostFuncs template.FuncMap
 	// contentCSS is the href of the CMS-generated content stylesheet
 	// {{cmsHead}} links (see SetContentCSSHref), "" for none. Atomic:
 	// a background rebuild updates it while renders read it.
@@ -805,8 +887,24 @@ type Renderer struct {
 // appear in the admin's or editor's template choosers — the post template
 // is one.
 func New(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionStyles, hidden ...PageTemplate) (*Renderer, error) {
+	return NewWithFuncs(fsys, shared, pages, sections, nil, hidden...)
+}
+
+// NewWithFuncs is New with the host application's own template functions
+// declared alongside the CMS's. Templates parse against their names, so
+// any number of them may be registered and called like the cms* funcs —
+// typically to reach data the CMS does not own (a product catalogue, a
+// vehicle table) from inside a CMS-managed page.
+//
+// The map given here is what templates parse against, and what renders
+// use unless Input.Funcs supplies a per-request replacement. Names inside
+// the reserved cms* namespace are rejected; see ValidateFuncNames.
+func NewWithFuncs(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionStyles, host template.FuncMap, hidden ...PageTemplate) (*Renderer, error) {
 	if len(pages) == 0 {
 		return nil, fmt.Errorf("render: at least one PageTemplate is required")
+	}
+	if err := ValidateFuncNames(host); err != nil {
+		return nil, err
 	}
 	if sections == nil {
 		sections = DefaultSectionStyles()
@@ -815,10 +913,12 @@ func New(fsys fs.FS, shared []string, pages []PageTemplate, sections *SectionSty
 		sets:      make(map[string]*template.Template, len(pages)+len(hidden)),
 		templates: pages,
 		sections:  sections,
+		hostFuncs: host,
 	}
+	parse := parseFuncs(host)
 	for _, pt := range append(append([]PageTemplate{}, pages...), hidden...) {
 		patterns := append(append([]string{}, shared...), pt.File)
-		set, err := template.New(path.Base(pt.File)).Funcs(stubFuncs).ParseFS(fsys, patterns...)
+		set, err := template.New(path.Base(pt.File)).Funcs(parse).ParseFS(fsys, patterns...)
 		if err != nil {
 			return nil, fmt.Errorf("render: parsing page template %s: %w", pt.File, err)
 		}
@@ -900,6 +1000,17 @@ type Input struct {
 	// build the optional "Log in" nav link (Site.LoginInNav). Empty
 	// disables the link even when the setting is on.
 	AdminPath string
+	// Funcs replaces the host template functions declared at construction
+	// (NewWithFuncs) for this render, entry by entry: a name it does not
+	// carry keeps the declared implementation. This is how a host binds
+	// its functions to the request — a database query wants the request's
+	// context, and a locale-aware one wants Locale — without the renderer
+	// having to know what a request is.
+	//
+	// Only names the constructor declared can actually be called: the
+	// templates were parsed against that set, so a name appearing here
+	// for the first time is unreachable. Reserved cms* names are ignored.
+	Funcs template.FuncMap
 }
 
 // LocaleLink is one entry {{cmsLocales}} returns: the current page's URL
@@ -1113,6 +1224,13 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			return template.HTML(sb.String())
 		}
 	}
+	// Host funcs last, so they are bound for this render: the declared
+	// implementations first, then whatever the request supplied over
+	// them. mergeFuncs drops reserved names, so nothing here can shadow
+	// {{cmsHead}} or {{cmsScripts}}.
+	mergeFuncs(funcs, r.hostFuncs)
+	mergeFuncs(funcs, in.Funcs)
+
 	clone.Funcs(funcs)
 
 	var buf bytes.Buffer
