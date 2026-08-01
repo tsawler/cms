@@ -260,13 +260,20 @@ rather than letting it vary:
 ## The Styles menu (Tailwind-first)
 
 The in-place editor's toolbar starts with a **Styles** dropdown: a
-built-in **Headings** submenu (Headings 2–4 — h1 stays reserved for
-the page title), followed by a short list of named,
+built-in **Headings** submenu (Headings 1–4, plus Paragraph to go back
+down), followed by a short list of named,
 on-brand text styles editors can apply to a selection. There is
 deliberately no free color picker and no font-family menu — every
 style applies CSS **classes**, so your stylesheet stays the single
 source of design truth, and a later redesign restyles existing content
 by changing the CSS rather than hunting down baked-in inline styles.
+
+Heading 1 is in the submenu for the case that needs it: a region that
+carries the page's own headline, where the `<h1>` lives *inside* the
+region so an editor can style parts of it. Content under a page title
+should still start at Heading 2 — the entry exists so a heading that has
+been flattened to a paragraph can be put back, not as an invitation to
+put several `<h1>`s on a page.
 
 ### The defaults
 
