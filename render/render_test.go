@@ -128,11 +128,11 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	if !strings.Contains(out, `<div data-cms-region="main" data-cms-kind="html"><p>Hello</p></div>`) {
 		t.Errorf("html region marker missing:\n%s", out)
 	}
-	if !strings.Contains(out, `src="`+EditorScriptPath+`"`) || !strings.Contains(out, `data-csrf="tok123"`) {
+	if !strings.Contains(out, `src="`+EditorScriptPath()+`"`) || !strings.Contains(out, `data-csrf="tok123"`) {
 		t.Errorf("editor script tag missing:\n%s", out)
 	}
 	// The script must land before </body>, inside the document.
-	if strings.Index(out, EditorScriptPath) > strings.LastIndex(strings.ToLower(out), "</body>") {
+	if strings.Index(out, EditorScriptPath()) > strings.LastIndex(strings.ToLower(out), "</body>") {
 		t.Error("editor script injected after </body>")
 	}
 
@@ -141,7 +141,7 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en"}); err != nil {
 		t.Fatalf("plain Render: %v", err)
 	}
-	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath) {
+	if strings.Contains(buf.String(), "data-cms-region") || strings.Contains(buf.String(), EditorScriptPath()) {
 		t.Error("plain render leaked editor markers")
 	}
 }

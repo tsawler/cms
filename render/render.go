@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/editor"
 	"github.com/tsawler/cms/internal/datefmt"
 	"github.com/tsawler/cms/media"
 )
@@ -614,9 +615,11 @@ func parseFuncs(host template.FuncMap) template.FuncMap {
 	return out
 }
 
-// EditorScriptPath is the public route the in-place editor script is served
-// from.
-const EditorScriptPath = "/cms/editor/editor.js"
+// EditorScriptPath is the public route the in-place editor script is
+// served from. It carries a digest of the editor bundle, so shipping a
+// new one changes the address and no browser can go on running the copy
+// it cached. See editor.Version.
+func EditorScriptPath() string { return editor.ScriptPath() }
 
 // SharedRegionPrefix namespaces shared regions in the marker attributes an
 // edit render emits: {{cmsShared "footer"}} becomes
@@ -1452,7 +1455,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if err != nil || edit.Locales == nil {
 		localesJSON = []byte("[]")
 	}
-	tag := `<script src="` + EditorScriptPath + `" defer` +
+	tag := `<script src="` + EditorScriptPath() + `" defer` +
 		` data-page-id="` + strconv.FormatInt(edit.PageID, 10) + `"` +
 		` data-slug="` + html.EscapeString(edit.Slug) + `"` +
 		` data-admin-path="` + html.EscapeString(edit.AdminPath) + `"` +

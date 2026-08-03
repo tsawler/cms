@@ -20,7 +20,11 @@
     postInfo = JSON.parse(cfg.post || "null");
   } catch (e) {
   }
-  var EDITOR_BASE = "/cms/editor/";
+  var EDITOR_BASE = (function() {
+    var src = document.currentScript && document.currentScript.src;
+    if (!src) return "/cms/editor/";
+    return src.slice(0, src.lastIndexOf("/") + 1);
+  })();
   var styleFormats = [];
   try {
     styleGroups = {};

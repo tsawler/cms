@@ -34,7 +34,26 @@ try {
     postInfo = JSON.parse(cfg.post || "null");
 } catch (e) { /* no post-settings gear */ }
 
-export var EDITOR_BASE = "/cms/editor/";
+// Where the editor's own assets live, derived from this script's URL
+// rather than written down.
+//
+// The server serves the bundle under a digest of its contents —
+// /cms/editor/<version>/editor.js — so that shipping a new editor changes
+// the address and no browser keeps running a cached copy of the old one.
+// A hard-coded "/cms/editor/" would send TinyMCE to fetch its skins and
+// plugins from the unversioned path, which is the one place that trick
+// does not protect: the script would be current and its skin a year old.
+//
+// document.currentScript is the tag being executed, and reading it at
+// module scope is what makes that work — it is null once any callback
+// runs. The literal is a fallback for the case where this file is loaded
+// some other way; it resolves to files that are still served, just
+// without the cache guarantee.
+export var EDITOR_BASE = (function () {
+    var src = document.currentScript && document.currentScript.src;
+    if (!src) return "/cms/editor/";
+    return src.slice(0, src.lastIndexOf("/") + 1);
+})();
 
 // The Styles menu: named, on-brand styles configured on the server.
 // Each applies CSS classes, so the site's stylesheet stays in charge.
