@@ -953,6 +953,12 @@ and positioning of dropdown panels, a neutral panel look, the mobile
 collapse) — colors, spacing, and typography come from your CSS, and
 every injected rule can be overridden by class.
 
+A dropdown's parent is a `<button>` rather than an `<a>`, so it can be
+opened from the keyboard, but it carries `.cms-nav-link` exactly like a
+plain item — style that one class and both look the same. The reset that
+undoes the browser's button styling is wrapped in `:where()`, so it has
+zero specificity and your rule wins even though it names an element.
+
 **Editing happens right on the nav.** While in edit mode, editors
 right-click any menu item (long-press on touch) to set its text, link it
 to a page (searchable picker; the URL follows slug renames, and the item

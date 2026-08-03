@@ -1612,7 +1612,21 @@ const navCSS = `.cms-nav ul{list-style:none;margin:0;padding:0}` +
 	`.cms-brand{display:inline-flex;align-items:center;gap:.5em}` +
 	`.cms-brand-logo{height:1.6em;width:auto}` +
 	`.cms-nav-item{position:relative}` +
-	`button.cms-nav-toggle{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}` +
+	// A dropdown's parent is a <button> so it can be operated from the
+	// keyboard, which means undoing the browser's button styling — its
+	// own font, background and border — before the site's own rules land.
+	//
+	// :where() is what makes that safe. The reset has to name the element
+	// to beat the user agent, but `button.cms-nav-toggle` is *more
+	// specific* than `.cms-nav-link`, which is the class every one of
+	// these carries and the hook the host is told to style. The reset
+	// therefore won, and a dropdown's label came out in the page's body
+	// font while its plain-link siblings used the site's display font.
+	// Wrapped in :where() the reset has zero specificity: it still
+	// outranks the user agent, because author styles always do, and it
+	// loses to any rule the host writes — which is the whole point of
+	// emitting a class for the host to write rules against.
+	`:where(button.cms-nav-toggle){font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}` +
 	`.cms-nav-caret::before{content:'';display:inline-block;margin-left:.4em;vertical-align:.15em;` +
 	`border:.32em solid transparent;border-top-color:currentColor;border-bottom:none}` +
 	`.cms-nav-sub{display:none;position:absolute;top:100%;left:0;z-index:40;min-width:11em;` +
