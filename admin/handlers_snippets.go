@@ -120,6 +120,11 @@ func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[strin
 				sn.Settings["corners"] = c.Key
 			}
 		}
+		if list := s.deps.SectionStyles.Paddings; len(list) > 0 {
+			if p := s.deps.SectionStyles.Padding(r.PostFormValue("set_padding")); p.Key != list[0].Key {
+				sn.Settings["padding"] = p.Key
+			}
+		}
 	}
 	return sn, errs
 }

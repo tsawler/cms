@@ -658,6 +658,36 @@ the default choices (None / Small / Medium / Large →
 entirely. The first option is the default and should normally be a
 no-class "none".
 
+`Paddings` is the vertical breathing room around a section's content, as
+its own axis:
+
+```go
+Paddings: []cms.SectionOption{
+    {Key: "normal", Label: "Normal", Class: "py-12"},
+    {Key: "tight",  Label: "Tight",  Class: "py-3"},
+    {Key: "none",   Label: "None",   Class: "py-0"},
+},
+```
+
+It is optional and nil by default, which renders exactly as it did
+before the setting existed — so keeping your `py-*` inside the `Widths`
+presets goes on working. Configure it and the spacing becomes
+independently choosable, which is worth doing for two reasons:
+
+- Bundled into `Widths`, "the same measure but tighter" has no
+  expression except a second width option, and the list multiplies by
+  every spacing anyone wants.
+- It is not the same thing as the section **height** setting, which is a
+  `min-height` and can only ever make a section *taller*. An editor who
+  wants less space reaches for height first, finds "Auto" already
+  selected, and concludes the CMS cannot do it.
+
+The class is emitted after the width class, so moving a `py-*` out of a
+width preset and into `Paddings` needs no thought about ordering. The
+first option is the default and is what content saved before you added
+the axis resolves to — make it match whatever padding your width presets
+used to carry and nothing already published will move.
+
 Safelist the default section classes along with the rest:
 
 ```js

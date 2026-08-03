@@ -671,6 +671,40 @@ type SectionStyles struct {
 	Backgrounds []SectionOption `json:"backgrounds"`
 	Widths      []SectionOption `json:"widths"`
 	Corners     []SectionOption `json:"corners"`
+
+	// Paddings is the vertical breathing room around a section's
+	// content, as its own axis.
+	//
+	// It is separate from Widths because they answer different
+	// questions, and bundling them — the obvious shortcut, since a width
+	// preset is already a class string and can just carry a py-* — makes
+	// one unanswerable: "the same measure, but tighter" then has no
+	// expression except a second width option, and the option list
+	// multiplies by every spacing anyone wants.
+	//
+	// It is also separate from the height setting, which is a min-height
+	// and can only ever make a section taller. An editor looking for less
+	// space reaches for height first, finds "Auto" already selected, and
+	// concludes the CMS cannot do it.
+	//
+	// Optional: a nil list leaves sections exactly as they render today,
+	// so hosts that keep their padding in the width presets are
+	// unaffected. When set, the first entry is the default for content
+	// saved before the axis existed — make it match whatever padding the
+	// width presets used to carry, and nothing shifts.
+	Paddings []SectionOption `json:"paddings"`
+}
+
+// joinClasses joins non-empty class strings with single spaces, so an
+// unset axis leaves no trace in the rendered attribute.
+func joinClasses(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func pickOption(list []SectionOption, key string) SectionOption {
@@ -696,6 +730,12 @@ func (ss *SectionStyles) Width(key string) SectionOption { return pickOption(ss.
 // option. A nil Corners list resolves everything to a zero option, so
 // hosts that ship no corner choices render sections unchanged.
 func (ss *SectionStyles) Corner(key string) SectionOption { return pickOption(ss.Corners, key) }
+
+// Padding resolves a stored vertical-spacing key, falling back to the
+// first option. A nil Paddings list resolves to a zero option, which
+// contributes no class — so a host that never configured the axis
+// renders exactly as it did before it existed.
+func (ss *SectionStyles) Padding(key string) SectionOption { return pickOption(ss.Paddings, key) }
 
 // DefaultSectionStyles is the Tailwind-first default set of section
 // settings. The classes need safelisting like editor styles do.
@@ -1261,6 +1301,7 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	bg := r.sections.Background(b.Settings["bg"])
 	w := r.sections.Width(b.Settings["width"])
 	corner := r.sections.Corner(b.Settings["corners"])
+	pad := r.sections.Padding(b.Settings["padding"])
 	bgColor := ValidBackgroundColor(b.Settings["bgcolor"])
 	bgImage := ValidBackgroundURL(b.Settings["bgimage"])
 	bgPos := ValidBackgroundPosition(b.Settings["bgposition"])
@@ -1277,6 +1318,9 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		sb.WriteString(`"`)
 		if corner.Key != "" {
 			sb.WriteString(` data-cms-corners="` + html.EscapeString(corner.Key) + `"`)
+		}
+		if pad.Key != "" {
+			sb.WriteString(` data-cms-padding="` + html.EscapeString(pad.Key) + `"`)
 		}
 		if height != "" {
 			sb.WriteString(` data-cms-height="`)
@@ -1328,7 +1372,12 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	if edit {
 		sb.WriteString(" data-cms-section-content")
 	}
-	if inner := strings.TrimSpace(w.Class + " " + bg.ContentClass); inner != "" {
+	// Padding last, so a host moving its py-* out of the width presets
+	// gets the spacing option winning on source order rather than having
+	// to think about which class Tailwind emits first. Joined rather
+	// than concatenated because any of the three may be empty, and
+	// concatenation leaves the gaps behind in the attribute.
+	if inner := joinClasses(w.Class, bg.ContentClass, pad.Class); inner != "" {
 		sb.WriteString(` class="` + html.EscapeString(inner) + `"`)
 	}
 	sb.WriteString(">")

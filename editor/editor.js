@@ -824,6 +824,10 @@
     var list = sectionStyles.corners || [];
     return list.length ? sbOpt(list, key) : { key: "", class: "" };
   }
+  function paddingOption(key) {
+    var list = sectionStyles.paddings || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
+  }
   function isDarkColor(c) {
     var r, g, b;
     var m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || "");
@@ -1093,6 +1097,18 @@
             })
           });
         }
+        if ((sectionStyles.paddings || []).length) {
+          setFields.push({
+            id: "padding",
+            label: "Vertical spacing",
+            type: "select",
+            tab: "Layout",
+            value: wrapper.dataset.cmsPadding || "",
+            options: sectionStyles.paddings.map(function(o) {
+              return { value: o.key, label: o.label };
+            })
+          });
+        }
         setFields.push(
           {
             id: "bg",
@@ -1219,6 +1235,7 @@
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
+    var pad = paddingOption(s.padding);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     var position = image ? bgPosition(s) : CENTERED;
@@ -1227,6 +1244,7 @@
     wrapper.dataset.cmsBg = bg.key;
     wrapper.dataset.cmsWidth = w.key;
     wrapper.dataset.cmsCorners = corner.key;
+    wrapper.dataset.cmsPadding = pad.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
@@ -1246,7 +1264,7 @@
     var mce = (contentEl.className || "").split(/\s+/).filter(function(c) {
       return c.indexOf("mce-") === 0;
     });
-    contentEl.className = [w.class, bg.contentClass, mce.join(" ")].filter(Boolean).join(" ");
+    contentEl.className = [w.class, bg.contentClass, pad.class, mce.join(" ")].filter(Boolean).join(" ");
   }
   function reapplySectionClasses() {
     document.querySelectorAll("[data-cms-section]").forEach(function(wrapper) {
@@ -1254,6 +1272,7 @@
         bg: wrapper.dataset.cmsBg,
         width: wrapper.dataset.cmsWidth,
         corners: wrapper.dataset.cmsCorners,
+        padding: wrapper.dataset.cmsPadding,
         height: wrapper.dataset.cmsHeight,
         valign: wrapper.dataset.cmsValign,
         bgcolor: wrapper.dataset.cmsBgcolor,
@@ -4557,6 +4576,7 @@
         bg: wrapper.dataset.cmsBg || "",
         width: wrapper.dataset.cmsWidth || "",
         corners: wrapper.dataset.cmsCorners || "",
+        padding: wrapper.dataset.cmsPadding || "",
         height: wrapper.dataset.cmsHeight || "",
         valign: wrapper.dataset.cmsValign || "",
         bgcolor: wrapper.dataset.cmsBgcolor || "",

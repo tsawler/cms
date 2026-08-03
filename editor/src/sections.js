@@ -60,6 +60,14 @@ function cornerOption(key) {
     return list.length ? sbOpt(list, key) : { key: "", class: "" };
 }
 
+// paddingOption resolves the vertical-spacing setting, or a no-op option
+// when the host ships no spacing choices — so a section renders exactly
+// as it did before the axis existed.
+function paddingOption(key) {
+    var list = sectionStyles.paddings || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
+}
+
 function isDarkColor(c) {
     var r, g, b;
     var m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || "");
@@ -343,6 +351,15 @@ export function initSections() {
                     value: wrapper.dataset.cmsCorners || "",
                     options: sectionStyles.corners.map(function (o) { return { value: o.key, label: o.label }; }) });
             }
+            // Vertical spacing. Distinct from height, which is a
+            // minimum and can only add: this is the padding around the
+            // content, and it is the one an editor wants when a section
+            // feels too airy.
+            if ((sectionStyles.paddings || []).length) {
+                setFields.push({ id: "padding", label: "Vertical spacing", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsPadding || "",
+                    options: sectionStyles.paddings.map(function (o) { return { value: o.key, label: o.label }; }) });
+            }
             setFields.push(
                 { id: "bg", label: "Background style", type: "select", tab: "Background",
                     value: wrapper.dataset.cmsBg || "",
@@ -473,6 +490,7 @@ function applySectionSettings(wrapper, s) {
     var bg = sbOpt(sectionStyles.backgrounds, s.bg);
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
+    var pad = paddingOption(s.padding);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     // An anchor without an image has nothing to anchor, and centered is
@@ -487,6 +505,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.dataset.cmsBg = bg.key;
     wrapper.dataset.cmsWidth = w.key;
     wrapper.dataset.cmsCorners = corner.key;
+    wrapper.dataset.cmsPadding = pad.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
@@ -509,7 +528,9 @@ function applySectionSettings(wrapper, s) {
     var mce = (contentEl.className || "").split(/\s+/).filter(function (c) {
         return c.indexOf("mce-") === 0;
     });
-    contentEl.className = [w.class, bg.contentClass, mce.join(" ")]
+    // Padding after the width class, so a host that moved its py-* out
+    // of the width presets has the spacing win on source order.
+    contentEl.className = [w.class, bg.contentClass, pad.class, mce.join(" ")]
         .filter(Boolean).join(" ");
 }
 
@@ -524,6 +545,7 @@ export function reapplySectionClasses() {
             bg: wrapper.dataset.cmsBg,
             width: wrapper.dataset.cmsWidth,
             corners: wrapper.dataset.cmsCorners,
+            padding: wrapper.dataset.cmsPadding,
             height: wrapper.dataset.cmsHeight,
             valign: wrapper.dataset.cmsValign,
             bgcolor: wrapper.dataset.cmsBgcolor,

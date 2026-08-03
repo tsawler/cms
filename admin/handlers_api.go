@@ -575,6 +575,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 			BG      string `json:"bg"`
 			Width   string `json:"width"`
 			Corners string `json:"corners"`
+			Padding string `json:"padding"`
 			Height  string `json:"height"`
 			VAlign  string `json:"valign"`
 			BGColor string `json:"bgcolor"`
@@ -625,6 +626,14 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		if list := s.deps.SectionStyles.Corners; len(list) > 0 {
 			if c := s.deps.SectionStyles.Corner(sec.Corners); c.Key != list[0].Key {
 				settings["corners"] = c.Key
+			}
+		}
+		// Vertical spacing, on the same terms: only a non-default choice
+		// is stored, so content saved before the axis existed keeps
+		// resolving to the first option and renders unchanged.
+		if list := s.deps.SectionStyles.Paddings; len(list) > 0 {
+			if p := s.deps.SectionStyles.Padding(sec.Padding); p.Key != list[0].Key {
+				settings["padding"] = p.Key
 			}
 		}
 		// Custom backgrounds and height are free-form values; invalid
