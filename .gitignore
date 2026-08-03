@@ -10,7 +10,5 @@ examples/wheels/static/site.css
 # Compiled binaries. examples/basic/basic in particular would otherwise ship
 # inside every module zip the proxy serves.
 /examples/basic/basic
-/examples/wheels/wheels
+/examples/wheels
 /editor/build/build
-
-examples/wheels

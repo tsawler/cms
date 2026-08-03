@@ -10,12 +10,20 @@ package cms
 // database. Pages link it as /cms/content-<hash>.css, injected via
 // {{cmsHead}}.
 //
-// The hash in the URL is derived from the class set, so the link doubles
-// as the cache buster: identical content produces an identical URL on
-// every instance (no clock skew), and any change produces a fresh URL
-// that no cache has seen. The stylesheet itself lives in the database,
-// so multi-instance deployments serve one consistent artifact no matter
-// which instance built it.
+// Two hashes appear here and they answer different questions. The *build*
+// hash (buildHash) is the cache key for compiling: the class set, the
+// command, and a digest of the sources the command scans for itself. It
+// decides whether a rebuild can be skipped. The *content* hash (cssHash)
+// is the address of the finished bytes, and it is what the URL carries,
+// so the link doubles as a cache buster: identical CSS produces an
+// identical URL on every instance (no clock skew), and any change to the
+// bytes — from content, a template edit, or a CLI upgrade — produces a
+// fresh URL no cache has seen. Using the build hash for the URL would let
+// the file change underneath a URL browsers were told to keep forever.
+//
+// The stylesheet itself lives in the database, so multi-instance
+// deployments serve one consistent artifact no matter which instance
+// built it.
 
 import (
 	"context"
@@ -23,6 +31,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -60,6 +69,30 @@ type TailwindConfig struct {
 	// site's Tailwind config and input stylesheet live. Empty means the
 	// process's working directory.
 	Dir string
+
+	// Sources fingerprints the files the Tailwind build reads on its own
+	// account — page templates, the input stylesheet, a theme file —
+	// rather than through {content}.
+	//
+	// It exists because those files are build inputs the CMS cannot
+	// otherwise see. A rebuild is skipped when the class set is
+	// unchanged, so without this a template edit that adds a class
+	// produces no rebuild at all: the generated stylesheet keeps
+	// whatever it had, and because it is linked *after* the site's own
+	// stylesheet, the utilities it does carry outrank the ones it does
+	// not. The symptom is a responsive class that silently stops
+	// applying — a lg: rule losing to the sm: rule the stale artifact
+	// still holds — which looks like a CSS bug and is really a cache
+	// bug.
+	//
+	// Nil defaults to Config.TemplateFS, which is right whenever the
+	// build scans the same templates the CMS renders — the usual
+	// arrangement. Set it explicitly to cover more (an input.css that
+	// changes, a theme file) or to opt out with an empty FS.
+	//
+	// Only the file contents matter, not their paths on disk, so an
+	// embed.FS and an os.DirFS both work.
+	Sources fs.FS
 
 	// Timeout bounds one rebuild. Zero means 60 seconds.
 	Timeout time.Duration
@@ -193,15 +226,63 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// buildHash is the content address of a build: the class set plus the
-// command that compiles it, so changing the Tailwind command, version
-// pin, or config directory regenerates the artifact even when content
+// buildHash is the content address of a build: the class set, the command
+// that compiles it, and a digest of the sources the command reads for
+// itself. Changing the Tailwind command, version pin, config directory,
+// or a scanned template regenerates the artifact even when stored content
 // hasn't changed. Stable across instances and orderings, unlike a
 // timestamp.
-func buildHash(tc *TailwindConfig, tokens []string) string {
-	input := strings.Join(tc.Command, "\x00") + "\x00" + tc.Dir + "\x01" + strings.Join(tokens, "\n")
+func buildHash(tc *TailwindConfig, tokens []string, sourcesDigest string) string {
+	input := strings.Join(tc.Command, "\x00") + "\x00" + tc.Dir +
+		"\x01" + strings.Join(tokens, "\n") + "\x02" + sourcesDigest
 	sum := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// sourcesDigest fingerprints every file in fsys, so an edit to a scanned
+// template changes the build hash.
+//
+// Paths are folded in alongside contents, so a rename counts as a change;
+// fs.WalkDir visits in lexical order, which makes the result stable
+// across instances without sorting. A nil FS digests to the empty string,
+// which is simply a build whose sources are not tracked.
+//
+// Errors are reported rather than swallowed: a digest that silently
+// degrades to "" on a read error would reintroduce the stale-artifact bug
+// in the one case nobody would think to check.
+func sourcesDigest(fsys fs.FS) (string, error) {
+	if fsys == nil {
+		return "", nil
+	}
+	h := sha256.New()
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		body, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", path, len(body))
+		h.Write(body)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// tailwindSources is the FS whose contents feed the build hash:
+// Tailwind.Sources when set, otherwise the templates the CMS renders.
+func (c *CMS) tailwindSources() fs.FS {
+	if c.cfg.Tailwind != nil && c.cfg.Tailwind.Sources != nil {
+		return c.cfg.Tailwind.Sources
+	}
+	return c.cfg.TemplateFS
 }
 
 func (c *CMS) loadContentCSS(ctx context.Context) (hash, css string, err error) {
@@ -237,10 +318,34 @@ type cssRebuilder struct {
 	running bool
 	rerun   bool
 
-	cacheMu    sync.Mutex // guards the served-copy cache below
+	cacheMu sync.Mutex // guards the served-copy cache below
+	// cachedHash addresses the *bytes*, not the build. See cssHash.
 	cachedHash string
 	cachedCSS  string
 	cachedAt   time.Time
+}
+
+// cssHash is the content address of the stylesheet itself, and it is what
+// appears in the served URL.
+//
+// Deliberately not the build hash. The build hash answers "do I need to
+// compile again?", and it covers inputs — the class set, the command, the
+// scanned sources. Those can change without changing a byte of the
+// output, and, more damagingly, the output can change without them: any
+// upgrade of the Tailwind CLI recompiles the same inputs into different
+// CSS. A URL carrying the build hash then stays fixed while its contents
+// move, and every browser holding the immutable copy keeps it — the file
+// updates and no visitor sees it until a hard reload.
+//
+// Hashing the bytes makes the URL change exactly when the bytes do, which
+// is the property "immutable" claims. Derived on load rather than stored,
+// so it cannot disagree with the CSS it names.
+func cssHash(css string) string {
+	if css == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(css))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 // schedule requests a rebuild. Builds are serialized; a request landing
@@ -294,14 +399,22 @@ func (b *cssRebuilder) buildOnce() {
 		log.Error("cms tailwind: collecting classes", "err", err)
 		return
 	}
-	hash := buildHash(tc, tokens)
+	digest, err := sourcesDigest(b.c.tailwindSources())
+	if err != nil {
+		// Building anyway would be worse than not building: the hash
+		// would be wrong, and a wrong hash is what makes a stale
+		// stylesheet look current forever.
+		log.Error("cms tailwind: fingerprinting build sources", "err", err)
+		return
+	}
+	hash := buildHash(tc, tokens, digest)
 	storedHash, storedCSS, err := b.c.loadContentCSS(ctx)
 	if err != nil {
 		log.Error("cms tailwind: loading stored css", "err", err)
 		return
 	}
 	if storedHash == hash {
-		b.setCache(hash, storedCSS)
+		b.setCache(storedCSS)
 		return
 	}
 
@@ -343,12 +456,15 @@ func (b *cssRebuilder) buildOnce() {
 		log.Error("cms tailwind: storing css", "err", err)
 		return
 	}
-	b.setCache(hash, string(css))
+	b.setCache(string(css))
 	log.Info("cms tailwind: rebuilt content css",
 		"classes", len(tokens), "bytes", len(css), "took", time.Since(started).Round(time.Millisecond))
 }
 
-func (b *cssRebuilder) setCache(hash, css string) {
+// setCache publishes a stylesheet as the one to serve, addressing it by
+// its own bytes.
+func (b *cssRebuilder) setCache(css string) {
+	hash := cssHash(css)
 	b.cacheMu.Lock()
 	b.cachedHash = hash
 	b.cachedCSS = css
@@ -364,9 +480,10 @@ func (b *cssRebuilder) setCache(hash, css string) {
 	}
 }
 
-// current returns the newest stored stylesheet, trusting the in-memory
-// copy for a few seconds so multi-instance deployments converge on a
-// rebuild done elsewhere without a database read per request.
+// current returns the newest stored stylesheet and the hash of its bytes,
+// trusting the in-memory copy for a few seconds so multi-instance
+// deployments converge on a rebuild done elsewhere without a database
+// read per request.
 func (b *cssRebuilder) current(ctx context.Context) (hash, css string) {
 	b.cacheMu.Lock()
 	fresh := time.Since(b.cachedAt) < contentCSSCacheTTL && b.cachedHash != ""
@@ -375,14 +492,16 @@ func (b *cssRebuilder) current(ctx context.Context) (hash, css string) {
 	if fresh {
 		return hash, css
 	}
-	dbHash, dbCSS, err := b.c.loadContentCSS(ctx)
+	// The stored class_hash is the build key and is deliberately not what
+	// the URL carries; setCache re-derives the address from the bytes.
+	_, dbCSS, err := b.c.loadContentCSS(ctx)
 	if err != nil {
 		// Serve the stale copy rather than nothing.
 		b.c.cfg.Logger.Error("cms tailwind: reading css for serving", "err", err)
 		return hash, css
 	}
-	b.setCache(dbHash, dbCSS)
-	return dbHash, dbCSS
+	b.setCache(dbCSS)
+	return cssHash(dbCSS), dbCSS
 }
 
 // serveContentCSS handles GET /cms/content-<hash>.css. The current

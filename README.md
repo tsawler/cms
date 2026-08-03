@@ -354,9 +354,10 @@ HTML source views, and no static safelist can cover that. Setting
 collects the class tokens from stored content and, when the set actually
 changed, runs your Tailwind CLI over a synthetic file of those classes
 and serves the result as a supplemental stylesheet
-(`/cms/content-<hash>.css`, linked by `{{cmsHead}}` with the hash as the
-cache buster). The stylesheet is stored in the database, so every
-instance of a multi-instance deployment serves the same artifact.
+(`/cms/content-<hash>.css`, linked by `{{cmsHead}}`, where the hash is of
+the generated CSS itself and so doubles as the cache buster). The
+stylesheet is stored in the database, so every instance of a
+multi-instance deployment serves the same artifact.
 
 ```go
 Tailwind: &cms.TailwindConfig{
@@ -365,16 +366,37 @@ Tailwind: &cms.TailwindConfig{
     Command: []string{"tailwindcss", "-i", "assets/input.css",
         "-o", "{output}", "--content", "{content}"},
     Dir: "/path/to/site", // where your Tailwind config lives
+    // Files your build scans for itself, so editing one triggers a
+    // rebuild. Defaults to Config.TemplateFS; see below.
+    Sources: os.DirFS("/path/to/site/templates"),
 },
 ```
 
 The command runs your Tailwind — your version, your plugins, and your
 theme *as far as the input CSS you point it at declares one*. Builds are
-asynchronous, serialized, and skipped when the class set is unchanged; a
-failed build logs and keeps the previous stylesheet. Setups whose CLI
-can't take an ad-hoc content file (e.g. Tailwind v4 auto-detection) can
-point `Command` at a wrapper script that copies `{content}` where their
-build expects it.
+asynchronous, serialized, and skipped when nothing that feeds them has
+changed; a failed build logs and keeps the previous stylesheet. Setups
+whose CLI can't take an ad-hoc content file (e.g. Tailwind v4
+auto-detection) can point `Command` at a wrapper script that copies
+`{content}` where their build expects it.
+
+"Nothing that feeds them" includes the files your build scans on its own
+account. If your input CSS has `@source "../templates"` — which the
+section below explains why you want — then a template is a build input
+the CMS cannot see, and an edit to one must invalidate the artifact.
+`Sources` is how it does: its contents are fingerprinted into the build
+key. It defaults to `Config.TemplateFS`, so the usual arrangement needs
+no configuration; set it explicitly when your build reads more than the
+templates (an `input.css` you edit, a theme file), or to an empty FS to
+opt out.
+
+Getting this wrong is unpleasant to debug, which is why it is not
+optional. Edit a template to add `lg:grid-cols-6`, and with the class set
+unchanged there is no rebuild — the stored stylesheet still holds
+`sm:grid-cols-2` and not the `lg:` rule, and because it is linked *after*
+your site stylesheet it beats the `lg:` rule that build did emit. The
+element silently stays two columns at every width, and neither stylesheet
+looks wrong on its own.
 
 #### Keep the two builds on one theme
 

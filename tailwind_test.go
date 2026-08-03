@@ -3,6 +3,7 @@ package cms
 import (
 	"reflect"
 	"testing"
+	"testing/fstest"
 )
 
 func TestClassTokens(t *testing.T) {
@@ -17,21 +18,120 @@ func TestClassTokens(t *testing.T) {
 
 func TestBuildHash(t *testing.T) {
 	tc := &TailwindConfig{Command: []string{"tw", "{content}", "{output}"}}
-	a := buildHash(tc, []string{"a", "b", "c"})
-	if b := buildHash(tc, []string{"a", "b", "c"}); b != a {
+	a := buildHash(tc, []string{"a", "b", "c"}, "src1")
+	if b := buildHash(tc, []string{"a", "b", "c"}, "src1"); b != a {
 		t.Errorf("same build hashed differently: %q vs %q", a, b)
 	}
 	if len(a) != 16 {
 		t.Errorf("hash length = %d, want 16", len(a))
 	}
-	if c := buildHash(tc, []string{"a", "b"}); c == a {
+	if c := buildHash(tc, []string{"a", "b"}, "src1"); c == a {
 		t.Errorf("different class sets hashed identically: %q", c)
 	}
 	// A different command must invalidate the artifact — a new Tailwind
 	// version or config produces different CSS from the same classes.
 	tc2 := &TailwindConfig{Command: []string{"tw2", "{content}", "{output}"}}
-	if c := buildHash(tc2, []string{"a", "b", "c"}); c == a {
+	if c := buildHash(tc2, []string{"a", "b", "c"}, "src1"); c == a {
 		t.Errorf("different commands hashed identically: %q", c)
+	}
+	// And so must an edited template. This is the case that used to slip
+	// through: the class set is unchanged, so the rebuild was skipped and
+	// the stale stylesheet went on overriding the site's own.
+	if c := buildHash(tc, []string{"a", "b", "c"}, "src2"); c == a {
+		t.Errorf("different sources hashed identically: %q", c)
+	}
+}
+
+// TestSourcesDigest covers the fingerprint that makes a template edit
+// invalidate the artifact.
+func TestSourcesDigest(t *testing.T) {
+	base := fstest.MapFS{
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(`<div class="sm:grid-cols-2">`)},
+		"pages/list.gohtml": &fstest.MapFile{Data: []byte(`<p class="p-5">`)},
+	}
+	a, err := sourcesDigest(base)
+	if err != nil {
+		t.Fatalf("sourcesDigest: %v", err)
+	}
+	if len(a) != 16 {
+		t.Errorf("digest length = %d, want 16", len(a))
+	}
+
+	same, err := sourcesDigest(fstest.MapFS{
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(`<div class="sm:grid-cols-2">`)},
+		"pages/list.gohtml": &fstest.MapFile{Data: []byte(`<p class="p-5">`)},
+	})
+	if err != nil {
+		t.Fatalf("sourcesDigest: %v", err)
+	}
+	if same != a {
+		t.Errorf("identical trees digested differently: %q vs %q", a, same)
+	}
+
+	// The real-world change: a class added to a template.
+	edited, err := sourcesDigest(fstest.MapFS{
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(`<div class="sm:grid-cols-2">`)},
+		"pages/list.gohtml": &fstest.MapFile{Data: []byte(`<p class="p-5 lg:grid-cols-6">`)},
+	})
+	if err != nil {
+		t.Fatalf("sourcesDigest: %v", err)
+	}
+	if edited == a {
+		t.Errorf("an edited template digested identically: %q", edited)
+	}
+
+	// A rename is a change too: a moved file can change what the
+	// scanner's globs pick up.
+	renamed, err := sourcesDigest(fstest.MapFS{
+		"pages/home.gohtml":  &fstest.MapFile{Data: []byte(`<div class="sm:grid-cols-2">`)},
+		"pages/other.gohtml": &fstest.MapFile{Data: []byte(`<p class="p-5">`)},
+	})
+	if err != nil {
+		t.Fatalf("sourcesDigest: %v", err)
+	}
+	if renamed == a {
+		t.Errorf("a renamed template digested identically: %q", renamed)
+	}
+
+	// Content is not concatenated blindly: "ab"+"c" and "a"+"bc" across
+	// two files must not collide.
+	x, _ := sourcesDigest(fstest.MapFS{
+		"a": &fstest.MapFile{Data: []byte("ab")},
+		"b": &fstest.MapFile{Data: []byte("c")},
+	})
+	y, _ := sourcesDigest(fstest.MapFS{
+		"a": &fstest.MapFile{Data: []byte("a")},
+		"b": &fstest.MapFile{Data: []byte("bc")},
+	})
+	if x == y {
+		t.Errorf("split contents collided: %q", x)
+	}
+
+	if got, err := sourcesDigest(nil); err != nil || got != "" {
+		t.Errorf("sourcesDigest(nil) = %q, %v; want \"\", nil", got, err)
+	}
+}
+
+// TestCSSHash covers the other half: the URL must follow the bytes, not
+// the build key. A Tailwind upgrade recompiles identical inputs into
+// different CSS, and a URL that did not move would leave every browser
+// holding an immutable copy of the old file.
+func TestCSSHash(t *testing.T) {
+	a := cssHash(".p-5{padding:1.25rem}")
+	if len(a) != 16 {
+		t.Errorf("hash length = %d, want 16", len(a))
+	}
+	if b := cssHash(".p-5{padding:1.25rem}"); b != a {
+		t.Errorf("identical css hashed differently: %q vs %q", a, b)
+	}
+	if b := cssHash(".p-5{padding:20px}"); b == a {
+		t.Errorf("different css hashed identically: %q", b)
+	}
+	if got := cssHash(""); got != "" {
+		t.Errorf("cssHash(\"\") = %q, want empty", got)
+	}
+	if !contentCSSHashRe.MatchString(a) {
+		t.Errorf("hash %q is not a servable URL segment", a)
 	}
 }
 
