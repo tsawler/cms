@@ -54,5 +54,10 @@ window.CAP_SCRIPT_NONCE = {{.Captcha.Nonce}};
         {{end}}
         <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">{{.T "Log in"}}</button>
     </form>
+    {{/* Only when the host wired a Mailer: a link to a form that could
+         never send its email would look broken rather than be off. */}}
+    {{if .ForgotEnabled}}
+    <p class="cms-hint cms-login-alt"><a href="{{.AdminPath}}/forgot-password">{{.T "Forgot your password?"}}</a></p>
+    {{end}}
 </div>
 {{end}}

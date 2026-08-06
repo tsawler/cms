@@ -240,6 +240,10 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
 }
 .cms-form-wide { max-width: 46rem; }
 .cms-login-card { margin: 4rem auto 0; }
+/* The quiet row under a login-card form: "Forgot your password?",
+   "Back to log in". A class rather than an inline style because the
+   admin's CSP carries no style-src unsafe-inline. */
+.cms-login-alt { margin-top: 1rem; }
 /* Honeypot field: off-screen (not display:none, which some bots detect). */
 .cms-hp { position: absolute; left: -9999px; top: -9999px; }
 .cms-remember label { display: flex; align-items: center; gap: .45rem; font-weight: 400; }

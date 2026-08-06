@@ -166,6 +166,29 @@ var frStrings = map[string]string{
 	"Please complete the verification challenge.":                        "Veuillez compléter le test de vérification.",
 	"Verification failed. Please try again.":                             "La vérification a échoué. Veuillez réessayer.",
 
+	// Forgot-password flow: the two pages and the email.
+	"Forgot your password?": "Mot de passe oublié?",
+	"Enter the email address you log in with and we'll send you a link to set a new one.": "Entrez le courriel avec lequel vous vous connectez et nous vous enverrons un lien pour en définir un nouveau.",
+	"Email me a reset link": "Envoyez-moi un lien de réinitialisation",
+	"Back to log in":        "Retour à la connexion",
+	"Check your email":      "Consultez vos courriels",
+	"If that address has an account, a reset link is on its way. It works once, for the next hour. No email? Check your spam folder, or make sure you typed the address you log in with.": "Si cette adresse correspond à un compte, un lien de réinitialisation est en route. Il fonctionne une seule fois, pendant une heure. Pas de courriel? Vérifiez vos indésirables, ou assurez-vous d'avoir saisi l'adresse avec laquelle vous vous connectez.",
+	"Too many requests. Please wait a few minutes and try again.": "Trop de demandes. Veuillez patienter quelques minutes et réessayer.",
+	"Enter your email address.":                                   "Entrez votre adresse courriel.",
+	"Set a new password": "Définir un nouveau mot de passe",
+	// "New password" is already translated in the users-form block.
+	"New password again": "Nouveau mot de passe (encore)",
+	"Change my password":                                          "Changer mon mot de passe",
+	"Those passwords don't match.":                                "Ces mots de passe ne correspondent pas.",
+	"That link doesn't work any more":                             "Ce lien ne fonctionne plus",
+	"Reset links work once and expire after an hour. Ask for a fresh one and use it right away.": "Les liens de réinitialisation fonctionnent une seule fois et expirent après une heure. Demandez-en un nouveau et utilisez-le sans tarder.",
+	"Send me a new link":                                        "Envoyez-moi un nouveau lien",
+	"Your password has been changed. Log in with it now.":       "Votre mot de passe a été changé. Connectez-vous avec celui-ci maintenant.",
+	"Hi":                                                        "Bonjour",
+	"Reset your CMS password":                                   "Réinitialisez votre mot de passe CMS",
+	"Somebody asked to reset the password for the CMS account at this address. If it was you, follow this link — it works once, for the next hour:": "Quelqu'un a demandé la réinitialisation du mot de passe du compte CMS associé à cette adresse. Si c'était vous, suivez ce lien — il fonctionne une seule fois, pendant une heure :",
+	"If it wasn't you, ignore this message. Nothing changes unless the link is used.": "Si ce n'était pas vous, ignorez ce message. Rien ne change tant que le lien n'est pas utilisé.",
+
 	// Dashboard.
 	"Welcome back,": "Bon retour,",
 	"Create and edit the pages on your site.":                                      "Créez et modifiez les pages de votre site.",

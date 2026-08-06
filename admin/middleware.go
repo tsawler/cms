@@ -164,8 +164,13 @@ func secureHeaders(capOrigin string) func(http.Handler) http.Handler {
 // that loads the CAPTCHA widget, and so the only one whose policy is
 // relaxed for it. Matched by suffix because the admin router may be mounted
 // with or without its prefix stripped.
+// isLoginPath matches the pages that embed the CAPTCHA widget: the login
+// form and the forgot-password form. The second is there because it is an
+// email-sending endpoint — exactly where a CAPTCHA earns its keep — and it
+// needs the same CSP concessions to load the same widget.
 func isLoginPath(p string) bool {
-	return p == "/login" || strings.HasSuffix(p, "/login")
+	return p == "/login" || strings.HasSuffix(p, "/login") ||
+		p == "/forgot-password" || strings.HasSuffix(p, "/forgot-password")
 }
 
 // scriptNonceKey types the request-context slot holding the CSP nonce.

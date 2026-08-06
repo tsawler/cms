@@ -1288,7 +1288,8 @@ option added to the CMS itself.
 ## Bot protection
 
 The public site is read-only (GET/HEAD only), so the bot-facing surface
-is the admin login form. Three layers protect it:
+is the admin login form — and the forgot-password form, when a Mailer is
+configured (see the next section). Three layers protect both:
 
 - **Login throttling** (always on): five failed attempts per email+IP in
   fifteen minutes, then 429 responses until the window passes.
@@ -1343,6 +1344,74 @@ the Cap server rejects the token, the login fails; if the Cap server is
 the CAPTCHA backend shouldn't lock admins out, and the throttle still
 applies. Host applications can reuse the verification client
 (`captcha.New`, `Client.Verify`) for their own forms.
+
+## Password resets ("forgot password")
+
+The login page can offer a self-service reset: ask for a link, get an
+email, follow it, set a new password. The CMS owns the whole flow — the
+token table, the two pages, the throttling, and the wording of the email
+— and the host supplies exactly one thing: delivery.
+
+```go
+// Satisfy the one-method interface with whatever your application
+// already sends mail through:
+type cmsMailer struct{ m *yourMailer }
+
+func (a cmsMailer) Send(ctx context.Context, to, subject, text, html string) error {
+    return a.m.Deliver(ctx, to, subject, text, html)
+}
+
+c, err := cms.New(cms.Config{
+    // ...
+    Mailer: cmsMailer{yourAppMailer},
+})
+```
+
+That split is deliberate. Delivery policy — SMTP or an API, which From
+address, a development mail sink — already lives in the host, and the
+CMS should not duplicate it. The message content goes the other way:
+the CMS authors the email so every deployment sends the same
+carefully-worded thing, in particular the part that never confirms
+whether an address has an account.
+
+**Nil means off.** With no `Mailer` configured, the login page shows no
+"Forgot your password?" link and the reset routes answer 404. A reset
+form that could never send its email would *look* broken; absent, the
+feature is honestly off. A host that wants the flow without real
+delivery (development, tests) can pass a Mailer that logs.
+
+What the flow does, so you don't have to re-derive it from the code:
+
+- **Tokens are single-use and expire after an hour** (`auth.ResetTTL`).
+  Asking again revokes the earlier link, so at most one works at a time.
+  The database stores only a SHA-256 of the token — the email holds the
+  only usable copy, so a leaked backup or a curious query replays
+  nothing.
+- **No account oracle.** Every address gets the same confirmation page,
+  and the email (when there is one) is sent in the background so known
+  addresses are not measurably slower than unknown ones. Deactivated
+  accounts get the same page and no email.
+- **The same defenses as the login form**: its own throttle (five
+  requests per email+IP per fifteen minutes — this endpoint makes the
+  server send email, which is worth as much to a spammer as a password
+  guess is to a thief), the honeypot, and the CAPTCHA when one is
+  configured.
+- **A typo doesn't burn the link.** Password validation failures
+  re-render the form with the token intact; the token is only consumed
+  once a valid new password is installed.
+- Both pages and the email are translated when the site has a French
+  locale, like the rest of the admin.
+
+The email link is built from `Config.SiteURL` when set, otherwise from
+the request's own scheme and host — the same rule as every other
+absolute link the CMS mints. If the admin is reached behind a proxy that
+rewrites `Host`, set `SiteURL`.
+
+`examples/wheels` wires this up for real (see `adminMailer` in its
+`mail.go`): the adapter is five lines around the mailer the site already
+had, and it only sets `Config.Mailer` when mail is actually configured —
+so a fresh checkout without SMTP credentials gets the honest absent
+state rather than emails that vanish into a log.
 
 ## Running the examples
 

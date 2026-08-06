@@ -97,6 +97,10 @@ type CaptchaConfig = captcha.Config
 // to integrate with the admin chrome.
 type AdminSection = admin.Section
 
+// Mailer sends the messages the CMS itself originates; see admin.Mailer
+// and Config.Mailer.
+type Mailer = admin.Mailer
+
 // Config holds everything the host application provides to the CMS.
 type Config struct {
 	// DB is the database connection pool. Required. All CMS tables are
@@ -337,6 +341,21 @@ type Config struct {
 	// throttle and honeypot still apply.
 	Captcha *CaptchaConfig
 
+	// Mailer, when set, delivers the email the CMS itself originates —
+	// today only the password reset the login page's "Forgot your
+	// password?" flow sends. The CMS authors the message (subject and
+	// both bodies); the host supplies only the transport, which is where
+	// delivery policy — SMTP or an API, which From address, a
+	// development mail sink — already lives.
+	//
+	// Nil turns the feature off entirely: the login page shows no
+	// forgot-password link and the reset routes answer 404. That is the
+	// honest failure mode — a reset form that could never send its link
+	// would look broken rather than be off. A host that wants the flow
+	// without real delivery (development, tests) can pass a Mailer that
+	// logs.
+	Mailer Mailer
+
 	// AdminSections are deployment-specific admin pages: each is an
 	// http.Handler mounted at {AdminPath}/x/{Path}, behind the admin's
 	// login, session, and CSRF middleware, with an optional link in the
@@ -524,6 +543,7 @@ func New(cfg Config) (*CMS, error) {
 		Media:          mediaManager,
 		Snippets:       snippets.NewStore(db),
 		Captcha:        capClient,
+		Mailer:         cfg.Mailer,
 		ConfigSnippets: cfg.Snippets,
 		SectionStyles:  cfg.SectionStyles,
 		PostTemplate:   cfg.PostTemplate,

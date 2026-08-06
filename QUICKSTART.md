@@ -4,7 +4,8 @@ This guide walks through building a working, editable website with the
 `github.com/tsawler/cms` module from an empty directory: project setup,
 database, templates, the Go program, styling, first login, and creating
 content. Optional features (media library, blog & news, multiple
-languages, CAPTCHA, custom admin pages) follow at the end.
+languages, CAPTCHA, forgot-password, custom admin pages) follow at the
+end.
 
 The mental model up front: **the CMS is a library, not a platform.** You
 own `main()`, the HTTP server, the templates, and the stylesheet. The
@@ -947,6 +948,22 @@ Two things worth knowing before you rely on it:
 If the Cap server is unreachable the login proceeds with a logged warning —
 an outage of the CAPTCHA backend shouldn't lock you out — and the throttle
 still applies.
+
+### Forgot password
+
+Give `cms.Config` a `Mailer` — one method, `Send(ctx, to, subject, text,
+html)` — and the login page grows a "Forgot your password?" link backed
+by the full reset flow: single-use emailed links that expire after an
+hour, throttled and honeypotted like the login form, with the email's
+wording authored by the CMS so it never confirms whether an address has
+an account.
+
+```go
+Mailer: cmsMailer{appMailer}, // adapt whatever your app sends mail through
+```
+
+Without a `Mailer` the feature is off: no link, and the reset routes
+answer 404. See "Password resets" in the README for the full design.
 
 ### Custom admin pages
 

@@ -46,7 +46,7 @@ module, which keeps the data model and auth simple.
 ```
 github.com/tsawler/cms
 ├── cms.go            // Config, New(), the public Handlers
-├── auth/             // users, passwords, roles, login throttling
+├── auth/             // users, passwords, roles, login throttling, reset tokens
 ├── content/          // pages, regions, publishing; posts (blog + news) (phases 2, 6)
 ├── media/            // uploads, S3 client, image variants           (phase 3)
 ├── render/           // template integration, region injection       (phase 2)
@@ -549,6 +549,8 @@ non-technical users.
 ```
 cms_users         id, email, name, password_hash (argon2id), role (admin|editor), active
 cms_sessions      token, data, expiry
+cms_password_resets  token_hash (sha256; the email holds the only usable copy),
+                  user_id, expires_at  -- single-use, one live row per user
 cms_pages         id, slug, template_name, status (draft|published), sort, parent_id,
                   is_system  -- the reserved __site row owning shared regions (4.2.1)
 cms_page_meta     page_id, locale, title, description            -- SEO per locale

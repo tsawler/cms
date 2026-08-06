@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -29,6 +30,16 @@ var templateFS embed.FS
 //go:embed static
 var staticFS embed.FS
 
+// Mailer sends the messages the CMS itself originates — today only the
+// password reset email. The CMS authors the content; an implementation
+// supplies only delivery, so it decides transport and From address and
+// nothing else. Implementations must be safe for concurrent use.
+//
+// htmlBody may be empty, in which case the message is plain text only.
+type Mailer interface {
+	Send(ctx context.Context, to, subject, textBody, htmlBody string) error
+}
+
 // Deps is everything the admin area needs from the rest of the CMS.
 type Deps struct {
 	Sessions *scs.SessionManager
@@ -45,6 +56,7 @@ type Deps struct {
 	Media          *media.Manager // nil when the host has not configured an object store
 	Snippets       *snippets.Store
 	Captcha        *captcha.Client       // nil when login CAPTCHA is not configured
+	Mailer         Mailer                // nil disables the forgot-password flow
 	ConfigSnippets []snippets.Snippet    // host-registered palette entries
 	SectionStyles  *render.SectionStyles // curated section settings
 	Sections       []Section             // host-registered admin pages, already validated
@@ -178,6 +190,15 @@ func New(d Deps) http.Handler {
 	r.Get("/login", s.loginForm)
 	r.Post("/login", s.login)
 
+	// The forgot-password flow exists only when the host supplied a
+	// Mailer — see the Mailer interface for why absent means off.
+	if d.Mailer != nil {
+		r.Get("/forgot-password", s.forgotForm)
+		r.Post("/forgot-password", s.forgotRequest)
+		r.Get("/reset-password", s.resetForm)
+		r.Post("/reset-password", s.resetSubmit)
+	}
+
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireUser)
 		r.Get("/", s.dashboard)
@@ -288,7 +309,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "dashboard", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
+	pages := []string{"login", "forgot_password", "reset_password", "dashboard", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -338,6 +359,14 @@ type templateData struct {
 	// Captcha is set when login CAPTCHA is configured; the login page
 	// embeds the Cap widget with it.
 	Captcha *captchaInfo
+
+	// The forgot-password flow. ForgotEnabled shows the login page's
+	// link (true when a Mailer is configured); the rest carry one
+	// request's state through the two reset templates.
+	ForgotEnabled bool
+	ResetSent     bool   // forgot form: the confirmation state
+	ResetToken    string // reset form: the live token, echoed into the form
+	ResetInvalid  bool   // reset form: the dead-link state
 
 	// RememberDays or RememberHours labels the login page's "Remember
 	// me" checkbox: days when the duration is a whole number of days
@@ -478,6 +507,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		PagesEnabled: s.deps.Renderer != nil,
 		PostsEnabled: s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
 		MediaEnabled: s.deps.Media != nil,
+		ForgotEnabled: s.deps.Mailer != nil,
 		Locales:      s.deps.Locales,
 		EditLocale:   s.deps.DefaultLocale,
 		PagerCSSPath: pagerCSSPath,
