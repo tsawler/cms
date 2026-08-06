@@ -500,17 +500,17 @@ type captchaInfo struct {
 
 func (s *server) newTemplateData(r *http.Request) templateData {
 	td := templateData{
-		AdminPath:    s.deps.AdminPath,
-		User:         s.currentUser(r),
-		CSRFToken:    s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
-		Flash:        s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
-		PagesEnabled: s.deps.Renderer != nil,
-		PostsEnabled: s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
-		MediaEnabled: s.deps.Media != nil,
+		AdminPath:     s.deps.AdminPath,
+		User:          s.currentUser(r),
+		CSRFToken:     s.deps.Sessions.GetString(r.Context(), sessionKeyCSRF),
+		Flash:         s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
+		PagesEnabled:  s.deps.Renderer != nil,
+		PostsEnabled:  s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
+		MediaEnabled:  s.deps.Media != nil,
 		ForgotEnabled: s.deps.Mailer != nil,
-		Locales:      s.deps.Locales,
-		EditLocale:   s.deps.DefaultLocale,
-		PagerCSSPath: pagerCSSPath,
+		Locales:       s.deps.Locales,
+		EditLocale:    s.deps.DefaultLocale,
+		PagerCSSPath:  pagerCSSPath,
 	}
 	if s.deps.SiteBaseURL != nil {
 		td.SiteBase = s.deps.SiteBaseURL(r)
