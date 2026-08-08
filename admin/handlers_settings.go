@@ -11,10 +11,13 @@ package admin
 
 import (
 	"encoding/base64"
+	"errors"
 	"html/template"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -22,16 +25,22 @@ import (
 )
 
 func (s *server) settingsForm(w http.ResponseWriter, r *http.Request) {
-	s.renderSettings(w, r, http.StatusOK, nil)
+	s.renderSettings(w, r, http.StatusOK, nil, nil)
 }
 
 // renderSettings draws the settings page, including the in-progress
 // enrollment block (QR code and confirm field) when the session holds a
-// pending secret.
-func (s *server) renderSettings(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+// pending secret. form, when non-nil, carries a rejected profile
+// submission so its values re-render instead of the stored ones.
+func (s *server) renderSettings(w http.ResponseWriter, r *http.Request, status int, errs map[string]string, form *auth.User) {
 	data := s.newTemplateData(r)
 	data.FormErrors = errs
+	data.PageScript = "validate.js"
 	u := data.User // non-nil behind requireUser
+	data.FormUser = u
+	if form != nil {
+		data.FormUser = form
+	}
 	data.TwoFactorEnabled = u.TwoFactorEnabled()
 
 	if secret := s.deps.Sessions.GetString(r.Context(), sessionKeyTOTPSetup); secret != "" && !data.TwoFactorEnabled {
@@ -48,6 +57,74 @@ func (s *server) renderSettings(w http.ResponseWriter, r *http.Request, status i
 	s.render(w, status, "settings", data)
 }
 
+// settingsProfile changes the current user's name and email. A name is
+// just a label, but the email is the login identifier and where reset
+// links go — so changing it re-proves the password, like the page's
+// other sensitive actions. Role and active are deliberately absent:
+// nobody adjusts their own powers here.
+// POST /settings/profile  name, email, current_password (when email changes)
+func (s *server) settingsProfile(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(r)
+
+	form := *u
+	form.Name = strings.TrimSpace(r.PostFormValue("name"))
+	form.Email = strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
+	emailChanged := form.Email != u.Email
+
+	errs := map[string]string{}
+	if form.Name == "" {
+		errs["name"] = s.tr(r, "Name is required.")
+	}
+	if form.Email == "" {
+		errs["email"] = s.tr(r, "Email is required.")
+	} else if _, err := mail.ParseAddress(form.Email); err != nil {
+		errs["email"] = s.tr(r, "That doesn't look like a valid email address.")
+	}
+
+	if emailChanged {
+		throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + remoteIP(r)
+		if s.throttle.Blocked(throttleKey) {
+			errs["profile_password"] = s.tr(r, "Too many failed attempts. Please wait a few minutes and try again.")
+			s.renderSettings(w, r, http.StatusTooManyRequests, errs, &form)
+			return
+		}
+		ok, err := auth.VerifyPassword(r.PostFormValue("current_password"), u.PasswordHash)
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		if !ok {
+			s.throttle.Fail(throttleKey)
+			errs["profile_password"] = s.tr(r, "That isn't your current password.")
+		} else {
+			s.throttle.Reset(throttleKey)
+		}
+	}
+
+	if len(errs) > 0 {
+		s.renderSettings(w, r, http.StatusUnprocessableEntity, errs, &form)
+		return
+	}
+
+	// form started as a copy of the stored user, so role and active go
+	// back exactly as they are; only name and email differ.
+	if err := s.deps.Users.Update(r.Context(), &form); err != nil {
+		if errors.Is(err, auth.ErrDuplicateEmail) {
+			s.renderSettings(w, r, http.StatusUnprocessableEntity, map[string]string{
+				"email": s.tr(r, "That email address is already in use."),
+			}, &form)
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	if emailChanged {
+		s.deps.Logger.Info("cms admin: email changed", "user", u.Email, "to", form.Email)
+	}
+	s.flash(r, s.tr(r, "Profile updated."))
+	http.Redirect(w, r, s.deps.AdminPath+"/settings", http.StatusSeeOther)
+}
+
 // settingsPassword changes the current user's password.
 // POST /settings/password  current_password, password, confirm
 func (s *server) settingsPassword(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +136,7 @@ func (s *server) settingsPassword(w http.ResponseWriter, r *http.Request) {
 	if s.throttle.Blocked(throttleKey) {
 		s.renderSettings(w, r, http.StatusTooManyRequests, map[string]string{
 			"current_password": s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."),
-		})
+		}, nil)
 		return
 	}
 
@@ -80,7 +157,7 @@ func (s *server) settingsPassword(w http.ResponseWriter, r *http.Request) {
 		errs["confirm"] = s.tr(r, "Those passwords don't match.")
 	}
 	if len(errs) > 0 {
-		s.renderSettings(w, r, http.StatusUnprocessableEntity, errs)
+		s.renderSettings(w, r, http.StatusUnprocessableEntity, errs, nil)
 		return
 	}
 
@@ -142,7 +219,7 @@ func (s *server) totpConfirm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.renderSettings(w, r, http.StatusUnprocessableEntity, map[string]string{
 			"totp": s.tr(r, "That code didn't work. Enter the current code from your authenticator app."),
-		})
+		}, nil)
 		return
 	}
 	// Recording the confirming code's step spends it: the code that
@@ -171,7 +248,7 @@ func (s *server) totpDisable(w http.ResponseWriter, r *http.Request) {
 	if s.throttle.Blocked(throttleKey) {
 		s.renderSettings(w, r, http.StatusTooManyRequests, map[string]string{
 			"disable": s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."),
-		})
+		}, nil)
 		return
 	}
 	ok, err := auth.VerifyPassword(r.PostFormValue("current_password"), u.PasswordHash)
@@ -183,7 +260,7 @@ func (s *server) totpDisable(w http.ResponseWriter, r *http.Request) {
 		s.throttle.Fail(throttleKey)
 		s.renderSettings(w, r, http.StatusUnprocessableEntity, map[string]string{
 			"disable": s.tr(r, "That isn't your current password."),
-		})
+		}, nil)
 		return
 	}
 

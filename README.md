@@ -1416,9 +1416,17 @@ state rather than emails that vanish into a log.
 ## Account settings and two-factor login
 
 Every logged-in user has an account page at `/admin/settings` (their name
-in the sidebar links to it) with two things on it: changing their own
-password — behind the current one, so a walked-away session can't quietly
-take over the account — and turning **two-factor login** on or off.
+in the sidebar links to it) with three things on it: editing their own
+name and email, changing their own password — behind the current one, so
+a walked-away session can't quietly take over the account — and turning
+**two-factor login** on or off.
+
+Email edits get the same validation as the admin's user form (a
+well-formed address that no other account holds) and additionally
+require the current password, because the address is the login
+identifier and where reset links go. A name change alone needs no
+password. Role and active status are deliberately not on this page —
+nobody adjusts their own powers outside the admin-only `/admin/users`.
 
 Two-factor uses ordinary TOTP authenticator apps (Google Authenticator,
 1Password, Authy, …): the settings page shows a QR code and a

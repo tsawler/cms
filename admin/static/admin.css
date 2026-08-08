@@ -1036,3 +1036,15 @@ a.cms-whoami { text-decoration: none; }
 a.cms-whoami:hover { text-decoration: underline; }
 /* Breathing room between a login-card's lead-in hint and the form. */
 .cms-login-card > .cms-hint { margin-bottom: .75rem; }
+
+/* Live validation states (validate.js). Wrong is red at the border and
+   the focus ring; a field that was wrong and is right again gets the
+   spruce border as a quiet "fixed". The attn state is the profile
+   form's password field while an email change makes it required —
+   brass, the ink of "pending", drawing the eye before there is any
+   error to shout about. */
+.cms-field input { transition: border-color .15s ease; }
+.cms-field-bad input { border-color: var(--cms-danger); }
+.cms-field-bad input:focus { outline-color: var(--cms-danger); border-color: var(--cms-danger); }
+.cms-field-good input { border-color: var(--cms-spruce); }
+.cms-field-attn label .cms-muted { color: var(--cms-brass); }

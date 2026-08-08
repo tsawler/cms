@@ -141,6 +141,90 @@ func TestSettingsChangePassword(t *testing.T) {
 	})
 }
 
+// TestSettingsProfile: name and email edits on the settings page — a name
+// change is free, an email change needs the password, a well-formed
+// address, and one nobody else holds.
+func TestSettingsProfile(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		srv, users := settingsTestServer(t, db)
+		client := newClient(t)
+		u := seedActiveUser(t, users, "pat@example.com", "password-123")
+		seedActiveUser(t, users, "taken@example.com", "password-456")
+		logIn(t, srv, client, "pat@example.com", "password-123")
+
+		csrf := csrfFrom(t, srv, client, "/admin/settings")
+		post := func(form url.Values) (*http.Response, string) {
+			form.Set("csrf_token", csrf)
+			return postForm(t, srv, client, "/admin/settings/profile", form)
+		}
+
+		// A name change alone needs no password.
+		_, page := post(url.Values{"name": {"Patricia"}, "email": {"pat@example.com"}})
+		if !strings.Contains(page, "Profile updated.") {
+			t.Fatalf("name change did not update:\n%s", page)
+		}
+		if got, _ := users.GetByID(context.Background(), u.ID); got.Name != "Patricia" {
+			t.Fatalf("name = %q, want Patricia", got.Name)
+		}
+
+		// A malformed address is refused.
+		resp, page := post(url.Values{"name": {"Patricia"}, "email": {"not-an-email"}})
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(page, "valid email address") {
+			t.Fatalf("malformed email: status = %d:\n%s", resp.StatusCode, page)
+		}
+
+		// An empty name is refused.
+		resp, page = post(url.Values{"name": {""}, "email": {"pat@example.com"}})
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(page, "Name is required.") {
+			t.Fatalf("empty name: status = %d:\n%s", resp.StatusCode, page)
+		}
+
+		// Changing the address without the password is refused...
+		resp, page = post(url.Values{"name": {"Patricia"}, "email": {"new@example.com"}})
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(page, "current password") {
+			t.Fatalf("email change without password: status = %d:\n%s", resp.StatusCode, page)
+		}
+		// ...and the rejected submission re-renders what was typed.
+		if !strings.Contains(page, `value="new@example.com"`) {
+			t.Fatalf("rejected email not re-rendered:\n%s", page)
+		}
+		if got, _ := users.GetByID(context.Background(), u.ID); got.Email != "pat@example.com" {
+			t.Fatalf("email changed without the password: %q", got.Email)
+		}
+
+		// An address somebody else holds is refused even with the password.
+		resp, page = post(url.Values{
+			"name": {"Patricia"}, "email": {"taken@example.com"},
+			"current_password": {"password-123"},
+		})
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(page, "already in use") {
+			t.Fatalf("duplicate email: status = %d:\n%s", resp.StatusCode, page)
+		}
+
+		// The real thing. Case is normalized on the way in.
+		_, page = post(url.Values{
+			"name": {"Patricia"}, "email": {"Pat.New@Example.com"},
+			"current_password": {"password-123"},
+		})
+		if !strings.Contains(page, "Profile updated.") {
+			t.Fatalf("email change did not update:\n%s", page)
+		}
+		got, err := users.GetByID(context.Background(), u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Email != "pat.new@example.com" {
+			t.Fatalf("email = %q, want pat.new@example.com", got.Email)
+		}
+		if got.Role != auth.RoleEditor || !got.Active {
+			t.Fatalf("profile save touched role/active: %s active=%v", got.Role, got.Active)
+		}
+		if _, err := users.Authenticate(context.Background(), "pat.new@example.com", "password-123"); err != nil {
+			t.Errorf("cannot authenticate with the new address: %v", err)
+		}
+	})
+}
+
 var totpSecretRe = regexp.MustCompile(`class="cms-totp-secret">([A-Z2-7 ]+)<`)
 
 // TestTwoFactorEnrollment: the settings page's enroll flow — generate,
@@ -156,6 +240,14 @@ func TestTwoFactorEnrollment(t *testing.T) {
 		_, page := postForm(t, srv, client, "/admin/settings/2fa/setup", url.Values{
 			"csrf_token": {csrf},
 		})
+
+		// The page carries the live-validation script and rules — the
+		// server stays the authority, but the wiring must be present.
+		for _, want := range []string{"validate.js", "data-validate", "data-v-required", "data-v-digits"} {
+			if !strings.Contains(page, want) {
+				t.Errorf("settings page missing %q", want)
+			}
+		}
 
 		// The page shows the pending secret (QR plus manual key)...
 		m := totpSecretRe.FindStringSubmatch(page)
@@ -219,6 +311,9 @@ func TestTwoFactorLogin(t *testing.T) {
 		page := logIn(t, srv, client, "pat@example.com", "password-123")
 		if !strings.Contains(page, "Enter your code") {
 			t.Fatalf("login did not land on the code challenge:\n%s", page)
+		}
+		if !strings.Contains(page, "validate.js") {
+			t.Error("challenge page missing the live-validation script")
 		}
 
 		// The password alone is not a session: the admin still bounces to

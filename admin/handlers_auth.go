@@ -158,7 +158,9 @@ func (s *server) twoFactorForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, s.deps.AdminPath+"/login", http.StatusSeeOther)
 		return
 	}
-	s.render(w, http.StatusOK, "login_2fa", s.newTemplateData(r))
+	data := s.newTemplateData(r)
+	data.PageScript = "validate.js"
+	s.render(w, http.StatusOK, "login_2fa", data)
 }
 
 func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +173,7 @@ func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
 	fail := func(status int, msg string) {
 		data := s.newTemplateData(r)
 		data.Error = msg
+		data.PageScript = "validate.js"
 		s.render(w, status, "login_2fa", data)
 	}
 

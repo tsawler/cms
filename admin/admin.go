@@ -209,8 +209,9 @@ func New(d Deps) http.Handler {
 		r.Post("/logout", s.logout)
 		r.Post("/lang", s.setLang)
 
-		// Every user's own account page: password and two-factor.
+		// Every user's own account page: profile, password, two-factor.
 		r.Get("/settings", s.settingsForm)
+		r.Post("/settings/profile", s.settingsProfile)
 		r.Post("/settings/password", s.settingsPassword)
 		r.Post("/settings/2fa/setup", s.totpSetup)
 		r.Post("/settings/2fa/confirm", s.totpConfirm)

@@ -5,11 +5,13 @@
     <h1>{{.T "Enter your code"}}</h1>
     <p class="cms-hint">{{.T "Open the authenticator app on your phone and enter the 6-digit code it shows for this site."}}</p>
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
-    <form method="post" action="{{.AdminPath}}/login/2fa" novalidate>
+    <form method="post" action="{{.AdminPath}}/login/2fa" novalidate data-validate>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="cms-field">
             <label for="code">{{.T "6-digit code"}}</label>
-            <input type="text" id="code" name="code" class="cms-totp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required autofocus>
+            <input type="text" id="code" name="code" class="cms-totp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required autofocus
+                   data-v data-v-required="{{.T "Enter the 6-digit code from your authenticator app."}}"
+                   data-v-digits="6" data-v-digits-msg="{{.T "Enter the 6-digit code from your authenticator app."}}">
         </div>
         <button type="submit" class="cms-btn cms-btn-primary cms-btn-block">{{.T "Log in"}}</button>
     </form>

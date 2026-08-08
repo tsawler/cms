@@ -5,25 +5,62 @@
     <h1>{{.T "My account"}}</h1>
 </div>
 
-<form class="cms-form" method="post" action="{{.AdminPath}}/settings/password" novalidate>
+<form class="cms-form" method="post" action="{{.AdminPath}}/settings/profile" novalidate data-validate>
+    <h2>{{.T "Name and email"}}</h2>
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <div class="cms-field">
+        <label for="profile_name">{{.T "Name"}}</label>
+        <input type="text" id="profile_name" name="name" value="{{.FormUser.Name}}" required
+               data-v data-v-required="{{.T "Name is required."}}">
+        {{with index .FormErrors "name"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <div class="cms-field">
+        <label for="profile_email">{{.T "Email"}}</label>
+        <input type="email" id="profile_email" name="email" value="{{.FormUser.Email}}" autocomplete="off" required
+               data-v data-orig="{{.User.Email}}"
+               data-v-required="{{.T "Email is required."}}"
+               data-v-email="{{.T "That doesn't look like a valid email address."}}">
+        {{with index .FormErrors "email"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        <p class="cms-hint">{{.T "This is the address you log in with."}}</p>
+    </div>
+
+    <div class="cms-field">
+        <label for="profile_password">{{.T "Your password"}} <span class="cms-muted">{{.T "(needed only to change your email)"}}</span></label>
+        <input type="password" id="profile_password" name="current_password" autocomplete="current-password"
+               data-v data-v-reqchanged="#profile_email"
+               data-v-reqchanged-msg="{{.T "Enter your password to change your email."}}">
+        {{with index .FormErrors "profile_password"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <button type="submit" class="cms-btn cms-btn-primary">{{.T "Save changes"}}</button>
+</form>
+
+<form class="cms-form cms-settings-block" method="post" action="{{.AdminPath}}/settings/password" novalidate data-validate>
     <h2>{{.T "Change password"}}</h2>
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
     <div class="cms-field">
         <label for="current_password">{{.T "Current password"}}</label>
-        <input type="password" id="current_password" name="current_password" autocomplete="current-password" required>
+        <input type="password" id="current_password" name="current_password" autocomplete="current-password" required
+               data-v data-v-required="{{.T "Enter your current password."}}">
         {{with index .FormErrors "current_password"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
         <label for="password">{{.T "New password"}}</label>
-        <input type="password" id="password" name="password" autocomplete="new-password" required>
+        <input type="password" id="password" name="password" autocomplete="new-password" required
+               data-v data-v-required="{{.T "Password must be at least 8 characters."}}"
+               data-v-minlen="8" data-v-minlen-msg="{{.T "Password must be at least 8 characters."}}">
         {{with index .FormErrors "password"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
     <div class="cms-field">
         <label for="confirm">{{.T "New password again"}}</label>
-        <input type="password" id="confirm" name="confirm" autocomplete="new-password" required>
+        <input type="password" id="confirm" name="confirm" autocomplete="new-password" required
+               data-v data-v-match="#password"
+               data-v-match-msg="{{.T "Those passwords don't match."}}">
         {{with index .FormErrors "confirm"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
@@ -37,11 +74,12 @@
 
     {{if .TwoFactorEnabled}}
     <p class="cms-hint">{{.T "You'll be asked for a code from your authenticator app each time you log in."}}</p>
-    <form method="post" action="{{.AdminPath}}/settings/2fa/disable" novalidate>
+    <form method="post" action="{{.AdminPath}}/settings/2fa/disable" novalidate data-validate>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="cms-field">
             <label for="disable_password">{{.T "Your password"}} <span class="cms-muted">{{.T "(to confirm it's you)"}}</span></label>
-            <input type="password" id="disable_password" name="current_password" autocomplete="current-password" required>
+            <input type="password" id="disable_password" name="current_password" autocomplete="current-password" required
+                   data-v data-v-required="{{.T "Enter your current password."}}">
             {{with index .FormErrors "disable"}}<p class="cms-field-error">{{.}}</p>{{end}}
         </div>
         <button type="submit" class="cms-btn cms-btn-danger">{{.T "Turn off two-factor authentication"}}</button>
@@ -54,11 +92,13 @@
         <p class="cms-hint">{{.T "Can't scan? Enter this key by hand instead:"}}</p>
         <p class="cms-totp-secret">{{.TOTPSecret}}</p>
     </div>
-    <form method="post" action="{{.AdminPath}}/settings/2fa/confirm" novalidate>
+    <form method="post" action="{{.AdminPath}}/settings/2fa/confirm" novalidate data-validate>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="cms-field">
             <label for="code">{{.T "Then enter the 6-digit code the app shows, to check it's set up right:"}}</label>
-            <input type="text" id="code" name="code" class="cms-totp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required>
+            <input type="text" id="code" name="code" class="cms-totp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required
+                   data-v data-v-required="{{.T "Enter the 6-digit code from your authenticator app."}}"
+                   data-v-digits="6" data-v-digits-msg="{{.T "Enter the 6-digit code from your authenticator app."}}">
             {{with index .FormErrors "totp"}}<p class="cms-field-error">{{.}}</p>{{end}}
         </div>
         <div class="cms-actions">
