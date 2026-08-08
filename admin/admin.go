@@ -566,6 +566,16 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		td.NavCounts = s.navCounts(r, td.IsAdmin())
 		td.NavCurrent = navCurrent(r.URL.Path)
 	}
+	// Inside a host section, the mount prefix has been stripped, so the
+	// path-based matching above is looking at section-relative paths: "/"
+	// reads as the dashboard, and no section link matches. The section's
+	// browser-facing base is in the context, and it is the truth.
+	if base := SectionPath(r); base != "" {
+		td.NavCurrent = ""
+		for i := range td.NavSections {
+			td.NavSections[i].Active = td.NavSections[i].URL == base
+		}
+	}
 	return td
 }
 
