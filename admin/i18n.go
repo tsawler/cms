@@ -189,6 +189,36 @@ var frStrings = map[string]string{
 	"Somebody asked to reset the password for the CMS account at this address. If it was you, follow this link — it works once, for the next hour:": "Quelqu'un a demandé la réinitialisation du mot de passe du compte CMS associé à cette adresse. Si c'était vous, suivez ce lien — il fonctionne une seule fois, pendant une heure :",
 	"If it wasn't you, ignore this message. Nothing changes unless the link is used.":                                                               "Si ce n'était pas vous, ignorez ce message. Rien ne change tant que le lien n'est pas utilisé.",
 
+	// Two-factor login challenge (login_2fa page and handler).
+	"Two-factor code": "Code à deux facteurs",
+	"Enter your code": "Entrez votre code",
+	"Open the authenticator app on your phone and enter the 6-digit code it shows for this site.": "Ouvrez l'application d'authentification sur votre téléphone et entrez le code à 6 chiffres qu'elle affiche pour ce site.",
+	"6-digit code": "Code à 6 chiffres",
+	"That code didn't work. Enter the current code from your authenticator app.": "Ce code n'a pas fonctionné. Entrez le code actuel de votre application d'authentification.",
+
+	// Account settings page (settings template and handlers).
+	"My account":                        "Mon compte",
+	"Change password":                   "Changer le mot de passe",
+	"Current password":                  "Mot de passe actuel",
+	"That isn't your current password.": "Ce n'est pas votre mot de passe actuel.",
+	"Your password has been changed.":   "Votre mot de passe a été changé.",
+	"Two-factor authentication":         "Authentification à deux facteurs",
+	"on":                                "activée",
+	"off":                               "désactivée",
+	"Add a second step to logging in: a 6-digit code from an authenticator app on your phone. Even someone who knows your password can't log in without it.": "Ajoutez une deuxième étape à la connexion : un code à 6 chiffres d'une application d'authentification sur votre téléphone. Même quelqu'un qui connaît votre mot de passe ne peut pas se connecter sans lui.",
+	"Set up two-factor authentication": "Configurer l'authentification à deux facteurs",
+	"Scan this QR code with the authenticator app on your phone (Google Authenticator, 1Password, Authy, …).": "Balayez ce code QR avec l'application d'authentification sur votre téléphone (Google Authenticator, 1Password, Authy, …).",
+	"QR code for your authenticator app":                                           "Code QR pour votre application d'authentification",
+	"Can't scan? Enter this key by hand instead:":                                  "Impossible de balayer? Entrez plutôt cette clé manuellement :",
+	"Then enter the 6-digit code the app shows, to check it's set up right:":       "Entrez ensuite le code à 6 chiffres affiché par l'application, pour vérifier que tout est bien configuré :",
+	"Turn on two-factor authentication":                                            "Activer l'authentification à deux facteurs",
+	"Two-factor authentication is on. You'll be asked for a code when you log in.": "L'authentification à deux facteurs est activée. Un code vous sera demandé à la connexion.",
+	"You'll be asked for a code from your authenticator app each time you log in.": "Un code de votre application d'authentification vous sera demandé à chaque connexion.",
+	"Your password":                      "Votre mot de passe",
+	"(to confirm it's you)":              "(pour confirmer que c'est bien vous)",
+	"Turn off two-factor authentication": "Désactiver l'authentification à deux facteurs",
+	"Two-factor authentication is off.":  "L'authentification à deux facteurs est désactivée.",
+
 	// Dashboard.
 	"Welcome back,": "Bon retour,",
 	"Create and edit the pages on your site.":                                      "Créez et modifiez les pages de votre site.",
@@ -235,6 +265,8 @@ var frStrings = map[string]string{
 	"Choose a role.":                                "Choisissez un rôle.",
 	"Password is required.":                         "Le mot de passe est obligatoire.",
 	"Password must be at least 8 characters.":       "Le mot de passe doit contenir au moins 8 caractères.",
+	"Reset two-factor authentication — for someone locked out of their authenticator app": "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
+	"They'll log in with just their password until they set it up again.":                 "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
 
 	// Pages list.
 	"New page":   "Nouvelle page",

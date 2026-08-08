@@ -1,0 +1,78 @@
+{{define "title"}}{{.T "My account"}} — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>{{.T "My account"}}</h1>
+</div>
+
+<form class="cms-form" method="post" action="{{.AdminPath}}/settings/password" novalidate>
+    <h2>{{.T "Change password"}}</h2>
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <div class="cms-field">
+        <label for="current_password">{{.T "Current password"}}</label>
+        <input type="password" id="current_password" name="current_password" autocomplete="current-password" required>
+        {{with index .FormErrors "current_password"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <div class="cms-field">
+        <label for="password">{{.T "New password"}}</label>
+        <input type="password" id="password" name="password" autocomplete="new-password" required>
+        {{with index .FormErrors "password"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <div class="cms-field">
+        <label for="confirm">{{.T "New password again"}}</label>
+        <input type="password" id="confirm" name="confirm" autocomplete="new-password" required>
+        {{with index .FormErrors "confirm"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </div>
+
+    <button type="submit" class="cms-btn cms-btn-primary">{{.T "Change my password"}}</button>
+</form>
+
+<div class="cms-form cms-settings-block" id="two-factor">
+    <h2>{{.T "Two-factor authentication"}}
+        {{if .TwoFactorEnabled}}<span class="cms-badge cms-badge-ok">{{.T "on"}}</span>{{else}}<span class="cms-badge">{{.T "off"}}</span>{{end}}
+    </h2>
+
+    {{if .TwoFactorEnabled}}
+    <p class="cms-hint">{{.T "You'll be asked for a code from your authenticator app each time you log in."}}</p>
+    <form method="post" action="{{.AdminPath}}/settings/2fa/disable" novalidate>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <div class="cms-field">
+            <label for="disable_password">{{.T "Your password"}} <span class="cms-muted">{{.T "(to confirm it's you)"}}</span></label>
+            <input type="password" id="disable_password" name="current_password" autocomplete="current-password" required>
+            {{with index .FormErrors "disable"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        </div>
+        <button type="submit" class="cms-btn cms-btn-danger">{{.T "Turn off two-factor authentication"}}</button>
+    </form>
+
+    {{else if .TOTPSecret}}
+    <p class="cms-hint">{{.T "Scan this QR code with the authenticator app on your phone (Google Authenticator, 1Password, Authy, …)."}}</p>
+    <div class="cms-totp-setup">
+        {{if .TOTPQR}}<img class="cms-totp-qr" src="{{.TOTPQR}}" width="208" height="208" alt="{{.T "QR code for your authenticator app"}}">{{end}}
+        <p class="cms-hint">{{.T "Can't scan? Enter this key by hand instead:"}}</p>
+        <p class="cms-totp-secret">{{.TOTPSecret}}</p>
+    </div>
+    <form method="post" action="{{.AdminPath}}/settings/2fa/confirm" novalidate>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <div class="cms-field">
+            <label for="code">{{.T "Then enter the 6-digit code the app shows, to check it's set up right:"}}</label>
+            <input type="text" id="code" name="code" class="cms-totp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required>
+            {{with index .FormErrors "totp"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        </div>
+        <div class="cms-actions">
+            <button type="submit" class="cms-btn cms-btn-primary">{{.T "Turn on two-factor authentication"}}</button>
+            <button type="submit" class="cms-btn cms-btn-ghost" formaction="{{.AdminPath}}/settings/2fa/cancel">{{.T "Cancel"}}</button>
+        </div>
+    </form>
+
+    {{else}}
+    <p class="cms-hint">{{.T "Add a second step to logging in: a 6-digit code from an authenticator app on your phone. Even someone who knows your password can't log in without it."}}</p>
+    <form method="post" action="{{.AdminPath}}/settings/2fa/setup">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="cms-btn cms-btn-primary">{{.T "Set up two-factor authentication"}}</button>
+    </form>
+    {{end}}
+</div>
+{{end}}

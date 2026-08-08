@@ -46,6 +46,11 @@ type User struct {
 	PasswordHash string
 	Role         Role
 	Active       bool
+	// TOTPSecret is the base32 key an authenticator app was enrolled
+	// with, empty when two-factor is off. TOTPLastStep is the time step
+	// of the last accepted code; see Store.ConsumeTOTPStep.
+	TOTPSecret   string
+	TOTPLastStep int64
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -70,11 +75,11 @@ func NewStore(db *sqldb.DB) *Store {
 	return &Store{db: db}
 }
 
-const userColumns = "id, email, name, password_hash, role, active, created_at, updated_at"
+const userColumns = "id, email, name, password_hash, role, active, totp_secret, totp_last_step, created_at, updated_at"
 
 func scanUser(row sqldb.Scanner) (*User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Active, &u.TOTPSecret, &u.TOTPLastStep, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

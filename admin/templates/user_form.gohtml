@@ -46,6 +46,16 @@
         {{with index .FormErrors "active"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
+    {{if and (not .IsNew) .FormUser.TwoFactorEnabled}}
+    <div class="cms-field cms-field-check">
+        <label>
+            <input type="checkbox" name="reset_totp">
+            {{.T "Reset two-factor authentication — for someone locked out of their authenticator app"}}
+        </label>
+        <p class="cms-hint">{{.T "They'll log in with just their password until they set it up again."}}</p>
+    </div>
+    {{end}}
+
     <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}{{.T "Create user"}}{{else}}{{.T "Save changes"}}{{end}}</button>
 </form>
 {{end}}

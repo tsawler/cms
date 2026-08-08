@@ -54,7 +54,7 @@
         {{end}}
     </nav>
     <div class="cms-sidebar-foot">
-        <span class="cms-whoami">{{.User.Name}}</span>
+        <a class="cms-whoami" href="{{.AdminPath}}/settings" title="{{.T "My account"}}">{{.User.Name}}</a>
         <div class="cms-sidebar-actions">
             {{if .LangToggle}}
             <form method="post" action="{{.AdminPath}}/lang">

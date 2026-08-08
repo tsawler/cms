@@ -97,7 +97,7 @@ func (s *Store) ConsumeReset(ctx context.Context, token string) (*User, error) {
 }
 
 // prefixedUserColumns is userColumns qualified for the join above.
-const prefixedUserColumns = "u.id, u.email, u.name, u.password_hash, u.role, u.active, u.created_at, u.updated_at"
+const prefixedUserColumns = "u.id, u.email, u.name, u.password_hash, u.role, u.active, u.totp_secret, u.totp_last_step, u.created_at, u.updated_at"
 
 // hashResetToken is the stored form of a token. Plain SHA-256 rather than
 // argon2: these are 256-bit random strings, not passwords, so there is

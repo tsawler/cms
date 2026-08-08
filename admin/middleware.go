@@ -17,6 +17,19 @@ const (
 	sessionKeyUserID = sessiondata.KeyUserID
 	sessionKeyCSRF   = sessiondata.KeyCSRF
 	sessionKeyFlash  = sessiondata.KeyFlash
+
+	// The two-factor login's pending state: who passed the password step
+	// (never sessionKeyUserID — pending is not logged in), whether they
+	// ticked "remember me", and when the challenge lapses. Admin-only, so
+	// not in sessiondata: the public handler has no business reading them.
+	sessionKey2FAUserID   = "cms2FAUserID"
+	sessionKey2FARemember = "cms2FARemember"
+	sessionKey2FAExpires  = "cms2FAExpires"
+
+	// A generated-but-unconfirmed enrollment secret on the settings page.
+	// It only moves to the database once a live code has confirmed the
+	// authenticator app holds it too.
+	sessionKeyTOTPSetup = "cmsTOTPSetupSecret"
 )
 
 // currentUser returns the logged-in, active user for the request, or nil.

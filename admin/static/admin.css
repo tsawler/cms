@@ -1007,3 +1007,32 @@ body.cms-dragging .cms-table {
     }
     .cms-main { padding: 1.5rem 1.25rem; }
 }
+
+/* Account settings (/settings): the two-factor block and its enrollment
+   kit — QR code, manual-entry key, and the code fields, which get the
+   mono face because a one-time code is data, not prose. */
+.cms-settings-block { margin-top: 1.5rem; }
+.cms-settings-block h2 { display: flex; align-items: center; gap: .6rem; }
+.cms-settings-block form { margin-top: .75rem; }
+.cms-totp-qr {
+    display: block;
+    margin: .75rem 0;
+    border: 1px solid var(--cms-fog);
+    border-radius: var(--cms-radius);
+    /* The quiet zone must stay white for scanners, whatever the surface. */
+    background: #fff;
+}
+.cms-totp-secret {
+    font-family: var(--cms-mono);
+    font-size: .82rem;
+    letter-spacing: .04em;
+    margin: .3rem 0 1rem;
+    overflow-wrap: anywhere;
+}
+.cms-field input.cms-totp-input { font-family: var(--cms-mono); letter-spacing: .18em; }
+/* The sidebar's whoami is now a link to /settings; keep it looking like
+   the quiet label it was, revealing itself only on hover. */
+a.cms-whoami { text-decoration: none; }
+a.cms-whoami:hover { text-decoration: underline; }
+/* Breathing room between a login-card's lead-in hint and the form. */
+.cms-login-card > .cms-hint { margin-bottom: .75rem; }

@@ -75,6 +75,9 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 
 	form, password, errs := s.parseUserForm(r, false)
 	form.ID = existing.ID
+	// Carried over so an error re-render still shows the two-factor
+	// reset checkbox; Update never writes this field.
+	form.TOTPSecret = existing.TOTPSecret
 
 	// Guard rails: an admin editing their own account cannot lock
 	// themselves out by deactivating it or dropping the admin role.
@@ -111,6 +114,16 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
+	}
+
+	// The rescue for a lost phone: an admin clears the user's two-factor
+	// enrollment so their password alone logs them in again.
+	if r.PostFormValue("reset_totp") == "on" && existing.TwoFactorEnabled() {
+		if err := s.deps.Users.DisableTOTP(r.Context(), existing.ID); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		s.deps.Logger.Info("cms admin: two-factor reset", "user", existing.Email, "by", s.currentUser(r).Email)
 	}
 
 	s.flash(r, s.tr(r, "User updated."))

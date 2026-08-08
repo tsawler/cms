@@ -189,6 +189,10 @@ func New(d Deps) http.Handler {
 
 	r.Get("/login", s.loginForm)
 	r.Post("/login", s.login)
+	// The two-factor code challenge, between password and session: its
+	// visitor is authenticated-in-part, so it lives outside requireUser.
+	r.Get("/login/2fa", s.twoFactorForm)
+	r.Post("/login/2fa", s.twoFactorSubmit)
 
 	// The forgot-password flow exists only when the host supplied a
 	// Mailer — see the Mailer interface for why absent means off.
@@ -204,6 +208,14 @@ func New(d Deps) http.Handler {
 		r.Get("/", s.dashboard)
 		r.Post("/logout", s.logout)
 		r.Post("/lang", s.setLang)
+
+		// Every user's own account page: password and two-factor.
+		r.Get("/settings", s.settingsForm)
+		r.Post("/settings/password", s.settingsPassword)
+		r.Post("/settings/2fa/setup", s.totpSetup)
+		r.Post("/settings/2fa/confirm", s.totpConfirm)
+		r.Post("/settings/2fa/cancel", s.totpCancel)
+		r.Post("/settings/2fa/disable", s.totpDisable)
 
 		if d.Renderer != nil {
 			r.Get("/pages", s.pagesList)
@@ -309,7 +321,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "forgot_password", "reset_password", "dashboard", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
+	pages := []string{"login", "login_2fa", "forgot_password", "reset_password", "dashboard", "settings", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -379,6 +391,15 @@ type templateData struct {
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
+
+	// The account settings page. TwoFactorEnabled is the logged-in
+	// user's current state; TOTPSecret and TOTPQR carry an enrollment in
+	// progress — the pending secret (spaced for manual entry) and the
+	// same secret as a scannable QR data URI. template.URL because
+	// html/template would otherwise refuse a data: image.
+	TwoFactorEnabled bool
+	TOTPSecret       string
+	TOTPQR           template.URL
 
 	// Page management pages.
 	PagesEnabled  bool

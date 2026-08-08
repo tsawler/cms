@@ -1413,6 +1413,39 @@ had, and it only sets `Config.Mailer` when mail is actually configured —
 so a fresh checkout without SMTP credentials gets the honest absent
 state rather than emails that vanish into a log.
 
+## Account settings and two-factor login
+
+Every logged-in user has an account page at `/admin/settings` (their name
+in the sidebar links to it) with two things on it: changing their own
+password — behind the current one, so a walked-away session can't quietly
+take over the account — and turning **two-factor login** on or off.
+
+Two-factor uses ordinary TOTP authenticator apps (Google Authenticator,
+1Password, Authy, …): the settings page shows a QR code and a
+manual-entry key, and enrollment only saves once a live code from the
+app confirms it — nobody locks themselves out by enabling it with an app
+that never scanned the code. From then on, the password step of login
+parks the user at a 6-digit code challenge; the session only exists
+after the code passes. Nothing to configure: the feature is per-user and
+always offered.
+
+What the flow does, so you don't have to re-derive it from the code:
+
+- **Codes are single-use.** Each accepted code's 30-second time step is
+  recorded (`totp_last_step`), and a login only succeeds by moving it
+  forward — a shoulder-surfed or phished code replays nothing. One step
+  of clock skew either side is accepted, like everything else that
+  speaks TOTP.
+- **The challenge is throttled** like the login form (five wrong codes
+  per account+IP per fifteen minutes), and it expires: a correct
+  password opens a five-minute window to produce the code, then the
+  half-login goes stale.
+- **Turning it off requires the password** — a borrowed session alone
+  can't strip the second factor.
+- **Lost phone?** An admin editing the user (`/admin/users/…`) gets a
+  "Reset two-factor authentication" checkbox; the user logs in with
+  just their password and can re-enroll.
+
 ## Running the examples
 
 There are two, and they are deliberately opposites — start with whichever
