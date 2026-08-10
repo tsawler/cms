@@ -67,6 +67,7 @@ function captureFrame(src, crossOrigin) {
     var dropZone = uploader.querySelector("[data-dropzone]");
     var moreBtn = uploader.querySelector("[data-upload-more]");
     var stopBtn = uploader.querySelector("[data-upload-stop]");
+    var doneBtn = uploader.querySelector("[data-upload-done]");
 
     var jobs = [];
     var active = 0;
@@ -167,6 +168,9 @@ function captureFrame(src, crossOrigin) {
         queueEl.hidden = false;
         moreBtn.hidden = true;
         stopBtn.hidden = false;
+        // While transfers run, Stop is the way out; a clickable Done here
+        // would silently cancel whatever is still in flight.
+        doneBtn.disabled = true;
         pump();
     }
 
@@ -293,6 +297,17 @@ function captureFrame(src, crossOrigin) {
     function finish() {
         stopBtn.hidden = true;
         moreBtn.hidden = false;
+        doneBtn.disabled = false;
+
+        // Every file landed: nothing in the queue needs reading, so close
+        // — the close handler reloads the listing. A failure or a cancel
+        // keeps the dialog open so its rows and notes can be seen.
+        var allDone = jobs.length > 0 && jobs.every(function (j) { return j.state === "done"; });
+        if (allDone) {
+            uploader.close();
+            return;
+        }
+
         var failed = jobs.filter(function (j) { return j.state === "failed"; }).length;
         if (failed) {
             titleEl.textContent = t("partial", { failed: failed });

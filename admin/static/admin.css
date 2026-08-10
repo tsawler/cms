@@ -229,6 +229,12 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
 .cms-btn-danger:hover { background: var(--cms-danger-tint); }
 .cms-btn-danger:focus-visible { outline-color: var(--cms-danger); }
 .cms-btn-sm { padding: .3rem .6rem; font-size: .8rem; }
+/* Faded, not pointer-events:none — a disabled button can still carry an
+   explanatory title tooltip (the folder Delete does), which needs hover. */
+.cms-btn:disabled { opacity: .45; cursor: default; }
+.cms-btn-primary:disabled:hover { background: var(--cms-spruce); }
+.cms-btn-ghost:disabled:hover { color: var(--cms-muted); border-color: var(--cms-fog); }
+.cms-btn-danger:disabled:hover { background: transparent; }
 
 /* Forms */
 .cms-form, .cms-login-card {
