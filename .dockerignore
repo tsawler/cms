@@ -4,3 +4,7 @@
 .DS_Store
 examples/basic/.env
 examples/basic/static/site.css
+examples/wheels/.env
+examples/wheels/wheels
+examples/wheels/static/site.css
+examples/wheels/seed.sql
