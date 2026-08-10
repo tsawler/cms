@@ -43,7 +43,7 @@ func TestValidateSections(t *testing.T) {
 
 func TestNavSectionsFor(t *testing.T) {
 	sections := []Section{
-		{Path: "reports", NavLabel: "Reports", Handler: noopHandler},
+		{Path: "reports", NavLabel: "Reports", Confirm: "Run the report?", Handler: noopHandler},
 		{Path: "hidden", Handler: noopHandler}, // no NavLabel: never in the nav
 		{Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: noopHandler},
 	}
@@ -53,6 +53,9 @@ func TestNavSectionsFor(t *testing.T) {
 	editor := navSectionsFor(sections, "/admin", editorUser, "/")
 	if len(editor) != 1 || editor[0].Label != "Reports" || editor[0].URL != "/admin/x/reports/" {
 		t.Errorf("editor nav = %+v, want only Reports at /admin/x/reports/", editor)
+	}
+	if editor[0].Confirm != "Run the report?" {
+		t.Errorf("Confirm = %q, want the section's message carried through", editor[0].Confirm)
 	}
 
 	admin := navSectionsFor(sections, "/admin", adminUser, "/")
@@ -157,6 +160,7 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 		Body:      template.HTML(`<h1>Reports</h1><p class="host">42 visits</p>`),
 		NavSections: []navLink{
 			{URL: "/admin/x/reports/", Label: "Reports"},
+			{URL: "/admin/x/stickers/", Label: "Stickers", Confirm: `Print them all? A "big" PDF.`},
 		},
 	}
 
@@ -172,6 +176,9 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 		`href="/admin/x/reports/"`,                   // nav link target
 		`<span class="cms-nav-label">Reports</span>`, // nav link label
 		`href="/admin/static/admin.css"`,             // standard chrome
+		// A Confirm section's link asks first, its message escaped into
+		// the attribute admin.js reads.
+		` data-confirm="Print them all? A &#34;big&#34; PDF." href="/admin/x/stickers/"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered page missing %q:\n%s", want, html)

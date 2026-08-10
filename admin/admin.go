@@ -515,10 +515,13 @@ func (td templateData) Abs(u string) string {
 }
 
 // navLink is one host-registered section's entry in the admin sidebar.
+// Confirm carries the section's Confirm message; non-empty means the
+// link asks (via the shared dialog) before the browser follows it.
 type navLink struct {
-	URL    string
-	Label  string
-	Active bool
+	URL     string
+	Label   string
+	Confirm string
+	Active  bool
 }
 
 // navCounts is the sidebar's table-of-contents numbers: how many items
@@ -616,9 +619,10 @@ func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath 
 		}
 		prefix := SectionPathPrefix + "/" + sec.Path
 		links = append(links, navLink{
-			URL:    adminPath + prefix + "/",
-			Label:  sec.NavLabel,
-			Active: reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
+			URL:     adminPath + prefix + "/",
+			Label:   sec.NavLabel,
+			Confirm: sec.Confirm,
+			Active:  reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
 		})
 	}
 	return links

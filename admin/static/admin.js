@@ -30,14 +30,16 @@
         if (e.target.matches && e.target.matches("dialog.cms-dialog")) e.target.close();
     });
 
-    // Confirmations: <form data-confirm="Question? Detail.">
+    // Confirmations: <form data-confirm="Question? Detail."> and
+    // <a data-confirm="Question? Detail.">
     //
     // window.confirm is synchronous and a dialog is not, so a form that
     // needs confirming is stopped, asked about, and — on a yes — submitted
     // again. `answered` marks the form that already got its yes so the
-    // second pass falls straight through.
+    // second pass falls straight through. A link is simpler: on a yes the
+    // browser just follows its href.
     var confirmDialog = document.getElementById("cms-confirm");
-    var pending = null;   // {form, submitter} waiting on an answer
+    var pending = null;   // {form, submitter} or {href} waiting on an answer
     var answered = null;  // the form that may now submit
 
     // The button that submitted the form already names the action and
@@ -54,6 +56,26 @@
         var i = msg.indexOf("?");
         if (i > 0 && i < msg.length - 1) return [msg.slice(0, i + 1), msg.slice(i + 1).trim()];
         return [msg, ""];
+    }
+
+    // ask opens the dialog with the message split into heading and fine
+    // print, the confirm button named after the action it stands for.
+    function ask(msg, okLabel, danger) {
+        var parts = splitMessage(msg);
+        var detail = confirmDialog.querySelector("[data-confirm-detail]");
+        confirmDialog.querySelector("[data-confirm-title]").textContent = parts[0];
+        detail.textContent = parts[1];
+        detail.hidden = !parts[1];
+
+        var okBtn = confirmDialog.querySelector("[data-dialog-confirm]");
+        okBtn.textContent = okLabel || confirmDialog.getAttribute("data-t-ok");
+        okBtn.className = "cms-btn cms-btn-sm " + (danger ? "cms-btn-danger" : "cms-btn-primary");
+
+        confirmDialog.returnValue = "";
+        confirmDialog.showModal();
+        // Destructive actions open on Cancel, so a reflexive Return is the
+        // safe answer rather than the irreversible one.
+        (danger ? confirmDialog.querySelector("[data-dialog-close]") : okBtn).focus();
     }
 
     document.addEventListener("submit", function (e) {
@@ -77,24 +99,27 @@
             return;
         }
 
-        var parts = splitMessage(msg);
-        var detail = confirmDialog.querySelector("[data-confirm-detail]");
-        confirmDialog.querySelector("[data-confirm-title]").textContent = parts[0];
-        detail.textContent = parts[1];
-        detail.hidden = !parts[1];
-
-        var danger = !!(submitter && submitter.classList.contains("cms-btn-danger"));
-        var okBtn = confirmDialog.querySelector("[data-dialog-confirm]");
-        okBtn.textContent = (submitter && submitter.textContent.trim()) ||
-            confirmDialog.getAttribute("data-t-ok");
-        okBtn.className = "cms-btn cms-btn-sm " + (danger ? "cms-btn-danger" : "cms-btn-primary");
-
         pending = { form: form, submitter: submitter };
-        confirmDialog.returnValue = "";
-        confirmDialog.showModal();
-        // Destructive actions open on Cancel, so a reflexive Return is the
-        // safe answer rather than the irreversible one.
-        (danger ? confirmDialog.querySelector("[data-dialog-close]") : okBtn).focus();
+        ask(msg, submitter && submitter.textContent.trim(),
+            !!(submitter && submitter.classList.contains("cms-btn-danger")));
+    });
+
+    // Confirmed links — the sidebar's action entries (admin.Section's
+    // Confirm field). Stopped, asked, and followed on a yes; the link's
+    // own text names the action on the dialog's confirm button.
+    document.addEventListener("click", function (e) {
+        var link = e.target.closest ? e.target.closest("a[data-confirm]") : null;
+        if (!link) return;
+        var msg = link.getAttribute("data-confirm");
+        if (!msg) return;
+
+        e.preventDefault();
+        if (!confirmDialog || !confirmDialog.showModal) {
+            if (window.confirm(msg)) window.location.assign(link.href);
+            return;
+        }
+        pending = { href: link.href };
+        ask(msg, link.textContent.trim(), false);
     });
 
     if (confirmDialog) {
@@ -102,6 +127,10 @@
             var asked = pending;
             pending = null;
             if (!asked || confirmDialog.returnValue !== "ok") return;
+            if (asked.href) {
+                window.location.assign(asked.href);
+                return;
+            }
             answered = asked.form;
             asked.form.requestSubmit(asked.submitter);
         });

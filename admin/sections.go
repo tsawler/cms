@@ -39,6 +39,14 @@ type Section struct {
 	// means no nav link; the section is still routable.
 	NavLabel string
 
+	// Confirm, when non-empty, makes the nav link ask before it
+	// navigates: clicking it opens the admin's shared confirmation
+	// dialog with this message ("Question? Detail." — the question
+	// becomes the heading), and the browser only follows the link on a
+	// yes. For nav entries that do something — generate a file, run a
+	// job — rather than open a page. Ignored when NavLabel is empty.
+	Confirm string
+
 	// AdminOnly restricts the section to users with the admin role.
 	// Editors receive 403 and don't see the nav link.
 	AdminOnly bool
