@@ -151,6 +151,7 @@ var frStrings = map[string]string{
 	"Media":       "Médias",
 	"Snippets":    "Blocs",
 	"Users":       "Utilisateurs",
+	"Public Site": "Site public",
 	"Log out":     "Se déconnecter",
 
 	// Login page and handler.
