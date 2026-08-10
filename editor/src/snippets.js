@@ -3,7 +3,7 @@
  * buttons that open it, and the "new page" dialog on the rail.
  * ------------------------------------------------------------------ */
 
-import { state, pageTemplates, postsEnabled, mediaEnabled } from "./state.js";
+import { state, pageTemplates, postsEnabled, mediaEnabled, canPages, canBlogs, canNews } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
@@ -276,11 +276,11 @@ export function initSnippets() {
         state.pendingSection = { region: container.getAttribute("data-cms-sections"), after: null };
         openDrawer();
     });
-    $("rail-page").hidden = pageTemplates.length === 0;
+    $("rail-page").hidden = pageTemplates.length === 0 || !canPages;
     $("rail-page").addEventListener("click", newPageDialog);
 
-    $("rail-post").hidden = !postsEnabled;
-    $("rail-post").addEventListener("click", function () { newPostDialog("blog"); });
+    $("rail-post").hidden = !postsEnabled || (!canBlogs && !canNews);
+    $("rail-post").addEventListener("click", function () { newPostDialog(canBlogs ? "blog" : "news"); });
 
     $("drawer-close").addEventListener("click", closeDrawer);
 }
@@ -289,7 +289,7 @@ export function initSnippets() {
 // and navigates into the draft. Shared by the tool rail and the admin
 // tools menu.
 export function newPageDialog() {
-    if (!pageTemplates.length) return;
+    if (!pageTemplates.length || !canPages) return;
     openDialog({
         message: "Create a new page",
         prompt: true,
@@ -321,17 +321,22 @@ export function newPageDialog() {
 // "Publish under" select preset to feed, creates it, and navigates into
 // the draft. Shared by the tool rail and the admin tools menu.
 export function newPostDialog(feed) {
-    if (!postsEnabled) return;
+    if (!postsEnabled || (!canBlogs && !canNews)) return;
+    // Only permitted feeds are offered, and the preset falls back to a
+    // permitted one; the server refuses the other feed regardless.
+    var feedOptions = [];
+    if (canBlogs) feedOptions.push({ value: "blog", label: "Blog" });
+    if (canNews) feedOptions.push({ value: "news", label: "News" });
+    if ((feed === "news" && !canNews) || (feed !== "news" && !canBlogs)) {
+        feed = feedOptions[0].value;
+    }
     var fields = [
         {
             id: "feed",
             label: "Publish under",
             type: "select",
             value: feed === "news" ? "news" : "blog",
-            options: [
-                { value: "blog", label: "Blog" },
-                { value: "news", label: "News" },
-            ],
+            options: feedOptions,
         },
         { id: "summary", label: "Summary", type: "text",
             placeholder: "Shown in listings and feeds (optional)" },

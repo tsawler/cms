@@ -3,7 +3,7 @@
  * bar-button visibility rules that reflect it all.
  * ------------------------------------------------------------------ */
 
-import { state, cfg, postInfo, locales, defaultLocale } from "./state.js";
+import { state, cfg, postInfo, locales, defaultLocale, canPages } from "./state.js";
 import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
@@ -14,13 +14,21 @@ import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
 import { setTitleEditing } from "./title.js";
 
+// Shared regions ("site:footer" and friends) are site furniture: they
+// take the pages permission to edit, so for anyone without it they are
+// left out of the editable set entirely. The server refuses a save of
+// them regardless.
+function editable(el) {
+    return canPages || el.getAttribute("data-cms-region").indexOf("site:") !== 0;
+}
+
 export function textRegions() {
     return Array.prototype.slice.call(
-        document.querySelectorAll('[data-cms-region][data-cms-kind="text"]'));
+        document.querySelectorAll('[data-cms-region][data-cms-kind="text"]')).filter(editable);
 }
 export function htmlRegions() {
     return Array.prototype.slice.call(
-        document.querySelectorAll('[data-cms-region][data-cms-kind="html"]'));
+        document.querySelectorAll('[data-cms-region][data-cms-kind="html"]')).filter(editable);
 }
 
 // takeSnapshot / restoreSnapshot let Cancel put the page back exactly
@@ -90,7 +98,9 @@ export function setEditing(on) {
         });
     }
     $("rail").classList.toggle("on", on);
-    setMenuEditing(on);
+    // Menus are part of the pages permission, like the pages they
+    // navigate to; without it the nav stays a nav even in edit mode.
+    setMenuEditing(on && canPages);
     if (!on) {
         closeDrawer();
         state.pendingSection = null;

@@ -75,6 +75,40 @@ func (s *server) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// requireSuperadmin responds 403 unless the logged-in user has the
+// superadmin role. It must be nested inside requireUser.
+func (s *server) requireSuperadmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := s.currentUser(r)
+		if u == nil || !u.Role.IsSuperadmin() {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requirePerm builds middleware that responds 403 unless the logged-in
+// user holds the permission (admin roles hold every permission). It must
+// be nested inside requireUser.
+func (s *server) requirePerm(p auth.Permission) func(http.Handler) http.Handler {
+	return s.requireAnyPerm(p)
+}
+
+// requireAnyPerm is requirePerm for handlers that several permissions
+// unlock — the shared Blog & News area needs either feed, not both.
+func (s *server) requireAnyPerm(perms ...auth.Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !s.currentUser(r).CanAny(perms...) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // csrf implements a session-bound synchronizer token. Safe methods ensure a
 // token exists; unsafe methods must echo it back in the csrf_token form
 // field or the X-CSRF-Token header.
@@ -110,8 +144,11 @@ func (s *server) csrf(next http.Handler) http.Handler {
 // and runs a WASM solver in blob workers, so the CSP must admit all of that.
 func secureHeaders(capOrigin string) func(http.Handler) http.Handler {
 	// img-src allows https so the media library can show images served
-	// from the site's bucket/CDN.
-	const plain = "default-src 'self'; img-src 'self' https: data:; frame-ancestors 'none'"
+	// from the site's bucket/CDN; media-src the same, so its inspector can
+	// play videos, plus blob: for the local files the uploader reads a
+	// poster frame out of before they are anywhere a URL can reach.
+	const plain = "default-src 'self'; img-src 'self' https: data:; " +
+		"media-src 'self' https: blob:; frame-ancestors 'none'"
 
 	// loginCSP is the policy for the login page, and only that page. The
 	// CAPTCHA widget needs concessions the rest of the admin does not, so

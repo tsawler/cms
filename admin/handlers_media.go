@@ -275,6 +275,31 @@ func (s *server) mediaUpdateAlt(w http.ResponseWriter, r *http.Request) {
 	s.backToMedia(w, r)
 }
 
+// mediaRename changes an item's display name. Nothing in the bucket
+// moves, so every existing link keeps working; the media package keeps
+// the stored extension whatever was submitted.
+func (s *server) mediaRename(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.mediaIDFromURL(w, r)
+	if !ok {
+		return
+	}
+	_, err := s.deps.Media.Rename(r.Context(), id, s.deps.DefaultLocale, r.PostFormValue("name"))
+	switch {
+	case errors.Is(err, media.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case errors.Is(err, media.ErrBadFilename):
+		s.flash(r, s.tr(r, "File names must be between 1 and 200 characters."))
+		s.backToMedia(w, r)
+		return
+	case err != nil:
+		s.serverError(w, err)
+		return
+	}
+	s.flash(r, s.tr(r, "File renamed."))
+	s.backToMedia(w, r)
+}
+
 func (s *server) mediaDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.mediaIDFromURL(w, r)
 	if !ok {

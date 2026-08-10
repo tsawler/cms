@@ -25,12 +25,14 @@ func TestValidateSections(t *testing.T) {
 	}
 
 	bad := map[string][]Section{
-		"empty path":      {{Path: "", Handler: noopHandler}},
-		"slash in path":   {{Path: "a/b", Handler: noopHandler}},
-		"space in path":   {{Path: "a b", Handler: noopHandler}},
-		"escaping path":   {{Path: "../users", Handler: noopHandler}},
-		"duplicate paths": {{Path: "x", Handler: noopHandler}, {Path: "x", Handler: noopHandler}},
-		"nil handler":     {{Path: "x"}},
+		"empty path":           {{Path: "", Handler: noopHandler}},
+		"slash in path":        {{Path: "a/b", Handler: noopHandler}},
+		"space in path":        {{Path: "a b", Handler: noopHandler}},
+		"escaping path":        {{Path: "../users", Handler: noopHandler}},
+		"duplicate paths":      {{Path: "x", Handler: noopHandler}, {Path: "x", Handler: noopHandler}},
+		"nil handler":          {{Path: "x"}},
+		"uppercase permission": {{Path: "x", Permission: "Vehicles", Handler: noopHandler}},
+		"spaced permission":    {{Path: "x", Permission: "manage vehicles", Handler: noopHandler}},
 	}
 	for name, sections := range bad {
 		if err := ValidateSections(sections); err == nil {
@@ -45,21 +47,52 @@ func TestNavSectionsFor(t *testing.T) {
 		{Path: "hidden", Handler: noopHandler}, // no NavLabel: never in the nav
 		{Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: noopHandler},
 	}
+	editorUser := &auth.User{Role: auth.RoleEditor}
+	adminUser := &auth.User{Role: auth.RoleAdmin}
 
-	editor := navSectionsFor(sections, "/admin", false, "/")
+	editor := navSectionsFor(sections, "/admin", editorUser, "/")
 	if len(editor) != 1 || editor[0].Label != "Reports" || editor[0].URL != "/admin/x/reports/" {
 		t.Errorf("editor nav = %+v, want only Reports at /admin/x/reports/", editor)
 	}
 
-	admin := navSectionsFor(sections, "/admin", true, "/")
+	admin := navSectionsFor(sections, "/admin", adminUser, "/")
 	if len(admin) != 2 || admin[1].Label != "Billing" || admin[1].URL != "/admin/x/billing/" {
 		t.Errorf("admin nav = %+v, want Reports then Billing", admin)
 	}
 
 	// Viewing a section marks its own link, and only its own, active.
-	viewing := navSectionsFor(sections, "/admin", true, "/x/billing/subpage")
+	viewing := navSectionsFor(sections, "/admin", adminUser, "/x/billing/subpage")
 	if viewing[0].Active || !viewing[1].Active {
 		t.Errorf("active flags = %+v, want only Billing active", viewing)
+	}
+
+	// The login page renders the nav data with no user at all.
+	if got := navSectionsFor(sections, "/admin", nil, "/"); len(got) != 1 {
+		t.Errorf("nil-user nav = %+v, want only Reports", got)
+	}
+}
+
+// A section's Permission hides its nav link from editors without the
+// grant, admits editors with it, and never bars admin roles.
+func TestNavSectionsForPermission(t *testing.T) {
+	sections := []Section{
+		{Path: "inventory", NavLabel: "Inventory", Permission: "vehicles", Handler: noopHandler},
+	}
+
+	for name, tc := range map[string]struct {
+		user *auth.User
+		want int
+	}{
+		"nil user":              {nil, 0},
+		"editor without grant":  {&auth.User{Role: auth.RoleEditor}, 0},
+		"editor with grant":     {&auth.User{Role: auth.RoleEditor, Permissions: []auth.Permission{"vehicles"}}, 1},
+		"editor with other":     {&auth.User{Role: auth.RoleEditor, Permissions: []auth.Permission{auth.PermPages}}, 0},
+		"admin without grant":   {&auth.User{Role: auth.RoleAdmin}, 1},
+		"superadmin, no grants": {&auth.User{Role: auth.RoleSuperadmin}, 1},
+	} {
+		if got := navSectionsFor(sections, "/admin", tc.user, "/"); len(got) != tc.want {
+			t.Errorf("%s: nav has %d links, want %d", name, len(got), tc.want)
+		}
 	}
 }
 

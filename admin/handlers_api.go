@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/dberr"
 	"github.com/tsawler/cms/media"
@@ -32,13 +33,30 @@ func jsonError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// pageFromURLCan is pageFromURL plus authorization: 403 unless the user
+// holds the permission the page's slug falls under (blog/… and news/…
+// belong to their feeds, everything else to pages). The editor's
+// page-mutating API routes serve posts' backing pages too, so they are
+// gated here per page rather than on the route.
+func (s *server) pageFromURLCan(w http.ResponseWriter, r *http.Request) (*content.Page, bool) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return nil, false
+	}
+	if !s.currentUser(r).Can(auth.PermissionForSlug(page.Slug)) {
+		jsonError(w, http.StatusForbidden, s.tr(r, "You don't have permission to edit this page."))
+		return nil, false
+	}
+	return page, true
+}
+
 // apiSaveRegions stores in-place edits as draft blocks. Region names
 // carrying the shared prefix ("site:footer") are the site's, not the
 // page's, and are stored against the site page instead — the editor sends
 // whatever was edited on screen, and that can be a mixture of the two.
 // POST /api/pages/{id}/regions  body: {"regions": {"name": "content", ...}}
 func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -57,9 +75,18 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isAdmin := s.currentUser(r).Role.IsAdmin()
+	user := s.currentUser(r)
+	isAdmin := user.Role.IsAdmin()
 	locale := s.requestLocale(body.Locale)
 	pageValues, sharedValues := splitSharedRegions(body.Regions)
+	// Shared regions (the site footer and friends) appear on every page,
+	// so they ride along in any page's save — but they are site
+	// furniture, and editing them takes the pages permission even when
+	// the page being saved is a post.
+	if len(sharedValues) > 0 && !user.Can(auth.PermPages) {
+		jsonError(w, http.StatusForbidden, s.tr(r, "Editing shared site areas needs the pages permission."))
+		return
+	}
 	if err := s.saveRegions(r.Context(), page.ID, page.TemplateName, pageValues, isAdmin,
 		locale); err != nil {
 		s.deps.Logger.Error("cms admin: api saving regions", "page", page.ID, "err", err)
@@ -145,7 +172,7 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 // title becomes the copy's title in the given locale.
 // POST /api/pages/{id}/duplicate  body: {"title": "...", "locale": "en"}
 func (s *server) apiDuplicatePage(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -223,7 +250,7 @@ func (s *server) apiDuplicatePage(w http.ResponseWriter, r *http.Request) {
 // Like any edit, the block-side effect goes live on the next Publish.
 // POST /api/pages/{id}/revert-locale  body: {"locale": "fr"}
 func (s *server) apiRevertLocale(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -541,7 +568,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 // (empty slug) is not deletable — a site must always answer at /.
 // DELETE /api/pages/{id}
 func (s *server) apiDeletePage(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -563,7 +590,7 @@ func (s *server) apiDeletePage(w http.ResponseWriter, r *http.Request) {
 // POST /api/pages/{id}/sections
 // body: {"region": "...", "sections": [{"bg": "...", "width": "...", "html": "..."}]}
 func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -756,7 +783,7 @@ func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
 // PUT /api/pages/{id}/meta  body: {"locale", "title", "description",
 // "metaDescription"}
 func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -813,7 +840,7 @@ func (s *server) apiSavePageMeta(w http.ResponseWriter, r *http.Request) {
 // content with it (see publishWithShared).
 // POST /api/pages/{id}/publish
 func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -830,7 +857,7 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 // draft and published both survive — so publishing again restores it.
 // POST /api/pages/{id}/unpublish
 func (s *server) apiUnpublish(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -846,7 +873,7 @@ func (s *server) apiUnpublish(w http.ResponseWriter, r *http.Request) {
 // apiSetVisibility changes who may view the page on the public site.
 // PUT /api/pages/{id}/visibility  body: {"visibility": "public" | "private"}
 func (s *server) apiSetVisibility(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -870,7 +897,7 @@ func (s *server) apiSetVisibility(w http.ResponseWriter, r *http.Request) {
 // draft content to match what is currently published.
 // POST /api/pages/{id}/discard
 func (s *server) apiDiscard(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -999,6 +1026,45 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 
 	view := s.deps.Media.Views([]media.Media{*md})[0]
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "filed": filed, "media": toMediaJSON(view)})
+}
+
+// apiMediaSetPoster attaches a browser-captured poster frame to a video.
+// The media page uses it to backfill a video uploaded without one: the
+// server can't decode video, so the inspector captures a frame while the
+// video is being previewed and posts it here.
+// POST /api/media/{id}/poster  (multipart field "poster")
+func (s *server) apiMediaSetPoster(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.mediaIDFromURL(w, r)
+	if !ok {
+		return
+	}
+	// Same cap a poster riding along with an upload gets.
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	pf, _, err := r.FormFile("poster")
+	if err != nil {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
+		return
+	}
+	defer pf.Close()
+	poster, err := io.ReadAll(pf)
+	if err != nil {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
+		return
+	}
+
+	md, err := s.deps.Media.SetPoster(r.Context(), id, s.deps.DefaultLocale, poster)
+	switch {
+	case errors.Is(err, media.ErrNotFound):
+		jsonError(w, http.StatusNotFound, s.tr(r, "That file could not be processed."))
+		return
+	case err != nil:
+		s.deps.Logger.Error("cms admin: api setting video poster", "id", id, "err", err)
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
+		return
+	}
+
+	view := s.deps.Media.Views([]media.Media{*md})[0]
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "media": toMediaJSON(view)})
 }
 
 // apiFoldersList returns media folders with item counts, filtered to one

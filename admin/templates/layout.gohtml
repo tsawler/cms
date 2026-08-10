@@ -25,11 +25,11 @@
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
             <span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
-        {{if .PagesEnabled}}
+        {{if and .PagesEnabled (.Can "pages")}}
         <a {{if eq .NavCurrent "pages"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/pages">
             <span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
         {{end}}
-        {{if .PostsEnabled}}
+        {{if and .PostsEnabled (or (.Can "blogs") (.Can "news"))}}
         <a {{if eq .NavCurrent "posts"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/posts">
             <span class="cms-nav-label">{{.T "Blog & News"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Posts}}</span></a>
         {{end}}
@@ -37,11 +37,11 @@
         <a {{if eq .NavCurrent "media"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/media">
             <span class="cms-nav-label">{{.T "Media"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Media}}</span></a>
         {{end}}
-        {{if and .PagesEnabled .IsAdmin}}
+        {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "snippets"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/snippets">
             <span class="cms-nav-label">{{.T "Snippets"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Snippets}}</span></a>
         {{end}}
-        {{if .IsAdmin}}
+        {{if .Can "users"}}
         <a {{if eq .NavCurrent "users"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/users">
             <span class="cms-nav-label">{{.T "Users"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Users}}</span></a>
         {{end}}

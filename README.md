@@ -1182,6 +1182,63 @@ defined".
 and the two maps, and `templates/pages/home.gohtml` ranges over the result
 between two `cmsText` slots.
 
+## Roles & permissions
+
+Accounts have one of three **roles**, which encode trust:
+
+- **editor** — works on content, gated by per-user permissions (below).
+- **admin** — everything: all permissions implicitly, plus site-wide and
+  per-page CSS/JS (written into pages unsanitized) and user management
+  without restriction.
+- **superadmin** — admin plus the whole-page HTML source view in the
+  in-place editor, and snippet management (snippets are raw HTML
+  injected into every editor).
+
+What an *editor* may work on is a set of per-user **permissions**,
+toggled on their page under Users:
+
+| Permission | Grants |
+|---|---|
+| Blog posts | the blog feed: creating, editing, publishing blog posts |
+| News | the news feed, the same way |
+| Pages, menus & site settings | site pages, navigation menus, and the non-code site settings |
+| User management | managing *editor* accounts (see below) |
+
+Everything follows from the grant: nav entries and dashboard cards the
+user can't act on don't render, the routes 403 regardless, and on the
+public site the in-place editor appears only on pages the user may edit
+— a blogs-only editor gets the editor (and sees drafts) on `blog/…`
+pages and the ordinary published render everywhere else. The media
+library stays open to every logged-in user; content work needs it.
+
+A migration grants existing editors the three content permissions, so
+an upgrade changes nothing until you start unticking boxes.
+
+**User management without the admin role is deliberately bounded.** An
+editor with that grant manages editor accounts only: admin accounts are
+out of reach entirely (including their passwords and two-factor
+resets), the role select offers only "editor", and they can neither
+grant nor revoke a permission they don't hold themselves. Escalation by
+way of the users page is a dead end.
+
+Deployments can declare **custom permissions** for functionality they
+gate themselves — either implicitly through an admin section's
+`Permission` field (see [Custom admin pages](#custom-admin-pages)), or
+standalone:
+
+```go
+Permissions: []cms.PermissionDef{
+    {Key: "vehicles", Label: "Manage vehicles"},
+},
+```
+
+Each declared permission becomes a checkbox on the user form; grants
+live in the `cms_user_permissions` table. Check them in your own
+handlers with `auth.User.Can` — inside an admin section that's
+`admin.UserFrom(r).Can("vehicles")` (admin roles always pass). Keys are
+lowercase identifiers (`[a-z][a-z0-9_-]*`, max 64 chars); the built-in
+keys `blogs`, `news`, `pages`, and `users` are reserved.
+
 ## Custom admin pages
 
 Deployments often need admin pages the CMS doesn't ship — reports,
@@ -1207,6 +1264,13 @@ AdminSections: []cms.AdminSection{
 - **`NavLabel`** — adds a link to the admin top bar; leave empty for
   routable-but-unlisted pages.
 - **`AdminOnly`** — editors get 403 and no nav link.
+- **`Permission`** — restricts the section to users holding the named
+  permission (see [Roles & permissions](#roles--permissions)). Naming a
+  built-in permission reuses it; any other key *declares* a custom
+  permission, which appears as a checkbox on the admin's user form,
+  labelled with `NavLabel`. The wheels example gates its inventory
+  manager this way: `{Path: "inventory", NavLabel: "Inventory",
+  Permission: "vehicles", Handler: ...}`.
 - **`Handler`** — sees section-relative paths (`/` at the root), so it can
   serve sub-routes and its own static assets beneath it.
 

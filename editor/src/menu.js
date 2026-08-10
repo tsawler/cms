@@ -15,7 +15,7 @@
  * are the stable handle).
  * ------------------------------------------------------------------ */
 
-import { state, cfg, defaultLocale } from "./state.js";
+import { state, cfg, defaultLocale, canPages } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm } from "./dialogs.js";
@@ -27,6 +27,13 @@ var loadPromise = null;
 
 function navEls() {
     return Array.prototype.slice.call(document.querySelectorAll("nav[data-cms-menu]"));
+}
+
+// menuEditing gates every menu-editing affordance: menus belong to the
+// pages permission, so without it the nav stays a plain nav even while
+// the rest of the page is in edit mode.
+function menuEditing() {
+    return state.editing && canPages;
 }
 
 function normalize(items) {
@@ -155,7 +162,7 @@ function itemLI(item, top) {
         var sub = document.createElement("ul");
         sub.className = "cms-nav-sub";
         item.children.forEach(function (c) { sub.appendChild(itemLI(c, false)); });
-        if (state.editing) sub.appendChild(addChip());
+        if (menuEditing()) sub.appendChild(addChip());
         li.appendChild(sub);
         return li;
     }
@@ -163,7 +170,7 @@ function itemLI(item, top) {
     a.className = "cms-nav-link";
     var url = itemURL(item);
     a.href = url || "#";
-    if (state.editing) a.draggable = false; // our pointer drag, not the native link drag
+    if (menuEditing()) a.draggable = false; // our pointer drag, not the native link drag
     if (url && url.indexOf("http") !== 0 && url === window.location.pathname) {
         a.className += " cms-active";
         a.setAttribute("aria-current", "page");
@@ -218,7 +225,7 @@ function renderNav(nav) {
     var ul = document.createElement("ul");
     ul.className = "cms-nav-list";
     menus[key].forEach(function (item) { ul.appendChild(itemLI(item, true)); });
-    if (state.editing) ul.appendChild(addChip());
+    if (menuEditing()) ul.appendChild(addChip());
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);
@@ -627,7 +634,7 @@ export function initMenu() {
     // stay reachable — while on touch the tap still toggles the panel
     // and long-press edits. Capture, so host handlers can't swallow it.
     document.addEventListener("click", function (e) {
-        if (!state.editing || !e.target.closest) return;
+        if (!menuEditing() || !e.target.closest) return;
         var nav = e.target.closest("nav[data-cms-menu]");
         if (!nav || e.target.closest(".cms-nav-addli")) return;
         var toggle = e.target.closest(".cms-nav-toggle");
@@ -649,7 +656,7 @@ export function initMenu() {
 
     // Native link dragging would swallow our pointer-based drag.
     document.addEventListener("dragstart", function (e) {
-        if (state.editing && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
+        if (menuEditing() && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
             e.preventDefault();
         }
     }, true);
@@ -657,7 +664,7 @@ export function initMenu() {
     // Long-press opens the same modal on touch — the only way to edit
     // a dropdown parent there, since tapping its toggle opens the panel.
     document.addEventListener("pointerdown", function (e) {
-        if (!state.editing || e.pointerType === "mouse" || !e.target.closest) return;
+        if (!menuEditing() || e.pointerType === "mouse" || !e.target.closest) return;
         var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
         if (!li) return;
         var sx = e.clientX, sy = e.clientY;
@@ -681,7 +688,7 @@ export function initMenu() {
 
     // Mouse drag to rearrange.
     document.addEventListener("pointerdown", function (e) {
-        if (!state.editing || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
+        if (!menuEditing() || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
         var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
         if (!li || !menus) return;
         var r = li.getBoundingClientRect();

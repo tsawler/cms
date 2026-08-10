@@ -7,9 +7,15 @@
 </div>
 
 <p class="cms-tabs">
+    {{if and (.Can "blogs") (.Can "news")}}
     <a {{if not .FeedFilter}}class="cms-active"{{end}} href="{{.AdminPath}}/posts">{{.T "All"}}</a>
+    {{end}}
+    {{if .Can "blogs"}}
     <a {{if eq .FeedFilter "blog"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=blog">{{.T "Blog"}}</a>
+    {{end}}
+    {{if .Can "news"}}
     <a {{if eq .FeedFilter "news"}}class="cms-active"{{end}} href="{{.AdminPath}}/posts?feed=news">{{.T "News"}}</a>
+    {{end}}
 </p>
 
 <table class="cms-table">

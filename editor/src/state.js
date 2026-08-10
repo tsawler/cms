@@ -15,6 +15,12 @@ export var mediaEnabled = cfg.media === "1";
 export var isAdmin = cfg.isAdmin === "1";
 export var isSuperadmin = cfg.isSuperadmin === "1";
 export var postsEnabled = cfg.posts === "1";
+// Per-user permissions: cross-page chrome (new page, menus, site
+// settings) needs canPages; creating a post needs its feed's flag. The
+// server enforces all of this regardless.
+export var canPages = cfg.canPages === "1";
+export var canBlogs = cfg.canBlogs === "1";
+export var canNews = cfg.canNews === "1";
 
 // Configured site locales ([0] = default). More than one shows the edit
 // bar's language switcher; the current render's locale is cfg.locale.

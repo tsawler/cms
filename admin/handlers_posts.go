@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
@@ -22,6 +23,19 @@ func (s *server) postsList(w http.ResponseWriter, r *http.Request) {
 	feed := r.URL.Query().Get("feed")
 	if !content.ValidFeed(feed) {
 		feed = ""
+	}
+	// The route admits holders of either feed permission; the listing
+	// shows only feeds the user holds — asking for the other one is 403,
+	// and no filter narrows to the one feed they can see.
+	user := s.currentUser(r)
+	switch {
+	case feed != "" && !user.Can(auth.PermissionForFeed(feed)):
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	case feed == "" && !user.Can(auth.PermBlogs):
+		feed = string(content.FeedNews)
+	case feed == "" && !user.Can(auth.PermNews):
+		feed = string(content.FeedBlog)
 	}
 	// The admin sees drafts and private posts, so it counts them too:
 	// publishedOnly is false here exactly as it is for the window below,
@@ -50,7 +64,11 @@ func (s *server) postsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postNew(w http.ResponseWriter, r *http.Request) {
-	s.renderPostForm(w, r, &content.Post{Feed: content.FeedBlog, PublishedAt: time.Now()}, true, nil)
+	feed := content.FeedBlog
+	if !s.currentUser(r).Can(auth.PermBlogs) {
+		feed = content.FeedNews
+	}
+	s.renderPostForm(w, r, &content.Post{Feed: feed, PublishedAt: time.Now()}, true, nil)
 }
 
 func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +100,7 @@ func (s *server) postCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -90,7 +108,7 @@ func (s *server) postEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
-	existing, ok := s.postFromURL(w, r)
+	existing, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -163,7 +181,7 @@ func (s *server) postUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postDelete(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -178,7 +196,7 @@ func (s *server) postDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -200,7 +218,7 @@ func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
 // the listing as well as its own URL. Content is untouched, so publishing
 // again restores it.
 func (s *server) postUnpublish(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -216,7 +234,7 @@ func (s *server) postUnpublish(w http.ResponseWriter, r *http.Request) {
 // postPreview renders the post's draft content with the real site
 // templates, post data included.
 func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -273,6 +291,10 @@ func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*conten
 	if !content.ValidFeed(feed) {
 		errs["feed"] = s.tr(r, "Choose Blog or News.")
 		feed = string(content.FeedBlog)
+	} else if !s.currentUser(r).Can(auth.PermissionForFeed(feed)) {
+		// Covers creating in a feed the user doesn't hold, and moving
+		// an existing post into one (the old feed is postFromURLCan's).
+		errs["feed"] = s.tr(r, "You don't have permission to publish in that feed.")
 	}
 	p.Feed = content.Feed(feed)
 
@@ -482,6 +504,10 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Choose Blog or News."))
 		return
 	}
+	if !s.currentUser(r).Can(auth.PermissionForFeed(body.Feed)) {
+		jsonError(w, http.StatusForbidden, s.tr(r, "You don't have permission to publish in that feed."))
+		return
+	}
 
 	base := content.Slugify(title)
 	if base == "" {
@@ -548,7 +574,7 @@ func (s *server) apiCreatePost(w http.ResponseWriter, r *http.Request) {
 // "published_at", "hide_author", "thumbnail_media_id", "thumbnail_url"}
 // -> {ok}
 func (s *server) apiUpdatePostSettings(w http.ResponseWriter, r *http.Request) {
-	post, ok := s.postFromURL(w, r)
+	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -623,6 +649,21 @@ func (s *server) postFromURL(w http.ResponseWriter, r *http.Request) (*content.P
 	}
 	if err != nil {
 		s.serverError(w, err)
+		return nil, false
+	}
+	return post, true
+}
+
+// postFromURLCan is postFromURL plus authorization: 403 unless the user
+// holds the post's feed permission. The Blog & News routes admit anyone
+// with either feed; which posts they may touch is decided here.
+func (s *server) postFromURLCan(w http.ResponseWriter, r *http.Request) (*content.Post, bool) {
+	post, ok := s.postFromURL(w, r)
+	if !ok {
+		return nil, false
+	}
+	if !s.currentUser(r).Can(auth.PermissionForFeed(string(post.Feed))) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return nil, false
 	}
 	return post, true

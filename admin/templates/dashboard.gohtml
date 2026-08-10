@@ -5,26 +5,26 @@
 <p class="cms-muted">{{.T "Welcome back,"}} {{.User.Name}}.</p>
 
 <div class="cms-cards">
-    {{if .PagesEnabled}}
+    {{if and .PagesEnabled (.Can "pages")}}
     <a class="cms-card" href="{{.AdminPath}}/pages">
         <span class="cms-card-count">{{.NavCounts.Pages}}</span>
         <h2>{{.T "Pages"}}</h2>
         <p>{{.T "Create and edit the pages on your site."}}</p>
     </a>
-    {{else}}
+    {{else if not .PagesEnabled}}
     <div class="cms-card cms-card-disabled">
         <h2>{{.T "Pages"}}</h2>
         <p>{{.T "Not configured — the host application must set TemplateFS and PageTemplates."}}</p>
     </div>
     {{end}}
-    {{if and .PagesEnabled .IsAdmin}}
+    {{if and .PagesEnabled .IsSuperadmin}}
     <a class="cms-card" href="{{.AdminPath}}/snippets">
         <span class="cms-card-count">{{.NavCounts.Snippets}}</span>
         <h2>{{.T "Snippets"}}</h2>
         <p>{{.T "Ready-made blocks editors can drop into pages."}}</p>
     </a>
     {{end}}
-    {{if .IsAdmin}}
+    {{if .Can "users"}}
     <a class="cms-card" href="{{.AdminPath}}/users">
         <span class="cms-card-count">{{.NavCounts.Users}}</span>
         <h2>{{.T "Users"}}</h2>
@@ -43,13 +43,13 @@
         <p>{{.T "Not configured — the host application must set Config.S3."}}</p>
     </div>
     {{end}}
-    {{if .PostsEnabled}}
+    {{if and .PostsEnabled (or (.Can "blogs") (.Can "news"))}}
     <a class="cms-card" href="{{.AdminPath}}/posts">
         <span class="cms-card-count">{{.NavCounts.Posts}}</span>
         <h2>{{.T "Blog & News"}}</h2>
         <p>{{.T "Write and publish blog posts and news items."}}</p>
     </a>
-    {{else}}
+    {{else if not .PostsEnabled}}
     <div class="cms-card cms-card-disabled">
         <h2>{{.T "Blog & News"}}</h2>
         <p>{{.T "Not configured — the host application must set Config.PostTemplate."}}</p>

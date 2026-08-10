@@ -892,6 +892,13 @@ type EditInfo struct {
 	// IsSuperadmin unlocks the whole-page HTML source view on the
 	// editor's tool rail.
 	IsSuperadmin bool
+	// CanPages, CanBlogs, and CanNews unlock the editor's cross-page
+	// chrome: new page, menu editing, and site settings need pages;
+	// creating a post needs its feed. The server enforces every one of
+	// these regardless — the flags only decide what the UI offers.
+	CanPages bool
+	CanBlogs bool
+	CanNews  bool
 	// PostsEnabled shows the tool rail's "New post" button (blog & news
 	// configured on the host).
 	PostsEnabled bool
@@ -1412,6 +1419,18 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.PostsEnabled {
 		postsFlag = "1"
 	}
+	canPagesFlag := "0"
+	if edit.CanPages {
+		canPagesFlag = "1"
+	}
+	canBlogsFlag := "0"
+	if edit.CanBlogs {
+		canBlogsFlag = "1"
+	}
+	canNewsFlag := "0"
+	if edit.CanNews {
+		canNewsFlag = "1"
+	}
 	// The post-settings dialog wants the date preformatted for its
 	// <input type="datetime-local">, so this is a bespoke object rather
 	// than a PostInfo marshal.
@@ -1468,6 +1487,9 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
+		` data-can-pages="` + canPagesFlag + `"` +
+		` data-can-blogs="` + canBlogsFlag + `"` +
+		` data-can-news="` + canNewsFlag + `"` +
 		` data-posts="` + postsFlag + `"` +
 		` data-post="` + html.EscapeString(postJSON) + `"` +
 		` data-styles="` + html.EscapeString(string(stylesJSON)) + `"` +

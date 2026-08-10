@@ -38,8 +38,12 @@
     <div class="cms-field">
         <label for="feed">{{.T "Feed"}}</label>
         <select id="feed" name="feed">
+            {{if or (.Can "blogs") (eq .FormPost.Feed "blog")}}
             <option value="blog" {{if eq .FormPost.Feed "blog"}}selected{{end}}>{{.T "Blog"}}</option>
+            {{end}}
+            {{if or (.Can "news") (eq .FormPost.Feed "news")}}
             <option value="news" {{if eq .FormPost.Feed "news"}}selected{{end}}>{{.T "News"}}</option>
+            {{end}}
         </select>
         {{with index .FormErrors "feed"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>

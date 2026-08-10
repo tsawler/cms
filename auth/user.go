@@ -46,6 +46,11 @@ type User struct {
 	PasswordHash string
 	Role         Role
 	Active       bool
+	// Permissions are the user's grants, loaded by GetByID and
+	// GetByEmail (All leaves it nil — the users list doesn't need
+	// them). Meaningful for editors only; admin roles pass every
+	// Can check regardless of what is stored here.
+	Permissions []Permission
 	// TOTPSecret is the base32 key an authenticator app was enrolled
 	// with, empty when two-factor is off. TOTPLastStep is the time step
 	// of the last accepted code; see Store.ConsumeTOTPStep.
@@ -89,18 +94,33 @@ func scanUser(row sqldb.Scanner) (*User, error) {
 	return &u, nil
 }
 
-// GetByID returns the user with the given id, or ErrNotFound.
+// GetByID returns the user with the given id, grants included, or
+// ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id int64) (*User, error) {
 	row := s.db.QueryRow(ctx, "SELECT "+userColumns+" FROM cms_users WHERE id = $1", id)
-	return scanUser(row)
+	u, err := scanUser(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadPermissions(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
-// GetByEmail returns the user with the given email (case-insensitive), or
-// ErrNotFound.
+// GetByEmail returns the user with the given email (case-insensitive),
+// grants included, or ErrNotFound.
 func (s *Store) GetByEmail(ctx context.Context, email string) (*User, error) {
 	row := s.db.QueryRow(ctx, "SELECT "+userColumns+" FROM cms_users WHERE email = $1",
 		strings.ToLower(strings.TrimSpace(email)))
-	return scanUser(row)
+	u, err := scanUser(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadPermissions(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // All returns every user, ordered by name then email.

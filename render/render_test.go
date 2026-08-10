@@ -178,6 +178,49 @@ func TestRenderTitleIsPlainTextUntilEditMode(t *testing.T) {
 	}
 }
 
+// The editor script tag carries the user's permission flags: the JS
+// decides which tools to offer from these, so they must mirror EditInfo
+// exactly.
+func TestEditorScriptCarriesPermissionFlags(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 3, TemplateName: "pages/home.gohtml", Title: "Home"}
+
+	var buf bytes.Buffer
+	err := r.Render(&buf, Input{Page: page, Locale: "en", Edit: &EditInfo{
+		PageID: 3, AdminPath: "/admin", CSRFToken: "tok", Locale: "en", Status: "draft",
+		CanBlogs: true,
+	}})
+	if err != nil {
+		t.Fatalf("edit Render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`data-can-blogs="1"`, `data-can-news="0"`, `data-can-pages="0"`,
+		`data-is-admin="0"`, `data-is-superadmin="0"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("edit render missing %s in script tag:\n%s", want, out)
+		}
+	}
+
+	buf.Reset()
+	err = r.Render(&buf, Input{Page: page, Locale: "en", Edit: &EditInfo{
+		PageID: 3, AdminPath: "/admin", CSRFToken: "tok", Locale: "en", Status: "draft",
+		IsAdmin: true, CanPages: true, CanBlogs: true, CanNews: true,
+	}})
+	if err != nil {
+		t.Fatalf("edit Render: %v", err)
+	}
+	out = buf.String()
+	for _, want := range []string{
+		`data-can-blogs="1"`, `data-can-news="1"`, `data-can-pages="1"`, `data-is-admin="1"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("admin edit render missing %s in script tag:\n%s", want, out)
+		}
+	}
+}
+
 func TestNewRejectsUnknownPageTemplate(t *testing.T) {
 	_, err := New(testFS, nil, []PageTemplate{{File: "pages/missing.gohtml", Label: "X"}}, nil)
 	if err == nil {

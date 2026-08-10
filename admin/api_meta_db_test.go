@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,8 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/dbtest"
 	"github.com/tsawler/cms/internal/sqldb"
@@ -25,11 +28,13 @@ import (
 // language alone.
 
 // metaServer returns a server wired to a real store, with English as the
-// default locale and French alongside it. Only the pieces these handlers
-// touch are populated — they neither render templates nor read the
-// session.
+// default locale and French alongside it. The mutating handlers load the
+// logged-in user for their permission checks, so sessions and users are
+// wired too; apiRequest logs the request in as an admin.
 func metaServer(db *sqldb.DB) *server {
 	return &server{deps: Deps{
+		Sessions:      scs.New(),
+		Users:         auth.NewStore(db),
 		Content:       content.NewStore(db, "en"),
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DefaultLocale: "en",
@@ -38,8 +43,11 @@ func metaServer(db *sqldb.DB) *server {
 }
 
 // apiRequest builds a request carrying the {id} URL parameter the
-// handlers read, plus an optional query string ("locale=fr").
-func apiRequest(method, query, body string, id int64) *http.Request {
+// handlers read, plus an optional query string ("locale=fr"), with the
+// session state the middleware would have left behind for a logged-in
+// admin — the handlers under test check permissions off it.
+func apiRequest(t *testing.T, s *server, method, query, body string, id int64) *http.Request {
+	t.Helper()
 	target := "/api/x"
 	if query != "" {
 		target += "?" + query
@@ -48,7 +56,24 @@ func apiRequest(method, query, body string, id int64) *http.Request {
 	r.Header.Set("Content-Type", "application/json")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", strconv.FormatInt(id, 10))
-	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+
+	ctx := context.Background()
+	u, err := s.deps.Users.GetByEmail(ctx, "meta-admin@example.com")
+	if errors.Is(err, auth.ErrNotFound) {
+		u = &auth.User{Email: "meta-admin@example.com", Name: "Meta Admin",
+			PasswordHash: "x", Role: auth.RoleAdmin, Active: true}
+		_, err = s.deps.Users.Insert(ctx, u)
+	}
+	if err != nil {
+		t.Fatalf("seeding the session admin: %v", err)
+	}
+	sctx, err := s.deps.Sessions.Load(r.Context(), "")
+	if err != nil {
+		t.Fatalf("loading a session: %v", err)
+	}
+	s.deps.Sessions.Put(sctx, sessionKeyUserID, u.ID)
+	return r.WithContext(sctx)
 }
 
 func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
@@ -71,7 +96,7 @@ func TestAPIGetPageMeta(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		s.apiGetPageMeta(rec, apiRequest(http.MethodGet, "locale=fr", "", page.ID))
+		s.apiGetPageMeta(rec, apiRequest(t, s, http.MethodGet, "locale=fr", "", page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
 		}
@@ -96,13 +121,13 @@ func TestAPIGetPageMeta(t *testing.T) {
 		// An unconfigured locale is not an error — it falls back to the
 		// default, which is the locale the caller then edits.
 		rec = httptest.NewRecorder()
-		s.apiGetPageMeta(rec, apiRequest(http.MethodGet, "locale=de", "", page.ID))
+		s.apiGetPageMeta(rec, apiRequest(t, s, http.MethodGet, "locale=de", "", page.ID))
 		if body := decodeJSON(t, rec); body["locale"] != "en" || body["title"] != "About Us" {
 			t.Errorf("unknown locale read = %+v, want the English default", body)
 		}
 
 		rec = httptest.NewRecorder()
-		s.apiGetPageMeta(rec, apiRequest(http.MethodGet, "", "", page.ID+1000))
+		s.apiGetPageMeta(rec, apiRequest(t, s, http.MethodGet, "", "", page.ID+1000))
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("missing page: status %d, want 404", rec.Code)
 		}
@@ -120,7 +145,7 @@ func TestAPISavePageMeta(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"fr","title":"À propos","description":"Qui nous sommes"}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
@@ -145,7 +170,7 @@ func TestAPISavePageMeta(t *testing.T) {
 		// Clearing a translation's title is how it goes back to showing
 		// the default language, so it must be allowed.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"fr","title":"  ","description":""}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("clearing fr: status %d, want 200: %s", rec.Code, rec.Body)
@@ -167,7 +192,7 @@ func TestAPISavePageMeta(t *testing.T) {
 		// The default locale has nothing to fall back to, so an empty
 		// title there is a mistake rather than an instruction.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"en","title":"","description":"x"}`, page.ID))
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("empty default-locale title: status %d, want 422", rec.Code)
@@ -182,7 +207,7 @@ func TestAPISavePageMeta(t *testing.T) {
 		// An unconfigured locale is rejected outright rather than
 		// silently redirected onto the default language's row.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"de","title":"Über uns"}`, page.ID))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("unknown locale: status %d, want 400", rec.Code)
@@ -205,7 +230,7 @@ func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"en","title":"About the team"}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
@@ -224,7 +249,7 @@ func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
 		// The other way round holds too: the dialogs are free to save a
 		// description without restating the title.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"en","description":"The people behind it"}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("description-only save: status %d, want 200: %s", rec.Code, rec.Body)
@@ -239,7 +264,7 @@ func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
 		// Sending a field empty still means empty — the dialogs clear a
 		// translation that way.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"en","description":""}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("clearing description: status %d, want 200: %s", rec.Code, rec.Body)
@@ -254,7 +279,7 @@ func TestAPISavePageMetaLeavesOutOmittedFields(t *testing.T) {
 		// A title-only save on a translation is judged on the title it
 		// sends, not on the empty description it doesn't.
 		rec = httptest.NewRecorder()
-		s.apiSavePageMeta(rec, apiRequest(http.MethodPut, "",
+		s.apiSavePageMeta(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"locale":"fr","title":"À propos"}`, page.ID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("fr title-only save: status %d, want 200: %s", rec.Code, rec.Body)
@@ -286,7 +311,7 @@ func TestAPIUpdatePostSettingsDescriptionsAndByline(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+		s.apiUpdatePostSettings(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"title":"Notice","summary":"What changed","meta_description":"The notice, for search",
 			  "hide_author":true}`, post.PostID))
 		if rec.Code != http.StatusOK {
@@ -314,7 +339,7 @@ func TestAPIUpdatePostSettingsDescriptionsAndByline(t *testing.T) {
 		// Clearing it goes back to publishing the summary, rather than
 		// leaving the old words behind on a post that no longer says them.
 		rec = httptest.NewRecorder()
-		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+		s.apiUpdatePostSettings(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"title":"Notice","summary":"What changed","meta_description":"","hide_author":false}`,
 			post.PostID))
 		if rec.Code != http.StatusOK {
@@ -351,7 +376,7 @@ func TestAPIUpdatePostSettingsWritesTheRequestLocale(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "locale=fr",
+		s.apiUpdatePostSettings(rec, apiRequest(t, s, http.MethodPut, "locale=fr",
 			`{"title":"Jour du lancement","summary":"Nous l'avons lancé"}`, post.PostID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
@@ -374,7 +399,7 @@ func TestAPIUpdatePostSettingsWritesTheRequestLocale(t *testing.T) {
 
 		// Without a locale the save is the default language's, as before.
 		rec = httptest.NewRecorder()
-		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+		s.apiUpdatePostSettings(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"title":"Launch Day!","summary":"We shipped it at last"}`, post.PostID))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("default-locale save: status %d, want 200: %s", rec.Code, rec.Body)
@@ -394,7 +419,7 @@ func TestAPIUpdatePostSettingsWritesTheRequestLocale(t *testing.T) {
 
 		// A post still needs a title in the default language.
 		rec = httptest.NewRecorder()
-		s.apiUpdatePostSettings(rec, apiRequest(http.MethodPut, "",
+		s.apiUpdatePostSettings(rec, apiRequest(t, s, http.MethodPut, "",
 			`{"title":"","summary":"x"}`, post.PostID))
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("empty default-locale title: status %d, want 422", rec.Code)

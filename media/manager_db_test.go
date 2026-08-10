@@ -218,6 +218,146 @@ func TestMediaAltTextPerLocale(t *testing.T) {
 	})
 }
 
+// Renaming is a display-name change only: the object keys under the item
+// id never move, so a rename can never break a link on a page.
+func TestMediaRename(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		m, objects := newTestManager(db)
+
+		md, err := m.Upload(ctx, "photo.png", testImage(t, 10, 10, "png"), 0, nil)
+		if err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		keysBefore := objects.len()
+
+		tests := []struct {
+			name string
+			in   string
+			want string
+		}{
+			{"plain stem gets the extension back", "sunset", "sunset.png"},
+			{"typed extension is absorbed, not doubled", "sunset.png", "sunset.png"},
+			{"extension matches case-insensitively", "Sunset.PNG", "Sunset.png"},
+			{"a wrong extension is just part of the stem", "clip.mp4", "clip.mp4.png"},
+			{"path elements are stripped", "../secrets/evil", "evil.png"},
+			{"surrounding space is trimmed", "  tidy  ", "tidy.png"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := m.Rename(ctx, md.ID, "en", tt.in)
+				if err != nil {
+					t.Fatalf("Rename(%q): %v", tt.in, err)
+				}
+				if got.Filename != tt.want {
+					t.Errorf("Rename(%q) = %q, want %q", tt.in, got.Filename, tt.want)
+				}
+			})
+		}
+
+		// The change is persisted, and nothing in the store moved.
+		fresh, err := m.GetByID(ctx, md.ID, "en")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if fresh.Filename != "tidy.png" {
+			t.Errorf("persisted filename = %q, want %q", fresh.Filename, "tidy.png")
+		}
+		if fresh.StoreKey != md.StoreKey {
+			t.Errorf("store_key changed on rename: %q -> %q", md.StoreKey, fresh.StoreKey)
+		}
+		if objects.len() != keysBefore {
+			t.Errorf("object count changed on rename: %d -> %d", keysBefore, objects.len())
+		}
+
+		// Names that reduce to nothing, or to the extension alone, are
+		// refused and leave the record untouched.
+		for _, bad := range []string{"", "   ", ".png", "a/b/", strings.Repeat("x", 300)} {
+			if _, err := m.Rename(ctx, md.ID, "en", bad); !errors.Is(err, ErrBadFilename) {
+				t.Errorf("Rename(%q) = %v, want ErrBadFilename", bad, err)
+			}
+		}
+		fresh, err = m.GetByID(ctx, md.ID, "en")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if fresh.Filename != "tidy.png" {
+			t.Errorf("filename after refused renames = %q, want %q", fresh.Filename, "tidy.png")
+		}
+
+		if _, err := m.Rename(ctx, 4242, "en", "ghost"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Rename(missing) = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// A video uploaded without a poster frame is what SetPoster exists for:
+// the admin captures a frame in the browser the first time the video is
+// previewed and attaches it here.
+func TestMediaSetPoster(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		m, objects := newTestManager(db)
+
+		md, err := m.UploadFrom(ctx, "clip.mp4",
+			strings.NewReader("\x00\x00\x00\x18ftypmp42 a video body"), 21, nil, 0, nil)
+		if err != nil {
+			t.Fatalf("Upload video: %v", err)
+		}
+		if md.VariantExt != "" {
+			t.Fatalf("posterless upload has variant_ext %q, want empty", md.VariantExt)
+		}
+		if url := m.URL(md, "poster"); url != "" {
+			t.Fatalf("URL(poster) before SetPoster = %q, want empty", url)
+		}
+
+		got, err := m.SetPoster(ctx, md.ID, "en", testImage(t, 100, 50, "png"))
+		if err != nil {
+			t.Fatalf("SetPoster: %v", err)
+		}
+		if got.VariantExt != ".webp" {
+			t.Errorf("variant_ext = %q, want .webp", got.VariantExt)
+		}
+		if got.Width != 100 || got.Height != 50 {
+			t.Errorf("dimensions = %dx%d, want 100x50", got.Width, got.Height)
+		}
+
+		// The change is persisted, not just returned, and the poster URLs
+		// resolve to the stored objects.
+		fresh, err := m.GetByID(ctx, md.ID, "en")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if fresh.VariantExt != ".webp" || fresh.Width != 100 || fresh.Height != 50 {
+			t.Errorf("persisted record = %q %dx%d, want .webp 100x50",
+				fresh.VariantExt, fresh.Width, fresh.Height)
+		}
+		for _, name := range []string{"web", "thumb"} {
+			key := "media/" + md.StoreKey + "/" + name + ".webp"
+			if len(objects.keys(key)) == 0 {
+				t.Errorf("poster rendition %q was not written to the store", key)
+			}
+		}
+
+		// Undecodable poster data is refused and leaves the record alone.
+		if _, err := m.SetPoster(ctx, md.ID, "en", []byte("not an image")); err == nil {
+			t.Error("SetPoster(garbage) succeeded, want an error")
+		}
+
+		// Only videos take a poster.
+		img, err := m.Upload(ctx, "photo.png", testImage(t, 10, 10, "png"), 0, nil)
+		if err != nil {
+			t.Fatalf("Upload(image): %v", err)
+		}
+		if _, err := m.SetPoster(ctx, img.ID, "en", testImage(t, 10, 10, "png")); !errors.Is(err, ErrUnsupportedType) {
+			t.Errorf("SetPoster(image) = %v, want ErrUnsupportedType", err)
+		}
+		if _, err := m.SetPoster(ctx, 4242, "en", testImage(t, 10, 10, "png")); !errors.Is(err, ErrNotFound) {
+			t.Errorf("SetPoster(missing) = %v, want ErrNotFound", err)
+		}
+	})
+}
+
 func TestMediaAllFiltering(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()

@@ -9,6 +9,9 @@
   var isAdmin = cfg.isAdmin === "1";
   var isSuperadmin = cfg.isSuperadmin === "1";
   var postsEnabled = cfg.posts === "1";
+  var canPages = cfg.canPages === "1";
+  var canBlogs = cfg.canBlogs === "1";
+  var canNews = cfg.canNews === "1";
   var locales = [];
   try {
     locales = JSON.parse(cfg.locales || "[]") || [];
@@ -1522,16 +1525,16 @@
       state.pendingSection = { region: container.getAttribute("data-cms-sections"), after: null };
       openDrawer();
     });
-    $("rail-page").hidden = pageTemplates.length === 0;
+    $("rail-page").hidden = pageTemplates.length === 0 || !canPages;
     $("rail-page").addEventListener("click", newPageDialog);
-    $("rail-post").hidden = !postsEnabled;
+    $("rail-post").hidden = !postsEnabled || !canBlogs && !canNews;
     $("rail-post").addEventListener("click", function() {
-      newPostDialog("blog");
+      newPostDialog(canBlogs ? "blog" : "news");
     });
     $("drawer-close").addEventListener("click", closeDrawer);
   }
   function newPageDialog() {
-    if (!pageTemplates.length) return;
+    if (!pageTemplates.length || !canPages) return;
     openDialog({
       message: "Create a new page",
       prompt: true,
@@ -1561,17 +1564,20 @@
     });
   }
   function newPostDialog(feed) {
-    if (!postsEnabled) return;
+    if (!postsEnabled || !canBlogs && !canNews) return;
+    var feedOptions = [];
+    if (canBlogs) feedOptions.push({ value: "blog", label: "Blog" });
+    if (canNews) feedOptions.push({ value: "news", label: "News" });
+    if (feed === "news" && !canNews || feed !== "news" && !canBlogs) {
+      feed = feedOptions[0].value;
+    }
     var fields = [
       {
         id: "feed",
         label: "Publish under",
         type: "select",
         value: feed === "news" ? "news" : "blog",
-        options: [
-          { value: "blog", label: "Blog" },
-          { value: "news", label: "News" }
-        ]
+        options: feedOptions
       },
       {
         id: "summary",
@@ -2633,6 +2639,7 @@
     });
   }
   function openSiteSettings() {
+    if (!canPages) return;
     api("/settings").then(function(s) {
       var fields = [
         {
@@ -2746,19 +2753,21 @@
     menu.appendChild(item(tools, editLabel(), startEditing));
     menu.appendChild(document.createElement("hr"));
     var beforeAdd = menu.children.length;
-    if (pageTemplates.length) {
+    if (pageTemplates.length && canPages) {
       menu.appendChild(item(tools, "Add page", newPageDialog));
     }
-    if (postsEnabled) {
+    if (postsEnabled && canNews) {
       menu.appendChild(item(tools, "Add news item", function() {
         newPostDialog("news");
       }));
+    }
+    if (postsEnabled && canBlogs) {
       menu.appendChild(item(tools, "Add blog post", function() {
         newPostDialog("blog");
       }));
     }
     if (menu.children.length > beforeAdd) menu.appendChild(document.createElement("hr"));
-    menu.appendChild(item(tools, "Site settings", openSiteSettings));
+    if (canPages) menu.appendChild(item(tools, "Site settings", openSiteSettings));
     if (isAdmin) menu.appendChild(item(tools, "Site CSS & JS", openSiteCode));
     var admin = document.createElement("a");
     admin.href = adminPath + "/";
@@ -2808,6 +2817,9 @@
   var loadPromise = null;
   function navEls() {
     return Array.prototype.slice.call(document.querySelectorAll("nav[data-cms-menu]"));
+  }
+  function menuEditing() {
+    return state.editing && canPages;
   }
   function normalize(items) {
     return (items || []).map(function(it) {
@@ -2921,7 +2933,7 @@
       item2.children.forEach(function(c) {
         sub.appendChild(itemLI(c, false));
       });
-      if (state.editing) sub.appendChild(addChip());
+      if (menuEditing()) sub.appendChild(addChip());
       li.appendChild(sub);
       return li;
     }
@@ -2929,7 +2941,7 @@
     a.className = "cms-nav-link";
     var url = itemURL(item2);
     a.href = url || "#";
-    if (state.editing) a.draggable = false;
+    if (menuEditing()) a.draggable = false;
     if (url && url.indexOf("http") !== 0 && url === window.location.pathname) {
       a.className += " cms-active";
       a.setAttribute("aria-current", "page");
@@ -2980,7 +2992,7 @@
     menus[key].forEach(function(item2) {
       ul.appendChild(itemLI(item2, true));
     });
-    if (state.editing) ul.appendChild(addChip());
+    if (menuEditing()) ul.appendChild(addChip());
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);
@@ -3309,7 +3321,7 @@
       suppressClick = false;
     }, true);
     document.addEventListener("click", function(e) {
-      if (!state.editing || !e.target.closest) return;
+      if (!menuEditing() || !e.target.closest) return;
       var nav = e.target.closest("nav[data-cms-menu]");
       if (!nav || e.target.closest(".cms-nav-addli")) return;
       var toggle = e.target.closest(".cms-nav-toggle");
@@ -3329,12 +3341,12 @@
       });
     }, true);
     document.addEventListener("dragstart", function(e) {
-      if (state.editing && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
+      if (menuEditing() && e.target.closest && e.target.closest("nav[data-cms-menu]")) {
         e.preventDefault();
       }
     }, true);
     document.addEventListener("pointerdown", function(e) {
-      if (!state.editing || e.pointerType === "mouse" || !e.target.closest) return;
+      if (!menuEditing() || e.pointerType === "mouse" || !e.target.closest) return;
       var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
       if (!li) return;
       var sx = e.clientX, sy = e.clientY;
@@ -3358,7 +3370,7 @@
       document.addEventListener("pointermove", onMove, true);
     }, true);
     document.addEventListener("pointerdown", function(e) {
-      if (!state.editing || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
+      if (!menuEditing() || e.pointerType !== "mouse" || e.button !== 0 || !e.target.closest) return;
       var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
       if (!li || !menus) return;
       var r = li.getBoundingClientRect();
@@ -3525,15 +3537,18 @@
   }
 
   // ../src/editing.js
+  function editable(el) {
+    return canPages || el.getAttribute("data-cms-region").indexOf("site:") !== 0;
+  }
   function textRegions() {
     return Array.prototype.slice.call(
       document.querySelectorAll('[data-cms-region][data-cms-kind="text"]')
-    );
+    ).filter(editable);
   }
   function htmlRegions() {
     return Array.prototype.slice.call(
       document.querySelectorAll('[data-cms-region][data-cms-kind="html"]')
-    );
+    ).filter(editable);
   }
   function takeSnapshot() {
     var regs = [];
@@ -3585,7 +3600,7 @@
       });
     }
     $("rail").classList.toggle("on", on);
-    setMenuEditing(on);
+    setMenuEditing(on && canPages);
     if (!on) {
       closeDrawer();
       state.pendingSection = null;

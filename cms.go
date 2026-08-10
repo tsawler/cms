@@ -97,6 +97,10 @@ type CaptchaConfig = captcha.Config
 // to integrate with the admin chrome.
 type AdminSection = admin.Section
 
+// PermissionDef declares a deployment-specific permission; see
+// admin.PermissionDef and Config.Permissions.
+type PermissionDef = admin.PermissionDef
+
 // Mailer sends the messages the CMS itself originates; see admin.Mailer
 // and Config.Mailer.
 type Mailer = admin.Mailer
@@ -363,6 +367,16 @@ type Config struct {
 	// admin routes, now or after upgrades.
 	AdminSections []AdminSection
 
+	// Permissions declares deployment-specific permissions beyond the
+	// built-ins (blogs, news, pages, users), for functionality the host
+	// gates itself with auth.User.Can — e.g. in-place editing of its own
+	// records. Each appears as a grant checkbox on the admin's user form.
+	// An AdminSection with a Permission set is declared automatically
+	// (labelled with its NavLabel); list it here only to override the
+	// label. Grants live in the cms_user_permissions table; admin and
+	// superadmin roles hold every permission implicitly.
+	Permissions []PermissionDef
+
 	// Logger receives operational log output. Defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -451,6 +465,10 @@ func New(cfg Config) (*CMS, error) {
 		return nil, fmt.Errorf("cms: RequestFuncs needs TemplateFuncs to declare the function names")
 	}
 	if err := admin.ValidateSections(cfg.AdminSections); err != nil {
+		return nil, err
+	}
+	permissions, err := collectPermissions(cfg.Permissions, cfg.AdminSections)
+	if err != nil {
 		return nil, err
 	}
 	if err := validateTailwindConfig(cfg.Tailwind); err != nil {
@@ -548,6 +566,7 @@ func New(cfg Config) (*CMS, error) {
 		SectionStyles:  cfg.SectionStyles,
 		PostTemplate:   cfg.PostTemplate,
 		Sections:       cfg.AdminSections,
+		Permissions:    permissions,
 		Logger:         cfg.Logger,
 		AdminPath:      cfg.AdminPath,
 		SiteBaseURL:    c.siteBaseURL,
@@ -557,6 +576,53 @@ func New(cfg Config) (*CMS, error) {
 		PerPage:        cfg.AdminPerPage,
 	})
 	return c, nil
+}
+
+// collectPermissions merges the host's declared permissions with those
+// implied by its admin sections, validating keys as it goes. An explicit
+// Config.Permissions entry wins over a section-derived one, so a host
+// can relabel a section's permission; the built-ins cannot be
+// redeclared — their behavior is the CMS's, not the host's.
+func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]PermissionDef, error) {
+	builtin := make(map[auth.Permission]bool)
+	for _, p := range auth.BuiltinPermissions() {
+		builtin[p] = true
+	}
+
+	var out []PermissionDef
+	seen := make(map[auth.Permission]bool)
+	for _, d := range declared {
+		if !auth.ValidPermissionKey(string(d.Key)) {
+			return nil, fmt.Errorf("cms: permission key %q must be a lowercase letter followed by lowercase letters, digits, hyphens, or underscores", d.Key)
+		}
+		if builtin[d.Key] {
+			return nil, fmt.Errorf("cms: permission %q is built in and cannot be redeclared", d.Key)
+		}
+		if seen[d.Key] {
+			return nil, fmt.Errorf("cms: permission %q declared twice", d.Key)
+		}
+		seen[d.Key] = true
+		if d.Label == "" {
+			d.Label = string(d.Key)
+		}
+		out = append(out, d)
+	}
+
+	// Section keys were already format-checked by ValidateSections. A
+	// section may reuse a built-in permission; only new keys are declared.
+	for _, sec := range sections {
+		key := auth.Permission(sec.Permission)
+		if sec.Permission == "" || builtin[key] || seen[key] {
+			continue
+		}
+		seen[key] = true
+		label := sec.NavLabel
+		if label == "" {
+			label = sec.Path
+		}
+		out = append(out, PermissionDef{Key: key, Label: label})
+	}
+	return out, nil
 }
 
 // Migrate creates or upgrades the CMS's database schema, performs any
@@ -687,6 +753,19 @@ func (c *CMS) Admin() http.Handler {
 	return c.admin
 }
 
+// MediaManager returns the CMS's media library — the same one the admin's
+// Media section manages — for host applications that want to reference
+// library items from their own data: list with All, resolve with GetByID,
+// and build servable URLs with URL. Nil when no object store is
+// configured, so callers must check.
+//
+// The manager writes only under the library's own key root; host code
+// keeping its own objects elsewhere in the bucket can use both without
+// the two namespaces meeting.
+func (c *CMS) MediaManager() *media.Manager {
+	return c.media
+}
+
 // Handler returns a single handler for the whole site: requests under
 // Config.AdminPath go to the admin area (with the prefix stripped and the
 // bare admin path redirected to its trailing-slash form), and everything
@@ -789,7 +868,12 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := c.sessionUser(r)
-	editing := user != nil
+	// Edit mode is per-page, decided by the slug's permission: blog/…
+	// and news/… answer to their feed, everything else to pages. A
+	// logged-in user without the page's permission gets the published
+	// public render, exactly like a visitor (admin roles hold every
+	// permission; Can is nil-safe for the anonymous case).
+	editing := user.Can(auth.PermissionForSlug(slug))
 
 	// Editors see draft pages and draft content; the public sees only
 	// what is published.
@@ -887,6 +971,9 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 			MediaEnabled:   c.media != nil,
 			IsAdmin:        user.Role.IsAdmin(),
 			IsSuperadmin:   user.Role.IsSuperadmin(),
+			CanPages:       user.Can(auth.PermPages),
+			CanBlogs:       user.Can(auth.PermBlogs),
+			CanNews:        user.Can(auth.PermNews),
 			PostsEnabled:   c.postsEnabled(),
 			Post:           post,
 			Locales:        c.cfg.Locales,

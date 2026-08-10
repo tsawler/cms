@@ -43,6 +43,13 @@ type Section struct {
 	// Editors receive 403 and don't see the nav link.
 	AdminOnly bool
 
+	// Permission, when non-empty, restricts the section to users holding
+	// the named permission (admin roles hold every permission). Naming a
+	// built-in permission reuses it; any other key declares a custom
+	// permission that appears as a grant checkbox on the user form,
+	// labelled with NavLabel. Composes with AdminOnly: both must pass.
+	Permission string
+
 	// Handler serves the section's requests. The mount prefix is
 	// stripped: it sees "/" at the section root and may serve its own
 	// sub-routes and static assets beneath it. Requests only reach the
@@ -50,6 +57,16 @@ type Section struct {
 	// have already passed CSRF validation — forms need only include
 	// CSRFToken(r) as the csrf_token field.
 	Handler http.Handler
+}
+
+// PermissionDef declares a custom permission to the admin so the user
+// form can offer it as a grant checkbox: Key is what handlers check
+// with auth.User.Can, Label is the checkbox text. Sections that name a
+// Permission are declared automatically; cms.Config.Permissions is for
+// permissions not tied to a section.
+type PermissionDef struct {
+	Key   auth.Permission
+	Label string
 }
 
 var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
@@ -77,6 +94,9 @@ func (s *server) sectionHandler(sec Section) http.Handler {
 	})
 
 	h = s.withServer(h)
+	if sec.Permission != "" {
+		h = s.requirePerm(auth.Permission(sec.Permission))(h)
+	}
 	if sec.AdminOnly {
 		h = s.requireAdmin(h)
 	}
@@ -98,6 +118,9 @@ func ValidateSections(sections []Section) error {
 		seen[sec.Path] = true
 		if sec.Handler == nil {
 			return fmt.Errorf("cms: admin section %q has a nil Handler", sec.Path)
+		}
+		if sec.Permission != "" && !auth.ValidPermissionKey(sec.Permission) {
+			return fmt.Errorf("cms: admin section %q permission %q must be a lowercase letter followed by lowercase letters, digits, hyphens, or underscores", sec.Path, sec.Permission)
 		}
 	}
 	return nil

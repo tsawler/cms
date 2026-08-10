@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/microcosm-cc/bluemonday"
+	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
@@ -297,7 +298,7 @@ func (s *server) seedHeaderSection(ctx context.Context, pageID int64, templateNa
 }
 
 func (s *server) pageEdit(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -305,7 +306,7 @@ func (s *server) pageEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) pageUpdate(w http.ResponseWriter, r *http.Request) {
-	existing, ok := s.pageFromURL(w, r)
+	existing, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -526,7 +527,7 @@ func validImageURL(v string) bool {
 }
 
 func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -547,7 +548,7 @@ func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 // pageDiscard throws away the page's unpublished draft edits, reverting its
 // draft content to match what is currently published.
 func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -569,7 +570,7 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 // both the draft and published block sets survive, so publishing again
 // restores the page.
 func (s *server) pageUnpublish(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -585,7 +586,7 @@ func (s *server) pageUnpublish(w http.ResponseWriter, r *http.Request) {
 // pagePreview renders the page's draft content with the real site
 // templates, so editors can see unpublished work exactly as it will appear.
 func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
@@ -641,6 +642,11 @@ func (s *server) parsePageMeta(r *http.Request) (*content.Page, map[string]strin
 		errs["slug"] = s.tr(r, "Use only lowercase letters, numbers, and hyphens, e.g. about-us.")
 	} else if s.localeSlugCollision(p.Slug) {
 		errs["slug"] = s.tr(r, "That address starts with a language code, which is reserved for translated pages.")
+	} else if !s.currentUser(r).Can(auth.PermissionForSlug(p.Slug)) {
+		// Only the blog/ and news/ prefixes can trip this (any user
+		// here holds the pages permission): a page may not be renamed
+		// into a feed's namespace by someone who can't edit that feed.
+		errs["slug"] = s.tr(r, "That address is reserved for blog and news posts.")
 	}
 	if !s.deps.Renderer.Knows(p.TemplateName) {
 		errs["template_name"] = s.tr(r, "Choose a template.")
@@ -719,6 +725,28 @@ func (s *server) pageFromURL(w http.ResponseWriter, r *http.Request) (*content.P
 		return nil, false
 	}
 	if err != nil {
+		s.serverError(w, err)
+		return nil, false
+	}
+	return page, true
+}
+
+// sitePageFromURL is pageFromURL for the Pages section's own handlers:
+// pages that back a blog or news post 404 here, because posts are
+// managed under Blog & News. Without this, the pages routes would be a
+// side door past the feed permissions — and past the post form's rule
+// that feed and slug stay put.
+func (s *server) sitePageFromURL(w http.ResponseWriter, r *http.Request) (*content.Page, bool) {
+	page, ok := s.pageFromURL(w, r)
+	if !ok {
+		return nil, false
+	}
+	_, err := s.deps.Content.PostByPageID(r.Context(), page.ID, s.deps.DefaultLocale, true)
+	if err == nil {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	if !errors.Is(err, content.ErrNotFound) {
 		s.serverError(w, err)
 		return nil, false
 	}

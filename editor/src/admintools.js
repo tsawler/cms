@@ -14,7 +14,7 @@
  * re-render to put it back.
  * ------------------------------------------------------------------ */
 
-import { adminPath, csrf, isAdmin, pageTemplates, postInfo, postsEnabled, state } from "./state.js";
+import { adminPath, canBlogs, canNews, canPages, csrf, isAdmin, pageTemplates, postInfo, postsEnabled, state } from "./state.js";
 import { newPageDialog, newPostDialog } from "./snippets.js";
 import { openSiteSettings } from "./settings.js";
 import { openSiteCode } from "./pagecode.js";
@@ -94,15 +94,19 @@ export function initAdminTools() {
     // only when that group actually got an entry — not merely because
     // the menu is non-empty, which the edit entry above would satisfy.
     var beforeAdd = menu.children.length;
-    if (pageTemplates.length) {
+    if (pageTemplates.length && canPages) {
         menu.appendChild(item(tools, "Add page", newPageDialog));
     }
-    if (postsEnabled) {
+    if (postsEnabled && canNews) {
         menu.appendChild(item(tools, "Add news item", function () { newPostDialog("news"); }));
+    }
+    if (postsEnabled && canBlogs) {
         menu.appendChild(item(tools, "Add blog post", function () { newPostDialog("blog"); }));
     }
     if (menu.children.length > beforeAdd) menu.appendChild(document.createElement("hr"));
-    menu.appendChild(item(tools, "Site settings", openSiteSettings));
+    // Site settings shape the whole site (name, logo, menu layout), so
+    // they belong to the pages permission, like the menus themselves.
+    if (canPages) menu.appendChild(item(tools, "Site settings", openSiteSettings));
     // Site-wide code is written raw into every page, so the editor is
     // admin-only — matching the server, which ignores these fields in
     // a settings save from anyone else.

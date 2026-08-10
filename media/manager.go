@@ -79,6 +79,15 @@ func (md Media) ItemID() string {
 // ErrNotFound is returned when no media matches the query.
 var ErrNotFound = errors.New("media: not found")
 
+// ErrBadFilename is returned by Rename for a name that is empty (or all
+// path separators) once sanitized, or longer than maxFilenameLen.
+var ErrBadFilename = errors.New("media: bad filename")
+
+// maxFilenameLen caps renamed filenames. The column is TEXT, so this
+// guards the UI, not the database: a name this long already ellipsizes
+// everywhere it is shown.
+const maxFilenameLen = 200
+
 // Manager coordinates the object store and the Postgres metadata.
 type Manager struct {
 	db            *sqldb.DB
@@ -446,6 +455,90 @@ func (m *Manager) Count(ctx context.Context) (int, error) {
 	var n int
 	err := m.db.QueryRow(ctx, "SELECT count(*) FROM cms_media").Scan(&n)
 	return n, err
+}
+
+// SetPoster attaches a poster frame to an existing video, processing the
+// still into the same web/thumb variants an upload-time poster gets and
+// updating the record's variant metadata. The admin uses it to backfill
+// videos uploaded without one — the server can't decode video, so the
+// frame is captured in a browser. Existing poster objects are overwritten
+// in place: the variant keys are deterministic, so a failure part-way
+// leaves nothing a retry won't replace. Non-video media is refused.
+func (m *Manager) SetPoster(ctx context.Context, id int64, locale string, poster []byte) (*Media, error) {
+	md, err := m.GetByID(ctx, id, locale)
+	if err != nil {
+		return nil, err
+	}
+	if md.Kind != KindVideo {
+		return nil, ErrUnsupportedType
+	}
+	p, err := processPoster(poster, http.DetectContentType(poster), m.webpQuality)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range p.Variants {
+		if err := m.objects.Put(ctx, m.abs(md.StoreKey+"/"+v.Name+v.Ext), v.Mime, bytes.NewReader(v.Data)); err != nil {
+			return nil, err
+		}
+	}
+	md.VariantExt = p.VariantExt
+	md.Width, md.Height = p.Width, p.Height
+	_, err = m.db.Exec(ctx, `
+		UPDATE cms_media SET variant_ext = $1, width = $2, height = $3 WHERE id = $4`,
+		md.VariantExt, md.Width, md.Height, md.ID)
+	if err != nil {
+		return nil, err
+	}
+	m.syncManifest(ctx, md.ID)
+	return md, nil
+}
+
+// Rename changes a media item's display name. Purely a metadata change:
+// objects live under an opaque item id (or, for documents, a key cut from
+// the upload-time name), and none of them move — which is what keeps
+// every existing link to the item working. The stored extension is
+// reattached whatever was submitted, so a rename can never make the name
+// contradict the bytes; a trailing copy of it in the new name is absorbed
+// rather than doubled. The extension alone is not a name, so a rename to
+// just ".pdf" comes back ErrBadFilename.
+func (m *Manager) Rename(ctx context.Context, id int64, locale, name string) (*Media, error) {
+	md, err := m.GetByID(ctx, id, locale)
+	if err != nil {
+		return nil, err
+	}
+
+	// Keep the final path element, defensively, like uploads do.
+	name = strings.ReplaceAll(name, "\\", "/")
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimSpace(name)
+	if md.Ext != "" {
+		if stem, ok := cutSuffixFold(name, md.Ext); ok {
+			name = strings.TrimSpace(stem)
+		}
+		name += md.Ext
+	}
+	if name == "" || name == md.Ext || len(name) > maxFilenameLen {
+		return nil, ErrBadFilename
+	}
+
+	md.Filename = name
+	if _, err := m.db.Exec(ctx,
+		"UPDATE cms_media SET filename = $1 WHERE id = $2", name, id); err != nil {
+		return nil, err
+	}
+	m.syncManifest(ctx, id)
+	return md, nil
+}
+
+// cutSuffixFold is strings.CutSuffix, matching case-insensitively —
+// ".MP4" is the same extension as ".mp4".
+func cutSuffixFold(s, suffix string) (string, bool) {
+	if len(s) < len(suffix) || !strings.EqualFold(s[len(s)-len(suffix):], suffix) {
+		return s, false
+	}
+	return s[:len(s)-len(suffix)], true
 }
 
 // UpdateAlt sets the alt text for one media record and locale.

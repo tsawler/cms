@@ -32,11 +32,46 @@
         <label for="role">{{.T "Role"}}</label>
         <select id="role" name="role">
             <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>{{.T "Editor — can edit content"}}</option>
+            {{if .IsAdmin}}
             <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>{{.T "Admin — can also manage users"}}</option>
             <option value="superadmin" {{if eq .FormUser.Role "superadmin"}}selected{{end}}>{{.T "Superadmin — can also edit raw page HTML"}}</option>
+            {{end}}
         </select>
         {{with index .FormErrors "role"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
+
+    <fieldset class="cms-fieldset cms-perms">
+        <legend>{{.T "Permissions"}}</legend>
+        <p class="cms-hint">{{.T "What an editor may work on. Admins and superadmins always hold every permission."}}</p>
+        <div class="cms-field-check">
+            <label><input type="checkbox" name="perm" value="blogs"
+                {{if .GrantChecked "blogs"}}checked{{end}} {{if not (.Can "blogs")}}disabled{{end}}>
+                {{.T "Blog posts"}}</label>
+        </div>
+        <div class="cms-field-check">
+            <label><input type="checkbox" name="perm" value="news"
+                {{if .GrantChecked "news"}}checked{{end}} {{if not (.Can "news")}}disabled{{end}}>
+                {{.T "News"}}</label>
+        </div>
+        <div class="cms-field-check">
+            <label><input type="checkbox" name="perm" value="pages"
+                {{if .GrantChecked "pages"}}checked{{end}} {{if not (.Can "pages")}}disabled{{end}}>
+                {{.T "Pages, menus & site settings"}}</label>
+        </div>
+        <div class="cms-field-check">
+            <label><input type="checkbox" name="perm" value="users"
+                {{if .GrantChecked "users"}}checked{{end}} {{if not (.Can "users")}}disabled{{end}}>
+                {{.T "User management"}}</label>
+        </div>
+        {{range .Permissions}}
+        <div class="cms-field-check">
+            <label><input type="checkbox" name="perm" value="{{.Key}}"
+                {{if $.GrantChecked (print .Key)}}checked{{end}} {{if not ($.Can (print .Key))}}disabled{{end}}>
+                {{.Label}}</label>
+        </div>
+        {{end}}
+        {{with index .FormErrors "perm"}}<p class="cms-field-error">{{.}}</p>{{end}}
+    </fieldset>
 
     <div class="cms-field cms-field-check">
         <label>

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,6 +61,7 @@ type Deps struct {
 	ConfigSnippets []snippets.Snippet    // host-registered palette entries
 	SectionStyles  *render.SectionStyles // curated section settings
 	Sections       []Section             // host-registered admin pages, already validated
+	Permissions    []PermissionDef       // host-declared custom permissions, already validated
 	Logger         *slog.Logger
 	AdminPath      string
 	DefaultLocale  string
@@ -219,24 +221,34 @@ func New(d Deps) http.Handler {
 		r.Post("/settings/2fa/disable", s.totpDisable)
 
 		if d.Renderer != nil {
-			r.Get("/pages", s.pagesList)
-			r.Get("/pages/new", s.pageNew)
-			r.Post("/pages/new", s.pageCreate)
-			r.Get("/pages/{id}", s.pageEdit)
-			r.Post("/pages/{id}", s.pageUpdate)
-			r.Post("/pages/{id}/delete", s.pageDelete)
-			r.Post("/pages/{id}/discard", s.pageDiscard)
-			r.Post("/pages/{id}/unpublish", s.pageUnpublish)
-			r.Get("/pages/{id}/preview", s.pagePreview)
+			// The Pages section: site pages and, through the editor
+			// API below, menus and site settings — one permission
+			// covers the three.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requirePerm(auth.PermPages))
+				r.Get("/pages", s.pagesList)
+				r.Get("/pages/new", s.pageNew)
+				r.Post("/pages/new", s.pageCreate)
+				r.Get("/pages/{id}", s.pageEdit)
+				r.Post("/pages/{id}", s.pageUpdate)
+				r.Post("/pages/{id}/delete", s.pageDelete)
+				r.Post("/pages/{id}/discard", s.pageDiscard)
+				r.Post("/pages/{id}/unpublish", s.pageUnpublish)
+				r.Get("/pages/{id}/preview", s.pagePreview)
+			})
 
-			// JSON API for the in-place editor.
+			// JSON API for the in-place editor. Reads stay open to
+			// every logged-in user (the post editor's link dialog
+			// lists pages), and the {id} mutations are gated inside
+			// the handlers by the page's slug — a post's backing
+			// page answers to its feed permission, not to pages.
 			r.Get("/api/pages", s.apiListPages)
-			r.Post("/api/pages", s.apiCreatePage)
+			r.With(s.requirePerm(auth.PermPages)).Post("/api/pages", s.apiCreatePage)
 			r.Delete("/api/pages/{id}", s.apiDeletePage)
 			r.Get("/api/menu", s.apiGetMenu)
-			r.Put("/api/menu", s.apiSaveMenu)
+			r.With(s.requirePerm(auth.PermPages)).Put("/api/menu", s.apiSaveMenu)
 			r.Get("/api/settings", s.apiGetSettings)
-			r.Put("/api/settings", s.apiSaveSettings)
+			r.With(s.requirePerm(auth.PermPages)).Put("/api/settings", s.apiSaveSettings)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
@@ -256,24 +268,30 @@ func New(d Deps) http.Handler {
 				r.Put("/api/pages/{id}/code", s.apiSavePageCode)
 			})
 
-			// Blog & news, when a post template is configured.
+			// Blog & news, when a post template is configured. Either
+			// feed permission opens the section; which feeds a user
+			// can actually touch is enforced per-post in the handlers.
 			if d.PostTemplate.File != "" {
-				r.Get("/posts", s.postsList)
-				r.Get("/posts/new", s.postNew)
-				r.Post("/posts/new", s.postCreate)
-				r.Get("/posts/{id}", s.postEdit)
-				r.Post("/posts/{id}", s.postUpdate)
-				r.Post("/posts/{id}/delete", s.postDelete)
-				r.Post("/posts/{id}/discard", s.postDiscard)
-				r.Post("/posts/{id}/unpublish", s.postUnpublish)
-				r.Get("/posts/{id}/preview", s.postPreview)
-				r.Post("/api/posts", s.apiCreatePost)
-				r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireAnyPerm(auth.PermBlogs, auth.PermNews))
+					r.Get("/posts", s.postsList)
+					r.Get("/posts/new", s.postNew)
+					r.Post("/posts/new", s.postCreate)
+					r.Get("/posts/{id}", s.postEdit)
+					r.Post("/posts/{id}", s.postUpdate)
+					r.Post("/posts/{id}/delete", s.postDelete)
+					r.Post("/posts/{id}/discard", s.postDiscard)
+					r.Post("/posts/{id}/unpublish", s.postUnpublish)
+					r.Get("/posts/{id}/preview", s.postPreview)
+					r.Post("/api/posts", s.apiCreatePost)
+					r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
+				})
 			}
 
-			// Snippet management (palette entries) is admin-only.
+			// Snippet management (palette entries) is superadmin-only:
+			// snippets are raw HTML injected into every editor.
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdmin)
+				r.Use(s.requireSuperadmin)
 				r.Get("/snippets", s.snippetsList)
 				r.Get("/snippets/new", s.snippetNew)
 				r.Post("/snippets/new", s.snippetCreate)
@@ -287,6 +305,7 @@ func New(d Deps) http.Handler {
 			r.Get("/media", s.mediaList)
 			r.Post("/media/upload", s.mediaUpload)
 			r.Post("/media/{id}/alt", s.mediaUpdateAlt)
+			r.Post("/media/{id}/rename", s.mediaRename)
 			r.Post("/media/{id}/delete", s.mediaDelete)
 			r.Post("/media/{id}/move", s.mediaMove)
 			r.Post("/media/bulk/move", s.mediaBulkMove)
@@ -296,6 +315,7 @@ func New(d Deps) http.Handler {
 
 			r.Get("/api/media", s.apiMediaList)
 			r.Post("/api/media", s.apiMediaUpload)
+			r.Post("/api/media/{id}/poster", s.apiMediaSetPoster)
 			r.Get("/api/media/folders", s.apiFoldersList)
 			r.Post("/api/media/folders", s.apiFolderCreate)
 		}
@@ -307,7 +327,7 @@ func New(d Deps) http.Handler {
 		}
 
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireAdmin)
+			r.Use(s.requirePerm(auth.PermUsers))
 			r.Get("/users", s.usersList)
 			r.Get("/users/new", s.userNew)
 			r.Post("/users/new", s.userCreate)
@@ -392,6 +412,9 @@ type templateData struct {
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
+	// Permissions lists the host-declared custom permissions, for the
+	// user form's grant checkboxes (built-ins are rendered literally).
+	Permissions []PermissionDef
 
 	// The account settings page. TwoFactorEnabled is the logged-in
 	// user's current state; TOTPSecret and TOTPQR carry an enrollment in
@@ -561,9 +584,9 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 			Nonce:     scriptNonce(r),
 		}
 	}
-	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.IsAdmin(), r.URL.Path)
+	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.User, r.URL.Path)
 	if td.User != nil {
-		td.NavCounts = s.navCounts(r, td.IsAdmin())
+		td.NavCounts = s.navCounts(r, td.User)
 		td.NavCurrent = navCurrent(r.URL.Path)
 	}
 	// Inside a host section, the mount prefix has been stripped, so the
@@ -580,12 +603,15 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 }
 
 // navSectionsFor returns the sidebar links for the host-registered sections
-// a user with the given role may see. reqPath is the request's path within
-// the admin, for marking the section being viewed.
-func navSectionsFor(sections []Section, adminPath string, isAdmin bool, reqPath string) []navLink {
+// the user may see (nil on the login page: no sections). reqPath is the
+// request's path within the admin, for marking the section being viewed.
+func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath string) []navLink {
 	var links []navLink
 	for _, sec := range sections {
-		if sec.NavLabel == "" || (sec.AdminOnly && !isAdmin) {
+		if sec.NavLabel == "" || (sec.AdminOnly && (u == nil || !u.Role.IsAdmin())) {
+			continue
+		}
+		if sec.Permission != "" && !u.Can(auth.Permission(sec.Permission)) {
 			continue
 		}
 		prefix := SectionPathPrefix + "/" + sec.Path
@@ -615,9 +641,10 @@ func navCurrent(path string) string {
 	return ""
 }
 
-// navCounts gathers the sidebar's table-of-contents numbers. A failed
-// count is logged and rendered as zero rather than failing the page.
-func (s *server) navCounts(r *http.Request, isAdmin bool) navCounts {
+// navCounts gathers the sidebar's table-of-contents numbers, skipping
+// areas the user's permissions hide from the nav. A failed count is
+// logged and rendered as zero rather than failing the page.
+func (s *server) navCounts(r *http.Request, u *auth.User) navCounts {
 	ctx := r.Context()
 	var c navCounts
 	if s.deps.Renderer != nil && s.deps.Content != nil {
@@ -626,7 +653,7 @@ func (s *server) navCounts(r *http.Request, isAdmin bool) navCounts {
 			s.deps.Logger.Error("cms admin: counting pages and posts", "err", err)
 		}
 	}
-	if s.deps.Renderer != nil && s.deps.Snippets != nil {
+	if s.deps.Renderer != nil && s.deps.Snippets != nil && u != nil && u.Role.IsSuperadmin() {
 		c.Snippets = len(s.deps.ConfigSnippets)
 		if n, err := s.deps.Snippets.Count(ctx); err != nil {
 			s.deps.Logger.Error("cms admin: counting snippets", "err", err)
@@ -640,7 +667,7 @@ func (s *server) navCounts(r *http.Request, isAdmin bool) navCounts {
 			s.deps.Logger.Error("cms admin: counting media", "err", err)
 		}
 	}
-	if isAdmin && s.deps.Users != nil {
+	if u.Can(auth.PermUsers) && s.deps.Users != nil {
 		var err error
 		if c.Users, err = s.deps.Users.Count(ctx); err != nil {
 			s.deps.Logger.Error("cms admin: counting users", "err", err)
@@ -653,6 +680,24 @@ func (s *server) navCounts(r *http.Request, isAdmin bool) navCounts {
 // superadmin); used by templates to show admin-only fields.
 func (td templateData) IsAdmin() bool {
 	return td.User != nil && td.User.Role.IsAdmin()
+}
+
+// IsSuperadmin reports whether the logged-in user has the superadmin
+// role; used by templates for superadmin-only areas (snippets).
+func (td templateData) IsSuperadmin() bool {
+	return td.User != nil && td.User.Role.IsSuperadmin()
+}
+
+// Can reports whether the logged-in user holds the permission; used by
+// templates to decide which navigation entries and controls to show.
+func (td templateData) Can(perm string) bool {
+	return td.User.Can(auth.Permission(perm))
+}
+
+// GrantChecked reports whether the user form's grant checkbox for key
+// should render ticked — the form user (not the viewer) holds it.
+func (td templateData) GrantChecked(key string) bool {
+	return td.FormUser != nil && slices.Contains(td.FormUser.Permissions, auth.Permission(key))
 }
 
 // IsDefaultLocale reports whether the form is on its default-locale tab,

@@ -275,6 +275,20 @@ var frStrings = map[string]string{
 	"Reset two-factor authentication — for someone locked out of their authenticator app": "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
 	"They'll log in with just their password until they set it up again.":                 "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
 
+	// Permission grants (user form) and permission-denied messages.
+	// "News" is translated with the posts strings further down.
+	"Permissions": "Permissions",
+	"What an editor may work on. Admins and superadmins always hold every permission.": "Ce sur quoi un éditeur peut travailler. Les admins et superadmins détiennent toujours toutes les permissions.",
+	"Blog posts":                                             "Billets de blogue",
+	"Pages, menus & site settings":                           "Pages, menus et réglages du site",
+	"User management":                                        "Gestion des utilisateurs",
+	"Only administrators can assign admin roles.":            "Seuls les administrateurs peuvent attribuer des rôles d'admin.",
+	"You cannot remove your own user-management permission.": "Vous ne pouvez pas retirer votre propre permission de gestion des utilisateurs.",
+	"You don't have permission to edit this page.":           "Vous n'avez pas la permission de modifier cette page.",
+	"You don't have permission to publish in that feed.":     "Vous n'avez pas la permission de publier dans ce fil.",
+	"Editing shared site areas needs the pages permission.":  "La modification des zones partagées du site requiert la permission Pages.",
+	"That address is reserved for blog and news posts.":      "Cette adresse est réservée aux billets de blogue et aux nouvelles.",
+
 	// Pages list.
 	"New page":   "Nouvelle page",
 	"Title":      "Titre",

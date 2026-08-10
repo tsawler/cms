@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/mail"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,14 +26,27 @@ func (s *server) usersList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) userNew(w http.ResponseWriter, r *http.Request) {
+	// A fresh editor starts with the content permissions ticked — the
+	// pre-permissions status quo — and user management off. A non-admin
+	// creator can only pass on what they hold, so the defaults are cut
+	// down the same way the save will be.
+	actor := s.currentUser(r)
+	var perms []auth.Permission
+	for _, p := range []auth.Permission{auth.PermBlogs, auth.PermNews, auth.PermPages} {
+		if actor.Can(p) {
+			perms = append(perms, p)
+		}
+	}
 	data := s.newTemplateData(r)
 	data.IsNew = true
-	data.FormUser = &auth.User{Role: auth.RoleEditor, Active: true}
+	data.FormUser = &auth.User{Role: auth.RoleEditor, Active: true, Permissions: perms}
+	data.Permissions = s.deps.Permissions
 	s.render(w, http.StatusOK, "user_form", data)
 }
 
 func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 	form, password, errs := s.parseUserForm(r, true)
+	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, nil)
 
 	if len(errs) > 0 {
 		s.renderUserForm(w, r, form, true, errs)
@@ -54,6 +68,10 @@ func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	if err := s.deps.Users.ReplacePermissions(r.Context(), form.ID, form.Permissions); err != nil {
+		s.serverError(w, err)
+		return
+	}
 
 	s.flash(r, s.tr(r, "User created."))
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
@@ -64,6 +82,10 @@ func (s *server) userEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.canManage(r, u) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	s.renderUserForm(w, r, u, false, nil)
 }
 
@@ -72,21 +94,31 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.canManage(r, existing) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 
 	form, password, errs := s.parseUserForm(r, false)
 	form.ID = existing.ID
+	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, existing.Permissions)
 	// Carried over so an error re-render still shows the two-factor
 	// reset checkbox; Update never writes this field.
 	form.TOTPSecret = existing.TOTPSecret
 
-	// Guard rails: an admin editing their own account cannot lock
-	// themselves out by deactivating it or dropping the admin role.
+	// Guard rails: nobody may deactivate their own account, an admin
+	// editing their own account cannot drop the admin role, and a
+	// non-admin user manager cannot drop the very permission that lets
+	// them manage users.
 	if self := s.currentUser(r); self != nil && self.ID == existing.ID {
 		if !form.Active {
 			errs["active"] = s.tr(r, "You cannot deactivate your own account.")
 		}
-		if !form.Role.IsAdmin() {
+		if self.Role.IsAdmin() && !form.Role.IsAdmin() {
 			errs["role"] = s.tr(r, "You cannot remove your own admin role.")
+		}
+		if !self.Role.IsAdmin() && !slices.Contains(form.Permissions, auth.PermUsers) {
+			errs["perm"] = s.tr(r, "You cannot remove your own user-management permission.")
 		}
 	}
 
@@ -100,6 +132,10 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 			s.renderUserForm(w, r, form, false, map[string]string{"email": s.tr(r, "That email address is already in use.")})
 			return
 		}
+		s.serverError(w, err)
+		return
+	}
+	if err := s.deps.Users.ReplacePermissions(r.Context(), form.ID, form.Permissions); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -130,6 +166,53 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 }
 
+// canManage reports whether the acting user may open or edit the target
+// account. Admin roles manage everyone; a non-admin holder of the users
+// permission manages editor accounts only — an admin's password, role,
+// or two-factor reset is never within an editor's reach.
+func (s *server) canManage(r *http.Request, target *auth.User) bool {
+	actor := s.currentUser(r)
+	if actor == nil {
+		return false
+	}
+	return actor.Role.IsAdmin() || target.Role == auth.RoleEditor
+}
+
+// mergeGrants bounds a grant change to what the actor may give or take:
+// a non-admin user manager can neither grant nor revoke a permission
+// they don't hold themselves, so for those the target keeps whatever it
+// had. Admin actors pass submitted through untouched.
+func mergeGrants(actor *auth.User, submitted, existing []auth.Permission) []auth.Permission {
+	if actor != nil && actor.Role.IsAdmin() {
+		return submitted
+	}
+	var out []auth.Permission
+	for _, p := range submitted {
+		if actor.Can(p) {
+			out = append(out, p)
+		}
+	}
+	for _, p := range existing {
+		if !actor.Can(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// knownPermissions is the set the user form's checkboxes may grant: the
+// built-ins plus whatever the host declared.
+func (s *server) knownPermissions() map[auth.Permission]bool {
+	known := make(map[auth.Permission]bool, 4+len(s.deps.Permissions))
+	for _, p := range auth.BuiltinPermissions() {
+		known[p] = true
+	}
+	for _, d := range s.deps.Permissions {
+		known[d.Key] = true
+	}
+	return known
+}
+
 // parseUserForm reads and validates the shared user form. When isNew is
 // true a password is required; otherwise a blank password means "keep".
 func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string, map[string]string) {
@@ -143,6 +226,16 @@ func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string,
 	}
 	password := r.PostFormValue("password")
 
+	// Unknown keys can only come from a tampered form; dropping them
+	// silently matches how the image picker treats a bogus media id.
+	known := s.knownPermissions()
+	for _, v := range r.PostForm["perm"] {
+		p := auth.Permission(v)
+		if known[p] && !slices.Contains(u.Permissions, p) {
+			u.Permissions = append(u.Permissions, p)
+		}
+	}
+
 	if u.Name == "" {
 		errs["name"] = s.tr(r, "Name is required.")
 	}
@@ -153,6 +246,8 @@ func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string,
 	}
 	if !u.Role.Valid() {
 		errs["role"] = s.tr(r, "Choose a role.")
+	} else if u.Role != auth.RoleEditor && !s.currentUser(r).Role.IsAdmin() {
+		errs["role"] = s.tr(r, "Only administrators can assign admin roles.")
 	}
 	if isNew && password == "" {
 		errs["password"] = s.tr(r, "Password is required.")
@@ -173,6 +268,7 @@ func (s *server) renderUserForm(w http.ResponseWriter, r *http.Request, u *auth.
 	data.FormUser = u
 	data.IsNew = isNew
 	data.FormErrors = errs
+	data.Permissions = s.deps.Permissions
 	s.render(w, status, "user_form", data)
 }
 

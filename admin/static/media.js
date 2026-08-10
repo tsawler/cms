@@ -1,6 +1,50 @@
 // Media library behaviors: the modal dialogs and the upload queue.
 // Loaded only on the media page (templateData.PageScript). Framework-free
 // and external, because the admin's CSP forbids inline scripts.
+
+// captureFrame draws an early frame of a video onto a canvas and resolves
+// with a JPEG blob. Always resolves — null on any failure or after a
+// timeout — so a stubborn video just goes without a poster. Both blocks
+// below use it: the uploader on the local file being sent (as a blob:
+// URL), the inspector on an already-stored video it is previewing.
+// crossOrigin is set for a stored video served from another origin
+// (bucket/CDN); without CORS headers there the canvas would be tainted
+// and the capture fails, which the try/catch turns into a null.
+function captureFrame(src, crossOrigin) {
+    return new Promise(function (resolve) {
+        var video = document.createElement("video");
+        var done = false;
+        var timer = setTimeout(function () { finish(null); }, 5000);
+        function finish(blob) {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            video.removeAttribute("src");
+            resolve(blob);
+        }
+        video.muted = true;
+        video.preload = "auto";
+        if (crossOrigin) video.crossOrigin = "anonymous";
+        video.addEventListener("error", function () { finish(null); });
+        video.addEventListener("loadeddata", function () {
+            // Skip a beat in: the very first frame is often black.
+            try { video.currentTime = Math.min(0.5, (video.duration || 1) / 2); }
+            catch (e) { finish(null); }
+        });
+        video.addEventListener("seeked", function () {
+            try {
+                if (!video.videoWidth) { finish(null); return; }
+                var canvas = document.createElement("canvas");
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext("2d").drawImage(video, 0, 0);
+                canvas.toBlob(function (blob) { finish(blob); }, "image/jpeg", 0.85);
+            } catch (e) { finish(null); }
+        });
+        video.src = src;
+    });
+}
+
 (function () {
     "use strict";
 
@@ -147,15 +191,38 @@
         }
     }
 
+    function isVideoFile(file) {
+        return file.type.indexOf("video/") === 0 || /\.(mp4|webm)$/i.test(file.name);
+    }
+
     function start(job) {
         job.state = "uploading";
         active++;
         setState(job, "", "");
         setProgress(job, 0);
 
+        // Videos ride along with a poster frame captured in the browser —
+        // the server stores them as uploaded and can't extract one itself.
+        // The capture occupies the job's slot: it is part of sending that
+        // file, and letting another transfer start meanwhile would put
+        // three requests on the wire when the cap says two.
+        if (isVideoFile(job.file)) {
+            var url = URL.createObjectURL(job.file);
+            captureFrame(url).then(function (blob) {
+                URL.revokeObjectURL(url);
+                if (job.state !== "uploading") return; // canceled during capture
+                send(job, blob);
+            });
+            return;
+        }
+        send(job, null);
+    }
+
+    function send(job, poster) {
         var form = new FormData();
         form.append("file", job.file);
         form.append("folder", job.folder);
+        if (poster) form.append("poster", poster, "poster.jpg");
 
         var xhr = new XMLHttpRequest();
         job.xhr = xhr;
@@ -204,11 +271,15 @@
     }
 
     function cancel(job) {
-        if (job.state === "uploading" && job.xhr) {
+        if (job.state === "uploading") {
             job.state = "canceled";
             setState(job, t("canceled"), "muted");
             job.cancelBtn.remove();
-            job.xhr.abort(); // the abort handler releases the slot and pumps
+            // Mid-transfer the abort handler releases the slot and pumps;
+            // mid-capture there is no request yet, so release it here —
+            // the capture callback sees the state and never sends.
+            if (job.xhr) job.xhr.abort();
+            else { active--; pump(); }
             return;
         }
         if (job.state === "queued") {
@@ -562,6 +633,7 @@
         var preview = inspector.querySelector("[data-inspector-preview]");
         var nameEl = inspector.querySelector("[data-inspector-name]");
         var factsEl = inspector.querySelector("[data-inspector-facts]");
+        var renameForm = inspector.querySelector("[data-inspector-rename]");
         var altForm = inspector.querySelector("[data-inspector-alt]");
         var copy = inspector.querySelector("[data-inspector-copy]");
 
@@ -571,6 +643,7 @@
         if (files.length !== 1) {
             nameEl.textContent = inspector.getAttribute("data-t-none") || "";
             nameEl.classList.add("cms-muted");
+            renameForm.hidden = true;
             altForm.hidden = true;
             copy.hidden = true;
             return;
@@ -581,7 +654,19 @@
         nameEl.classList.remove("cms-muted");
 
         var thumb = el.getAttribute("data-thumb");
-        if (thumb) {
+        if (el.getAttribute("data-kind") === "video") {
+            // metadata only: selecting a tile should not start pulling a
+            // half-gigabyte file. The proxy serves Range requests, so the
+            // player seeks fine once someone presses play.
+            var player = document.createElement("video");
+            player.controls = true;
+            player.preload = "metadata";
+            player.src = el.getAttribute("data-url");
+            var posterURL = el.getAttribute("data-poster");
+            if (posterURL) player.poster = posterURL;
+            else backfillPoster(el, player);
+            preview.appendChild(player);
+        } else if (thumb) {
             var img = document.createElement("img");
             img.src = thumb;
             img.alt = "";
@@ -603,6 +688,21 @@
             factsEl.appendChild(dd);
         });
 
+        // The name is edited without its extension: the extension names
+        // the format, which a rename can't change, so it sits after the
+        // input as a fixed suffix.
+        renameForm.hidden = false;
+        renameForm.action = renameForm.getAttribute("data-action-template")
+            .replace("{id}", el.getAttribute("data-id"));
+        var fullName = el.getAttribute("data-name") || "";
+        var ext = el.getAttribute("data-ext");
+        var stem = fullName;
+        if (ext && fullName.toLowerCase().slice(-(ext.length + 1)) === "." + ext.toLowerCase()) {
+            stem = fullName.slice(0, -(ext.length + 1));
+        }
+        renameForm.querySelector("input[name=name]").value = stem;
+        renameForm.querySelector("[data-rename-ext]").textContent = ext ? "." + ext : "";
+
         // Alt text is for pictures; a PDF has no picture to describe.
         var isImage = el.getAttribute("data-kind") === "image";
         altForm.hidden = !isImage;
@@ -614,6 +714,69 @@
 
         copy.hidden = false;
         copy.setAttribute("data-copy", el.getAttribute("data-url") || "");
+    }
+
+    // ---------------------------------------------------------------
+    // Poster backfill: a video uploaded without a poster frame (the no-JS
+    // form, an upload older than poster capture) gets one the first time
+    // somebody previews it here. The server can't decode video, so a
+    // browser with the file on screen is the only place a frame for a
+    // stored video can come from.
+    // ---------------------------------------------------------------
+    function backfillPoster(el, player) {
+        var template = inspector.getAttribute("data-poster-template");
+        var csrf = inspector.getAttribute("data-csrf");
+        var id = el.getAttribute("data-id");
+        if (!template || !csrf || !id) return;
+        // One try per page view: a failure (an uncooperative codec, a
+        // cross-origin bucket without CORS) would otherwise repeat on
+        // every click of the same tile.
+        if (el.hasAttribute("data-poster-tried")) return;
+        el.setAttribute("data-poster-tried", "1");
+
+        var src = el.getAttribute("data-url");
+        var cross;
+        try { cross = new URL(src, window.location.href).origin !== window.location.origin; }
+        catch (err) { return; }
+
+        captureFrame(src, cross).then(function (blob) {
+            if (!blob) return null;
+            var form = new FormData();
+            form.append("poster", blob, "poster.jpg");
+            return window.fetch(template.replace("{id}", id), {
+                method: "POST",
+                headers: { "X-CSRF-Token": csrf },
+                body: form,
+            }).then(function (res) {
+                return res.ok ? res.json() : null;
+            }).then(function (body) {
+                if (body && body.media) applyPoster(el, player, body.media);
+            });
+        }).catch(function () { /* decorative; the video still plays */ });
+    }
+
+    // applyPoster threads a fresh poster into everything on the page that
+    // shows this video: the entry's data, its tile, and the player when it
+    // is still the one on display.
+    function applyPoster(el, player, media) {
+        el.setAttribute("data-poster", media.poster || "");
+        el.setAttribute("data-thumb", media.thumb || "");
+        if (media.width) el.setAttribute("data-dims", media.width + "×" + media.height);
+
+        var tile = el.querySelector(".cms-item-thumb");
+        if (tile && media.thumb) {
+            tile.textContent = "";
+            var img = document.createElement("img");
+            img.src = media.thumb;
+            img.alt = "";
+            img.loading = "lazy";
+            img.draggable = false;
+            tile.appendChild(img);
+        }
+        var dims = el.querySelector(".cms-item-dims");
+        if (dims && media.width) dims.textContent = media.width + "×" + media.height;
+
+        if (player && player.isConnected && media.poster) player.poster = media.poster;
     }
 
     if (inspectorToggle) {

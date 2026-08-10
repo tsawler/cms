@@ -6,7 +6,7 @@
  * page in place so the result shows without a reload.
  * ------------------------------------------------------------------ */
 
-import { mediaEnabled } from "./state.js";
+import { mediaEnabled, canPages } from "./state.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
 
@@ -42,6 +42,7 @@ function applySettings(s) {
 }
 
 export function openSiteSettings() {
+    if (!canPages) return; // the save would 403; the menu entry is hidden too
     api("/settings").then(function (s) {
         var fields = [
             { id: "siteName", label: "Site name", type: "text", value: s.siteName,

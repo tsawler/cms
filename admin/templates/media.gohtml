@@ -224,7 +224,11 @@
                     data-added="{{.CreatedAt.Unix}}"
                     data-added-human="{{.CreatedAt.Format "Jan 2, 2006"}}"
                     data-alt="{{.Alt}}"
-                    data-thumb="{{.ThumbURL}}">
+                    data-thumb="{{.ThumbURL}}"
+                    {{- /* Videos only: what the inspector's player needs.
+                           An empty data-poster is a video whose upload
+                           carried no frame; previewing it captures one. */}}
+                    {{if eq .Kind "video"}}data-poster="{{.PosterURL}}"{{end}}>
                     <span class="cms-item-thumb">
                         {{if .ThumbURL}}
                         {{- /* draggable="false": an <img> is draggable by
@@ -273,12 +277,29 @@
         {{- /* Inspector: everything about one file, which is where alt text
                and Copy link went when they left the tiles. */}}
         <aside class="cms-inspector" data-inspector hidden aria-label="{{.T "Details"}}"
-               data-t-none="{{.T "Select one file to see its details."}}">
+               data-t-none="{{.T "Select one file to see its details."}}"
+               data-csrf="{{.CSRFToken}}"
+               data-poster-template="{{.AdminPath}}/api/media/{id}/poster">
             <div class="cms-inspector-preview" data-inspector-preview></div>
             <p class="cms-inspector-name" data-inspector-name></p>
             <dl class="cms-inspector-facts" data-inspector-facts
                 data-t-kind="{{.T "Type"}}" data-t-size="{{.T "Size"}}"
                 data-t-dims="{{.T "Dimensions"}}" data-t-added="{{.T "Added"}}"></dl>
+            {{- /* Renaming changes the display name only: objects keep
+                   their keys, so links on pages never break. The stored
+                   extension is not editable — the server would reattach
+                   it anyway, since it describes the bytes. */}}
+            <form method="post" class="cms-inspector-alt cms-inspector-rename" data-inspector-rename
+                  data-action-template="{{.AdminPath}}/media/{id}/rename">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <label for="cms-inspector-rename-input">{{.T "Name"}}</label>
+                <div class="cms-inspector-rename-row">
+                    <input id="cms-inspector-rename-input" type="text" name="name"
+                           autocomplete="off" required maxlength="200">
+                    <span class="cms-inspector-rename-ext" data-rename-ext></span>
+                </div>
+                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{.T "Rename"}}</button>
+            </form>
             <form method="post" class="cms-inspector-alt" data-inspector-alt
                   data-action-template="{{.AdminPath}}/media/{id}/alt">
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
