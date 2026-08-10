@@ -30,9 +30,16 @@ import (
 // PageTemplate is one template the host application offers for pages. File
 // is a path within the host's TemplateFS (e.g. "templates/pages/home.gohtml");
 // Label is what content editors see when choosing a page type.
+//
+// Unlisted keeps a template out of the new-page chooser for everyone but
+// superadmins: for one-off templates — a home page, a staff directory —
+// that only ever back a single page, where offering them on every "new
+// page" would invite a second. Pages already using an unlisted template
+// render and edit exactly as before; only creation is limited.
 type PageTemplate struct {
-	File  string `json:"file"`
-	Label string `json:"label"`
+	File     string `json:"file"`
+	Label    string `json:"label"`
+	Unlisted bool   `json:"unlisted,omitempty"`
 }
 
 // MenuEntry is one rendered navigation item, as templates receive it from
@@ -985,6 +992,19 @@ func (r *Renderer) PageTemplates() []PageTemplate {
 	return r.templates
 }
 
+// ListedPageTemplates returns the page templates offered when creating a
+// page — PageTemplates() minus the Unlisted ones, which only superadmins
+// may start new pages from.
+func (r *Renderer) ListedPageTemplates() []PageTemplate {
+	listed := make([]PageTemplate, 0, len(r.templates))
+	for _, t := range r.templates {
+		if !t.Unlisted {
+			listed = append(listed, t)
+		}
+	}
+	return listed
+}
+
 // Knows reports whether file is a registered page template.
 func (r *Renderer) Knows(file string) bool {
 	_, ok := r.sets[file]
@@ -1466,7 +1486,15 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if err != nil {
 		sectionsJSON = []byte("null")
 	}
-	templatesJSON, err := json.Marshal(r.templates)
+	// The new-page dialog's choices. Unlisted templates are for one-off
+	// pages, so only a superadmin's dialog offers them — and the server
+	// holds editors to the same list on create, so this is presentation
+	// of the rule, not the rule itself.
+	dialogTemplates := r.templates
+	if !edit.IsSuperadmin {
+		dialogTemplates = r.ListedPageTemplates()
+	}
+	templatesJSON, err := json.Marshal(dialogTemplates)
 	if err != nil {
 		templatesJSON = []byte("[]")
 	}

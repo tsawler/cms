@@ -106,6 +106,16 @@ func (s *server) apiSaveRegions(w http.ResponseWriter, r *http.Request) {
 // a title and a template choice; the slug is derived from the title, with
 // a numeric suffix when taken.
 // POST /api/pages  body: {"title": "...", "template": "..."}
+// templateByFile finds the page template registered under file.
+func templateByFile(templates []render.PageTemplate, file string) (render.PageTemplate, bool) {
+	for _, t := range templates {
+		if t.File == file {
+			return t, true
+		}
+	}
+	return render.PageTemplate{}, false
+}
+
 func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title    string `json:"title"`
@@ -121,7 +131,12 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Give the page a name."))
 		return
 	}
-	if !s.deps.Renderer.Knows(body.Template) {
+	// The template must be one offered to this user: a page template (not
+	// the hidden post template), and not an Unlisted one unless they are a
+	// superadmin. Unlisted templates back one-off pages, so for everyone
+	// else they are simply not a choice — same answer as an unknown name.
+	tpl, known := templateByFile(s.deps.Renderer.PageTemplates(), body.Template)
+	if !known || (tpl.Unlisted && !s.currentUser(r).Role.IsSuperadmin()) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Choose a page type."))
 		return
 	}

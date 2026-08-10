@@ -312,6 +312,7 @@ var frStrings = map[string]string{
 	"Description":                                                                      "Description",
 	"(for search engines)":                                                             "(pour les moteurs de recherche)",
 	"Changing the template takes effect after saving; the content fields below will update to match.": "Le changement de gabarit prend effet après l'enregistrement; les champs de contenu ci-dessous se mettront à jour en conséquence.",
+	"unlisted":                                "non listé",
 	"Visibility":                              "Visibilité",
 	"Public — anyone can view":                "Publique — tout le monde peut la voir",
 	"Private — only logged-in users can view": "Privée — visible seulement pour les utilisateurs connectés",

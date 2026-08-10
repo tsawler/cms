@@ -5,7 +5,7 @@
 <p class="cms-muted">{{.T "Welcome back,"}} {{.User.Name}}.</p>
 
 <div class="cms-cards">
-    {{if and .PagesEnabled (.Can "pages")}}
+    {{if and .PagesEnabled .IsSuperadmin}}
     <a class="cms-card" href="{{.AdminPath}}/pages">
         <span class="cms-card-count">{{.NavCounts.Pages}}</span>
         <h2>{{.T "Pages"}}</h2>

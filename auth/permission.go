@@ -26,7 +26,9 @@ const (
 	PermNews Permission = "news"
 	// PermPages grants site pages and everything that shapes them:
 	// creating and editing pages, the navigation menus, and the
-	// non-code site settings (name, logo, menu alignment).
+	// non-code site settings (name, logo, menu alignment) — all
+	// through the in-place editor; the admin panel's Pages section
+	// itself is superadmin-only.
 	PermPages Permission = "pages"
 	// PermUsers grants user management. A non-admin holder manages
 	// editor accounts only: they cannot touch admin accounts, assign

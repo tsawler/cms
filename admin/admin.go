@@ -221,11 +221,14 @@ func New(d Deps) http.Handler {
 		r.Post("/settings/2fa/disable", s.totpDisable)
 
 		if d.Renderer != nil {
-			// The Pages section: site pages and, through the editor
-			// API below, menus and site settings — one permission
-			// covers the three.
+			// The Pages section is superadmin-only, like snippets:
+			// editors and admins do all their page work in place on
+			// the public site, and a second door to the same features
+			// only confuses. The pages permission lives on in the
+			// editor API below, where it gates pages, menus, and site
+			// settings.
 			r.Group(func(r chi.Router) {
-				r.Use(s.requirePerm(auth.PermPages))
+				r.Use(s.requireSuperadmin)
 				r.Get("/pages", s.pagesList)
 				r.Get("/pages/new", s.pageNew)
 				r.Post("/pages/new", s.pageCreate)

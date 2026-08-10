@@ -25,7 +25,7 @@
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
             <span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
-        {{if and .PagesEnabled (.Can "pages")}}
+        {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "pages"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/pages">
             <span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
         {{end}}

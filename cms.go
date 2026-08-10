@@ -178,6 +178,8 @@ type Config struct {
 	// PageTemplates lists the templates editors may choose for a page.
 	// Each entry's File is parsed together with SharedTemplates into its
 	// own set, so different pages may define the same block names.
+	// An entry with Unlisted set is offered only to superadmins when
+	// creating a page — for one-off templates that back a single page.
 	PageTemplates []PageTemplate
 
 	// PostsPerPage is how many posts a paginated listing shows on one

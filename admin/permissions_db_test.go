@@ -42,10 +42,15 @@ func permTestServer(t *testing.T, db *sqldb.DB) (*httptest.Server, *auth.Store, 
 			`{{template "base" .}}{{define "content"}}{{cmsRegion "main"}}{{end}}`)},
 		"post.gohtml": &fstest.MapFile{Data: []byte(
 			`{{template "base" .}}{{define "content"}}{{cmsRegion "main"}}{{end}}`)},
+		"oneoff.gohtml": &fstest.MapFile{Data: []byte(
+			`{{template "base" .}}{{define "content"}}{{cmsRegion "main"}}{{end}}`)},
 	}
 	postTemplate := render.PageTemplate{File: "post.gohtml", Label: "Post"}
 	r, err := render.New(fsys, []string{"base.gohtml"},
-		[]render.PageTemplate{{File: "page.gohtml", Label: "Page"}}, nil, postTemplate)
+		[]render.PageTemplate{
+			{File: "page.gohtml", Label: "Page"},
+			{File: "oneoff.gohtml", Label: "One-off", Unlisted: true},
+		}, nil, postTemplate)
 	if err != nil {
 		t.Fatalf("render.New: %v", err)
 	}
@@ -152,15 +157,17 @@ func TestRouteAccessByPermission(t *testing.T) {
 			body         string
 			want         int
 		}{
-			// The Pages section needs the pages permission, and posts'
+			// The Pages section is superadmin-only — even the pages
+			// permission and the admin role don't open it — and posts'
 			// backing pages are not reachable through it for anyone.
-			{"pages@example.com", "GET", "/admin/pages", "", 200},
-			{"pages@example.com", "GET", "/admin/pages/" + pageID, "", 200},
+			{"super@example.com", "GET", "/admin/pages", "", 200},
+			{"super@example.com", "GET", "/admin/pages/" + pageID, "", 200},
+			{"admin@example.com", "GET", "/admin/pages", "", 403},
+			{"pages@example.com", "GET", "/admin/pages", "", 403},
+			{"pages@example.com", "GET", "/admin/pages/" + pageID, "", 403},
 			{"blogs@example.com", "GET", "/admin/pages", "", 403},
-			{"blogs@example.com", "GET", "/admin/pages/" + pageID, "", 403},
 			{"none@example.com", "GET", "/admin/pages", "", 403},
-			{"admin@example.com", "GET", "/admin/pages/" + blogPageID, "", 404},
-			{"pages@example.com", "GET", "/admin/pages/" + blogPageID, "", 404},
+			{"super@example.com", "GET", "/admin/pages/" + blogPageID, "", 404},
 
 			// Blog & News admits either feed permission; the other feed's
 			// posts stay out of reach.
@@ -199,6 +206,15 @@ func TestRouteAccessByPermission(t *testing.T) {
 			// Post creation checks the feed being posted into.
 			{"blogs@example.com", "POST", "/admin/api/posts", `{"title":"T","feed":"blog"}`, 200},
 			{"blogs@example.com", "POST", "/admin/api/posts", `{"title":"T","feed":"news"}`, 403},
+
+			// Page creation offers listed templates to any pages-permission
+			// holder; unlisted templates (and the hidden post template) are
+			// a superadmin's alone.
+			{"pages@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"page.gohtml"}`, 200},
+			{"pages@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"oneoff.gohtml"}`, 400},
+			{"admin@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"oneoff.gohtml"}`, 400},
+			{"pages@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"post.gohtml"}`, 400},
+			{"super@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"oneoff.gohtml"}`, 200},
 
 			// Snippets are superadmin's; users follows its permission.
 			{"super@example.com", "GET", "/admin/snippets", "", 200},

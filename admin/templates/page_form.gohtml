@@ -53,7 +53,7 @@
         <select id="template_name" name="template_name">
             {{$current := .FormPage.TemplateName}}
             {{range .PageTemplates}}
-            <option value="{{.File}}" {{if eq .File $current}}selected{{end}}>{{.Label}}</option>
+            <option value="{{.File}}" {{if eq .File $current}}selected{{end}}>{{.Label}}{{if .Unlisted}} ({{$.T "unlisted"}}){{end}}</option>
             {{end}}
         </select>
         {{with index .FormErrors "template_name"}}<p class="cms-field-error">{{.}}</p>{{end}}

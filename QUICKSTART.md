@@ -269,6 +269,12 @@ Each file in `PageTemplates` (step 5) is one **page type** editors can
 choose when creating a page. Ship at least a home page and a generic
 content page.
 
+An entry with `Unlisted: true` is offered only to superadmins when
+creating a page — use it for one-off templates that back exactly one
+page (the home page is a natural candidate), so the everyday "new page"
+list stays short and no one accidentally creates a second home page.
+Existing pages using an unlisted template are unaffected.
+
 `templates/pages/home.gohtml`:
 
 ```html
@@ -296,7 +302,9 @@ content page.
 {{end}}
 ```
 
-`templates/pages/standard.gohtml`:
+`templates/pages/standard.gohtml` — a heading the template owns, then
+editor-composed sections, so every block of content carries its own
+width, background, and spacing controls:
 
 ```html
 {{template "base" .}}
@@ -304,9 +312,6 @@ content page.
 {{define "content"}}
 <section class="mx-auto max-w-3xl px-6 py-12">
     <h1 class="text-3xl font-bold tracking-tight text-slate-900 mb-6">{{cmsText "heading"}}</h1>
-    <div class="prose prose-slate">
-        {{cmsRegion "main"}}
-    </div>
 </section>
 
 {{cmsSections "sections"}}

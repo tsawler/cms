@@ -471,6 +471,13 @@ page" dialog (page name + page type from your configured
 `PageTemplates`), creates the draft with a slug derived from the name,
 and takes the editor straight to it.
 
+A `PageTemplate` marked `Unlisted: true` is left out of that dialog for
+everyone but superadmins (and the server refuses it on create for anyone
+else) — for one-off templates that only ever back a single page, like a
+home page or a staff directory, where offering them on every "new page"
+would invite a second. Pages already using an unlisted template render
+and edit exactly as before.
+
 While editing, the edit bar also offers **Delete** for the current page
 (with a confirmation; the home page can't be deleted — the server refuses
 and the button doesn't appear on it).
@@ -1191,8 +1198,11 @@ Accounts have one of three **roles**, which encode trust:
   per-page CSS/JS (written into pages unsanitized) and user management
   without restriction.
 - **superadmin** — admin plus the whole-page HTML source view in the
-  in-place editor, and snippet management (snippets are raw HTML
-  injected into every editor).
+  in-place editor, snippet management (snippets are raw HTML injected
+  into every editor), and the admin panel's Pages section (everyone
+  else works on pages in place on the public site, where every page
+  feature is available; the admin list is the superadmin's index of
+  pages that aren't linked anywhere).
 
 What an *editor* may work on is a set of per-user **permissions**,
 toggled on their page under Users:
@@ -1201,7 +1211,7 @@ toggled on their page under Users:
 |---|---|
 | Blog posts | the blog feed: creating, editing, publishing blog posts |
 | News | the news feed, the same way |
-| Pages, menus & site settings | site pages, navigation menus, and the non-code site settings |
+| Pages, menus & site settings | site pages, navigation menus, and the non-code site settings, all through the in-place editor |
 | User management | managing *editor* accounts (see below) |
 
 Everything follows from the grant: nav entries and dashboard cards the

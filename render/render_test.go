@@ -146,6 +146,44 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	}
 }
 
+// Unlisted templates parse and render like any other, but the editor's
+// new-page dialog only offers them to superadmins.
+func TestUnlistedTemplatesHiddenFromNonSuperadminDialog(t *testing.T) {
+	r, err := New(testFS, []string{"base.gohtml"}, []PageTemplate{
+		{File: "pages/home.gohtml", Label: "Home"},
+		{File: "pages/home.gohtml", Label: "One-off", Unlisted: true},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	listed := r.ListedPageTemplates()
+	if len(listed) != 1 || listed[0].Label != "Home" {
+		t.Fatalf("ListedPageTemplates = %v, want just Home", listed)
+	}
+	if len(r.PageTemplates()) != 2 {
+		t.Fatalf("PageTemplates = %v, want both entries", r.PageTemplates())
+	}
+
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+	renderFor := func(super bool) string {
+		var buf bytes.Buffer
+		err := r.Render(&buf, Input{Page: page, Locale: "en", Edit: &EditInfo{
+			PageID: 1, AdminPath: "/admin", IsSuperadmin: super,
+		}})
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		return buf.String()
+	}
+	if out := renderFor(false); strings.Contains(out, "One-off") {
+		t.Errorf("editor payload offers an unlisted template to a non-superadmin:\n%s", out)
+	}
+	if out := renderFor(true); !strings.Contains(out, "One-off") {
+		t.Errorf("editor payload hides unlisted templates from a superadmin:\n%s", out)
+	}
+}
+
 // cmsTitle prints the page's own title, and an edit render wraps it so
 // the heading on the page is the thing an editor types into — the title
 // field and the heading being two views of one value is the whole point
