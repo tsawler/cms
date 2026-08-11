@@ -46,7 +46,7 @@ func (s *server) userNew(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 	form, password, errs := s.parseUserForm(r, true)
-	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, nil)
+	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, nil, s.gatedPermissions())
 
 	if len(errs) > 0 {
 		s.renderUserForm(w, r, form, true, errs)
@@ -101,7 +101,7 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 
 	form, password, errs := s.parseUserForm(r, false)
 	form.ID = existing.ID
-	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, existing.Permissions)
+	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, existing.Permissions, s.gatedPermissions())
 	// Carried over so an error re-render still shows the two-factor
 	// reset checkbox; Update never writes this field.
 	form.TOTPSecret = existing.TOTPSecret
@@ -179,25 +179,46 @@ func (s *server) canManage(r *http.Request, target *auth.User) bool {
 }
 
 // mergeGrants bounds a grant change to what the actor may give or take:
-// a non-admin user manager can neither grant nor revoke a permission
-// they don't hold themselves, so for those the target keeps whatever it
-// had. Admin actors pass submitted through untouched.
-func mergeGrants(actor *auth.User, submitted, existing []auth.Permission) []auth.Permission {
-	if actor != nil && actor.Role.IsAdmin() {
+// what they cannot touch, the target keeps. A non-admin user manager can
+// neither grant nor revoke a permission they don't hold themselves. An
+// admin may change anything except grants that bind admins too
+// (AdminsNeedGrant), which they likewise may only change while holding —
+// otherwise an admin switched out of a section could switch themselves
+// back in from the users page. Superadmins change everything.
+func mergeGrants(actor *auth.User, submitted, existing []auth.Permission, gated map[auth.Permission]bool) []auth.Permission {
+	if actor != nil && actor.Role.IsSuperadmin() {
 		return submitted
+	}
+	mayChange := func(p auth.Permission) bool {
+		if gated[p] {
+			return actor.HasGrant(p)
+		}
+		return actor.Can(p)
 	}
 	var out []auth.Permission
 	for _, p := range submitted {
-		if actor.Can(p) {
+		if mayChange(p) {
 			out = append(out, p)
 		}
 	}
 	for _, p := range existing {
-		if !actor.Can(p) {
+		if !mayChange(p) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// gatedPermissions is the set of declared permissions that bind admins
+// too — the ones mergeGrants holds admin actors to.
+func (s *server) gatedPermissions() map[auth.Permission]bool {
+	gated := make(map[auth.Permission]bool)
+	for _, d := range s.deps.Permissions {
+		if d.AdminsNeedGrant {
+			gated[d.Key] = true
+		}
+	}
+	return gated
 }
 
 // knownPermissions is the set the user form's checkboxes may grant: the

@@ -25,14 +25,15 @@ func TestValidateSections(t *testing.T) {
 	}
 
 	bad := map[string][]Section{
-		"empty path":           {{Path: "", Handler: noopHandler}},
-		"slash in path":        {{Path: "a/b", Handler: noopHandler}},
-		"space in path":        {{Path: "a b", Handler: noopHandler}},
-		"escaping path":        {{Path: "../users", Handler: noopHandler}},
-		"duplicate paths":      {{Path: "x", Handler: noopHandler}, {Path: "x", Handler: noopHandler}},
-		"nil handler":          {{Path: "x"}},
-		"uppercase permission": {{Path: "x", Permission: "Vehicles", Handler: noopHandler}},
-		"spaced permission":    {{Path: "x", Permission: "manage vehicles", Handler: noopHandler}},
+		"empty path":                     {{Path: "", Handler: noopHandler}},
+		"slash in path":                  {{Path: "a/b", Handler: noopHandler}},
+		"space in path":                  {{Path: "a b", Handler: noopHandler}},
+		"escaping path":                  {{Path: "../users", Handler: noopHandler}},
+		"duplicate paths":                {{Path: "x", Handler: noopHandler}, {Path: "x", Handler: noopHandler}},
+		"nil handler":                    {{Path: "x"}},
+		"uppercase permission":           {{Path: "x", Permission: "Vehicles", Handler: noopHandler}},
+		"spaced permission":              {{Path: "x", Permission: "manage vehicles", Handler: noopHandler}},
+		"grant-gated without permission": {{Path: "x", AdminsNeedGrant: true, Handler: noopHandler}},
 	}
 	for name, sections := range bad {
 		if err := ValidateSections(sections); err == nil {
@@ -91,6 +92,32 @@ func TestNavSectionsForPermission(t *testing.T) {
 		"editor with grant":     {&auth.User{Role: auth.RoleEditor, Permissions: []auth.Permission{"vehicles"}}, 1},
 		"editor with other":     {&auth.User{Role: auth.RoleEditor, Permissions: []auth.Permission{auth.PermPages}}, 0},
 		"admin without grant":   {&auth.User{Role: auth.RoleAdmin}, 1},
+		"superadmin, no grants": {&auth.User{Role: auth.RoleSuperadmin}, 1},
+	} {
+		if got := navSectionsFor(sections, "/admin", tc.user, "/"); len(got) != tc.want {
+			t.Errorf("%s: nav has %d links, want %d", name, len(got), tc.want)
+		}
+	}
+}
+
+// AdminsNeedGrant makes the permission bind the admin role too: the nav
+// link appears only with the explicit grant, and only superadmin passes
+// for free.
+func TestNavSectionsForAdminsNeedGrant(t *testing.T) {
+	sections := []Section{
+		{Path: "staff", NavLabel: "Staff", Permission: "team",
+			AdminsNeedGrant: true, Handler: noopHandler},
+	}
+
+	for name, tc := range map[string]struct {
+		user *auth.User
+		want int
+	}{
+		"nil user":              {nil, 0},
+		"editor without grant":  {&auth.User{Role: auth.RoleEditor}, 0},
+		"editor with grant":     {&auth.User{Role: auth.RoleEditor, Permissions: []auth.Permission{"team"}}, 1},
+		"admin without grant":   {&auth.User{Role: auth.RoleAdmin}, 0},
+		"admin with grant":      {&auth.User{Role: auth.RoleAdmin, Permissions: []auth.Permission{"team"}}, 1},
 		"superadmin, no grants": {&auth.User{Role: auth.RoleSuperadmin}, 1},
 	} {
 		if got := navSectionsFor(sections, "/admin", tc.user, "/"); len(got) != tc.want {

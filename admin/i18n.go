@@ -279,10 +279,11 @@ var frStrings = map[string]string{
 	// Permission grants (user form) and permission-denied messages.
 	// "News" is translated with the posts strings further down.
 	"Permissions": "Permissions",
-	"What an editor may work on. Admins and superadmins always hold every permission.": "Ce sur quoi un éditeur peut travailler. Les admins et superadmins détiennent toujours toutes les permissions.",
-	"Blog posts":                                             "Billets de blogue",
-	"Pages, menus & site settings":                           "Pages, menus et réglages du site",
-	"User management":                                        "Gestion des utilisateurs",
+	"What an editor may work on. Admins and superadmins always hold every permission.":                                 "Ce sur quoi un éditeur peut travailler. Les admins et superadmins détiennent toujours toutes les permissions.",
+	"Exception: some grants here bind admins too and must be ticked for them as well — only superadmins hold everything regardless.": "Exception : certains droits ici s'appliquent aussi aux admins et doivent être cochés pour eux également — seuls les superadmins détiennent tout d'office.",
+	"Blog posts":                   "Billets de blogue",
+	"Pages, menus & site settings": "Pages, menus et réglages du site",
+	"User management":              "Gestion des utilisateurs",
 	"Only administrators can assign admin roles.":            "Seuls les administrateurs peuvent attribuer des rôles d'admin.",
 	"You cannot remove your own user-management permission.": "Vous ne pouvez pas retirer votre propre permission de gestion des utilisateurs.",
 	"You don't have permission to edit this page.":           "Vous n'avez pas la permission de modifier cette page.",

@@ -87,6 +87,21 @@ func (u *User) Can(p Permission) bool {
 	return slices.Contains(u.Permissions, p)
 }
 
+// HasGrant reports whether the user holds the permission as an explicit
+// grant — or is a superadmin, who holds everything, as always. This is
+// the check behind capabilities that can be switched on and off per
+// user whatever their role: unlike Can, the admin role earns nothing
+// implicitly here. Safe to call on a nil user (false).
+func (u *User) HasGrant(p Permission) bool {
+	if u == nil {
+		return false
+	}
+	if u.Role.IsSuperadmin() {
+		return true
+	}
+	return slices.Contains(u.Permissions, p)
+}
+
 // CanAny reports whether the user holds at least one of the permissions.
 func (u *User) CanAny(perms ...Permission) bool {
 	for _, p := range perms {

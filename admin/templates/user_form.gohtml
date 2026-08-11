@@ -42,7 +42,11 @@
 
     <fieldset class="cms-fieldset cms-perms">
         <legend>{{.T "Permissions"}}</legend>
-        <p class="cms-hint">{{.T "What an editor may work on. Admins and superadmins always hold every permission."}}</p>
+        {{- /* Grants with PermissionDef.AdminsNeedGrant bind the admin
+             role as well, so the hint only claims admins hold everything
+             when nothing here says otherwise. */ -}}
+        {{$gated := false}}{{range .Permissions}}{{if .AdminsNeedGrant}}{{$gated = true}}{{end}}{{end}}
+        <p class="cms-hint">{{.T "What an editor may work on. Admins and superadmins always hold every permission."}}{{if $gated}} {{.T "Exception: some grants here bind admins too and must be ticked for them as well — only superadmins hold everything regardless."}}{{end}}</p>
         <div class="cms-field-check">
             <label><input type="checkbox" name="perm" value="blogs"
                 {{if .GrantChecked "blogs"}}checked{{end}} {{if not (.Can "blogs")}}disabled{{end}}>
@@ -66,7 +70,7 @@
         {{range .Permissions}}
         <div class="cms-field-check">
             <label><input type="checkbox" name="perm" value="{{.Key}}"
-                {{if $.GrantChecked (print .Key)}}checked{{end}} {{if not ($.Can (print .Key))}}disabled{{end}}>
+                {{if $.GrantChecked (print .Key)}}checked{{end}} {{if not ($.MayGrant .)}}disabled{{end}}>
                 {{.Label}}</label>
         </div>
         {{end}}

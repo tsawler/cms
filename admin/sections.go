@@ -58,6 +58,14 @@ type Section struct {
 	// labelled with NavLabel. Composes with AdminOnly: both must pass.
 	Permission string
 
+	// AdminsNeedGrant makes Permission an explicit grant for the admin
+	// role too: admins see and open the section only when the permission
+	// is ticked on their user page, exactly as editors do. Superadmins
+	// hold everything, as always. Without it, Permission keeps its usual
+	// meaning — admins hold every permission implicitly. Requires
+	// Permission to be set.
+	AdminsNeedGrant bool
+
 	// Handler serves the section's requests. The mount prefix is
 	// stripped: it sees "/" at the section root and may serve its own
 	// sub-routes and static assets beneath it. Requests only reach the
@@ -72,9 +80,17 @@ type Section struct {
 // with auth.User.Can, Label is the checkbox text. Sections that name a
 // Permission are declared automatically; cms.Config.Permissions is for
 // permissions not tied to a section.
+//
+// AdminsNeedGrant marks a permission that gates the admin role too (see
+// Section.AdminsNeedGrant); the user form annotates its checkbox so
+// whoever is granting knows it binds admins as well as editors. For a
+// permission carried by a section, it must match the section's own flag
+// — two answers to "does this bind admins?" would be a configuration
+// error, and cms.New refuses it.
 type PermissionDef struct {
-	Key   auth.Permission
-	Label string
+	Key             auth.Permission
+	Label           string
+	AdminsNeedGrant bool
 }
 
 var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
@@ -103,7 +119,11 @@ func (s *server) sectionHandler(sec Section) http.Handler {
 
 	h = s.withServer(h)
 	if sec.Permission != "" {
-		h = s.requirePerm(auth.Permission(sec.Permission))(h)
+		if sec.AdminsNeedGrant {
+			h = s.requireGrant(auth.Permission(sec.Permission))(h)
+		} else {
+			h = s.requirePerm(auth.Permission(sec.Permission))(h)
+		}
 	}
 	if sec.AdminOnly {
 		h = s.requireAdmin(h)
@@ -129,6 +149,9 @@ func ValidateSections(sections []Section) error {
 		}
 		if sec.Permission != "" && !auth.ValidPermissionKey(sec.Permission) {
 			return fmt.Errorf("cms: admin section %q permission %q must be a lowercase letter followed by lowercase letters, digits, hyphens, or underscores", sec.Path, sec.Permission)
+		}
+		if sec.AdminsNeedGrant && sec.Permission == "" {
+			return fmt.Errorf("cms: admin section %q sets AdminsNeedGrant without a Permission to grant", sec.Path)
 		}
 	}
 	return nil

@@ -206,4 +206,30 @@ func TestCollectPermissions(t *testing.T) {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
+
+	// AdminsNeedGrant rides through from the section, and every
+	// declaration of one key must agree on it — the flag decides who the
+	// checkbox binds, and two answers would be a configuration error.
+	gatedSection := func(path, perm string, gated bool) AdminSection {
+		return AdminSection{Path: path, NavLabel: path, Permission: perm, AdminsNeedGrant: gated,
+			Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+	}
+	got, err = collectPermissions(nil, []AdminSection{
+		gatedSection("sales", "team", true), gatedSection("staff", "team", true)})
+	if err != nil || len(got) != 1 || !got[0].AdminsNeedGrant {
+		t.Errorf("shared gated key = %+v (err %v), want one AdminsNeedGrant declaration", got, err)
+	}
+	if _, err := collectPermissions(nil, []AdminSection{
+		gatedSection("sales", "team", true), gatedSection("staff", "team", false)}); err == nil {
+		t.Error("sections disagreeing on AdminsNeedGrant: expected an error")
+	}
+	if _, err := collectPermissions([]PermissionDef{{Key: "team", Label: "Team"}},
+		[]AdminSection{gatedSection("staff", "team", true)}); err == nil {
+		t.Error("explicit def disagreeing with the section on AdminsNeedGrant: expected an error")
+	}
+	got, err = collectPermissions([]PermissionDef{{Key: "team", Label: "Sales people & staff", AdminsNeedGrant: true}},
+		[]AdminSection{gatedSection("staff", "team", true)})
+	if err != nil || len(got) != 1 || got[0].Label != "Sales people & staff" || !got[0].AdminsNeedGrant {
+		t.Errorf("explicit gated override = %+v (err %v), want the explicit label, still gated", got, err)
+	}
 }

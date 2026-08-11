@@ -95,6 +95,21 @@ func (s *server) requirePerm(p auth.Permission) func(http.Handler) http.Handler 
 	return s.requireAnyPerm(p)
 }
 
+// requireGrant is requirePerm without the admin shortcut: the permission
+// must be granted explicitly whatever the role, and only superadmin
+// passes for free. It gates the sections that declare AdminsNeedGrant.
+func (s *server) requireGrant(p auth.Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !s.currentUser(r).HasGrant(p) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requireAnyPerm is requirePerm for handlers that several permissions
 // unlock — the shared Blog & News area needs either feed, not both.
 func (s *server) requireAnyPerm(perms ...auth.Permission) func(http.Handler) http.Handler {

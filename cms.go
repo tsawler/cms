@@ -612,9 +612,24 @@ func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]Pe
 
 	// Section keys were already format-checked by ValidateSections. A
 	// section may reuse a built-in permission; only new keys are declared.
+	// Whether the grant binds admins (AdminsNeedGrant) must agree across
+	// every declaration of one key: the flag decides who a checkbox
+	// applies to, and two answers would resolve by declaration order —
+	// which is to say unpredictably — so a mismatch is refused instead.
+	gated := make(map[auth.Permission]bool)
+	for _, d := range out {
+		gated[d.Key] = d.AdminsNeedGrant
+	}
 	for _, sec := range sections {
 		key := auth.Permission(sec.Permission)
-		if sec.Permission == "" || builtin[key] || seen[key] {
+		if sec.Permission == "" || builtin[key] {
+			continue
+		}
+		if was, ok := gated[key]; ok && was != sec.AdminsNeedGrant {
+			return nil, fmt.Errorf("cms: permission %q is declared both with and without AdminsNeedGrant", key)
+		}
+		gated[key] = sec.AdminsNeedGrant
+		if seen[key] {
 			continue
 		}
 		seen[key] = true
@@ -622,7 +637,7 @@ func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]Pe
 		if label == "" {
 			label = sec.Path
 		}
-		out = append(out, PermissionDef{Key: key, Label: label})
+		out = append(out, PermissionDef{Key: key, Label: label, AdminsNeedGrant: sec.AdminsNeedGrant})
 	}
 	return out, nil
 }

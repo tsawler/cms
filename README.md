@@ -1249,6 +1249,14 @@ handlers with `auth.User.Can` — inside an admin section that's
 lowercase identifiers (`[a-z][a-z0-9_-]*`, max 64 chars); the built-in
 keys `blogs`, `news`, `pages`, and `users` are reserved.
 
+A permission can also be made to **bind admins**: declare it (or its
+section) with `AdminsNeedGrant: true` and the admin role stops holding
+it implicitly — the checkbox must be ticked for an admin exactly as for
+an editor, and only superadmins hold it regardless. Check these in your
+own handlers with `auth.User.HasGrant` rather than `Can`. Every
+declaration of one key must agree on the flag; `cms.New` refuses a
+mismatch.
+
 ## Custom admin pages
 
 Deployments often need admin pages the CMS doesn't ship — reports,
@@ -1281,6 +1289,12 @@ AdminSections: []cms.AdminSection{
   labelled with `NavLabel`. The wheels example gates its inventory
   manager this way: `{Path: "inventory", NavLabel: "Inventory",
   Permission: "vehicles", Handler: ...}`.
+- **`AdminsNeedGrant`** — makes `Permission` bind the admin role too:
+  admins see and open the section only with the grant ticked on their
+  user page, exactly as editors do; superadmins always pass. Several
+  sections may share one permission key to switch on and off together —
+  the wheels example groups its Sales people and Staff sections under a
+  single `"team"` grant this way.
 - **`Handler`** — sees section-relative paths (`/` at the root), so it can
   serve sub-routes and its own static assets beneath it.
 

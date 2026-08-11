@@ -26,6 +26,28 @@ func TestCan(t *testing.T) {
 	}
 }
 
+func TestHasGrant(t *testing.T) {
+	cases := []struct {
+		name string
+		user *User
+		perm Permission
+		want bool
+	}{
+		{"nil user", nil, "team", false},
+		{"editor with grant", &User{Role: RoleEditor, Permissions: []Permission{"team"}}, "team", true},
+		{"editor without grant", &User{Role: RoleEditor}, "team", false},
+		// The point of HasGrant: the admin role earns nothing implicitly.
+		{"admin without grant", &User{Role: RoleAdmin}, "team", false},
+		{"admin with grant", &User{Role: RoleAdmin, Permissions: []Permission{"team"}}, "team", true},
+		{"superadmin, empty grants", &User{Role: RoleSuperadmin}, "team", true},
+	}
+	for _, c := range cases {
+		if got := c.user.HasGrant(c.perm); got != c.want {
+			t.Errorf("%s: HasGrant(%q) = %v, want %v", c.name, c.perm, got, c.want)
+		}
+	}
+}
+
 func TestCanAny(t *testing.T) {
 	editor := &User{Role: RoleEditor, Permissions: []Permission{PermNews}}
 	if !editor.CanAny(PermBlogs, PermNews) {

@@ -617,8 +617,14 @@ func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath 
 		if sec.NavLabel == "" || (sec.AdminOnly && (u == nil || !u.Role.IsAdmin())) {
 			continue
 		}
-		if sec.Permission != "" && !u.Can(auth.Permission(sec.Permission)) {
-			continue
+		if sec.Permission != "" {
+			held := u.Can(auth.Permission(sec.Permission))
+			if sec.AdminsNeedGrant {
+				held = u.HasGrant(auth.Permission(sec.Permission))
+			}
+			if !held {
+				continue
+			}
 		}
 		prefix := SectionPathPrefix + "/" + sec.Path
 		links = append(links, navLink{
@@ -705,6 +711,18 @@ func (td templateData) Can(perm string) bool {
 // should render ticked — the form user (not the viewer) holds it.
 func (td templateData) GrantChecked(key string) bool {
 	return td.FormUser != nil && slices.Contains(td.FormUser.Permissions, auth.Permission(key))
+}
+
+// MayGrant reports whether the viewer may change the grant checkbox for
+// a declared permission — the render-side face of mergeGrants: what they
+// hold they may give, and for a grant that binds admins too, holding
+// means the explicit grant, so an admin switched out of a section finds
+// the box disabled rather than a tick that silently does not stick.
+func (td templateData) MayGrant(d PermissionDef) bool {
+	if d.AdminsNeedGrant {
+		return td.User.HasGrant(d.Key)
+	}
+	return td.User.Can(d.Key)
 }
 
 // IsDefaultLocale reports whether the form is on its default-locale tab,
