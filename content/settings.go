@@ -9,6 +9,10 @@ type SiteSettings struct {
 	MenuAlign string // "left", "center", "right", or "" (host default)
 	SiteName  string
 	LogoURL   string // "" = no logo
+	// FaviconURL is the site's browser-tab icon, emitted by cmsHead as
+	// <link rel="icon">. "" leaves the host template's own icon (or the
+	// browser's /favicon.ico guess) alone.
+	FaviconURL string
 	// LoginInNav adds a "Log in" link to {{cmsNav}} for visitors who
 	// aren't logged in, pointing at the admin login page.
 	LoginInNav bool
@@ -25,6 +29,7 @@ const (
 	settingMenuAlign  = "menu_align"
 	settingSiteName   = "site_name"
 	settingLogoURL    = "logo_url"
+	settingFaviconURL = "favicon_url"
 	settingLoginInNav = "login_in_nav"
 	settingSiteCSS    = "site_css"
 	settingSiteJS     = "site_js"
@@ -54,6 +59,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteName = v
 		case settingLogoURL:
 			out.LogoURL = v
+		case settingFaviconURL:
+			out.FaviconURL = v
 		case settingLoginInNav:
 			out.LoginInNav = v == "1"
 		case settingSiteCSS:
@@ -81,6 +88,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingMenuAlign:  in.MenuAlign,
 		settingSiteName:   in.SiteName,
 		settingLogoURL:    in.LogoURL,
+		settingFaviconURL: in.FaviconURL,
 		settingLoginInNav: loginInNav,
 		settingSiteCSS:    in.SiteCSS,
 		settingSiteJS:     in.SiteJS,

@@ -2614,6 +2614,18 @@
   // ../src/settings.js
   var ALIGNS = ["left", "center", "right"];
   function applySettings(s) {
+    var icon = document.querySelector("link[data-cms-favicon]");
+    if (s.faviconUrl) {
+      if (!icon) {
+        icon = document.createElement("link");
+        icon.rel = "icon";
+        icon.setAttribute("data-cms-favicon", "");
+        document.head.appendChild(icon);
+      }
+      icon.href = s.faviconUrl;
+    } else if (icon) {
+      icon.remove();
+    }
     document.querySelectorAll("nav[data-cms-menu]").forEach(function(nav) {
       ALIGNS.forEach(function(a) {
         nav.classList.remove("cms-nav-" + a);
@@ -2652,6 +2664,13 @@
       ];
       if (mediaEnabled) {
         fields.push({ id: "logo", label: "Logo", type: "image", value: s.logoUrl });
+        fields.push({
+          id: "favicon",
+          label: "Favicon",
+          type: "image",
+          value: s.faviconUrl,
+          prefer: "original"
+        });
       }
       fields.push({
         id: "menuAlign",
@@ -2681,6 +2700,7 @@
           menuAlign: values.menuAlign,
           siteName: values.siteName.trim(),
           logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
+          faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
           loginInNav: values.loginInNav === "1",
           // Site-wide CSS/JS has its own editor (wrench → Site
           // CSS & JS); carry the stored values through so this
@@ -3855,6 +3875,7 @@
             menuAlign: s.menuAlign,
             siteName: s.siteName,
             logoUrl: s.logoUrl,
+            faviconUrl: s.faviconUrl,
             loginInNav: s.loginInNav,
             siteCss: codeState.css,
             siteJs: codeState.js
@@ -4431,7 +4452,7 @@
     }
     choose.addEventListener("click", function() {
       openPicker("image", function(item2) {
-        dlgValues[f.id] = item2.web;
+        dlgValues[f.id] = f.prefer === "original" && item2.original || item2.web;
         dlgValues[f.id + "_id"] = item2.id || 0;
         show();
         dlgChanged();

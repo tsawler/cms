@@ -155,6 +155,7 @@ func TestSiteSettingsRoundTrip(t *testing.T) {
 			MenuAlign:  "center",
 			SiteName:   "Example Co",
 			LogoURL:    "/img/logo.svg",
+			FaviconURL: "/cms/media/abc123/original.png",
 			LoginInNav: true,
 			SiteCSS:    "body{margin:0}",
 			SiteJS:     "console.log('hi')",

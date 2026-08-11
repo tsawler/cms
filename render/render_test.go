@@ -1126,3 +1126,63 @@ func TestEmbedCode(t *testing.T) {
 		})
 	}
 }
+
+func TestFaviconLink(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"unset emits nothing", "", ""},
+		{"uploaded png", "/cms/media/abc123/original.png",
+			`<link rel="icon" data-cms-favicon href="/cms/media/abc123/original.png" type="image/png">` + "\n"},
+		{"uploaded svg", "/cms/media/abc123/web.svg",
+			`<link rel="icon" data-cms-favicon href="/cms/media/abc123/web.svg" type="image/svg+xml">` + "\n"},
+		{"external https", "https://cdn.example.com/icon.ico",
+			`<link rel="icon" data-cms-favicon href="https://cdn.example.com/icon.ico" type="image/x-icon">` + "\n"},
+		// A cache-busting query must not be read as the extension, and an
+		// unknown extension simply omits type= rather than guessing.
+		{"query ignored", "/icon.PNG?v=2",
+			`<link rel="icon" data-cms-favicon href="/icon.PNG?v=2" type="image/png">` + "\n"},
+		{"unknown extension omits type", "/favicon",
+			`<link rel="icon" data-cms-favicon href="/favicon">` + "\n"},
+		// ValidBackgroundURL rejects anything that could break out of the
+		// attribute or smuggle a script in.
+		{"javascript scheme rejected", "javascript:alert(1)", ""},
+		{"data url rejected", "data:image/svg+xml,<svg/>", ""},
+		{"quote rejected", `/a".png`, ""},
+		{"relative without slash rejected", "icon.png", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := faviconLink(tt.url); got != tt.want {
+				t.Errorf("faviconLink(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderEmitsSiteFavicon(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+
+	var buf bytes.Buffer
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Site: content.SiteSettings{
+		FaviconURL: "/cms/media/abc123/original.png",
+	}}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if want := `<link rel="icon" data-cms-favicon href="/cms/media/abc123/original.png" type="image/png">`; !strings.Contains(buf.String(), want) {
+		t.Errorf("favicon link missing from head:\n%s", buf.String())
+	}
+
+	// With no favicon stored the CMS stays out of the way, leaving the
+	// host template's own icon (or the browser's guess) in charge.
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Locale: "en"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(buf.String(), `rel="icon"`) {
+		t.Errorf("unset favicon should emit no link:\n%s", buf.String())
+	}
+}

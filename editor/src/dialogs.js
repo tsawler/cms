@@ -293,7 +293,11 @@ function buildImageField(wrap, f) {
         // The media picker opens above the dialog; the dialog stays put
         // and shows the chosen image when the picker closes.
         openPicker("image", function (item) {
-            dlgValues[f.id] = item.web;
+            // The web rendition is a downscaled, lossy WebP — right for
+            // an image placed on a page, wrong for a field that wants the
+            // file as uploaded (the favicon). f.prefer picks the other.
+            // SVGs are unaffected: every rendition of one is the SVG.
+            dlgValues[f.id] = (f.prefer === "original" && item.original) || item.web;
             dlgValues[f.id + "_id"] = item.id || 0;
             show();
             dlgChanged();

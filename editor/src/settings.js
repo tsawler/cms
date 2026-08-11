@@ -13,11 +13,27 @@ import { openDialog } from "./dialogs.js";
 var ALIGNS = ["left", "center", "right"];
 
 // applySettings updates the current page in place: alignment classes on
-// every {{cmsNav}} nav, and each {{cmsBrand}} span's logo and text. The
-// alignment class lives on the nav element itself, which menu.js's
-// re-renders preserve. A brand cleared of both logo and text falls back
-// to the template's data-cms-default fallback, matching the server.
+// every {{cmsNav}} nav, each {{cmsBrand}} span's logo and text, and the
+// favicon link {{cmsHead}} emitted. The alignment class lives on the nav
+// element itself, which menu.js's re-renders preserve. A brand cleared
+// of both logo and text falls back to the template's data-cms-default
+// fallback, matching the server.
 function applySettings(s) {
+    // Only the CMS's own link is touched — clearing the favicon leaves a
+    // host template's icon alone, exactly as the server would. Browsers
+    // cache favicons hard, so the tab may not repaint until a reload.
+    var icon = document.querySelector("link[data-cms-favicon]");
+    if (s.faviconUrl) {
+        if (!icon) {
+            icon = document.createElement("link");
+            icon.rel = "icon";
+            icon.setAttribute("data-cms-favicon", "");
+            document.head.appendChild(icon);
+        }
+        icon.href = s.faviconUrl;
+    } else if (icon) {
+        icon.remove();
+    }
     document.querySelectorAll("nav[data-cms-menu]").forEach(function (nav) {
         ALIGNS.forEach(function (a) { nav.classList.remove("cms-nav-" + a); });
         if (ALIGNS.indexOf(s.menuAlign) !== -1) nav.classList.add("cms-nav-" + s.menuAlign);
@@ -50,6 +66,11 @@ export function openSiteSettings() {
         ];
         if (mediaEnabled) {
             fields.push({ id: "logo", label: "Logo", type: "image", value: s.logoUrl });
+            // The favicon wants the file as uploaded, not the lossy web
+            // rendition — a browser tab renders it at 16px and the
+            // library's WebP re-encode buys nothing there.
+            fields.push({ id: "favicon", label: "Favicon", type: "image",
+                value: s.faviconUrl, prefer: "original" });
         }
         fields.push({ id: "menuAlign", label: "Menu alignment", type: "select", value: s.menuAlign,
             options: [
@@ -66,12 +87,13 @@ export function openSiteSettings() {
             fields: fields,
         }).then(function (values) {
             if (!values) return;
-            // The logo field is absent when media is disabled; keep the
-            // stored URL rather than wiping it.
+            // The logo and favicon fields are absent when media is
+            // disabled; keep the stored URLs rather than wiping them.
             var next = {
                 menuAlign: values.menuAlign,
                 siteName: values.siteName.trim(),
                 logoUrl: values.logo !== undefined ? values.logo : (s.logoUrl || ""),
+                faviconUrl: values.favicon !== undefined ? values.favicon : (s.faviconUrl || ""),
                 loginInNav: values.loginInNav === "1",
                 // Site-wide CSS/JS has its own editor (wrench → Site
                 // CSS & JS); carry the stored values through so this

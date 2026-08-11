@@ -1821,13 +1821,18 @@ func localeLinks(in Input) []LocaleLink {
 }
 
 // headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
-// small stylesheet (button hover), the generated content-CSS link (when
-// the Tailwind rebuild feature is active), hreflang alternates on
-// multi-locale sites, the page's meta description, and its per-page CSS.
-// HeadCSS is written raw; editing it is restricted to admins.
+// small stylesheet (button hover), the site's favicon, the generated
+// content-CSS link (when the Tailwind rebuild feature is active),
+// hreflang alternates on multi-locale sites, the page's meta
+// description, and its per-page CSS. HeadCSS is written raw; editing it
+// is restricted to admins.
 func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
+	// The stored favicon, when there is one. Nothing is emitted otherwise,
+	// so a host template's own <link rel="icon"> — or the browser's
+	// /favicon.ico guess — keeps working until someone sets one here.
+	sb.WriteString(faviconLink(in.Site.FaviconURL))
 	// hreflang alternates need absolute URLs, so they require BaseURL.
 	if in.BaseURL != "" && len(in.Locales) > 1 {
 		for _, l := range localeLinks(in) {
@@ -1856,6 +1861,44 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	sb.WriteString(embedCode(in.Site.SiteCSS, "style", styleCloseRe))
 	sb.WriteString(embedCode(p.HeadCSS, "style", styleCloseRe))
 	return template.HTML(sb.String())
+}
+
+// faviconMimes maps a favicon's extension to the type= browsers use to
+// pick between several icons. An extension not listed — or none at all,
+// as with a URL that ends in a path segment — simply omits the
+// attribute, which browsers handle by sniffing the response.
+var faviconMimes = map[string]string{
+	".svg":  "image/svg+xml",
+	".png":  "image/png",
+	".webp": "image/webp",
+	".gif":  "image/gif",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".ico":  "image/x-icon",
+}
+
+// faviconLink renders the stored site favicon as a <link rel="icon">.
+// The URL is checked the way the logo's is — an http(s) or site-relative
+// address with no characters that could break out of the attribute — and
+// an empty or rejected value emits nothing at all.
+func faviconLink(raw string) string {
+	href := ValidBackgroundURL(raw)
+	if href == "" {
+		return ""
+	}
+	// data-cms-favicon marks this link as the CMS's own, so the site
+	// settings dialog can swap it in place and knows not to disturb a
+	// host template's icon.
+	link := `<link rel="icon" data-cms-favicon href="` + html.EscapeString(href) + `"`
+	// The extension lives in the path, not the query or fragment: an
+	// uploaded icon is served from /cms/media/<id>/original.png, and a
+	// host may cache-bust an external one with ?v=2.
+	if u, err := url.Parse(href); err == nil {
+		if mime, ok := faviconMimes[strings.ToLower(path.Ext(u.Path))]; ok {
+			link += ` type="` + mime + `"`
+		}
+	}
+	return link + ">\n"
 }
 
 // A literal closing tag inside wrapped plain code would end the wrapper

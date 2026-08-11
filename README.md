@@ -141,7 +141,7 @@ UI discovers them automatically:
 <div>{{cmsShared "footer"}}</div>       <!-- rich HTML shared by every page -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
 {{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
-<head> ... {{cmsHead}} ... </head>      <!-- meta description + per-page CSS -->
+<head> ... {{cmsHead}} ... </head>      <!-- meta description, favicon, per-page CSS -->
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
 
@@ -1055,12 +1055,12 @@ the admin's Pages list and is not reachable as a URL. That is what lets
 shared content reuse drafts, publishing, sanitization, and locales
 unchanged.
 
-## Site settings: brand & menu alignment
+## Site settings: brand, favicon & menu alignment
 
 The wrench menu's **Site settings** entry lets editors set the site
-name, an optional logo, and the nav's alignment without touching
-templates. Put `{{cmsBrand "Fallback Name"}}` where your header shows
-the brand (typically inside your logo link):
+name, an optional logo, a favicon, and the nav's alignment without
+touching templates. Put `{{cmsBrand "Fallback Name"}}` where your header
+shows the brand (typically inside your logo link):
 
 ```html
 <a href="/">{{cmsBrand "Example Site"}}</a>
@@ -1072,6 +1072,15 @@ and/or the stored site name (`span.cms-brand-text`). Save a logo and
 clear the name for a logo-only brand; the fallback argument shows until
 either is set. Saves are live immediately — like menus, there is no
 draft state.
+
+The favicon is picked from the media library — PNG, JPEG, GIF, WebP, or
+SVG, whichever you uploaded, unmodified rather than re-encoded — and
+`{{cmsHead}}` emits it as `<link rel="icon">` on every page. It is the
+one image field that uses the original file instead of the library's
+downscaled web rendition, since a browser tab paints it at 16px and a
+lossy re-encode buys nothing there. Leave it unset and the CMS emits
+nothing at all, so a `<link rel="icon">` in your own `base.gohtml` (or
+the browser's `/favicon.ico` guess) keeps working.
 
 Menu alignment (left / center / right) adds a `cms-nav-left` /
 `cms-nav-center` / `cms-nav-right` class to `cmsNav` markup, which makes

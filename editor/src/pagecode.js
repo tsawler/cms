@@ -193,7 +193,7 @@ export function initPageCode() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ menuAlign: s.menuAlign,
                         siteName: s.siteName, logoUrl: s.logoUrl,
-                        loginInNav: s.loginInNav,
+                        faviconUrl: s.faviconUrl, loginInNav: s.loginInNav,
                         siteCss: codeState.css, siteJs: codeState.js }),
                 });
             })

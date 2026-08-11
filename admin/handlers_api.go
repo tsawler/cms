@@ -502,6 +502,7 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		"menuAlign":  site.MenuAlign,
 		"siteName":   site.SiteName,
 		"logoUrl":    site.LogoURL,
+		"faviconUrl": site.FaviconURL,
 		"loginInNav": site.LoginInNav,
 		"siteCss":    site.SiteCSS,
 		"siteJs":     site.SiteJS,
@@ -517,12 +518,13 @@ const maxSiteCodeLen = 100_000
 // written raw into every page, so only admins may change it — a non-admin
 // editor's request keeps whatever is already stored.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "loginInNav", "siteCss", "siteJs"}
+// "faviconUrl", "loginInNav", "siteCss", "siteJs"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
 		SiteName   string `json:"siteName"`
 		LogoURL    string `json:"logoUrl"`
+		FaviconURL string `json:"faviconUrl"`
 		LoginInNav bool   `json:"loginInNav"`
 		SiteCSS    string `json:"siteCss"`
 		SiteJS     string `json:"siteJs"`
@@ -548,6 +550,11 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The logo needs to be an uploaded image or a web address."))
 		return
 	}
+	favicon := strings.TrimSpace(body.FaviconURL)
+	if !validImageURL(favicon) {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The favicon needs to be an uploaded image or a web address."))
+		return
+	}
 	// Site-wide CSS/JS is injected raw, so it stays admin-only just like
 	// per-page code. Non-admins can still change the other settings; their
 	// request carries the stored code through unchanged.
@@ -568,6 +575,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		MenuAlign:  body.MenuAlign,
 		SiteName:   name,
 		LogoURL:    logo,
+		FaviconURL: favicon,
 		LoginInNav: body.LoginInNav,
 		SiteCSS:    css,
 		SiteJS:     js,

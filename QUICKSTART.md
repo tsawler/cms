@@ -199,7 +199,7 @@ The functions available in every template:
 | `{{cmsPagination $feed}}` | a ready-made Previous / 1 2 3 / Next bar |
 | `{{cmsDate .PublishedAt}}` | a date in the page's language ("30 juillet 2026") |
 | `{{cmsLocales}}` | language-switcher links (multi-locale sites) |
-| `{{cmsHead}}` | meta description, per-page CSS, hreflang — put in `<head>` |
+| `{{cmsHead}}` | meta description, favicon, per-page CSS, hreflang — put in `<head>` |
 | `{{cmsScripts}}` | per-page JS — put before `</body>` |
 
 The dot (`.`) each page template receives carries `.Title`,
