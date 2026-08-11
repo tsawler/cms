@@ -224,10 +224,6 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/login", http.StatusSeeOther)
 }
 
-func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusOK, "dashboard", s.newTemplateData(r))
-}
-
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

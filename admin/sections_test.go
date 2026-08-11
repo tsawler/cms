@@ -1,7 +1,11 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"html/template"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +21,8 @@ func TestValidateSections(t *testing.T) {
 		{Path: "reports", Handler: noopHandler},
 		{Path: "site-stats_v1.2~x", Handler: noopHandler},
 		{Path: "inventory", NavLabel: "Inventory", NavAfter: "dashboard", Handler: noopHandler},
+		{Path: "carded", NavLabel: "Carded", Dashboard: &DashboardCard{Description: "d"}, Handler: noopHandler},
+		{Path: "titled", Dashboard: &DashboardCard{Title: "Titled"}, Handler: noopHandler},
 	}
 	if err := ValidateSections(valid); err != nil {
 		t.Errorf("valid sections rejected: %v", err)
@@ -37,6 +43,7 @@ func TestValidateSections(t *testing.T) {
 		"grant-gated without permission": {{Path: "x", AdminsNeedGrant: true, Handler: noopHandler}},
 		"unknown NavAfter anchor":        {{Path: "x", NavAfter: "reports", Handler: noopHandler}},
 		"section path as NavAfter":       {{Path: "x", NavAfter: "x", Handler: noopHandler}},
+		"untitled dashboard card":        {{Path: "x", Dashboard: &DashboardCard{Description: "d"}, Handler: noopHandler}},
 	}
 	for name, sections := range bad {
 		if err := ValidateSections(sections); err == nil {
@@ -47,7 +54,8 @@ func TestValidateSections(t *testing.T) {
 
 func TestNavSectionsFor(t *testing.T) {
 	sections := []Section{
-		{Path: "reports", NavLabel: "Reports", NavAfter: "dashboard", Confirm: "Run the report?", Handler: noopHandler},
+		{Path: "reports", NavLabel: "Reports", NavAfter: "dashboard", Confirm: "Run the report?",
+			NavCount: func(context.Context) (int, error) { return 7, nil }, Handler: noopHandler},
 		{Path: "hidden", Handler: noopHandler}, // no NavLabel: never in the nav
 		{Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: noopHandler},
 	}
@@ -60,6 +68,9 @@ func TestNavSectionsFor(t *testing.T) {
 	}
 	if editor[0].After != "dashboard" {
 		t.Errorf("After = %q, want the section's NavAfter carried through", editor[0].After)
+	}
+	if !editor[0].HasCount || editor[0].count == nil {
+		t.Errorf("HasCount = %v, count nil = %v; want the section's NavCount carried through", editor[0].HasCount, editor[0].count == nil)
 	}
 	if editor[0].Confirm != "Run the report?" {
 		t.Errorf("Confirm = %q, want the section's message carried through", editor[0].Confirm)
@@ -176,6 +187,28 @@ func TestSectionHandlerPaths(t *testing.T) {
 	}
 }
 
+// fillNavCounts must store each counting link's number and, on a failed
+// count, log and leave zero — the built-in counts' contract.
+func TestFillNavCounts(t *testing.T) {
+	s := &server{deps: Deps{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}}
+	links := []navLink{
+		{Label: "Inventory", HasCount: true, count: func(context.Context) (int, error) { return 42, nil }},
+		{Label: "Stickers"}, // no NavCount: untouched
+		{Label: "Broken", HasCount: true, count: func(context.Context) (int, error) { return 9, errors.New("boom") }},
+	}
+	s.fillNavCounts(context.Background(), links)
+
+	if links[0].Count != 42 {
+		t.Errorf("Inventory count = %d, want 42", links[0].Count)
+	}
+	if links[1].HasCount || links[1].Count != 0 {
+		t.Errorf("countless link = %+v, want untouched", links[1])
+	}
+	if !links[2].HasCount || links[2].Count != 0 {
+		t.Errorf("failed count link = %+v, want HasCount with zero", links[2])
+	}
+}
+
 // A section's NavAfter must place its link directly under the named
 // built-in sidebar entry, in registration order; sections without one
 // keep the trailing position, after the built-in entries.
@@ -191,7 +224,7 @@ func TestNavAfterPlacement(t *testing.T) {
 		User:         &auth.User{Name: "Pat", Role: auth.RoleSuperadmin},
 		PagesEnabled: true,
 		NavSections: []navLink{
-			{URL: "/admin/x/inventory/", Label: "Inventory", After: "dashboard"},
+			{URL: "/admin/x/inventory/", Label: "Inventory", After: "dashboard", HasCount: true, Count: 42},
 			{URL: "/admin/x/stickers/", Label: "Stickers", After: "dashboard"},
 			{URL: "/admin/x/exports/", Label: "Exports", After: "media"},
 			{URL: "/admin/x/reports/", Label: "Reports"},
@@ -218,6 +251,15 @@ func TestNavAfterPlacement(t *testing.T) {
 			t.Errorf("sidebar order wrong: %q appears before the entry preceding it in %v", label, order)
 		}
 		last = i
+	}
+
+	// A counting link gets the built-in entries' leader and number; a
+	// countless one stays a bare label.
+	if !strings.Contains(html, `>Inventory</span><span class="cms-nav-leader"></span><span class="cms-nav-count">42</span>`) {
+		t.Errorf("Inventory link missing its leader and count:\n%s", html)
+	}
+	if !strings.Contains(html, `>Stickers</span></a>`) {
+		t.Errorf("Stickers link should have no leader or count:\n%s", html)
 	}
 }
 

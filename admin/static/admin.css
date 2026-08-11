@@ -195,6 +195,88 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
     color: var(--cms-spruce);
 }
 .cms-card-disabled { opacity: .55; }
+/* The card's dynamic freshness line — brass, like the status stamps,
+   so it reads as "worth a look" against the muted description. */
+.cms-card .cms-card-note {
+    margin-top: .45rem;
+    color: var(--cms-brass);
+    font-size: .8rem;
+    font-weight: 600;
+}
+
+/* Dashboard traffic chart. Geometry lives in the SVG's attributes (the
+   CSP allows no inline styles); everything painterly lives here. */
+.cms-traffic { margin-top: 2.25rem; }
+.cms-traffic h2 { margin-bottom: .2rem; }
+.cms-traffic > .cms-muted { font-size: .86rem; margin: 0; }
+.cms-traffic-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem 2.5rem;
+    align-items: flex-start;
+    margin-top: 1rem;
+    max-width: 62rem;
+}
+.cms-traffic-chart {
+    display: block;
+    flex: 1 1 26rem;
+    min-width: 0;
+    max-width: 46rem;
+    height: auto;
+}
+/* The week's busiest paths, with the sidebar's leader-line look. */
+.cms-traffic-top { flex: 0 1 16rem; min-width: 13rem; }
+.cms-traffic-top h3 {
+    margin: 0 0 .4rem;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--cms-muted);
+}
+.cms-traffic-top ul { list-style: none; margin: 0; padding: 0; }
+.cms-traffic-top li {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    padding: .28rem 0;
+}
+.cms-traffic-top li::after {
+    content: "";
+    order: 2;
+    flex: 1;
+    border-bottom: 1px dotted var(--cms-fog);
+}
+.cms-traffic-top a {
+    order: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--cms-ink);
+    text-decoration: none;
+    font-size: .86rem;
+}
+.cms-traffic-top a:hover { color: var(--cms-spruce); text-decoration: underline; }
+.cms-traffic-top li span {
+    order: 3;
+    font-family: var(--cms-mono);
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--cms-spruce);
+}
+.cms-traffic-bar { fill: var(--cms-spruce); }
+.cms-traffic-col:hover .cms-traffic-bar { fill: var(--cms-spruce-hover); }
+.cms-traffic-grid { stroke: var(--cms-fog); stroke-width: 1; stroke-dasharray: 3 3; }
+.cms-traffic-axis { stroke: var(--cms-fog); stroke-width: 1; }
+.cms-traffic-tick, .cms-traffic-day, .cms-traffic-count {
+    font-family: var(--cms-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    fill: var(--cms-muted);
+}
+.cms-traffic-count { fill: var(--cms-ink); }
+.cms-traffic-empty { margin-top: 1rem; }
 
 /* Buttons */
 .cms-btn {

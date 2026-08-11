@@ -47,6 +47,15 @@ type Section struct {
 	// is hidden from the user. Ignored when NavLabel is empty.
 	NavAfter string
 
+	// NavCount, when non-nil, supplies the number shown beside the nav
+	// link, with the same leader line and count style as the built-in
+	// entries ("Inventory ····· 42"). Called with the request context on
+	// every admin page render whose sidebar shows the link, so it should
+	// be a cheap query — the built-in counts run the same way. An error
+	// is logged and the count renders as zero, exactly as a failed
+	// built-in count does. Ignored when NavLabel is empty.
+	NavCount func(ctx context.Context) (int, error)
+
 	// Confirm, when non-empty, makes the nav link ask before it
 	// navigates: clicking it opens the admin's shared confirmation
 	// dialog with this message ("Question? Detail." — the question
@@ -74,6 +83,13 @@ type Section struct {
 	// Permission to be set.
 	AdminsNeedGrant bool
 
+	// Dashboard, when non-nil, puts a card for this section on the admin
+	// dashboard, linking to the section root. Host cards render ahead of
+	// the built-in cards (which are superadmin-only), in registration
+	// order, and a card is shown exactly when the section's nav link
+	// would be: AdminOnly, Permission, and AdminsNeedGrant all apply.
+	Dashboard *DashboardCard
+
 	// Handler serves the section's requests. The mount prefix is
 	// stripped: it sees "/" at the section root and may serve its own
 	// sub-routes and static assets beneath it. Requests only reach the
@@ -81,6 +97,34 @@ type Section struct {
 	// have already passed CSRF validation — forms need only include
 	// CSRFToken(r) as the csrf_token field.
 	Handler http.Handler
+}
+
+// DashboardCard is a section's card on the admin dashboard: a heading, a
+// one-line description, and a number. The number is the card's point — a
+// dashboard answers "what needs my attention?", so give it the count that
+// asks for attention (items pending, unread submissions), which is not
+// always the nav link's "how many are there".
+type DashboardCard struct {
+	// Title is the card's heading. Empty uses the section's NavLabel;
+	// one of the two must be set.
+	Title string
+
+	// Description is the card's one-line explanation, shown under the
+	// title. Host text, rendered as-is.
+	Description string
+
+	// Count supplies the card's number. Called once per dashboard render
+	// with the request context; an error is logged and the count renders
+	// as zero, exactly as a failed NavCount does. Nil falls back to the
+	// section's NavCount, and a card with neither shows no number.
+	Count func(ctx context.Context) (int, error)
+
+	// Note, when non-nil, supplies a short dynamic line rendered under
+	// the description — the card's freshness or urgency in the host's
+	// words ("Oldest unhandled: 2 days"). Called once per dashboard
+	// render; returning "" shows nothing, and an error is logged and
+	// shows nothing, so a note never blocks the page.
+	Note func(ctx context.Context) (string, error)
 }
 
 // PermissionDef declares a custom permission to the admin so the user
@@ -173,6 +217,9 @@ func ValidateSections(sections []Section) error {
 		}
 		if sec.NavAfter != "" && !navAnchors[sec.NavAfter] {
 			return fmt.Errorf("cms: admin section %q NavAfter %q is not a built-in nav entry (dashboard, pages, posts, media, snippets, users)", sec.Path, sec.NavAfter)
+		}
+		if sec.Dashboard != nil && sec.Dashboard.Title == "" && sec.NavLabel == "" {
+			return fmt.Errorf("cms: admin section %q has a Dashboard card with no Title and no NavLabel to fall back on", sec.Path)
 		}
 	}
 	return nil

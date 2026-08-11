@@ -497,6 +497,12 @@ type templateData struct {
 	// pages, which carry their own Active flag).
 	NavCounts  navCounts
 	NavCurrent string
+
+	// Dashboard page only: the host sections' cards and the public
+	// site's seven-day traffic chart. Filled by the dashboard handler
+	// alone, so their queries run nowhere else.
+	DashCards []dashCard
+	Traffic   *trafficChart
 }
 
 // Abs makes a site-relative URL absolute against the site's public base,
@@ -521,12 +527,19 @@ func (td templateData) Abs(u string) string {
 // Confirm carries the section's Confirm message; non-empty means the
 // link asks (via the shared dialog) before the browser follows it.
 // After is the section's NavAfter anchor; the layout groups links by it.
+// HasCount marks a link whose section supplies a NavCount, so the
+// layout gives it the built-in entries' leader line and number; Count
+// is filled per render by fillNavCounts.
 type navLink struct {
-	URL     string
-	Label   string
-	Confirm string
-	After   string
-	Active  bool
+	URL      string
+	Label    string
+	Confirm  string
+	After    string
+	Active   bool
+	HasCount bool
+	Count    int
+
+	count func(context.Context) (int, error)
 }
 
 // NavSectionsAt returns the host-registered nav links anchored after the
@@ -608,6 +621,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.User, r.URL.Path)
 	if td.User != nil {
 		td.NavCounts = s.navCounts(r, td.User)
+		s.fillNavCounts(r.Context(), td.NavSections)
 		td.NavCurrent = navCurrent(r.URL.Path)
 	}
 	// Inside a host section, the mount prefix has been stripped, so the
@@ -629,28 +643,58 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath string) []navLink {
 	var links []navLink
 	for _, sec := range sections {
-		if sec.NavLabel == "" || (sec.AdminOnly && (u == nil || !u.Role.IsAdmin())) {
+		if sec.NavLabel == "" || !sectionVisibleTo(sec, u) {
 			continue
-		}
-		if sec.Permission != "" {
-			held := u.Can(auth.Permission(sec.Permission))
-			if sec.AdminsNeedGrant {
-				held = u.HasGrant(auth.Permission(sec.Permission))
-			}
-			if !held {
-				continue
-			}
 		}
 		prefix := SectionPathPrefix + "/" + sec.Path
 		links = append(links, navLink{
-			URL:     adminPath + prefix + "/",
-			Label:   sec.NavLabel,
-			Confirm: sec.Confirm,
-			After:   sec.NavAfter,
-			Active:  reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
+			URL:      adminPath + prefix + "/",
+			Label:    sec.NavLabel,
+			Confirm:  sec.Confirm,
+			After:    sec.NavAfter,
+			Active:   reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
+			HasCount: sec.NavCount != nil,
+			count:    sec.NavCount,
 		})
 	}
 	return links
+}
+
+// sectionVisibleTo reports whether the user may see the section — the one
+// answer behind both its nav link and its dashboard card. It mirrors what
+// sectionHandler enforces: AdminOnly first, then Permission, which reads
+// as an explicit grant when AdminsNeedGrant is set. Can and HasGrant are
+// nil-safe, so the login page's nil user simply sees nothing gated.
+func sectionVisibleTo(sec Section, u *auth.User) bool {
+	if sec.AdminOnly && (u == nil || !u.Role.IsAdmin()) {
+		return false
+	}
+	if sec.Permission != "" {
+		if sec.AdminsNeedGrant {
+			return u.HasGrant(auth.Permission(sec.Permission))
+		}
+		return u.Can(auth.Permission(sec.Permission))
+	}
+	return true
+}
+
+// fillNavCounts runs each visible section link's NavCount and stores the
+// result on the link, mirroring the built-in counts' contract: a failed
+// count is logged and rendered as zero rather than failing the page.
+// Only called with a logged-in user — the sidebar doesn't render without
+// one, so the login page never runs host queries.
+func (s *server) fillNavCounts(ctx context.Context, links []navLink) {
+	for i := range links {
+		if links[i].count == nil {
+			continue
+		}
+		n, err := links[i].count(ctx)
+		if err != nil {
+			s.deps.Logger.Error("cms admin: counting section items", "section", links[i].Label, "err", err)
+			continue
+		}
+		links[i].Count = n
+	}
 }
 
 // navCurrent names the built-in sidebar entry a request path (within the

@@ -154,6 +154,22 @@ var frStrings = map[string]string{
 	"Public Site": "Site public",
 	"Log out":     "Se déconnecter",
 
+	// Dashboard traffic chart. The three-letter weekday keys are what
+	// time.Weekday's English names shorten to; the chart looks its
+	// labels up by them.
+	"Traffic":   "Achalandage",
+	"Top pages": "Pages les plus vues",
+	"Page views on the public site over the last seven days.":                   "Pages vues sur le site public au cours des sept derniers jours.",
+	"No page views recorded yet. Counting starts with the site's next visitor.": "Aucune page vue enregistrée pour l'instant. Le décompte commence avec le prochain visiteur du site.",
+	"page views": "pages vues",
+	"Mon":        "lun.",
+	"Tue":        "mar.",
+	"Wed":        "mer.",
+	"Thu":        "jeu.",
+	"Fri":        "ven.",
+	"Sat":        "sam.",
+	"Sun":        "dim.",
+
 	// Login page and handler.
 	"Log in":      "Se connecter",
 	"Email":       "Courriel",

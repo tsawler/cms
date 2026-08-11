@@ -5,32 +5,42 @@
 <p class="cms-muted">{{.T "Welcome back,"}} {{.User.Name}}.</p>
 
 <div class="cms-cards">
-    {{if and .PagesEnabled .IsSuperadmin}}
+    {{- /* Host section cards come first: they are the deployment's own
+         work, and for most users they are the whole dashboard. */ -}}
+    {{range .DashCards}}
+    <a class="cms-card" href="{{.URL}}">
+        {{if .HasCount}}<span class="cms-card-count">{{.Count}}</span>{{end}}
+        <h2>{{.Title}}</h2>
+        <p>{{.Description}}</p>
+        {{if .Note}}<p class="cms-card-note">{{.Note}}</p>{{end}}
+    </a>
+    {{end}}
+    {{- /* The built-in content cards are site plumbing — superadmin
+         territory. Editors reach Blog & News below; everything else
+         they touch in place on the public site. */ -}}
+    {{if .IsSuperadmin}}
+    {{if .PagesEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/pages">
         <span class="cms-card-count">{{.NavCounts.Pages}}</span>
         <h2>{{.T "Pages"}}</h2>
         <p>{{.T "Create and edit the pages on your site."}}</p>
     </a>
-    {{else if not .PagesEnabled}}
-    <div class="cms-card cms-card-disabled">
-        <h2>{{.T "Pages"}}</h2>
-        <p>{{.T "Not configured — the host application must set TemplateFS and PageTemplates."}}</p>
-    </div>
-    {{end}}
-    {{if and .PagesEnabled .IsSuperadmin}}
     <a class="cms-card" href="{{.AdminPath}}/snippets">
         <span class="cms-card-count">{{.NavCounts.Snippets}}</span>
         <h2>{{.T "Snippets"}}</h2>
         <p>{{.T "Ready-made blocks editors can drop into pages."}}</p>
     </a>
+    {{else}}
+    <div class="cms-card cms-card-disabled">
+        <h2>{{.T "Pages"}}</h2>
+        <p>{{.T "Not configured — the host application must set TemplateFS and PageTemplates."}}</p>
+    </div>
     {{end}}
-    {{if .Can "users"}}
     <a class="cms-card" href="{{.AdminPath}}/users">
         <span class="cms-card-count">{{.NavCounts.Users}}</span>
         <h2>{{.T "Users"}}</h2>
         <p>{{.T "Add and manage the people who can edit this site."}}</p>
     </a>
-    {{end}}
     {{if .MediaEnabled}}
     <a class="cms-card" href="{{.AdminPath}}/media">
         <span class="cms-card-count">{{.NavCounts.Media}}</span>
@@ -43,17 +53,59 @@
         <p>{{.T "Not configured — the host application must set Config.S3."}}</p>
     </div>
     {{end}}
+    {{end}}
     {{if and .PostsEnabled (or (.Can "blogs") (.Can "news"))}}
     <a class="cms-card" href="{{.AdminPath}}/posts">
         <span class="cms-card-count">{{.NavCounts.Posts}}</span>
         <h2>{{.T "Blog & News"}}</h2>
         <p>{{.T "Write and publish blog posts and news items."}}</p>
     </a>
-    {{else if not .PostsEnabled}}
+    {{else if and (not .PostsEnabled) .IsSuperadmin}}
     <div class="cms-card cms-card-disabled">
         <h2>{{.T "Blog & News"}}</h2>
         <p>{{.T "Not configured — the host application must set Config.PostTemplate."}}</p>
     </div>
     {{end}}
 </div>
+
+{{with .Traffic}}
+<section class="cms-traffic">
+    <h2>{{$.T "Traffic"}}</h2>
+    <p class="cms-muted">{{$.T "Page views on the public site over the last seven days."}}</p>
+    {{if .HasViews}}
+    <div class="cms-traffic-body">
+    <svg class="cms-traffic-chart" viewBox="0 0 {{.ViewW}} {{.ViewH}}" role="img"
+         aria-label="{{$.T "Page views on the public site over the last seven days."}}">
+        {{range .Ticks}}
+        <line class="cms-traffic-grid" x1="{{$.Traffic.PlotX}}" x2="{{$.Traffic.PlotX2}}" y1="{{.Y}}" y2="{{.Y}}"></line>
+        <text class="cms-traffic-tick" x="{{$.Traffic.TickX}}" y="{{.Y}}" text-anchor="end" dy="0.32em">{{.Label}}</text>
+        {{end}}
+        <line class="cms-traffic-axis" x1="{{.PlotX}}" x2="{{.PlotX2}}" y1="{{.Baseline}}" y2="{{.Baseline}}"></line>
+        <text class="cms-traffic-tick" x="{{.TickX}}" y="{{.Baseline}}" text-anchor="end" dy="0.32em">0</text>
+        {{range .Bars}}
+        <g class="cms-traffic-col">
+            <title>{{.Title}}</title>
+            <rect class="cms-traffic-hit" x="{{.HitX}}" y="{{.HitY}}" width="{{.HitW}}" height="{{.HitH}}" fill="transparent"></rect>
+            {{if .Path}}<path class="cms-traffic-bar" d="{{.Path}}"></path>{{end}}
+            {{if .ShowCount}}<text class="cms-traffic-count" x="{{.CountX}}" y="{{.CountY}}" text-anchor="middle">{{.Count}}</text>{{end}}
+            <text class="cms-traffic-day" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Label}}</text>
+        </g>
+        {{end}}
+    </svg>
+    {{if .TopPages}}
+    <div class="cms-traffic-top">
+        <h3>{{$.T "Top pages"}}</h3>
+        <ul>
+            {{range .TopPages}}
+            <li><a href="{{.Path}}" target="_blank" rel="noopener">{{.Path}}</a><span>{{.Views}}</span></li>
+            {{end}}
+        </ul>
+    </div>
+    {{end}}
+    </div>
+    {{else}}
+    <p class="cms-muted cms-traffic-empty">{{$.T "No page views recorded yet. Counting starts with the site's next visitor."}}</p>
+    {{end}}
+</section>
+{{end}}
 {{end}}

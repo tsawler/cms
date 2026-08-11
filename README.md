@@ -1287,6 +1287,25 @@ AdminSections: []cms.AdminSection{
   entries. Sections naming the same anchor keep their registration order
   — the wheels example anchors all six of its sections to `"dashboard"`,
   so the dealership's own tools top the sidebar.
+- **`NavCount`** — a `func(context.Context) (int, error)` supplying the
+  number beside the nav link, with the same leader line as the built-in
+  entries. Called on every admin page render, so keep it a cheap query;
+  an error is logged and renders as zero. Leave nil for no count — right
+  for links that trigger an action rather than open a list. The wheels
+  example counts its vehicles, active sales people and staff, leads, and
+  push-ready feeds this way (`navcounts.go`).
+- **`Dashboard`** — puts a card for the section on the admin dashboard,
+  ahead of the built-in cards, linking to the section root. A
+  `cms.DashboardCard` carries a `Title` (defaults to `NavLabel`), a
+  one-line `Description`, a `Count` func run once per dashboard render
+  (defaults to `NavCount`; the same error-renders-as-zero contract),
+  and an optional `Note` func supplying a short dynamic line under the
+  description — freshness or urgency in the host's words ("Oldest
+  undelivered: 2 days"; errors log and show nothing). Give the card the
+  number that asks for attention — the wheels example's Vehicles card
+  counts what still needs making ready, while its nav link counts the
+  whole lot. Visibility follows the section's own rules (`AdminOnly`,
+  `Permission`, `AdminsNeedGrant`).
 - **`AdminOnly`** — editors get 403 and no nav link.
 - **`Permission`** — restricts the section to users holding the named
   permission (see [Roles & permissions](#roles--permissions)). Naming a
@@ -1378,6 +1397,29 @@ data and break silently on upgrades). The supported paths are the
 existing configuration knobs (`Snippets`, `EditorStyles`,
 `SectionStyles`, ...) — and when those don't cover a need, a config
 option added to the CMS itself.
+
+## The dashboard
+
+The admin's landing page is built for the people who use it daily:
+
+- **Host section cards come first** — whatever the deployment registered
+  with `AdminSection.Dashboard` (above), visible by the section's own
+  permission rules. For most editors these cards *are* the dashboard.
+- **The built-in cards — Pages, Snippets, Users, Media — are
+  superadmin-only.** They are site plumbing; editors and admins do their
+  content work in place on the public site. **Blog & News** renders for
+  anyone holding a blogs or news grant.
+- **A traffic chart** shows the public site's page views for each of the
+  last seven days (UTC), for every logged-in user, with the week's five
+  most-viewed pages listed beside it.
+
+The traffic numbers come from the CMS itself: serving a page to an
+anonymous visitor upserts a per-day, per-path counter in
+`cms_page_views` — no cookies, no IPs, no user agents stored, so there
+is nothing here a privacy policy needs a section for. Logged-in CMS
+users aren't counted (staff aren't traffic), and neither are crawlers
+that identify themselves. `Migrate` prunes counters older than ninety
+days on every startup.
 
 ## Bot protection
 

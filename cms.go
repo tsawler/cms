@@ -97,6 +97,10 @@ type CaptchaConfig = captcha.Config
 // to integrate with the admin chrome.
 type AdminSection = admin.Section
 
+// DashboardCard puts a card for an admin section on the admin dashboard;
+// see admin.DashboardCard and AdminSection.Dashboard.
+type DashboardCard = admin.DashboardCard
+
 // PermissionDef declares a deployment-specific permission; see
 // admin.PermissionDef and Config.Permissions.
 type PermissionDef = admin.PermissionDef
@@ -383,6 +387,11 @@ type Config struct {
 	Logger *slog.Logger
 }
 
+// pageViewRetentionDays is how long the public site's daily page-view
+// counters are kept before Migrate prunes them: a season of history for
+// a dashboard that charts a week, at a negligible storage cost.
+const pageViewRetentionDays = 90
+
 // CMS is the root object of the module. Create one with New.
 type CMS struct {
 	cfg Config
@@ -653,6 +662,12 @@ func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]Pe
 // database already has.
 func (c *CMS) Migrate(ctx context.Context) error {
 	if err := migrations.Run(ctx, c.db, c.cfg.Logger); err != nil {
+		return err
+	}
+	// Traffic counters past their retention. Startup is the one moment
+	// every deployment reliably has, and a miss just waits for the next
+	// one — so pruning needs no scheduler of its own.
+	if err := c.content.PrunePageViews(ctx, time.Now().UTC().AddDate(0, 0, -pageViewRetentionDays)); err != nil {
 		return err
 	}
 	// Only for the store New built from Config.S3 — a host-supplied
@@ -1026,7 +1041,36 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		c.cfg.Logger.Error("cms: rendering page", "slug", slug, "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
 	}
+
+	// One page served to an ordinary visitor is one impression, counted
+	// after the response so the write never delays it. Logged-in CMS
+	// users are the site's staff, not its traffic, and crawlers that
+	// announce themselves aren't either. A failed write loses one count,
+	// which is not worth more than a log line.
+	if user == nil && r.Method == http.MethodGet && !likelyBot(r.UserAgent()) {
+		if err := c.content.RecordPageView(r.Context(), time.Now().UTC(), r.URL.Path); err != nil {
+			c.cfg.Logger.Error("cms: recording page view", "slug", slug, "err", err)
+		}
+	}
+}
+
+// likelyBot spots self-identifying crawlers by the words nearly all of
+// them carry in their user agent. It is a courtesy filter for the
+// dashboard's traffic chart, not bot defense: a crawler that pretends to
+// be a browser is counted, and that is fine at this stakes level.
+func likelyBot(ua string) bool {
+	if ua == "" {
+		return true
+	}
+	ua = strings.ToLower(ua)
+	for _, marker := range []string{"bot", "crawl", "spider", "slurp"} {
+		if strings.Contains(ua, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // requestFuncs asks the host to bind its template functions to this
