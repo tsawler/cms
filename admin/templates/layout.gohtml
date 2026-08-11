@@ -25,30 +25,33 @@
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
             <span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
+        {{- template "navsections" .NavSectionsAt "dashboard"}}
         {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "pages"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/pages">
             <span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
         {{end}}
+        {{- template "navsections" .NavSectionsAt "pages"}}
         {{if and .PostsEnabled (or (.Can "blogs") (.Can "news"))}}
         <a {{if eq .NavCurrent "posts"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/posts">
             <span class="cms-nav-label">{{.T "Blog & News"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Posts}}</span></a>
         {{end}}
+        {{- template "navsections" .NavSectionsAt "posts"}}
         {{if .MediaEnabled}}
         <a {{if eq .NavCurrent "media"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/media">
             <span class="cms-nav-label">{{.T "Media"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Media}}</span></a>
         {{end}}
+        {{- template "navsections" .NavSectionsAt "media"}}
         {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "snippets"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/snippets">
             <span class="cms-nav-label">{{.T "Snippets"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Snippets}}</span></a>
         {{end}}
+        {{- template "navsections" .NavSectionsAt "snippets"}}
         {{if .Can "users"}}
         <a {{if eq .NavCurrent "users"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/users">
             <span class="cms-nav-label">{{.T "Users"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Users}}</span></a>
         {{end}}
-        {{range .NavSections}}
-        <a {{if .Active}}class="cms-active" aria-current="page"{{end}}{{with .Confirm}} data-confirm="{{.}}"{{end}} href="{{.URL}}">
-            <span class="cms-nav-label">{{.Label}}</span></a>
-        {{end}}
+        {{- template "navsections" .NavSectionsAt "users"}}
+        {{- template "navsections" .NavSectionsAt ""}}
         <a href="/"><span class="cms-nav-label">{{.T "Public Site"}}</span></a>
     </nav>
     <div class="cms-sidebar-foot">
@@ -96,3 +99,9 @@
 {{end}}
 </body>
 </html>{{end}}
+{{- /* Host-registered section links for one sidebar position: the layout
+       renders this once per NavAfter anchor, so a section's link can sit
+       directly under the built-in entry its deployment names. */}}
+{{define "navsections"}}{{range .}}
+        <a {{if .Active}}class="cms-active" aria-current="page"{{end}}{{with .Confirm}} data-confirm="{{.}}"{{end}} href="{{.URL}}">
+            <span class="cms-nav-label">{{.Label}}</span></a>{{end}}{{end}}

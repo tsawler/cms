@@ -1281,6 +1281,12 @@ AdminSections: []cms.AdminSection{
   correctly.
 - **`NavLabel`** — adds a link to the admin top bar; leave empty for
   routable-but-unlisted pages.
+- **`NavAfter`** — places the nav link directly under a built-in sidebar
+  entry: `"dashboard"`, `"pages"`, `"posts"`, `"media"`, `"snippets"`, or
+  `"users"`. Leave empty for the default position, after the built-in
+  entries. Sections naming the same anchor keep their registration order
+  — the wheels example anchors all six of its sections to `"dashboard"`,
+  so the dealership's own tools top the sidebar.
 - **`AdminOnly`** — editors get 403 and no nav link.
 - **`Permission`** — restricts the section to users holding the named
   permission (see [Roles & permissions](#roles--permissions)). Naming a

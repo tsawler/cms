@@ -39,6 +39,14 @@ type Section struct {
 	// means no nav link; the section is still routable.
 	NavLabel string
 
+	// NavAfter names the built-in sidebar entry this section's link
+	// follows: "dashboard", "pages", "posts", "media", "snippets", or
+	// "users". Empty keeps the default placement, after the built-in
+	// entries. Sections naming the same anchor keep their registration
+	// order, and the link holds its position even when the anchor itself
+	// is hidden from the user. Ignored when NavLabel is empty.
+	NavAfter string
+
 	// Confirm, when non-empty, makes the nav link ask before it
 	// navigates: clicking it opens the admin's shared confirmation
 	// dialog with this message ("Question? Detail." — the question
@@ -94,6 +102,16 @@ type PermissionDef struct {
 }
 
 var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
+
+// navAnchors are the built-in sidebar entries a Section.NavAfter may name.
+var navAnchors = map[string]bool{
+	"dashboard": true,
+	"pages":     true,
+	"posts":     true,
+	"media":     true,
+	"snippets":  true,
+	"users":     true,
+}
 
 // sectionHandler wraps a host-registered section for mounting: it enforces
 // the admin role when asked, exposes the server to the package helpers,
@@ -152,6 +170,9 @@ func ValidateSections(sections []Section) error {
 		}
 		if sec.AdminsNeedGrant && sec.Permission == "" {
 			return fmt.Errorf("cms: admin section %q sets AdminsNeedGrant without a Permission to grant", sec.Path)
+		}
+		if sec.NavAfter != "" && !navAnchors[sec.NavAfter] {
+			return fmt.Errorf("cms: admin section %q NavAfter %q is not a built-in nav entry (dashboard, pages, posts, media, snippets, users)", sec.Path, sec.NavAfter)
 		}
 	}
 	return nil

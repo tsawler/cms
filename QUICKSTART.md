@@ -981,6 +981,10 @@ AdminSections: []cms.AdminSection{
 },
 ```
 
+`NavAfter: "dashboard"` (or any built-in entry name) moves the sidebar
+link directly under that entry instead of the default spot after the
+built-ins.
+
 Inside the handler, `admin.UserFrom(r)`, `admin.CSRFToken(r)`,
 `admin.SetFlash(r, …)`, and `admin.RenderPage(w, r, title, body)` (from
 `github.com/tsawler/cms/admin`) integrate with the admin chrome.

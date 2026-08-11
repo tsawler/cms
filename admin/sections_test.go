@@ -16,6 +16,7 @@ func TestValidateSections(t *testing.T) {
 	valid := []Section{
 		{Path: "reports", Handler: noopHandler},
 		{Path: "site-stats_v1.2~x", Handler: noopHandler},
+		{Path: "inventory", NavLabel: "Inventory", NavAfter: "dashboard", Handler: noopHandler},
 	}
 	if err := ValidateSections(valid); err != nil {
 		t.Errorf("valid sections rejected: %v", err)
@@ -34,6 +35,8 @@ func TestValidateSections(t *testing.T) {
 		"uppercase permission":           {{Path: "x", Permission: "Vehicles", Handler: noopHandler}},
 		"spaced permission":              {{Path: "x", Permission: "manage vehicles", Handler: noopHandler}},
 		"grant-gated without permission": {{Path: "x", AdminsNeedGrant: true, Handler: noopHandler}},
+		"unknown NavAfter anchor":        {{Path: "x", NavAfter: "reports", Handler: noopHandler}},
+		"section path as NavAfter":       {{Path: "x", NavAfter: "x", Handler: noopHandler}},
 	}
 	for name, sections := range bad {
 		if err := ValidateSections(sections); err == nil {
@@ -44,7 +47,7 @@ func TestValidateSections(t *testing.T) {
 
 func TestNavSectionsFor(t *testing.T) {
 	sections := []Section{
-		{Path: "reports", NavLabel: "Reports", Confirm: "Run the report?", Handler: noopHandler},
+		{Path: "reports", NavLabel: "Reports", NavAfter: "dashboard", Confirm: "Run the report?", Handler: noopHandler},
 		{Path: "hidden", Handler: noopHandler}, // no NavLabel: never in the nav
 		{Path: "billing", NavLabel: "Billing", AdminOnly: true, Handler: noopHandler},
 	}
@@ -54,6 +57,9 @@ func TestNavSectionsFor(t *testing.T) {
 	editor := navSectionsFor(sections, "/admin", editorUser, "/")
 	if len(editor) != 1 || editor[0].Label != "Reports" || editor[0].URL != "/admin/x/reports/" {
 		t.Errorf("editor nav = %+v, want only Reports at /admin/x/reports/", editor)
+	}
+	if editor[0].After != "dashboard" {
+		t.Errorf("After = %q, want the section's NavAfter carried through", editor[0].After)
 	}
 	if editor[0].Confirm != "Run the report?" {
 		t.Errorf("Confirm = %q, want the section's message carried through", editor[0].Confirm)
@@ -167,6 +173,51 @@ func TestSectionHandlerPaths(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "/admin/x/reports/?tab=2" {
 		t.Errorf("bare section URL redirected to %q, want /admin/x/reports/?tab=2", loc)
+	}
+}
+
+// A section's NavAfter must place its link directly under the named
+// built-in sidebar entry, in registration order; sections without one
+// keep the trailing position, after the built-in entries.
+func TestNavAfterPlacement(t *testing.T) {
+	templates := parseTemplates()
+	tmpl, ok := templates["custom"]
+	if !ok {
+		t.Fatal("no custom template in the parsed set")
+	}
+
+	data := templateData{
+		AdminPath:    "/admin",
+		User:         &auth.User{Name: "Pat", Role: auth.RoleSuperadmin},
+		PagesEnabled: true,
+		NavSections: []navLink{
+			{URL: "/admin/x/inventory/", Label: "Inventory", After: "dashboard"},
+			{URL: "/admin/x/stickers/", Label: "Stickers", After: "dashboard"},
+			{URL: "/admin/x/exports/", Label: "Exports", After: "media"},
+			{URL: "/admin/x/reports/", Label: "Reports"},
+		},
+	}
+
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "layout", data); err != nil {
+		t.Fatalf("rendering layout: %v", err)
+	}
+	html := out.String()
+
+	// The sidebar's labels, in the order they must appear. Media itself is
+	// disabled (MediaEnabled false), so Exports also proves an anchored
+	// link holds its position when the anchor entry is hidden.
+	order := []string{"Dashboard", "Inventory", "Stickers", "Pages", "Exports", "Snippets", "Users", "Reports", "Public Site"}
+	last := -1
+	for _, label := range order {
+		i := strings.Index(html, ">"+label+"</span>")
+		if i < 0 {
+			t.Fatalf("rendered sidebar missing %q:\n%s", label, html)
+		}
+		if i < last {
+			t.Errorf("sidebar order wrong: %q appears before the entry preceding it in %v", label, order)
+		}
+		last = i
 	}
 }
 
