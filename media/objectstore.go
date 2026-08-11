@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -70,10 +71,12 @@ type RangeGetter interface {
 	GetRange(ctx context.Context, key, rangeSpec string) (body io.ReadCloser, contentType, contentRange string, length int64, err error)
 }
 
-// ObjectInfo describes one object found by a Lister.
+// ObjectInfo describes one object found by a Lister. LastModified is the
+// store's own write timestamp; zero when the backend did not report one.
 type ObjectInfo struct {
-	Key  string
-	Size int64
+	Key          string
+	Size         int64
+	LastModified time.Time
 }
 
 // Lister is an optional ObjectStore interface for enumerating objects under
@@ -283,8 +286,9 @@ func (s *S3Store) List(ctx context.Context, prefix string) ([]ObjectInfo, error)
 		}
 		for _, obj := range page.Contents {
 			out = append(out, ObjectInfo{
-				Key:  aws.ToString(obj.Key),
-				Size: aws.ToInt64(obj.Size),
+				Key:          aws.ToString(obj.Key),
+				Size:         aws.ToInt64(obj.Size),
+				LastModified: aws.ToTime(obj.LastModified),
 			})
 		}
 	}
