@@ -548,7 +548,9 @@ all section presets isn't offered while inserting inline). Grouping is
 config-only, like `EditorStyles` groups; admin-created and ungrouped
 snippets pool under **Custom**. The default library is grouped as Basic,
 Buttons, Quotes, Media, Article, Headlines, Features, Stats, Team,
-Pricing, Products, Process, Skills, Partners, and Coming soon.
+Pricing, Products, Process, Skills, Partners, and Coming soon. The
+magnifier in the drawer header opens a search field that filters the
+list by name, combining with the category dropdown.
 
 For the default library add:
 
