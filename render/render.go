@@ -897,7 +897,8 @@ type EditInfo struct {
 	// panel); the server enforces the restriction regardless.
 	IsAdmin bool
 	// IsSuperadmin lets the new-page dialog offer unlisted page
-	// templates; the server holds create to the same list regardless.
+	// templates and puts the development/production switch in the site
+	// settings dialog; the server holds both to the same rule regardless.
 	IsSuperadmin bool
 	// CanPages, CanBlogs, and CanNews unlock the editor's cross-page
 	// chrome: new page, menu editing, and site settings need pages;
@@ -1431,6 +1432,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.IsAdmin {
 		adminFlag = "1"
 	}
+	superFlag := "0"
+	if edit.IsSuperadmin {
+		superFlag = "1"
+	}
 	postsFlag := "0"
 	if edit.PostsEnabled {
 		postsFlag = "1"
@@ -1510,6 +1515,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
+		` data-is-superadmin="` + superFlag + `"` +
 		` data-can-pages="` + canPagesFlag + `"` +
 		` data-can-blogs="` + canBlogsFlag + `"` +
 		` data-can-news="` + canNewsFlag + `"` +
@@ -1815,14 +1821,25 @@ func localeLinks(in Input) []LocaleLink {
 	return out
 }
 
-// headHTML builds what {{cmsHead}} emits inside <head>: the CMS's own
-// small stylesheet (button hover), the site's favicon, the generated
+// headHTML builds what {{cmsHead}} emits inside <head>: the robots
+// instruction a site in development carries, the CMS's own small
+// stylesheet (button hover), the site's favicon, the generated
 // content-CSS link (when the Tailwind rebuild feature is active),
 // hreflang alternates on multi-locale sites, the page's meta
 // description, and its per-page CSS. HeadCSS is written raw; editing it
 // is restricted to admins.
 func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 	var sb strings.Builder
+	// A site still under construction asks to be left out of search
+	// results. The public site sends the same instruction as a header on
+	// everything it serves — this is the half a person can see in View
+	// Source, and the half that survives being saved or proxied.
+	// data-cms-robots marks the tag as the CMS's own, the way the favicon
+	// link is marked: the settings dialog swaps it in place on a mode
+	// switch, and leaves a host template's own robots tag alone.
+	if in.Site.Development() {
+		sb.WriteString(`<meta name="robots" content="noindex, nofollow" data-cms-robots>` + "\n")
+	}
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
 	// The stored favicon, when there is one. Nothing is emitted otherwise,
 	// so a host template's own <link rel="icon"> — or the browser's

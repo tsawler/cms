@@ -141,7 +141,7 @@ UI discovers them automatically:
 <div>{{cmsShared "footer"}}</div>       <!-- rich HTML shared by every page -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
 {{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
-<head> ... {{cmsHead}} ... </head>      <!-- meta description, favicon, per-page CSS -->
+<head> ... {{cmsHead}} ... </head>      <!-- meta description, favicon, robots, per-page CSS -->
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
 
@@ -1088,6 +1088,54 @@ the nav grow (`flex:1`) inside your header's flexbox and justifies the
 items within it. "Theme default" adds no class and leaves your layout
 alone.
 
+## Development & production: keeping a site out of search
+
+The same dialog carries a **Site mode** switch, which only superadmins
+see. A site in **development** is built and browsable but asks search
+engines to leave it alone; switching it to **production** is what makes
+it findable. `SeedAdmin` starts a brand-new site in development, so a
+site is never indexed while it is still being written. Sites that
+predate the setting stay in production — an upgrade never quietly pulls
+a live site out of search.
+
+In development the CMS:
+
+- sends `X-Robots-Tag: noindex, nofollow` on **every** public response —
+  pages, RSS feeds, and media. The header is what covers the files no
+  `<meta>` tag can reach: search engines index a PDF or an image on its
+  own, and the media proxy serves both.
+- emits `<meta name="robots" content="noindex, nofollow">` from
+  `{{cmsHead}}`.
+- serves `/robots.txt` with `Disallow: /`.
+
+In production it does none of those things, and — importantly — does not
+claim `/robots.txt` at all. If your app serves its own (with a `Sitemap:`
+line, or rules for a particular crawler), it keeps serving it the moment
+the site goes live; the CMS's copy is only there while the site is
+hidden.
+
+Two things worth knowing:
+
+**This hides the site; it does not protect it.** Everything is still
+served to anyone with the address, and a crawler that ignores the rules
+is not stopped by them. If an unfinished site must not be *reachable*,
+that is HTTP auth, an IP allowlist, or not pointing a public name at it —
+none of which the CMS does for you.
+
+**Development mode is for a site that was never indexed.** `Disallow`
+keeps crawlers out, and a crawler that never fetches a page never sees
+the `noindex` on it. That is the right trade before launch, when there is
+nothing in anyone's index yet. It is the wrong tool for pulling a site
+that *has* been live back out of search results: for that the pages have
+to stay crawlable so the `noindex` can be read, which means removing the
+URLs through the search engine's own tools rather than flipping this
+switch.
+
+Everywhere else the mode stays visible: while a site is in development
+the admin sidebar carries a **Development** stamp under the brand, on
+every page, because the failure this feature invites is a finished site
+nobody remembered to switch over.
+
 ## Host data in CMS pages
 
 Some of a page isn't content. A dealership's "fresh on the lot" strip, a
@@ -1208,7 +1256,8 @@ Accounts have one of three **roles**, which encode trust:
   without restriction.
 - **superadmin** — admin plus snippet management (snippets are raw HTML
   injected into every editor), unlisted page templates in the new-page
-  dialog, and the admin panel's Pages section (everyone
+  dialog, the development/production switch (whether the site may be
+  indexed at all), and the admin panel's Pages section (everyone
   else works on pages in place on the public site, where every page
   feature is available; the admin list is the superadmin's index of
   pages that aren't linked anywhere).
@@ -1220,7 +1269,7 @@ toggled on their page under Users:
 |---|---|
 | Blog posts | the blog feed: creating, editing, publishing blog posts |
 | News | the news feed, the same way |
-| Pages, menus & site settings | site pages, navigation menus, and the non-code site settings, all through the in-place editor |
+| Pages, menus & site settings | site pages, navigation menus, and the non-code site settings, all through the in-place editor (the site mode stays superadmin-only) |
 | User management | managing *editor* accounts (see below) |
 
 Everything follows from the grant: nav entries and dashboard cards the

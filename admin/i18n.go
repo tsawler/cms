@@ -153,6 +153,9 @@ var frStrings = map[string]string{
 	"Users":       "Utilisateurs",
 	"Public Site": "Site public",
 	"Log out":     "Se déconnecter",
+	// The sidebar's development stamp and what it means.
+	"Development": "Développement",
+	"Search engines are asked to skip this site. A superadmin switches it to production in the site settings dialog.": "Les moteurs de recherche sont priés d'ignorer ce site. Un superadmin le passe en production dans la fenêtre des réglages du site.",
 
 	// Dashboard traffic chart. The three-letter weekday keys are what
 	// time.Weekday's English names shorten to; the chart looks its
@@ -612,6 +615,7 @@ var frStrings = map[string]string{
 	"Saving the menu failed — try again.":                              "L'enregistrement du menu a échoué — réessayez.",
 	"Could not load the site settings.":                                "Impossible de charger les paramètres du site.",
 	"Unknown menu alignment.":                                          "Alignement de menu inconnu.",
+	"Unknown site mode.":                                               "Mode de site inconnu.",
 	"The site name is too long.":                                       "Le nom du site est trop long.",
 	"The logo needs to be an uploaded image or a web address.":         "Le logo doit être une image téléversée ou une adresse web.",
 	"The favicon needs to be an uploaded image or a web address.":      "Le favicon doit être une image téléversée ou une adresse web.",

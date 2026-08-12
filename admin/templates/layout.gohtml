@@ -21,6 +21,13 @@
 {{if .User}}
 <aside class="cms-sidebar">
     <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+    {{- /* The site is built but not yet findable. Stamped on every admin
+           page, because the failure this guards against is nobody
+           remembering the switch exists. */}}
+    {{if .SiteDevelopment}}
+    <p class="cms-site-mode"><span class="cms-badge cms-badge-draft"
+        title="{{.T "Search engines are asked to skip this site. A superadmin switches it to production in the site settings dialog."}}">{{.T "Development"}}</span></p>
+    {{end}}
     <p class="cms-contents-label">{{.T "Contents"}}</p>
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">

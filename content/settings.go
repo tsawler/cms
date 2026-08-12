@@ -1,6 +1,9 @@
 package content
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // SiteSettings are the site-wide presentation settings the in-place
 // editor's "Site settings" dialog manages. Zero values mean "not set" —
@@ -22,6 +25,38 @@ type SiteSettings struct {
 	// admin-only, like per-page code.
 	SiteCSS string
 	SiteJS  string
+	// Mode is ModeDevelopment or ModeProduction (or "", read as
+	// production). Development asks search engines to leave the site
+	// alone; see Development. Changing it is superadmin-only.
+	Mode string
+}
+
+// The two site modes. A site under construction sits in development,
+// where the CMS asks search engines to keep it out of their indexes; the
+// switch to production is what makes it findable.
+//
+// The empty value reads as production, so a site that predates this
+// setting — or one whose settings were never saved — keeps behaving
+// exactly as it did. New installs are seeded into development instead,
+// which is the safe end to start from.
+const (
+	ModeProduction  = "production"
+	ModeDevelopment = "development"
+)
+
+// Development reports whether the site is in development mode, and so
+// should be kept out of search results.
+//
+// This is a request to well-behaved crawlers, not access control: the
+// site is still served to anyone who asks for it. Keeping an unfinished
+// site genuinely private is the host's job — HTTP auth, an IP allowlist,
+// or simply not pointing a public name at it.
+func (s SiteSettings) Development() bool { return s.Mode == ModeDevelopment }
+
+// ValidMode reports whether m is a mode that may be stored: one of the
+// two named modes, or "" for the production default.
+func ValidMode(m string) bool {
+	return m == "" || m == ModeProduction || m == ModeDevelopment
 }
 
 // Keys the settings are stored under in cms_settings.
@@ -33,6 +68,7 @@ const (
 	settingLoginInNav = "login_in_nav"
 	settingSiteCSS    = "site_css"
 	settingSiteJS     = "site_js"
+	settingSiteMode   = "site_mode"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -67,6 +103,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteCSS = v
 		case settingSiteJS:
 			out.SiteJS = v
+		case settingSiteMode:
+			out.Mode = v
 		}
 	}
 	return out, rows.Err()
@@ -92,6 +130,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingLoginInNav: loginInNav,
 		settingSiteCSS:    in.SiteCSS,
 		settingSiteJS:     in.SiteJS,
+		settingSiteMode:   in.Mode,
 	} {
 		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `
@@ -101,4 +140,19 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// SetSiteMode stores the site mode on its own, leaving every other
+// setting alone — what a fresh install's seeding wants, where writing a
+// whole SiteSettings would mean inventing values for keys nobody has set
+// yet.
+func (s *Store) SetSiteMode(ctx context.Context, mode string) error {
+	if !ValidMode(mode) {
+		return fmt.Errorf("content: %q is not a site mode", mode)
+	}
+	keyCol := s.db.Dialect().Quote("key")
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO cms_settings (`+keyCol+`, value) VALUES ($1, $2)
+		ON CONFLICT (`+keyCol+`) DO UPDATE SET value = EXCLUDED.value`, settingSiteMode, mode)
+	return err
 }

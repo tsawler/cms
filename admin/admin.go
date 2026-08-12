@@ -87,6 +87,13 @@ type Deps struct {
 	// package use.
 	SiteBaseURL func(*http.Request) string
 
+	// SiteDevelopment reports whether the site is in development mode
+	// (content.SiteSettings.Mode), which the sidebar stamps so nobody
+	// forgets a finished site is still hidden from search engines. Nil
+	// leaves the stamp off, which is what tests and direct package use
+	// want; the CMS supplies its own cached reader.
+	SiteDevelopment func(context.Context) bool
+
 	// ContentChanged, when set, is called (without waiting) after any
 	// mutation that can change which CSS classes stored content uses:
 	// region/section saves, publish/discard, page create/delete, and
@@ -498,6 +505,10 @@ type templateData struct {
 	NavCounts  navCounts
 	NavCurrent string
 
+	// SiteDevelopment stamps the sidebar when the public site is in
+	// development mode and so is being kept out of search engines.
+	SiteDevelopment bool
+
 	// Dashboard page only: the host sections' cards and the public
 	// site's seven-day traffic chart. Filled by the dashboard handler
 	// alone, so their queries run nowhere else.
@@ -623,6 +634,9 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		td.NavCounts = s.navCounts(r, td.User)
 		s.fillNavCounts(r.Context(), td.NavSections)
 		td.NavCurrent = navCurrent(r.URL.Path)
+		if s.deps.SiteDevelopment != nil {
+			td.SiteDevelopment = s.deps.SiteDevelopment(r.Context())
+		}
 	}
 	// Inside a host section, the mount prefix has been stripped, so the
 	// path-based matching above is looking at section-relative paths: "/"

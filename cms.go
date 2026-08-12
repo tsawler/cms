@@ -407,6 +407,13 @@ type CMS struct {
 	admin      http.Handler
 	cssBuilder *cssRebuilder // nil unless Config.Tailwind is set
 	cssOnce    sync.Once     // schedules the initial build on first traffic
+
+	// The site mode, cached: every public response consults it, including
+	// the media and asset routes that read no settings otherwise. See
+	// developmentMode.
+	modeMu  sync.Mutex
+	modeDev bool
+	modeAt  time.Time
 }
 
 // New validates cfg, applies defaults, and returns a ready CMS. It does not
@@ -565,27 +572,31 @@ func New(cfg Config) (*CMS, error) {
 	c.admin = admin.New(admin.Deps{
 		// Nil-safe: schedule is a no-op when Tailwind isn't configured.
 		ContentChanged: c.cssBuilder.schedule,
-		Sessions:       sessions,
-		Users:          users,
-		Content:        contentStore,
-		Renderer:       renderer,
-		RequestFuncs:   cfg.RequestFuncs,
-		Media:          mediaManager,
-		Snippets:       snippets.NewStore(db),
-		Captcha:        capClient,
-		Mailer:         cfg.Mailer,
-		ConfigSnippets: cfg.Snippets,
-		SectionStyles:  cfg.SectionStyles,
-		PostTemplate:   cfg.PostTemplate,
-		Sections:       cfg.AdminSections,
-		Permissions:    permissions,
-		Logger:         cfg.Logger,
-		AdminPath:      cfg.AdminPath,
-		SiteBaseURL:    c.siteBaseURL,
-		DefaultLocale:  cfg.Locales[0],
-		Locales:        cfg.Locales,
-		RememberFor:    cfg.RememberFor,
-		PerPage:        cfg.AdminPerPage,
+		// The same briefly-cached reading the public side stamps its
+		// responses from, so the sidebar and the site cannot disagree
+		// about which mode the site is in.
+		SiteDevelopment: c.developmentMode,
+		Sessions:        sessions,
+		Users:           users,
+		Content:         contentStore,
+		Renderer:        renderer,
+		RequestFuncs:    cfg.RequestFuncs,
+		Media:           mediaManager,
+		Snippets:        snippets.NewStore(db),
+		Captcha:         capClient,
+		Mailer:          cfg.Mailer,
+		ConfigSnippets:  cfg.Snippets,
+		SectionStyles:   cfg.SectionStyles,
+		PostTemplate:    cfg.PostTemplate,
+		Sections:        cfg.AdminSections,
+		Permissions:     permissions,
+		Logger:          cfg.Logger,
+		AdminPath:       cfg.AdminPath,
+		SiteBaseURL:     c.siteBaseURL,
+		DefaultLocale:   cfg.Locales[0],
+		Locales:         cfg.Locales,
+		RememberFor:     cfg.RememberFor,
+		PerPage:         cfg.AdminPerPage,
 	})
 	return c, nil
 }
@@ -700,6 +711,13 @@ func (c *CMS) Migrate(ctx context.Context) error {
 // Migrate; it is a no-op on every startup after the first. The account gets
 // the superadmin role — it belongs to whoever set the site up, and further
 // users can be created with lesser roles from the admin area.
+//
+// A site being set up for the first time is also put into development mode
+// (see content.SiteSettings.Mode), so it is not indexed while it is being
+// built. The superadmin switches it to production when it is ready to be
+// found. Existing sites are left alone: they are already live, and having
+// an upgrade quietly pull them out of search results would be a far worse
+// surprise than having to flip a switch once.
 func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool, error) {
 	n, err := c.users.Count(ctx)
 	if err != nil {
@@ -722,7 +740,11 @@ func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool
 	if err != nil {
 		return false, err
 	}
+	if err := c.content.SetSiteMode(ctx, content.ModeDevelopment); err != nil {
+		return false, err
+	}
 	c.cfg.Logger.Info("cms: created initial admin user", "email", email)
+	c.cfg.Logger.Info("cms: new site starts in development mode — search engines are asked to skip it until a superadmin switches it to production")
 	return true, nil
 }
 
@@ -847,6 +869,18 @@ func (c *CMS) Pages() http.Handler {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// A site in development says so on everything it serves, before
+		// any of the branches below decide what that is. The header is
+		// what covers the responses no <meta> tag can reach: the RSS
+		// feeds, and the media proxy serving images and PDFs that search
+		// engines index in their own right.
+		if c.developmentMode(r.Context()) {
+			w.Header().Set("X-Robots-Tag", robotsDirective)
+			if r.URL.Path == robotsPath {
+				c.serveRobotsTxt(w)
+				return
+			}
+		}
 		// Media and the editor script are served outside the session
 		// wrapper so their responses stay cacheable.
 		if c.objects != nil && strings.HasPrefix(r.URL.Path, media.ProxyPathPrefix) {
@@ -873,6 +907,76 @@ func (c *CMS) Pages() http.Handler {
 		}
 		withSession.ServeHTTP(w, r)
 	})
+}
+
+// robotsPath is the address crawlers look for their instructions at, and
+// robotsDirective is what a site in development answers every request
+// with. The CMS claims neither in production: a host that serves its own
+// robots.txt — with a sitemap line, or rules for one crawler — keeps
+// doing so once the site goes live, and gets these only while the site
+// is being built.
+const (
+	robotsPath      = "/robots.txt"
+	robotsDirective = "noindex, nofollow"
+)
+
+// robotsTxt is what a development site serves at /robots.txt. Disallow
+// is the blunt instrument and the right one here: a site under
+// construction has nothing in anyone's index yet, so keeping crawlers
+// out entirely beats letting them in to read a noindex.
+//
+// (The two do work against each other, and it matters in one direction:
+// a crawler that may not fetch a page never sees the noindex on it. On a
+// site that had been live and is being pulled back out of the index, the
+// disallow is what would keep the old URLs there — search for "noindex
+// and disallow" before reaching for this as a takedown.)
+const robotsTxt = "User-agent: *\nDisallow: /\n"
+
+func (c *CMS) serveRobotsTxt(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// No caching: the switch to production has to take effect when it is
+	// flipped, not whenever an intermediary decides it is done with this.
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, robotsTxt)
+}
+
+// siteModeCacheTTL is how long an instance trusts its in-memory copy of
+// the site mode. It bounds two things: how long a mode switch takes to
+// reach the instances that did not serve the request that made it, and
+// how stale the answer can be on the routes that read no other settings.
+// Short, because the whole point of the setting is the moment it changes.
+const siteModeCacheTTL = 5 * time.Second
+
+// developmentMode reports whether the site is in development, from a
+// briefly-cached copy of the stored setting.
+//
+// It is consulted on every public response, including media and asset
+// routes that touch the database for nothing else, so it cannot be a
+// query per request. A read that fails falls back to the last known
+// answer; with no answer yet — the database is unreachable at the first
+// request — it says development, because a site nobody can serve pages
+// for has nothing to gain from being crawled, and an unfinished site
+// landing in an index is the mistake that is hard to take back.
+func (c *CMS) developmentMode(ctx context.Context) bool {
+	if c.content == nil {
+		return false // no store to ask; only a hand-built CMS in a test
+	}
+	c.modeMu.Lock()
+	dev, at := c.modeDev, c.modeAt
+	c.modeMu.Unlock()
+	if !at.IsZero() && time.Since(at) < siteModeCacheTTL {
+		return dev
+	}
+	site, err := c.content.SiteSettings(ctx)
+	if err != nil {
+		c.cfg.Logger.Error("cms: reading the site mode", "err", err)
+		return at.IsZero() || dev
+	}
+	dev = site.Development()
+	c.modeMu.Lock()
+	c.modeDev, c.modeAt = dev, time.Now()
+	c.modeMu.Unlock()
+	return dev
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {

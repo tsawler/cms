@@ -7,6 +7,7 @@
   var csrf = cfg.csrf;
   var mediaEnabled = cfg.media === "1";
   var isAdmin = cfg.isAdmin === "1";
+  var isSuperadmin = cfg.isSuperadmin === "1";
   var postsEnabled = cfg.posts === "1";
   var canPages = cfg.canPages === "1";
   var canBlogs = cfg.canBlogs === "1";
@@ -2590,6 +2591,18 @@
   // ../src/settings.js
   var ALIGNS = ["left", "center", "right"];
   function applySettings(s) {
+    var robots = document.querySelector("meta[data-cms-robots]");
+    if (s.mode === "development") {
+      if (!robots) {
+        robots = document.createElement("meta");
+        robots.name = "robots";
+        robots.setAttribute("data-cms-robots", "");
+        document.head.appendChild(robots);
+      }
+      robots.content = "noindex, nofollow";
+    } else if (robots) {
+      robots.remove();
+    }
     var icon = document.querySelector("link[data-cms-favicon]");
     if (s.faviconUrl) {
       if (!icon) {
@@ -2666,6 +2679,21 @@
         type: "check",
         value: s.loginInNav
       });
+      if (isSuperadmin) {
+        fields.push({
+          id: "mode",
+          label: "Site mode",
+          type: "select",
+          value: s.mode,
+          options: [
+            { value: "development", label: "Development \u2014 keep out of search engines" },
+            { value: "production", label: "Production \u2014 live and findable" }
+          ]
+        });
+        fields.push({ type: "note", span: true, text: function(v) {
+          return v.mode === "development" ? "Search engines are asked not to index the site. Anyone with the address can still read it \u2014 this hides the site from search, it does not make it private." : "The site is open to search engines. It can take days or weeks for pages to appear in results.";
+        } });
+      }
       openDialog({
         message: "Site settings",
         okLabel: "Save",
@@ -2680,9 +2708,13 @@
           loginInNav: values.loginInNav === "1",
           // Site-wide CSS/JS has its own editor (wrench → Site
           // CSS & JS); carry the stored values through so this
-          // save doesn't wipe them.
+          // save doesn't wipe them. The mode field is absent for
+          // everyone but superadmins, and carries through the same
+          // way — the server ignores it from anyone else in any
+          // case.
           siteCss: s.siteCss || "",
-          siteJs: s.siteJs || ""
+          siteJs: s.siteJs || "",
+          mode: values.mode !== void 0 ? values.mode : s.mode || ""
         };
         api("/settings", {
           method: "PUT",

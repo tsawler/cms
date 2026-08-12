@@ -81,6 +81,10 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
     color: var(--cms-ink);
     margin-bottom: 1.9rem;
 }
+/* The development stamp, sitting under the brand: this site is being
+   built and is kept out of search engines until a superadmin says
+   otherwise. Pulled up close to the brand, since it qualifies it. */
+.cms-site-mode { margin: -1.35rem 0 1.35rem; }
 .cms-contents-label {
     font-size: .66rem;
     font-weight: 600;
@@ -1100,6 +1104,7 @@ body.cms-dragging .cms-table {
         padding: 1rem 1.25rem;
     }
     .cms-brand { margin-bottom: .75rem; }
+    .cms-site-mode { margin: -.4rem 0 .6rem; }
     .cms-contents-label { display: none; }
     .cms-nav { flex-direction: row; flex-wrap: wrap; gap: .15rem .3rem; }
     .cms-nav a { gap: .35rem; }

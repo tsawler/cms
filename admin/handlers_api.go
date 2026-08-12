@@ -498,6 +498,11 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the site settings."))
 		return
 	}
+	// "" is stored as production; the dialog's select wants the name.
+	mode := site.Mode
+	if mode == "" {
+		mode = content.ModeProduction
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"menuAlign":  site.MenuAlign,
 		"siteName":   site.SiteName,
@@ -506,6 +511,11 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		"loginInNav": site.LoginInNav,
 		"siteCss":    site.SiteCSS,
 		"siteJs":     site.SiteJS,
+		// Everyone who can open the dialog is told the mode — the switch
+		// itself is superadmin-only, but a save has to carry the stored
+		// value back, and an editor seeing "Development" explains why the
+		// site is not turning up in search.
+		"mode": mode,
 	})
 }
 
@@ -517,8 +527,10 @@ const maxSiteCodeLen = 100_000
 // draft state: the change is live immediately. Site-wide CSS/JS is
 // written raw into every page, so only admins may change it — a non-admin
 // editor's request keeps whatever is already stored.
+// Whether the site is findable at all is a superadmin's call, so the mode
+// is held to the same carry-through rule as the code fields.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "faviconUrl", "loginInNav", "siteCss", "siteJs"}
+// "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
@@ -528,6 +540,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LoginInNav bool   `json:"loginInNav"`
 		SiteCSS    string `json:"siteCss"`
 		SiteJS     string `json:"siteJs"`
+		Mode       string `json:"mode"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -555,20 +568,37 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The favicon needs to be an uploaded image or a web address."))
 		return
 	}
-	// Site-wide CSS/JS is injected raw, so it stays admin-only just like
-	// per-page code. Non-admins can still change the other settings; their
-	// request carries the stored code through unchanged.
-	css, js := body.SiteCSS, body.SiteJS
-	if u := s.currentUser(r); u == nil || !u.Role.IsAdmin() {
+	// Two fields here are not everyone's to change: site-wide CSS/JS is
+	// injected raw, so it stays admin-only just like per-page code, and
+	// the mode decides whether the site is findable at all, which is a
+	// superadmin's call. Anyone may still change the rest — their request
+	// carries the stored values through unchanged rather than being
+	// refused, since the dialog sends the whole object every time.
+	//
+	// Superadmin is a superset of admin, so a non-superadmin is the only
+	// case that has to read what is stored.
+	u := s.currentUser(r)
+	isAdmin := u != nil && u.Role.IsAdmin()
+	isSuper := u != nil && u.Role.IsSuperadmin()
+	css, js, mode := body.SiteCSS, body.SiteJS, body.Mode
+	if !isSuper {
 		current, err := s.deps.Content.SiteSettings(r.Context())
 		if err != nil {
 			s.deps.Logger.Error("cms admin: api loading site settings", "err", err)
 			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
 			return
 		}
-		css, js = current.SiteCSS, current.SiteJS
-	} else if len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen {
+		mode = current.Mode
+		if !isAdmin {
+			css, js = current.SiteCSS, current.SiteJS
+		}
+	}
+	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
+		return
+	}
+	if !content.ValidMode(mode) {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Unknown site mode."))
 		return
 	}
 	if err := s.deps.Content.SaveSiteSettings(r.Context(), content.SiteSettings{
@@ -579,6 +609,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LoginInNav: body.LoginInNav,
 		SiteCSS:    css,
 		SiteJS:     js,
+		Mode:       mode,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))

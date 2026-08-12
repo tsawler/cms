@@ -13,6 +13,9 @@ export var adminPath = cfg.adminPath || "/admin";
 export var csrf = cfg.csrf;
 export var mediaEnabled = cfg.media === "1";
 export var isAdmin = cfg.isAdmin === "1";
+// Superadmin unlocks the site settings dialog's development/production
+// switch. The server enforces it regardless.
+export var isSuperadmin = cfg.isSuperadmin === "1";
 export var postsEnabled = cfg.posts === "1";
 // Per-user permissions: cross-page chrome (new page, menus, site
 // settings) needs canPages; creating a post needs its feed's flag. The

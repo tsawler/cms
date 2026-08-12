@@ -199,7 +199,7 @@ The functions available in every template:
 | `{{cmsPagination $feed}}` | a ready-made Previous / 1 2 3 / Next bar |
 | `{{cmsDate .PublishedAt}}` | a date in the page's language ("30 juillet 2026") |
 | `{{cmsLocales}}` | language-switcher links (multi-locale sites) |
-| `{{cmsHead}}` | meta description, favicon, per-page CSS, hreflang — put in `<head>` |
+| `{{cmsHead}}` | meta description, favicon, per-page CSS, hreflang, robots — put in `<head>` |
 | `{{cmsScripts}}` | per-page JS — put before `</body>` |
 
 The dot (`.`) each page template receives carries `.Title`,
@@ -671,7 +671,9 @@ go run .
 ```
 
 1. Open <http://localhost:4000/admin/> and log in with the credentials
-   you passed to `SeedAdmin`.
+   you passed to `SeedAdmin`. The sidebar is stamped **Development**: a
+   new site is kept out of search engines until a superadmin says
+   otherwise (step 10).
 2. Visit <http://localhost:4000/>. `SeedHomePage` already created and
    published it, so you get your layout with an empty content area rather
    than a 404.
@@ -1195,6 +1197,13 @@ address comes from — is your program's business; the variables
 
 ## 10. Going to production
 
+- **Switch the site to production.** A freshly seeded site starts in
+  **development**, where it asks search engines to skip it — the admin
+  sidebar stamps every page while it does. A superadmin flips it in the
+  editor's wrench menu → **Site settings** → **Site mode**. Nothing else
+  changes; it decides whether the site may be indexed. If you cache
+  `Pages()` at the edge, purge after the switch — cached responses can
+  still carry the `X-Robots-Tag: noindex` header.
 - **Set `SecureCookies: true`** — you're serving over HTTPS, and the
   session cookie should say so.
 - **Seed a strong password**, or change the seeded one immediately; the
