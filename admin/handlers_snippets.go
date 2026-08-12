@@ -172,14 +172,18 @@ func (s *server) apiSnippetsList(w http.ResponseWriter, r *http.Request) {
 	}
 	type snippetJSON struct {
 		Name string `json:"name"`
-		HTML string `json:"html"`
+		// The drawer's category dropdown files the card under this
+		// group; empty lands it in "Custom" (config-only, so stored
+		// snippets never carry one).
+		Group string `json:"group,omitempty"`
+		HTML  string `json:"html"`
 		// Non-nil for section presets: the section settings the editor
 		// applies when this snippet starts a new section.
 		Settings map[string]string `json:"settings,omitempty"`
 	}
 	out := make([]snippetJSON, 0, len(s.deps.ConfigSnippets)+len(stored))
 	for _, sn := range s.deps.ConfigSnippets {
-		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML, Settings: sn.Settings})
+		out = append(out, snippetJSON{Name: sn.Name, Group: sn.Group, HTML: sn.HTML, Settings: sn.Settings})
 	}
 	for _, sn := range stored {
 		out = append(out, snippetJSON{Name: sn.Name, HTML: sn.HTML, Settings: sn.Settings})

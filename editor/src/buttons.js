@@ -15,6 +15,7 @@ import { markDirty, markSectionsDirty, hasUnsaved } from "./editing.js";
 import { openPicker } from "./media.js";
 import { unnestSnippets } from "./snippets.js";
 import { chooseVideoInto } from "./videos.js";
+import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
 import { flash } from "./util.js";
 
@@ -270,6 +271,10 @@ function mediaAtPoint(x, y) {
 function showVidUI(vid) {
     activeVid = vid;
     var ui = $("vid-ui");
+    // The same chrome serves video embeds and maps; say the right word.
+    var map = isMapEmbed(vid);
+    $("vid-set").title = map ? "Change this map" : "Change this video";
+    $("vid-del").title = map ? "Delete map" : "Delete video";
     ui.classList.add("on");
     var r = vid.getBoundingClientRect();
     var top = r.top + 8;
@@ -746,13 +751,19 @@ export function initButtons() {
         if (!activeVid) return;
         var vid = activeVid;
         hideVidUI(); // the element is replaced; the chrome can't follow it
-        chooseVideoInto(vid, "Change the video");
+        if (isMapEmbed(vid)) {
+            chooseMapInto(vid, "Paste a new Google Maps link, its embed code, or type an address");
+        } else {
+            chooseVideoInto(vid, "Change the video");
+        }
     });
 
     $("vid-del").addEventListener("click", function () {
         if (!activeVid) return;
         var vid = activeVid;
-        cmsConfirm("Delete this video?", "Delete video", true).then(function (yes) {
+        var map = isMapEmbed(vid);
+        cmsConfirm(map ? "Delete this map?" : "Delete this video?",
+            map ? "Delete map" : "Delete video", true).then(function (yes) {
             if (!yes) return;
             hideVidUI();
             // Resolve the dirty target before the video leaves the DOM.

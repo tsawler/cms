@@ -1342,8 +1342,52 @@
     $("drawer-hint").textContent = state.pendingSection ? "Click a starting point for the new section." : "Drag a snippet onto the page, or click one to insert it at the cursor.";
     $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
+    refreshCategories();
     applyDrawerDrag();
     updateRail();
+  }
+  var lastCatMode = null;
+  function refreshCategories() {
+    var sel = $("snip-cat");
+    var sections = $("snip-list").classList.contains("sections-mode");
+    if (sections !== lastCatMode) {
+      lastCatMode = sections;
+      sel.value = "";
+    }
+    var groups = [];
+    var hasCustom = false;
+    $("snip-list").querySelectorAll(".snip").forEach(function(card) {
+      if (!sections && card.classList.contains("preset")) return;
+      var g = card.getAttribute("data-group");
+      if (!g) {
+        hasCustom = true;
+        return;
+      }
+      if (groups.indexOf(g) === -1) groups.push(g);
+    });
+    if (hasCustom) groups.push("Custom");
+    $("drawer-cat").hidden = groups.length < 2;
+    var current = sel.value;
+    sel.innerHTML = "";
+    var all = document.createElement("option");
+    all.value = "";
+    all.textContent = "All categories";
+    sel.appendChild(all);
+    groups.forEach(function(g) {
+      var opt = document.createElement("option");
+      opt.value = g;
+      opt.textContent = g;
+      sel.appendChild(opt);
+    });
+    sel.value = groups.indexOf(current) !== -1 ? current : "";
+    applyCategoryFilter();
+  }
+  function applyCategoryFilter() {
+    var v = $("snip-cat").value;
+    $("snip-list").querySelectorAll(".snip").forEach(function(card) {
+      var g = card.getAttribute("data-group") || "Custom";
+      card.classList.toggle("cat-hide", !!v && g !== v);
+    });
   }
   function applyDrawerDrag() {
     var allow = !state.pendingSection;
@@ -1377,6 +1421,7 @@
       body.snippets.forEach(function(sn) {
         var card = document.createElement("div");
         card.className = sn.settings ? "snip preset" : "snip";
+        if (sn.group) card.setAttribute("data-group", sn.group);
         var nm = document.createElement("p");
         nm.className = "sname";
         nm.textContent = sn.name;
@@ -1416,6 +1461,7 @@
         list.appendChild(card);
       });
       applyDrawerDrag();
+      refreshCategories();
     }).catch(function(err) {
       list.innerHTML = "";
       var span = document.createElement("span");
@@ -1509,6 +1555,7 @@
       newPostDialog(canBlogs ? "blog" : "news");
     });
     $("drawer-close").addEventListener("click", closeDrawer);
+    $("snip-cat").addEventListener("change", applyCategoryFilter);
   }
   function newPageDialog() {
     if (!pageTemplates.length || !canPages) return;
@@ -1677,6 +1724,67 @@
       e.preventDefault();
       e.stopPropagation();
       chooseVideoInto(slot, "Add a video");
+    }, true);
+  }
+
+  // ../src/maps.js
+  function escapeAttr3(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  function mapEmbedURL(raw) {
+    raw = String(raw || "").trim();
+    if (!raw) return null;
+    var m = raw.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i);
+    if (m) raw = m[1];
+    if (/^https:\/\/(?:www\.)?google\.com\/maps\/embed\?/.test(raw)) return raw;
+    var u = null;
+    try {
+      u = new URL(raw);
+    } catch (e) {
+    }
+    if (u) {
+      var host2 = u.hostname.replace(/^www\./, "");
+      if (host2 !== "google.com" && host2 !== "maps.google.com") return null;
+      var q = u.searchParams.get("q");
+      if (!q) {
+        var at = (u.pathname + u.hash).match(/@(-?[0-9.]+),(-?[0-9.]+)/);
+        if (at) q = at[1] + "," + at[2];
+      }
+      if (!q) {
+        var place = u.pathname.match(/\/maps\/place\/([^/]+)/);
+        if (place) q = decodeURIComponent(place[1].replace(/\+/g, " "));
+      }
+      if (!q) return null;
+      return "https://www.google.com/maps?q=" + encodeURIComponent(q) + "&output=embed";
+    }
+    return "https://www.google.com/maps?q=" + encodeURIComponent(raw) + "&output=embed";
+  }
+  function isMapEmbed(el) {
+    return !!(el && el.tagName === "IFRAME" && /^https:\/\/(?:www\.)?(?:google\.com|maps\.google\.com)\/maps/.test(el.src || ""));
+  }
+  function chooseMapInto(el, message) {
+    cmsPrompt(message, "e.g. 123 Main Street, Halifax", "Embed map").then(function(v) {
+      if (v === null || v === "") return;
+      var src = mapEmbedURL(v);
+      if (!src) {
+        setMsg("That doesn't look like a Google Maps link or an address.");
+        return;
+      }
+      var region = el.closest("[data-cms-region]");
+      var container = el.closest("[data-cms-sections]");
+      el.outerHTML = '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr3(src) + '" title="Map" loading="lazy"></iframe>';
+      if (region) markDirty(region.getAttribute("data-cms-region"));
+      else if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
+    });
+  }
+  function initMapSlots() {
+    document.addEventListener("click", function(e) {
+      if (!state.editing) return;
+      var slot = e.target.closest ? e.target.closest("[data-cms-map-slot]") : null;
+      if (!slot) return;
+      e.preventDefault();
+      e.stopPropagation();
+      chooseMapInto(slot, "Paste a Google Maps link, its embed code, or type an address");
     }, true);
   }
 
@@ -1852,6 +1960,9 @@
   function showVidUI(vid) {
     activeVid = vid;
     var ui = $("vid-ui");
+    var map = isMapEmbed(vid);
+    $("vid-set").title = map ? "Change this map" : "Change this video";
+    $("vid-del").title = map ? "Delete map" : "Delete video";
     ui.classList.add("on");
     var r = vid.getBoundingClientRect();
     var top = r.top + 8;
@@ -2345,12 +2456,21 @@
       if (!activeVid) return;
       var vid = activeVid;
       hideVidUI();
-      chooseVideoInto(vid, "Change the video");
+      if (isMapEmbed(vid)) {
+        chooseMapInto(vid, "Paste a new Google Maps link, its embed code, or type an address");
+      } else {
+        chooseVideoInto(vid, "Change the video");
+      }
     });
     $("vid-del").addEventListener("click", function() {
       if (!activeVid) return;
       var vid = activeVid;
-      cmsConfirm("Delete this video?", "Delete video", true).then(function(yes) {
+      var map = isMapEmbed(vid);
+      cmsConfirm(
+        map ? "Delete this map?" : "Delete this video?",
+        map ? "Delete map" : "Delete video",
+        true
+      ).then(function(yes) {
         if (!yes) return;
         hideVidUI();
         var regionEl = vid.closest("[data-cms-region]");
@@ -5033,6 +5153,10 @@ padding:14px 16px;border-bottom:1px solid #e3e6ea}
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
 .drawer .dhead button:hover{background:#eceef1;color:#1c2128}
 .drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
+.drawer .dcat{padding:8px 16px;border-bottom:1px solid #eceef1}
+.drawer .dcat select{width:100%;padding:6px 8px;border:1px solid #d9dce1;border-radius:8px;
+  font:inherit;font-size:13px;color:#1c2128;background:#fff;cursor:pointer}
+.dlist .snip.cat-hide{display:none}
 .drawer .dlist{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column}
 .snip{border:1px solid #d9dce1;border-radius:10px;padding:12px;margin-bottom:10px;
 cursor:grab;background:#fff}
@@ -5296,8 +5420,8 @@ border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,
  * While editing, players and embeds go click-through so a click reaches
  * the gear/trash chrome (buttons.js hit-tests their rectangles) instead
  * of playing the video or vanishing into a cross-origin iframe. */
-.cms-editing [data-cms-video-slot]{cursor:pointer}
-.cms-editing [data-cms-video-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
+.cms-editing [data-cms-video-slot],.cms-editing [data-cms-photo-slot],.cms-editing [data-cms-map-slot]{cursor:pointer}
+.cms-editing [data-cms-video-slot]:hover,.cms-editing [data-cms-photo-slot]:hover,.cms-editing [data-cms-map-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
 .cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,
 .cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}
 
@@ -5337,7 +5461,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
@@ -5383,6 +5507,41 @@ body.cms-editing [data-cms-fallback] {
     } catch (e) {
     }
     updateBarButtons();
+  }
+
+  // ../src/photos.js
+  function escapeAttr4(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  function imgClassFor(slot) {
+    var keep = [];
+    var fixedSize = false, hasFit = false;
+    (slot.getAttribute("class") || "").split(/\s+/).forEach(function(c) {
+      if (/^(aspect-|size-|rounded($|-)|mx-auto$|object-)/.test(c)) {
+        keep.push(c);
+        if (c.indexOf("size-") === 0) fixedSize = true;
+        if (c.indexOf("object-") === 0) hasFit = true;
+      }
+    });
+    if (!fixedSize) keep.push("w-full");
+    if (!hasFit) keep.push("object-cover");
+    return keep.join(" ");
+  }
+  function initPhotoSlots() {
+    document.addEventListener("click", function(e) {
+      if (!state.editing) return;
+      var slot = e.target.closest ? e.target.closest("[data-cms-photo-slot]") : null;
+      if (!slot) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openPicker("image", function(item2) {
+        var region = slot.closest("[data-cms-region]");
+        var container = slot.closest("[data-cms-sections]");
+        slot.outerHTML = '<img src="' + escapeAttr4(item2.web) + '" alt="' + escapeAttr4(item2.alt || "") + '" loading="lazy" class="' + imgClassFor(slot) + '" data-cms-web="' + escapeAttr4(item2.web) + '" data-cms-orig="' + escapeAttr4(item2.original) + '">';
+        if (region) markDirty(region.getAttribute("data-cms-region"));
+        else if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
+      });
+    }, true);
   }
 
   // ../src/pagemeta.js
@@ -5635,6 +5794,8 @@ body.cms-editing [data-cms-fallback] {
   initEditing();
   initTitle();
   initVideoSlots();
+  initPhotoSlots();
+  initMapSlots();
   initButtons();
   initSaving();
   initPageCode();

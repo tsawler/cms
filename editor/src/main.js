@@ -19,6 +19,8 @@ import { initDialogs } from "./dialogs.js";
 import { initEditing } from "./editing.js";
 import { initTitle } from "./title.js";
 import { initVideoSlots } from "./videos.js";
+import { initPhotoSlots } from "./photos.js";
+import { initMapSlots } from "./maps.js";
 import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
@@ -38,6 +40,8 @@ initLightDom(); // TinyMCE toolbar strip + light-DOM editing styles
 initEditing();
 initTitle(); // the page title, where a template prints it with cmsTitle
 initVideoSlots(); // before initButtons: slot clicks beat snippet chrome
+initPhotoSlots(); // same ordering rule as the video slots
+initMapSlots();
 initButtons();
 initSaving();
 initPageCode();

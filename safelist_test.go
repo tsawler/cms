@@ -46,7 +46,10 @@ func TestDocsListDefaultClasses(t *testing.T) {
 		}
 	}
 
-	for _, sn := range append(snippets.DefaultSnippets(), snippets.DefaultSectionPresets()...) {
+	defaults := append(snippets.DefaultSnippets(), snippets.LibrarySnippets()...)
+	defaults = append(defaults, snippets.DefaultSectionPresets()...)
+	defaults = append(defaults, snippets.LibrarySectionPresets()...)
+	for _, sn := range defaults {
 		for _, m := range classAttrRe.FindAllStringSubmatch(sn.HTML, -1) {
 			add(m[1])
 		}

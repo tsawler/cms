@@ -125,8 +125,8 @@ border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,
  * While editing, players and embeds go click-through so a click reaches
  * the gear/trash chrome (buttons.js hit-tests their rectangles) instead
  * of playing the video or vanishing into a cross-origin iframe. */
-.cms-editing [data-cms-video-slot]{cursor:pointer}
-.cms-editing [data-cms-video-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
+.cms-editing [data-cms-video-slot],.cms-editing [data-cms-photo-slot],.cms-editing [data-cms-map-slot]{cursor:pointer}
+.cms-editing [data-cms-video-slot]:hover,.cms-editing [data-cms-photo-slot]:hover,.cms-editing [data-cms-map-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
 .cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,
 .cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}
 

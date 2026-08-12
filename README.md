@@ -329,13 +329,13 @@ safelist: [
     "rounded-lg", "rounded-2xl", "rounded-full", "aspect-video",
     "border", "border-b", "border-b-2", "border-slate-200", "border-slate-300",
     "p-1", "p-2", "p-4", "align-top", "font-semibold", "w-auto",
-    "odd:bg-slate-50", "overflow-x-auto",
+    "odd:bg-slate-50", "overflow-x-auto", "object-cover",
 ],
 ```
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video object-cover");
 ```
 
 (The example site shows the full production pattern with the Tailwind v4
@@ -500,15 +500,31 @@ places:
 - **`Config.Snippets`** — per-customer components, versioned with your
   code. Nil gets a Tailwind-first default library: inline blocks
   (callout, call-to-action, two columns, quote, button link, video,
-  flexible space) plus the section presets described under Sections below
-  (hero, feature grid, stats, testimonials, FAQ, the three video
-  layouts, call-to-action banner); an empty slice ships none. The
+  flexible space, plus imported blocks — button pair, pill buttons,
+  filled and outline single buttons in both shapes, quote with
+  portrait, and four article layouts) and the section presets described
+  under Sections below (hero, feature grid, stats, testimonials, FAQ,
+  the three video layouts, call-to-action banner, plus imported
+  presets — big headline, statement headline, kicker headline, team
+  profiles, photo gallery, numbered features, pricing plans,
+  achievements, client quotes, process steps, alternating steps, three
+  product layouts, three skills layouts, two logo strips, two holding
+  pages, and three map layouts — plus an inline map block); an empty
+  slice ships none. The
   **flexible space** is invisible on the live site but shows as a
   striped, labelled band while editing — click it to set its height in
   pixels. The **video** block (and the video section presets) ship a
   "Click to add a video" slot: clicking it while editing offers the
   media library or a YouTube/Vimeo link, and the slot becomes a native
-  `<video>` player or a privacy-enhanced embed.
+  `<video>` player or a privacy-enhanced embed. The imported
+  photo-bearing blocks (gallery, products, team, quotes) ship the same
+  affordance for images — a dashed **"Click to add a photo"** slot that
+  opens the media library and becomes an `<img>` keeping the slot's
+  shape (tile, wide, or circular portrait), cropped with
+  `object-cover`. The map block and map sections ship a
+  **"Click to add a map"** slot: paste a Google Maps link or its embed
+  code, or just type an address, and the slot becomes a bounded maps
+  `<iframe>` — no API key needed.
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks and
   section presets created after deployment.
 
@@ -523,8 +539,18 @@ Snippets: []cms.Snippet{
 Guidelines: wrap components in `not-prose` so Tailwind Typography doesn't
 restyle their internals; avoid `<script>` and SVG (stripped when
 editor-role users save); and **safelist every class that appears only in
-snippets** — the same database-content rule as the Styles menu. For the
-default library add:
+snippets** — the same database-content rule as the Styles menu.
+
+Set `Group` on a snippet to file it under a category: whenever the
+loaded snippets carry two or more categories, the drawer grows a
+dropdown that filters the list (per mode — a category whose entries are
+all section presets isn't offered while inserting inline). Grouping is
+config-only, like `EditorStyles` groups; admin-created and ungrouped
+snippets pool under **Custom**. The default library is grouped as Basic,
+Buttons, Quotes, Media, Article, Headlines, Features, Stats, Team,
+Pricing, Products, Process, Skills, Partners, and Coming soon.
+
+For the default library add:
 
 ```js
 safelist: [
@@ -540,6 +566,15 @@ safelist: [
     "inline-block", "flex", "items-center", "justify-center",
     "w-full", "aspect-video", "border-2", "border-dashed",
     "border-slate-300",
+    // Used by the imported block library (buttons, profiles, gallery,
+    // numbered features, pricing, achievements, client quotes):
+    "aspect-square", "bg-slate-200", "border-blue-600",
+    "border-slate-900", "h-0.5", "hover:bg-blue-600",
+    "hover:bg-slate-300", "hover:bg-slate-900", "hover:text-white",
+    "mr-2", "mt-2", "mt-4", "mt-6", "mt-10", "px-8", "size-24",
+    "sm:col-span-2", "sm:grid-cols-4", "text-5xl", "text-6xl",
+    "sm:text-7xl", "text-slate-200", "text-slate-400", "text-slate-900",
+    "tracking-widest", "uppercase", "w-10", "object-contain",
 ],
 ```
 
@@ -573,11 +608,21 @@ one-click starting point for a whole section, not an inline block. The
 editor lists presets first in the "Add a section" chooser (tagged
 "Section") and hides them from the inline-insert drawer; choosing one
 creates the section with the settings already applied along with the
-starting HTML. The default library ships nine — **Hero** (dark, 75%
-screen height, centered), **Feature grid**, **Stats**, **Testimonials**,
-**FAQ**, **Full-width video**, **Text + video**, **Video + text**, and
-**Call-to-action banner** — so a blank-canvas page can be composed into
-a landing page without touching the settings dialog.
+starting HTML. The default library ships thirty-three — **Hero** (dark,
+75% screen height, centered), **Feature grid**, **Stats**,
+**Testimonials**, **FAQ**, **Full-width video**, **Text + video**,
+**Video + text**, and **Call-to-action banner**; twenty-one
+converted from a commercial block library: **Big headline**,
+**Statement headline**, **Kicker headline**, **Team profiles**,
+**Photo gallery**, **Numbered features**, **Pricing plans**,
+**Achievements**, **Client quotes**, **Process steps**,
+**Alternating steps**, **Product pair**, **Product cards**,
+**Services list**, **Skill percentages**, **Skill circles**,
+**Skill rings**, **Partner logos**, **Featured on**, **Coming soon**,
+and **Maintenance mode**; and three map sections (**Full-width map**,
+**Text + map**, **Map + text**) built on the map slot — so a
+blank-canvas page can be composed into a landing page without touching
+the settings dialog.
 
 Settings use the section-settings vocabulary: `bg`, `width`, and
 `corners` name `SectionStyles` option keys, `height` is
