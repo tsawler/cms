@@ -183,6 +183,12 @@ padding:14px 16px;border-bottom:1px solid #e3e6ea}
 padding:4px 9px;color:#667085;cursor:pointer;border-radius:6px}
 .drawer .dhead button:hover{background:#eceef1;color:#1c2128}
 .drawer .dhint{padding:10px 16px;font-size:12px;color:#667085;border-bottom:1px solid #eceef1}
+.drawer .dhead .dactions{display:flex;align-items:center;gap:2px}
+.drawer .dhead .dactions button svg{width:16px;height:16px;fill:currentColor;display:block}
+.drawer .dhead #drawer-search-btn.on{background:#eceef1;color:#1c2128}
+.drawer .dsearch{padding:8px 16px;border-bottom:1px solid #eceef1}
+.drawer .dsearch input{width:100%;padding:6px 8px;border:1px solid #d9dce1;border-radius:8px;
+  font:inherit;font-size:13px;color:#1c2128;background:#fff}
 .drawer .dcat{padding:8px 16px;border-bottom:1px solid #eceef1}
 .drawer .dcat select{width:100%;padding:6px 8px;border:1px solid #d9dce1;border-radius:8px;
   font:inherit;font-size:13px;color:#1c2128;background:#fff;cursor:pointer}

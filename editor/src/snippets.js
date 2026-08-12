@@ -102,6 +102,7 @@ function refreshCategories() {
     if (sections !== lastCatMode) {
         lastCatMode = sections;
         sel.value = "";
+        closeSearch(); // a stale query would silently empty the new mode
     }
     var groups = [];
     var hasCustom = false;
@@ -131,12 +132,57 @@ function refreshCategories() {
     applyCategoryFilter();
 }
 
+// applyCategoryFilter hides cards the category dropdown or the search
+// query rules out (one class serves both), and shows a "nothing
+// matches" note when the two together empty the list.
 function applyCategoryFilter() {
     var v = $("snip-cat").value;
+    var q = ($("snip-q").value || "").trim().toLowerCase();
+    var sections = $("snip-list").classList.contains("sections-mode");
+    var any = false;
     $("snip-list").querySelectorAll(".snip").forEach(function (card) {
         var g = card.getAttribute("data-group") || "Custom";
-        card.classList.toggle("cat-hide", !!v && g !== v);
+        var hide = !!v && g !== v;
+        if (!hide && q) {
+            var nameEl = card.querySelector(".sname");
+            hide = (nameEl ? nameEl.textContent : "").toLowerCase().indexOf(q) === -1;
+        }
+        card.classList.toggle("cat-hide", hide);
+        // Preset cards don't show in inline mode, so they can't count
+        // toward "something is visible" there.
+        if (!hide && (sections || !card.classList.contains("preset"))) any = true;
     });
+    var none = $("snip-nomatch");
+    if (!none) {
+        none = document.createElement("span");
+        none.id = "snip-nomatch";
+        none.className = "empty";
+        none.textContent = "Nothing matches.";
+        $("snip-list").appendChild(none);
+    }
+    none.hidden = any;
+}
+
+// The search row: collapsed until the magnifier in the drawer header
+// opens it; closing clears the query so nothing stays filtered by an
+// invisible input.
+function toggleSearch() {
+    if ($("drawer-search").hidden) {
+        $("drawer-search").hidden = false;
+        $("drawer-search-btn").classList.add("on");
+        $("snip-q").focus();
+    } else {
+        closeSearch();
+    }
+}
+
+function closeSearch() {
+    $("drawer-search").hidden = true;
+    $("drawer-search-btn").classList.remove("on");
+    if ($("snip-q").value !== "") {
+        $("snip-q").value = "";
+        applyCategoryFilter();
+    }
 }
 
 // applyDrawerDrag turns dragging off for as long as a section is
@@ -340,6 +386,14 @@ export function initSnippets() {
 
     $("drawer-close").addEventListener("click", closeDrawer);
     $("snip-cat").addEventListener("change", applyCategoryFilter);
+    $("drawer-search-btn").addEventListener("click", toggleSearch);
+    $("snip-q").addEventListener("input", applyCategoryFilter);
+    $("snip-q").addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+            e.stopPropagation(); // just close the search, not the drawer
+            closeSearch();
+        }
+    });
 }
 
 // newPageDialog collects a name and template for a new page, creates it,
