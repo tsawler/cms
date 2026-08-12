@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,11 +74,23 @@ var (
 // Store reads and writes users in Postgres.
 type Store struct {
 	db *sqldb.DB
+	// logger reports work that happens alongside a request rather than
+	// as its result — currently the password rehash in Authenticate,
+	// whose failure must not fail the login. Defaults to slog.Default();
+	// the CMS points it at the configured logger with SetLogger.
+	logger *slog.Logger
 }
 
 // NewStore returns a Store backed by db.
 func NewStore(db *sqldb.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, logger: slog.Default()}
+}
+
+// SetLogger directs the store's background reporting at l.
+func (s *Store) SetLogger(l *slog.Logger) {
+	if l != nil {
+		s.logger = l
+	}
 }
 
 const userColumns = "id, email, name, password_hash, role, active, totp_secret, totp_last_step, created_at, updated_at"
@@ -212,7 +225,61 @@ func (s *Store) Authenticate(ctx context.Context, email, password string) (*User
 	if err != nil || !ok || !u.Active {
 		return nil, ErrInvalidCredentials
 	}
+	s.rehash(ctx, u, password)
 	return u, nil
+}
+
+// rehash re-derives a user's stored hash at the current algorithm and
+// cost, now that a correct password has proved itself — the one moment
+// the CMS holds a plaintext to derive from. This is how accounts
+// imported from a bcrypt system become argon2id: one login at a time,
+// with no password reset asked of anybody. A user who never logs in
+// again simply keeps a bcrypt hash, which still verifies.
+//
+// A failure here is not a failed login. The stored hash is still the
+// right one, and the next login will try the upgrade again, so we say so
+// in the log and let the caller through.
+func (s *Store) rehash(ctx context.Context, u *User, password string) {
+	if !NeedsRehash(u.PasswordHash) {
+		return
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		s.logger.Error("auth: rehashing password", "user", u.Email, "err", err)
+		return
+	}
+	swapped, err := s.swapPasswordHash(ctx, u.ID, u.PasswordHash, hash)
+	if err != nil {
+		s.logger.Error("auth: storing rehashed password", "user", u.Email, "err", err)
+		return
+	}
+	if !swapped {
+		// The row moved under us: a password change or a concurrent login
+		// got there first. Either way the stored hash is now somebody
+		// else's to worry about, and ours would be stale.
+		return
+	}
+	u.PasswordHash = hash
+	s.logger.Info("auth: upgraded password hash to argon2id", "user", u.Email)
+}
+
+// swapPasswordHash replaces a password hash only if the stored value is
+// still the one we verified against, reporting whether it landed. The
+// compare-and-set is what keeps a rehash from clobbering a password
+// changed in another tab while the login was in flight: it can only ever
+// overwrite the exact hash it re-derived.
+//
+// Unlike UpdatePassword this leaves updated_at alone. Re-deriving a hash
+// from an unchanged password is not an edit to the account, and logging
+// in should not make every user look freshly modified.
+func (s *Store) swapPasswordHash(ctx context.Context, id int64, oldHash, newHash string) (bool, error) {
+	tag, err := s.db.Exec(ctx,
+		"UPDATE cms_users SET password_hash = $1 WHERE id = $2 AND password_hash = $3",
+		newHash, id, oldHash)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // dummyHash is a hash of no particular password, verified when an unknown

@@ -547,7 +547,8 @@ non-technical users.
 ## Data model (Postgres)
 
 ```
-cms_users         id, email, name, password_hash (argon2id), role (admin|editor), active
+cms_users         id, email, name, password_hash (argon2id; bcrypt accepted on
+                  import and rehashed at the next login), role (admin|editor), active
 cms_sessions      token, data, expiry
 cms_password_resets  token_hash (sha256; the email holds the only usable copy),
                   user_id, expires_at  -- single-use, one live row per user
@@ -579,7 +580,7 @@ previous state.
 | Router          | chi                           | stdlib-compatible, mountable, zero magic |
 | DB              | pgx v5                        | the standard for Postgres in Go |
 | Sessions        | alexedwards/scs + own pgx store | mature; own store so the table is `cms_sessions` |
-| Passwords       | argon2id                      | current best practice |
+| Passwords       | argon2id, verifying bcrypt    | current best practice; bcrypt read-only so imported accounts migrate on login |
 | HTML sanitizing | bluemonday                    | non-negotiable for contenteditable input |
 | S3              | aws-sdk-go-v2                 | works with every S3-compatible store |
 | Images          | disintegration/imaging        | thumbnails/resizes on upload |

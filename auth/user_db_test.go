@@ -3,7 +3,11 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/tsawler/cms/internal/sqldb"
 
@@ -256,6 +260,102 @@ func TestUserUpdatePasswordAndAuthenticate(t *testing.T) {
 		}
 		if _, err := s.Authenticate(ctx, "login@example.com", "password123"); !errors.Is(err, auth.ErrInvalidCredentials) {
 			t.Errorf("Authenticate(old password) = %v, want ErrInvalidCredentials", err)
+		}
+	})
+}
+
+// TestUserAuthenticateRehashesBcrypt covers the migration path for a
+// customer imported from a bcrypt system: the old hash logs the user in
+// once, and by the time that login returns the column holds argon2id.
+func TestUserAuthenticateRehashesBcrypt(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := auth.NewStore(db)
+		s.SetLogger(slog.New(slog.DiscardHandler))
+
+		legacy, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
+		if err != nil {
+			t.Fatalf("bcrypt: %v", err)
+		}
+		u := seedUser(t, s, auth.User{
+			Email:        "imported@example.com",
+			Active:       true,
+			PasswordHash: string(legacy),
+		})
+
+		got, err := s.Authenticate(ctx, "imported@example.com", "password123")
+		if err != nil {
+			t.Fatalf("Authenticate(bcrypt hash) = %v, want success", err)
+		}
+		if !strings.HasPrefix(got.PasswordHash, "$argon2id$") {
+			t.Errorf("returned user still carries %q", got.PasswordHash)
+		}
+
+		stored, err := s.GetByID(ctx, u.ID)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if !strings.HasPrefix(stored.PasswordHash, "$argon2id$") {
+			t.Fatalf("stored hash was not upgraded: %q", stored.PasswordHash)
+		}
+
+		// The upgrade has to be transparent: same password after, wrong
+		// password still wrong.
+		if _, err := s.Authenticate(ctx, "imported@example.com", "password123"); err != nil {
+			t.Errorf("Authenticate(after rehash) = %v, want success", err)
+		}
+		if _, err := s.Authenticate(ctx, "imported@example.com", "nope"); !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Errorf("Authenticate(wrong password) = %v, want ErrInvalidCredentials", err)
+		}
+
+		// And it happens once: a hash already at current parameters is
+		// left exactly as it is, salt included.
+		again, err := s.GetByID(ctx, u.ID)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if again.PasswordHash != stored.PasswordHash {
+			t.Error("an argon2id hash was rewritten on a later login")
+		}
+	})
+}
+
+// TestUserAuthenticateRehashOnlyOnSuccess guards the obvious mistake: a
+// rejected login must not touch the stored hash, or a wrong password
+// would overwrite the right one.
+func TestUserAuthenticateRehashOnlyOnSuccess(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := auth.NewStore(db)
+		s.SetLogger(slog.New(slog.DiscardHandler))
+
+		legacy, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
+		if err != nil {
+			t.Fatalf("bcrypt: %v", err)
+		}
+		wrongPassword := seedUser(t, s, auth.User{
+			Email: "wrong@example.com", Active: true, PasswordHash: string(legacy),
+		})
+		inactive := seedUser(t, s, auth.User{
+			Email: "disabled@example.com", Active: false, PasswordHash: string(legacy),
+		})
+
+		if _, err := s.Authenticate(ctx, "wrong@example.com", "nope"); !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Fatalf("Authenticate(wrong password) = %v, want ErrInvalidCredentials", err)
+		}
+		// A disabled account gets no upgrade either: it did not log in.
+		if _, err := s.Authenticate(ctx, "disabled@example.com", "password123"); !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Fatalf("Authenticate(inactive) = %v, want ErrInvalidCredentials", err)
+		}
+
+		for _, u := range []*auth.User{wrongPassword, inactive} {
+			stored, err := s.GetByID(ctx, u.ID)
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			if stored.PasswordHash != string(legacy) {
+				t.Errorf("%s: stored hash changed on a failed login", u.Email)
+			}
 		}
 	})
 }

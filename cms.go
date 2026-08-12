@@ -507,6 +507,7 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.Secure = cfg.SecureCookies
 
 	users := auth.NewStore(db)
+	users.SetLogger(cfg.Logger)
 	contentStore := content.NewStore(db, cfg.Locales[0])
 
 	var renderer *render.Renderer
