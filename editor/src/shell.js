@@ -98,6 +98,7 @@ export function initShell() {
         '<div class="dhead"><h2 id="drawer-title">Snippets</h2>' +
         '<button id="drawer-close" title="Close" aria-label="Close">×</button></div>' +
         '<div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div>' +
+        '<div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div>' +
         '<div class="dlist" id="snip-list"></div>' +
         "</div>" +
         '<div class="dlg-overlay" id="mm-overlay"></div>' +

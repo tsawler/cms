@@ -82,8 +82,61 @@ export function openDrawer() {
     // blocks — the list shows them (first) only when adding a section.
     $("snip-list").classList.toggle("sections-mode", !!state.pendingSection);
     if (!snippetsLoaded) loadSnippets();
+    refreshCategories();
     applyDrawerDrag();
     updateRail();
+}
+
+/* ---- category dropdown -------------------------------------------
+ * Snippets may carry a group (config-only); the dropdown files cards
+ * under those categories. Options are rebuilt per mode — a category
+ * whose blocks are all section presets isn't offered while inserting
+ * inline — and ungrouped cards (admin-created, or host config without
+ * groups) pool under "Custom". With fewer than two categories in play
+ * the row stays hidden and the drawer looks exactly as before. */
+
+var lastCatMode = null;
+function refreshCategories() {
+    var sel = $("snip-cat");
+    var sections = $("snip-list").classList.contains("sections-mode");
+    if (sections !== lastCatMode) {
+        lastCatMode = sections;
+        sel.value = "";
+    }
+    var groups = [];
+    var hasCustom = false;
+    $("snip-list").querySelectorAll(".snip").forEach(function (card) {
+        // In inline mode preset cards are hidden, so their categories
+        // would be empty filters — skip them.
+        if (!sections && card.classList.contains("preset")) return;
+        var g = card.getAttribute("data-group");
+        if (!g) { hasCustom = true; return; }
+        if (groups.indexOf(g) === -1) groups.push(g);
+    });
+    if (hasCustom) groups.push("Custom");
+    $("drawer-cat").hidden = groups.length < 2;
+    var current = sel.value;
+    sel.innerHTML = "";
+    var all = document.createElement("option");
+    all.value = "";
+    all.textContent = "All categories";
+    sel.appendChild(all);
+    groups.forEach(function (g) {
+        var opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = g;
+        sel.appendChild(opt);
+    });
+    sel.value = groups.indexOf(current) !== -1 ? current : "";
+    applyCategoryFilter();
+}
+
+function applyCategoryFilter() {
+    var v = $("snip-cat").value;
+    $("snip-list").querySelectorAll(".snip").forEach(function (card) {
+        var g = card.getAttribute("data-group") || "Custom";
+        card.classList.toggle("cat-hide", !!v && g !== v);
+    });
 }
 
 // applyDrawerDrag turns dragging off for as long as a section is
@@ -127,6 +180,7 @@ function loadSnippets() {
         body.snippets.forEach(function (sn) {
             var card = document.createElement("div");
             card.className = sn.settings ? "snip preset" : "snip";
+            if (sn.group) card.setAttribute("data-group", sn.group);
             var nm = document.createElement("p");
             nm.className = "sname";
             nm.textContent = sn.name;
@@ -175,8 +229,10 @@ function loadSnippets() {
             list.appendChild(card);
         });
         // The list arrives after the drawer opened, so the cards learn
-        // here whether dragging is on for the mode they arrived into.
+        // here whether dragging is on for the mode they arrived into,
+        // and the category dropdown learns what groups exist.
         applyDrawerDrag();
+        refreshCategories();
     }).catch(function (err) {
         list.innerHTML = "";
         var span = document.createElement("span");
@@ -283,6 +339,7 @@ export function initSnippets() {
     $("rail-post").addEventListener("click", function () { newPostDialog(canBlogs ? "blog" : "news"); });
 
     $("drawer-close").addEventListener("click", closeDrawer);
+    $("snip-cat").addEventListener("change", applyCategoryFilter);
 }
 
 // newPageDialog collects a name and template for a new page, creates it,

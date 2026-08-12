@@ -511,7 +511,7 @@ With the Tailwind v4 standalone CLI, `assets/input.css`:
 
 /* Classes the CMS editor UI can apply (Styles menu defaults, alignment,
  * image gear, video embeds). */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video object-cover");
 ```
 
 Compile it (rerun after template changes, or use `--watch`):
@@ -530,31 +530,39 @@ snippet library, and the section presets:
 
 ```css
 /* Tailwind v4 — in assets/input.css, alongside @import "tailwindcss"; */
-@source inline("align-top aspect-video bg-blue-50 bg-blue-600 bg-blue-700 bg-slate-50 bg-slate-900 bg-white bg-yellow-200 block border border-2 border-b border-b-2 border-blue-200 border-dashed border-slate-200 border-slate-300 flex float-left float-right font-bold font-mono font-semibold font-serif gap-6 gap-8 grid h-auto inline-block items-center justify-center max-w-3xl max-w-5xl max-w-none mb-1 mb-2 mb-3 ml-6 mr-6 mt-1 mt-3 mx-auto my-4 my-6 my-8 not-prose odd:bg-slate-50 overflow-x-auto p-1 p-2 p-4 p-6 prose prose-invert prose-slate px-5 px-6 py-12 py-2.5 py-3 rounded-2xl rounded-3xl rounded-full rounded-lg rounded-xl sm:grid-cols-2 sm:grid-cols-3 sm:text-5xl text-2xl text-3xl text-4xl text-blue-600 text-blue-700 text-blue-900 text-center text-emerald-600 text-left text-lg text-red-600 text-right text-slate-500 text-slate-600 text-slate-700 text-sm text-white text-xl tracking-tight w-1/2 w-1/3 w-2/3 w-auto w-full");
+@source inline("align-top aspect-square aspect-video bg-blue-50 bg-blue-600 bg-blue-700 bg-slate-200 bg-slate-50 bg-slate-900 bg-white bg-yellow-200 block border border-2 border-b border-b-2 border-blue-200 border-blue-600 border-dashed border-slate-200 border-slate-300 border-slate-900 flex float-left float-right font-bold font-mono font-semibold font-serif gap-6 gap-8 grid h-0.5 h-auto hover:bg-blue-600 hover:bg-slate-300 hover:bg-slate-900 hover:text-white inline-block items-center justify-center max-w-3xl max-w-5xl max-w-none mb-1 mb-2 mb-3 ml-6 mr-2 mr-6 mt-1 mt-10 mt-2 mt-3 mt-4 mt-6 mx-auto my-4 my-6 my-8 not-prose object-contain object-cover odd:bg-slate-50 overflow-x-auto p-1 p-2 p-4 p-6 prose prose-invert prose-slate px-5 px-6 px-8 py-12 py-2.5 py-3 rounded-2xl rounded-3xl rounded-full rounded-lg rounded-xl size-24 sm:col-span-2 sm:grid-cols-2 sm:grid-cols-3 sm:grid-cols-4 sm:text-5xl sm:text-7xl text-2xl text-3xl text-4xl text-5xl text-6xl text-blue-600 text-blue-700 text-blue-900 text-center text-emerald-600 text-left text-lg text-red-600 text-right text-slate-200 text-slate-400 text-slate-500 text-slate-600 text-slate-700 text-slate-900 text-sm text-white text-xl tracking-tight tracking-widest uppercase w-1/2 w-1/3 w-10 w-2/3 w-auto w-full");
 ```
 
 ```js
 // Tailwind v3 — tailwind.config.js
 safelist: [
-    "align-top", "aspect-video", "bg-blue-50", "bg-blue-600",
-    "bg-blue-700", "bg-slate-50", "bg-slate-900", "bg-white",
-    "bg-yellow-200", "block", "border", "border-2", "border-b",
-    "border-b-2", "border-blue-200", "border-dashed", "border-slate-200",
-    "border-slate-300", "flex", "float-left", "float-right", "font-bold",
-    "font-mono", "font-semibold", "font-serif", "gap-6", "gap-8", "grid",
-    "h-auto", "inline-block", "items-center", "justify-center",
+    "align-top", "aspect-square", "aspect-video", "bg-blue-50",
+    "bg-blue-600", "bg-blue-700", "bg-slate-200", "bg-slate-50",
+    "bg-slate-900", "bg-white", "bg-yellow-200", "block", "border",
+    "border-2", "border-b", "border-b-2", "border-blue-200",
+    "border-blue-600", "border-dashed", "border-slate-200",
+    "border-slate-300", "border-slate-900", "flex", "float-left",
+    "float-right", "font-bold", "font-mono", "font-semibold",
+    "font-serif", "gap-6", "gap-8", "grid", "h-0.5", "h-auto",
+    "hover:bg-blue-600", "hover:bg-slate-300", "hover:bg-slate-900",
+    "hover:text-white", "inline-block", "items-center", "justify-center",
     "max-w-3xl", "max-w-5xl", "max-w-none", "mb-1", "mb-2", "mb-3",
-    "ml-6", "mr-6", "mt-1", "mt-3", "mx-auto", "my-4", "my-6", "my-8",
-    "not-prose", "odd:bg-slate-50", "overflow-x-auto", "p-1", "p-2",
-    "p-4", "p-6", "prose", "prose-invert", "prose-slate", "px-5", "px-6",
+    "ml-6", "mr-2", "mr-6", "mt-1", "mt-10", "mt-2", "mt-3", "mt-4",
+    "mt-6", "mx-auto", "my-4", "my-6", "my-8", "not-prose",
+    "object-contain", "object-cover", "odd:bg-slate-50", "overflow-x-auto", "p-1", "p-2", "p-4", "p-6",
+    "prose", "prose-invert", "prose-slate", "px-5", "px-6", "px-8",
     "py-12", "py-2.5", "py-3", "rounded-2xl", "rounded-3xl",
-    "rounded-full", "rounded-lg", "rounded-xl", "sm:grid-cols-2",
-    "sm:grid-cols-3", "sm:text-5xl", "text-2xl", "text-3xl", "text-4xl",
-    "text-blue-600", "text-blue-700", "text-blue-900", "text-center",
-    "text-emerald-600", "text-left", "text-lg", "text-red-600",
-    "text-right", "text-slate-500", "text-slate-600", "text-slate-700",
-    "text-sm", "text-white", "text-xl", "tracking-tight", "w-1/2",
-    "w-1/3", "w-2/3", "w-auto", "w-full",
+    "rounded-full", "rounded-lg", "rounded-xl", "size-24",
+    "sm:col-span-2", "sm:grid-cols-2", "sm:grid-cols-3",
+    "sm:grid-cols-4", "sm:text-5xl",
+    "sm:text-7xl", "text-2xl", "text-3xl", "text-4xl", "text-5xl",
+    "text-6xl", "text-blue-600", "text-blue-700", "text-blue-900",
+    "text-center", "text-emerald-600", "text-left", "text-lg",
+    "text-red-600", "text-right", "text-slate-200", "text-slate-400",
+    "text-slate-500", "text-slate-600", "text-slate-700",
+    "text-slate-900", "text-sm", "text-white", "text-xl",
+    "tracking-tight", "tracking-widest", "uppercase", "w-1/2", "w-1/3",
+    "w-10", "w-2/3", "w-auto", "w-full",
 ],
 ```
 

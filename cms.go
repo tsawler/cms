@@ -463,7 +463,9 @@ func New(cfg Config) (*CMS, error) {
 		cfg.EditorStyles = render.DefaultEditorStyles()
 	}
 	if cfg.Snippets == nil {
-		cfg.Snippets = append(snippets.DefaultSnippets(), snippets.DefaultSectionPresets()...)
+		cfg.Snippets = append(snippets.DefaultSnippets(), snippets.LibrarySnippets()...)
+		cfg.Snippets = append(cfg.Snippets, snippets.DefaultSectionPresets()...)
+		cfg.Snippets = append(cfg.Snippets, snippets.LibrarySectionPresets()...)
 	}
 	if cfg.SectionStyles == nil {
 		cfg.SectionStyles = render.DefaultSectionStyles()

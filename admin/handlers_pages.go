@@ -33,7 +33,13 @@ var mediaURLRe = regexp.MustCompile(`^(?:https?://|/)[^\s"'<>\\]+$`)
 // embedURLRe bounds iframe sources to the exact embed URLs the editor's
 // video slot generates: YouTube (privacy-enhanced host included) and
 // Vimeo players, nothing else.
-var embedURLRe = regexp.MustCompile(`^https://(?:www\.)?youtube(?:-nocookie)?\.com/embed/[\w-]{5,20}$|^https://player\.vimeo\.com/video/[0-9]{4,15}$`)
+var embedURLRe = regexp.MustCompile(`^https://(?:www\.)?youtube(?:-nocookie)?\.com/embed/[\w-]{5,20}$` +
+	`|^https://player\.vimeo\.com/video/[0-9]{4,15}$` +
+	// Google Maps, both shapes the map slot emits: the official
+	// Share > Embed URL, and the keyless q=…&output=embed form built
+	// from a pasted link or typed address.
+	`|^https://(?:www\.)?google\.com/maps/embed\?pb=[^\s"'<>\\]+$` +
+	`|^https://(?:maps\.google\.com|(?:www\.)?google\.com)/maps\?[^\s"'<>\\]*output=embed[^\s"'<>\\]*$`)
 
 // The button editor (editor.js) stores its settings as inline styles on
 // <a class="cms-btn"> elements. Browsers serialize colors as rgb(...) in
@@ -77,6 +83,12 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	// Unfilled video-slot placeholders from the video snippets survive
 	// saves; the editor turns them into a <video> or an embed on click.
 	p.AllowAttrs("data-cms-video-slot").Matching(regexp.MustCompile(`^$`)).OnElements("div")
+	// Likewise the photo slots from the imported library: the editor
+	// swaps a clicked slot for a media-library <img>.
+	p.AllowAttrs("data-cms-photo-slot").Matching(regexp.MustCompile(`^$`)).OnElements("div")
+	// And the map slots: a click prompts for a Google Maps link or an
+	// address and swaps in a bounded maps iframe.
+	p.AllowAttrs("data-cms-map-slot").Matching(regexp.MustCompile(`^$`)).OnElements("div")
 	// External video embeds from the video slot: iframes strictly bounded
 	// to YouTube/Vimeo player URLs, with only presentation attributes.
 	p.AllowAttrs("src").Matching(embedURLRe).OnElements("iframe")

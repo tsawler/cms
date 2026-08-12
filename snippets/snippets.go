@@ -32,9 +32,14 @@ import (
 // same as the section settings dialog. Presets come from config or from
 // the admin snippets UI (which offers the curated settings; the
 // free-form bgcolor/bgimage/bgposition are config-only).
+// Group names the category the editor's drawer files the snippet under:
+// the drawer offers a category dropdown when any loaded snippet carries
+// one. Grouping is config-only (like render.EditorStyle.Group) — admin-
+// created snippets and ungrouped config snippets appear under "Custom".
 type Snippet struct {
 	ID        int64
 	Name      string
+	Group     string
 	HTML      string
 	Settings  map[string]string
 	CreatedAt time.Time
@@ -65,35 +70,35 @@ func DefaultSnippets() []Snippet {
 	return []Snippet{
 		// A plain paragraph: the workhorse block. Deliberately unstyled,
 		// so it picks up the section's own prose styles.
-		{Name: "Text", HTML: `<p class="cms-snippet">Write your text here.</p>`},
-		{Name: "Callout", HTML: `<div class="cms-snippet not-prose my-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900">
+		{Name: "Text", Group: "Basic", HTML: `<p class="cms-snippet">Write your text here.</p>`},
+		{Name: "Callout", Group: "Basic", HTML: `<div class="cms-snippet not-prose my-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900">
 <p class="font-semibold mb-1">Heads up</p>
 <p>Something worth knowing goes here.</p>
 </div>`},
-		{Name: "Call to action", HTML: `<div class="cms-snippet not-prose my-6 rounded-xl bg-slate-900 p-6 text-center">
+		{Name: "Call to action", Group: "Basic", HTML: `<div class="cms-snippet not-prose my-6 rounded-xl bg-slate-900 p-6 text-center">
 <p class="text-lg font-semibold text-white mb-3">Ready to get started?</p>
 <a href="/" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Get in touch</a>
 </div>`},
-		{Name: "Two columns", HTML: `<div class="cms-snippet not-prose my-6 grid gap-6 sm:grid-cols-2">
+		{Name: "Two columns", Group: "Basic", HTML: `<div class="cms-snippet not-prose my-6 grid gap-6 sm:grid-cols-2">
 <div><h3 class="font-semibold mb-1">First column</h3><p class="text-slate-600">Write something here.</p></div>
 <div><h3 class="font-semibold mb-1">Second column</h3><p class="text-slate-600">And something here.</p></div>
 </div>`},
-		{Name: "Quote", HTML: `<figure class="cms-snippet not-prose my-6 rounded-xl border border-slate-200 bg-slate-50 p-6">
+		{Name: "Quote", Group: "Quotes", HTML: `<figure class="cms-snippet not-prose my-6 rounded-xl border border-slate-200 bg-slate-50 p-6">
 <blockquote class="text-lg text-slate-700">&ldquo;A quote worth repeating.&rdquo;</blockquote>
 <figcaption class="mt-3 text-sm font-semibold text-slate-500">&mdash; Name, Title</figcaption>
 </figure>`},
-		{Name: "Button link", HTML: `<p class="cms-snippet not-prose my-4">
+		{Name: "Button link", Group: "Buttons", HTML: `<p class="cms-snippet not-prose my-4">
 <a href="/" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Button text</a>
 </p>`},
 		// A movie, dropped inline: the slot offers the media library or a
 		// YouTube/Vimeo link when clicked while editing.
-		{Name: "Video", HTML: `<div class="cms-snippet not-prose my-6">
+		{Name: "Video", Group: "Media", HTML: `<div class="cms-snippet not-prose my-6">
 ` + videoSlotHTML + `
 </div>`},
 		// Invisible on the live site; in edit mode the editor script makes
 		// it visible and click-to-adjust (see editor.js and the height
 		// allowance in the sanitizer policy).
-		{Name: "Flexible space", HTML: `<div class="cms-spacer" data-height="48px" style="height: 48px"></div>`},
+		{Name: "Flexible space", Group: "Basic", HTML: `<div class="cms-spacer" data-height="48px" style="height: 48px"></div>`},
 	}
 }
 
@@ -111,25 +116,25 @@ func DefaultSectionPresets() []Snippet {
 		// A tall dark band, content centered both ways. The heading and
 		// paragraph take their color from prose-invert, so the hero stays
 		// readable if the background is later switched.
-		{Name: "Hero", Settings: map[string]string{"bg": "dark", "width": "wide", "height": "75", "valign": "center"},
+		{Name: "Hero", Group: "Headlines", Settings: map[string]string{"bg": "dark", "width": "wide", "height": "75", "valign": "center"},
 			HTML: `<div class="cms-snippet text-center">
 <h1 class="text-4xl sm:text-5xl font-bold tracking-tight">A headline that lands</h1>
 <p class="text-xl">One sentence on why visitors should care.</p>
 <p><a href="/" class="cms-btn inline-block rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white">Get started</a></p>
 </div>`},
-		{Name: "Feature grid", Settings: map[string]string{"width": "wide"},
+		{Name: "Feature grid", Group: "Features", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 text-center sm:grid-cols-3">
 <div><h3 class="text-lg font-semibold mb-2">Fast</h3><p class="text-slate-600">Explain the first thing you do well.</p></div>
 <div><h3 class="text-lg font-semibold mb-2">Simple</h3><p class="text-slate-600">Explain the second thing you do well.</p></div>
 <div><h3 class="text-lg font-semibold mb-2">Reliable</h3><p class="text-slate-600">Explain the third thing you do well.</p></div>
 </div>`},
-		{Name: "Stats", Settings: map[string]string{"bg": "light", "width": "wide"},
+		{Name: "Stats", Group: "Stats", Settings: map[string]string{"bg": "light", "width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 text-center sm:grid-cols-3">
 <div><p class="text-4xl font-bold">10k+</p><p class="text-slate-600 mt-1">Happy customers</p></div>
 <div><p class="text-4xl font-bold">99.9%</p><p class="text-slate-600 mt-1">Uptime</p></div>
 <div><p class="text-4xl font-bold">24/7</p><p class="text-slate-600 mt-1">Support</p></div>
 </div>`},
-		{Name: "Testimonials", Settings: map[string]string{"width": "wide"},
+		{Name: "Testimonials", Group: "Quotes", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid gap-6 sm:grid-cols-2">
 <figure class="rounded-xl border border-slate-200 bg-slate-50 p-6">
 <blockquote class="text-slate-700">&ldquo;Exactly what we needed &mdash; it just works.&rdquo;</blockquote>
@@ -144,7 +149,7 @@ func DefaultSectionPresets() []Snippet {
 		// so the FAQ adapts to any background. The width key is the
 		// default anyway, but a preset needs at least one setting or the
 		// API's omitempty would demote it to a plain snippet.
-		{Name: "FAQ", Settings: map[string]string{"width": "normal"},
+		{Name: "FAQ", Group: "Basic", Settings: map[string]string{"width": "normal"},
 			HTML: `<div class="cms-snippet">
 <h2>Frequently asked questions</h2>
 <h3>The first question people ask?</h3>
@@ -157,21 +162,21 @@ func DefaultSectionPresets() []Snippet {
 		// Movie sections: a full-width player, and both split layouts.
 		// The slot picks up a library video or a YouTube/Vimeo embed when
 		// clicked while editing (see videoSlotHTML).
-		{Name: "Full-width video", Settings: map[string]string{"width": "wide"},
+		{Name: "Full-width video", Group: "Media", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8">
 ` + videoSlotHTML + `
 </div>`},
-		{Name: "Text + video", Settings: map[string]string{"width": "wide"},
+		{Name: "Text + video", Group: "Media", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 items-center sm:grid-cols-2">
 <div><h2 class="text-2xl font-bold mb-2">A headline for the video</h2><p class="text-slate-600">Set up what viewers will see and why it&rsquo;s worth watching.</p></div>
 ` + videoSlotHTML + `
 </div>`},
-		{Name: "Video + text", Settings: map[string]string{"width": "wide"},
+		{Name: "Video + text", Group: "Media", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid gap-8 items-center sm:grid-cols-2">
 ` + videoSlotHTML + `
 <div><h2 class="text-2xl font-bold mb-2">A headline for the video</h2><p class="text-slate-600">Set up what viewers will see and why it&rsquo;s worth watching.</p></div>
 </div>`},
-		{Name: "Call-to-action banner", Settings: map[string]string{"bg": "accent", "valign": "center"},
+		{Name: "Call-to-action banner", Group: "Basic", Settings: map[string]string{"bg": "accent", "valign": "center"},
 			HTML: `<div class="cms-snippet text-center">
 <h2 class="text-3xl font-bold">Ready when you are</h2>
 <p>Tell visitors the one thing to do next.</p>
