@@ -234,18 +234,6 @@ export function elementSource(el) {
 
 var srcResolve = null; // pending openSource promise; truthy = modal open
 var srcOriginal = "";
-var srcValidate = null; // optional Apply gate: (text) -> error string or null
-
-function showSourceError(msg) {
-    $("src-err").textContent = msg;
-    $("src-err").hidden = false;
-    $("src-hint").hidden = true;
-}
-
-function clearSourceError() {
-    $("src-err").hidden = true;
-    $("src-hint").hidden = false;
-}
 
 export function isSourceOpen() {
     return !!srcResolve;
@@ -265,8 +253,6 @@ export function openSource(opts) {
         // up front rather than letting tags vanish silently on save.
         $("src-hint").textContent = (opts.hint ? opts.hint + " " : "") +
             (isAdmin ? "" : "Scripts and unsafe markup are removed when your changes are saved.");
-        srcValidate = opts.validate || null;
-        clearSourceError();
         srcOriginal = formatHTML(opts.html || "");
         var ta = $("src-ta");
         ta.value = srcOriginal;
@@ -288,7 +274,6 @@ function settleSource(value) {
     $("src-panel").classList.remove("on");
     var resolve = srcResolve;
     srcResolve = null;
-    srcValidate = null;
     resolve(value);
 }
 
@@ -310,21 +295,10 @@ export function initSource() {
     $("src-cancel").addEventListener("click", dismissSource);
     $("src-overlay").addEventListener("click", dismissSource);
     $("src-apply").addEventListener("click", function () {
-        if (srcValidate) {
-            var err = srcValidate($("src-ta").value);
-            if (err) {
-                showSourceError(err);
-                return; // keep the modal open until the text parses
-            }
-        }
         settleSource($("src-ta").value);
     });
 
-    // Typing clears the error; the next Apply re-validates.
-    $("src-ta").addEventListener("input", function () {
-        clearSourceError();
-        renderSource();
-    });
+    $("src-ta").addEventListener("input", renderSource);
     $("src-ta").addEventListener("scroll", function () {
         $("src-hl").scrollTop = $("src-ta").scrollTop;
         $("src-hl").scrollLeft = $("src-ta").scrollLeft;

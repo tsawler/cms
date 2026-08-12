@@ -18,9 +18,8 @@ import (
 type Role string
 
 const (
-	// RoleSuperadmin has every admin power plus raw HTML access in the
-	// in-place editor (the whole-page source view) — for users who are
-	// comfortable hand-editing markup.
+	// RoleSuperadmin has every admin power plus snippet management, the
+	// admin panel's Pages section, and unlisted page templates.
 	RoleSuperadmin Role = "superadmin"
 	// RoleAdmin may manage users and site settings in addition to content.
 	RoleAdmin Role = "admin"
@@ -35,8 +34,8 @@ func (r Role) Valid() bool { return r == RoleSuperadmin || r == RoleAdmin || r =
 // unsanitized content, page CSS/JS). Superadmin is a superset of admin.
 func (r Role) IsAdmin() bool { return r == RoleAdmin || r == RoleSuperadmin }
 
-// IsSuperadmin reports whether the role may edit raw page HTML in the
-// in-place editor.
+// IsSuperadmin reports whether the role carries the superadmin-only
+// powers (snippet management, the Pages section, unlisted templates).
 func (r Role) IsSuperadmin() bool { return r == RoleSuperadmin }
 
 // User is a CMS account.

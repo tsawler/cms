@@ -234,7 +234,7 @@ func TestEditorScriptCarriesPermissionFlags(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		`data-can-blogs="1"`, `data-can-news="0"`, `data-can-pages="0"`,
-		`data-is-admin="0"`, `data-is-superadmin="0"`,
+		`data-is-admin="0"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("edit render missing %s in script tag:\n%s", want, out)

@@ -67,7 +67,6 @@ export function initShell() {
         '<button id="rail-snips" title="Snippets">⧉<span>Snippets</span></button>' +
         '<button id="rail-page" title="New page">⊞<span>Page</span></button>' +
         '<button id="rail-post" title="New blog or news post">✎<span>Post</span></button>' +
-        '<button id="rail-html" title="Edit the page&#39;s HTML" hidden>&lt;/&gt;<span>HTML</span></button>' +
         "</div>" +
         // Post pages only, edit mode only: a pinned top-right pill, far
         // more discoverable than a bar icon for post date/summary/images.
@@ -169,7 +168,6 @@ export function initShell() {
         "</div>" +
         '<div class="cfoot">' +
         '<span class="chint" id="src-hint"></span>' +
-        '<span class="derr" id="src-err" hidden></span>' +
         '<button class="mbtn" id="src-cancel">Cancel</button>' +
         '<button class="mbtn primary" id="src-apply">Apply</button>' +
         "</div></div>" +

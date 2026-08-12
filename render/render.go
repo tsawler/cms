@@ -896,8 +896,8 @@ type EditInfo struct {
 	// IsAdmin unlocks admin-only editor chrome (the page CSS & JS
 	// panel); the server enforces the restriction regardless.
 	IsAdmin bool
-	// IsSuperadmin unlocks the whole-page HTML source view on the
-	// editor's tool rail.
+	// IsSuperadmin lets the new-page dialog offer unlisted page
+	// templates; the server holds create to the same list regardless.
 	IsSuperadmin bool
 	// CanPages, CanBlogs, and CanNews unlock the editor's cross-page
 	// chrome: new page, menu editing, and site settings need pages;
@@ -1431,10 +1431,6 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if edit.IsAdmin {
 		adminFlag = "1"
 	}
-	superFlag := "0"
-	if edit.IsSuperadmin {
-		superFlag = "1"
-	}
 	postsFlag := "0"
 	if edit.PostsEnabled {
 		postsFlag = "1"
@@ -1514,7 +1510,6 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-is-admin="` + adminFlag + `"` +
-		` data-is-superadmin="` + superFlag + `"` +
 		` data-can-pages="` + canPagesFlag + `"` +
 		` data-can-blogs="` + canBlogsFlag + `"` +
 		` data-can-news="` + canNewsFlag + `"` +

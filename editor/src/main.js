@@ -24,7 +24,6 @@ import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
 import { initPageSettings } from "./pagemeta.js";
 import { initSource } from "./source.js";
-import { initPageSource } from "./pagesource.js";
 import { initSnippets } from "./snippets.js";
 import { initPostSettings } from "./postsettings.js";
 import { initLocales } from "./locales.js";
@@ -44,7 +43,6 @@ initSaving();
 initPageCode();
 initPageSettings();
 initSource(); // the HTML-source modal for snippet blocks and sections
-initPageSource(); // whole-page HTML view on the rail (superadmin only)
 initBarMin(); // restores the remembered minimized state before first paint
 initSnippets();
 initPostSettings();

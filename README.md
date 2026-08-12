@@ -1206,9 +1206,9 @@ Accounts have one of three **roles**, which encode trust:
 - **admin** — everything: all permissions implicitly, plus site-wide and
   per-page CSS/JS (written into pages unsanitized) and user management
   without restriction.
-- **superadmin** — admin plus the whole-page HTML source view in the
-  in-place editor, snippet management (snippets are raw HTML injected
-  into every editor), and the admin panel's Pages section (everyone
+- **superadmin** — admin plus snippet management (snippets are raw HTML
+  injected into every editor), unlisted page templates in the new-page
+  dialog, and the admin panel's Pages section (everyone
   else works on pages in place on the public site, where every page
   feature is available; the admin list is the superadmin's index of
   pages that aren't linked anywhere).
