@@ -30,6 +30,13 @@ const (
 	// It only moves to the database once a live code has confirmed the
 	// authenticator app holds it too.
 	sessionKeyTOTPSetup = "cmsTOTPSetupSecret"
+
+	// The masquerade trail: while a superadmin works as another user,
+	// sessionKeyUserID carries the target and this key parks the owner's
+	// real ID for masqueradeExit to restore. Admin-only for the same
+	// reason as the 2FA keys — the public handler follows
+	// sessionKeyUserID and needs no say in who the session really is.
+	sessionKeyMasqueradeFrom = "cmsMasqueradeFrom"
 )
 
 // currentUser returns the logged-in, active user for the request, or nil.

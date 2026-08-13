@@ -13,6 +13,8 @@
     --cms-spruce-line: #c5d8cd;
     --cms-fog: #dfe3dc;
     --cms-brass: #8f6d22;
+    --cms-brass-tint: #f4eeda;
+    --cms-brass-line: #ddcd9e;
     --cms-danger: #a8402f;
     --cms-danger-tint: #f7e9e5;
     --cms-danger-line: #e5c4ba;
@@ -449,6 +451,25 @@ td.cms-slug { color: var(--cms-muted); }
     margin-bottom: 1rem;
     font-size: .92rem;
 }
+
+/* Masquerade banner: a superadmin working as someone else. Brass, like
+   the draft stamp — a state to notice, not an error. */
+.cms-masquerade {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    flex-wrap: wrap;
+    background: var(--cms-brass-tint);
+    border: 1px solid var(--cms-brass-line);
+    color: var(--cms-brass);
+    border-radius: var(--cms-radius);
+    padding: .45rem .6rem .45rem .9rem;
+    margin-bottom: 1rem;
+    font-size: .92rem;
+}
+.cms-masquerade form { margin: 0; }
+.cms-masquerade .cms-btn-ghost { background: var(--cms-surface); }
 
 /* Dialogs — shared admin chrome: the confirmation on every page, and
    the media page's uploader and new-folder prompts. */

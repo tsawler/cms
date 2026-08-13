@@ -21,8 +21,12 @@ func TestTemplatesRenderInFrench(t *testing.T) {
 		AdminPath:     "/admin",
 		AdminLang:     "fr",
 		LangToggle:    "en",
-		User:          &auth.User{Name: "Test", Role: auth.RoleAdmin},
-		Users:         []auth.User{{Name: "A", Email: "a@example.com", Role: auth.RoleEditor, Active: true}},
+		// A superadmin mid-masquerade, viewing a user who isn't them: this
+		// executes the users list's Become button and the layout's
+		// masquerade banner alongside everything the admin role renders.
+		User:           &auth.User{ID: 1, Name: "Test", Role: auth.RoleSuperadmin},
+		MasqueradeFrom: &auth.User{ID: 9, Name: "Owner", Role: auth.RoleSuperadmin},
+		Users:          []auth.User{{ID: 2, Name: "A", Email: "a@example.com", Role: auth.RoleEditor, Active: true}},
 		FormUser:      &auth.User{Role: auth.RoleEditor},
 		PagesEnabled:  true,
 		PostsEnabled:  true,

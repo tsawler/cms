@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -222,6 +223,10 @@ func New(d Deps) http.Handler {
 		r.Get("/", s.dashboard)
 		r.Post("/logout", s.logout)
 		r.Post("/lang", s.setLang)
+		// Ends a superadmin's masquerade (started from the users list).
+		// Behind requireUser alone: the session is signed in as the
+		// masqueraded user, who is usually not a superadmin.
+		r.Post("/masquerade/exit", s.masqueradeExit)
 
 		// Every user's own account page: profile, password, two-factor.
 		r.Get("/settings", s.settingsForm)
@@ -349,6 +354,7 @@ func New(d Deps) http.Handler {
 			r.Get("/users/{id}", s.userEdit)
 			r.Post("/users/{id}", s.userUpdate)
 			r.Post("/users/{id}/delete", s.userDelete)
+			r.With(s.requireSuperadmin).Post("/users/{id}/masquerade", s.userMasquerade)
 		})
 	})
 
@@ -379,6 +385,11 @@ type templateData struct {
 	CSRFToken string
 	Flash     string
 	Error     string // form-level error message
+
+	// MasqueradeFrom is the superadmin a masquerading session belongs
+	// to — the account the layout's banner switches back to. nil when
+	// the session is its owner's own.
+	MasqueradeFrom *auth.User
 
 	// PageScript names an extra script in static/ that this page needs
 	// (e.g. "media.js"), loaded after admin.js. Empty on pages whose
@@ -646,6 +657,17 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		td.NavCurrent = navCurrent(r.URL.Path)
 		if s.deps.SiteDevelopment != nil {
 			td.SiteDevelopment = s.deps.SiteDevelopment(r.Context())
+		}
+		// A masquerading session banners the way back on every page. A
+		// vanished owner leaves the banner off; masqueradeExit deals with
+		// that state when asked.
+		if fromID := s.deps.Sessions.GetInt64(r.Context(), sessionKeyMasqueradeFrom); fromID != 0 && fromID != td.User.ID {
+			from, err := s.deps.Users.GetByID(r.Context(), fromID)
+			if err == nil {
+				td.MasqueradeFrom = from
+			} else if !errors.Is(err, auth.ErrNotFound) {
+				s.deps.Logger.Error("cms admin: loading masquerade owner", "err", err)
+			}
 		}
 	}
 	// Inside a host section, the mount prefix has been stripped, so the
