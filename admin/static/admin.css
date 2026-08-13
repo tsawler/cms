@@ -163,6 +163,15 @@ body.cms-admin:not(.cms-has-sidebar) .cms-main {
     margin: 2rem auto;
     padding: 0 1.25rem;
 }
+/* Colophon: which CMS release printed this page. */
+.cms-main-foot {
+    margin-top: 3rem;
+    padding-top: .75rem;
+    border-top: 1px solid var(--cms-fog);
+    font-family: var(--cms-mono);
+    font-size: .72rem;
+    color: var(--cms-muted);
+}
 .cms-page-head {
     display: flex;
     align-items: center;

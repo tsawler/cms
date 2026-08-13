@@ -1545,6 +1545,11 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
 // client-side after a menu save (editor/src/menu.js) — keep the two in
 // sync.
+// loginIcon is the closed-lock-with-key emoji (🔐), the nav's login
+// link. Written as an escape so the glyph can't be silently mangled by
+// tooling that mishandles non-ASCII source.
+const loginIcon = "\U0001F510"
+
 func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL string) template.HTML {
 	cls := "cms-nav"
 	switch align {
@@ -1560,12 +1565,13 @@ func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL 
 	for _, e := range entries {
 		writeNavItem(&sb, e, edit)
 	}
-	// The optional "Log in" link (Site.LoginInNav), for logged-out
-	// visitors only — the caller passes "" otherwise.
+	// The optional login link (Site.LoginInNav), for logged-out
+	// visitors only — the caller passes "" otherwise. The visible label
+	// is an icon, so the accessible name has to be spelled out.
 	if loginURL != "" {
 		sb.WriteString(`<li class="cms-nav-item cms-nav-login"><a class="cms-nav-link" href="`)
 		sb.WriteString(html.EscapeString(loginURL))
-		sb.WriteString(`">Log in</a></li>`)
+		sb.WriteString(`" aria-label="Log in" title="Log in">` + loginIcon + `</a></li>`)
 	}
 	sb.WriteString(`</ul></nav>`)
 	return template.HTML(sb.String())
