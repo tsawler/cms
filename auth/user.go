@@ -194,6 +194,21 @@ func (s *Store) Update(ctx context.Context, u *User) error {
 	return nil
 }
 
+// Delete removes a user outright. The schema does the bookkeeping:
+// grants and password-reset tokens are dropped with the row, while media
+// uploads and posts survive with their user reference nulled. Returns
+// ErrNotFound when no such user exists.
+func (s *Store) Delete(ctx context.Context, id int64) error {
+	tag, err := s.db.Exec(ctx, "DELETE FROM cms_users WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdatePassword replaces a user's password hash.
 func (s *Store) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
 	tag, err := s.db.Exec(ctx,

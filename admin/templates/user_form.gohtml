@@ -97,4 +97,15 @@
 
     <button type="submit" class="cms-btn cms-btn-primary">{{if .IsNew}}{{.T "Create user"}}{{else}}{{.T "Save changes"}}{{end}}</button>
 </form>
+
+{{- /* Deleting is for admin roles only — an editor with the users
+     permission deactivates, never erases — and never one's own account,
+     mirroring the handler's guards. */ -}}
+{{if and (not .IsNew) .IsAdmin (ne .User.ID .FormUser.ID)}}
+<form method="post" action="{{.AdminPath}}/users/{{.FormUser.ID}}/delete" class="cms-danger-zone"
+      data-confirm="{{.T "Delete this user? Their posts and uploads remain but lose their author. This cannot be undone."}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" class="cms-btn cms-btn-danger">{{.T "Delete user"}}</button>
+</form>
+{{end}}
 {{end}}

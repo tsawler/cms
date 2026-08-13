@@ -166,6 +166,35 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 }
 
+// userDelete removes an account outright. Deletion is for admin roles
+// only: a non-admin holder of the users permission can deactivate the
+// editors they manage, but erasing an account is beyond their reach.
+// Nobody deletes their own account — the same rule as deactivation, and
+// it guarantees whoever is deleting still exists afterwards.
+func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
+	actor := s.currentUser(r)
+	if actor == nil || !actor.Role.IsAdmin() {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	target, ok := s.userFromURL(w, r)
+	if !ok {
+		return
+	}
+	if actor.ID == target.ID {
+		s.flash(r, s.tr(r, "You cannot delete your own account."))
+		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+		return
+	}
+	if err := s.deps.Users.Delete(r.Context(), target.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.deps.Logger.Info("cms admin: user deleted", "user", target.Email, "by", actor.Email)
+	s.flash(r, s.tr(r, "User deleted."))
+	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+}
+
 // canManage reports whether the acting user may open or edit the target
 // account. Admin roles manage everyone; a non-admin holder of the users
 // permission manages editor accounts only — an admin's password, role,
