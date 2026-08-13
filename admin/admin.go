@@ -67,6 +67,11 @@ type Deps struct {
 	DefaultLocale  string
 	Locales        []string // all configured locales, [0] = DefaultLocale
 
+	// Version is the CMS release the layout stamps in the footer of every
+	// admin page (the host passes cms.Version()). Empty hides the footer,
+	// which is what tests and direct package use get.
+	Version string
+
 	// PostTemplate is the template blog and news posts render with; the
 	// zero value disables the Blog & News admin.
 	PostTemplate render.PageTemplate
@@ -387,6 +392,9 @@ type templateData struct {
 	// template constant because only Go knows the route.
 	PagerCSSPath string
 
+	// Version is Deps.Version, for the footer; empty hides it.
+	Version string
+
 	// SiteBase is the site's absolute public base for this request; see
 	// Abs. Empty when Deps.SiteBaseURL is unset, which leaves links
 	// site-relative.
@@ -601,6 +609,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		Locales:       s.deps.Locales,
 		EditLocale:    s.deps.DefaultLocale,
 		PagerCSSPath:  pagerCSSPath,
+		Version:       s.deps.Version,
 	}
 	if s.deps.SiteBaseURL != nil {
 		td.SiteBase = s.deps.SiteBaseURL(r)

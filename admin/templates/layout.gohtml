@@ -85,6 +85,7 @@
 <main class="cms-main{{if .PageWide}} cms-main-wide{{end}}">
     {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}
     {{template "content" .}}
+    {{with .Version}}<footer class="cms-main-foot">CMS {{.}}</footer>{{end}}
 </main>
 {{if .User}}
 {{- /* One confirmation dialog for the whole admin, driven by admin.js.

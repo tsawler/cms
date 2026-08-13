@@ -641,6 +641,7 @@ func New(cfg Config) (*CMS, error) {
 		Locales:         cfg.Locales,
 		RememberFor:     cfg.RememberFor,
 		PerPage:         cfg.AdminPerPage,
+		Version:         Version(),
 	})
 	return c, nil
 }
