@@ -708,10 +708,14 @@ func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath 
 
 // sectionVisibleTo reports whether the user may see the section — the one
 // answer behind both its nav link and its dashboard card. It mirrors what
-// sectionHandler enforces: AdminOnly first, then Permission, which reads
-// as an explicit grant when AdminsNeedGrant is set. Can and HasGrant are
-// nil-safe, so the login page's nil user simply sees nothing gated.
+// sectionHandler enforces: SuperadminOnly first, then AdminOnly, then
+// Permission, which reads as an explicit grant when AdminsNeedGrant is
+// set. Can and HasGrant are nil-safe, so the login page's nil user simply
+// sees nothing gated.
 func sectionVisibleTo(sec Section, u *auth.User) bool {
+	if sec.SuperadminOnly && (u == nil || !u.Role.IsSuperadmin()) {
+		return false
+	}
 	if sec.AdminOnly && (u == nil || !u.Role.IsAdmin()) {
 		return false
 	}

@@ -93,6 +93,28 @@ func TestNavSectionsFor(t *testing.T) {
 	}
 }
 
+// SuperadminOnly hides the nav link from everyone below superadmin —
+// admins included, unlike AdminOnly.
+func TestNavSectionsForSuperadminOnly(t *testing.T) {
+	sections := []Section{
+		{Path: "feeds", NavLabel: "Feeds", SuperadminOnly: true, Handler: noopHandler},
+	}
+
+	for name, tc := range map[string]struct {
+		user *auth.User
+		want int
+	}{
+		"nil user":   {nil, 0},
+		"editor":     {&auth.User{Role: auth.RoleEditor}, 0},
+		"admin":      {&auth.User{Role: auth.RoleAdmin}, 0},
+		"superadmin": {&auth.User{Role: auth.RoleSuperadmin}, 1},
+	} {
+		if got := navSectionsFor(sections, "/admin", tc.user, "/"); len(got) != tc.want {
+			t.Errorf("%s: nav has %d links, want %d", name, len(got), tc.want)
+		}
+	}
+}
+
 // A section's Permission hides its nav link from editors without the
 // grant, admits editors with it, and never bars admin roles.
 func TestNavSectionsForPermission(t *testing.T) {

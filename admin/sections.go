@@ -68,6 +68,11 @@ type Section struct {
 	// Editors receive 403 and don't see the nav link.
 	AdminOnly bool
 
+	// SuperadminOnly restricts the section to superadmins. Everyone
+	// else — admins included — receives 403 and doesn't see the nav
+	// link. Subsumes AdminOnly; setting both is allowed and redundant.
+	SuperadminOnly bool
+
 	// Permission, when non-empty, restricts the section to users holding
 	// the named permission (admin roles hold every permission). Naming a
 	// built-in permission reuses it; any other key declares a custom
@@ -87,7 +92,8 @@ type Section struct {
 	// dashboard, linking to the section root. Host cards render ahead of
 	// the built-in cards (which are superadmin-only), in registration
 	// order, and a card is shown exactly when the section's nav link
-	// would be: AdminOnly, Permission, and AdminsNeedGrant all apply.
+	// would be: SuperadminOnly, AdminOnly, Permission, and
+	// AdminsNeedGrant all apply.
 	Dashboard *DashboardCard
 
 	// Handler serves the section's requests. The mount prefix is
@@ -158,7 +164,7 @@ var navAnchors = map[string]bool{
 }
 
 // sectionHandler wraps a host-registered section for mounting: it enforces
-// the admin role when asked, exposes the server to the package helpers,
+// the role gates when asked, exposes the server to the package helpers,
 // strips the mount prefix so the handler sees section-relative paths, and
 // canonicalizes the bare section URL to its trailing-slash form so the
 // handler's relative links resolve under the section.
@@ -189,6 +195,9 @@ func (s *server) sectionHandler(sec Section) http.Handler {
 	}
 	if sec.AdminOnly {
 		h = s.requireAdmin(h)
+	}
+	if sec.SuperadminOnly {
+		h = s.requireSuperadmin(h)
 	}
 	return h
 }
