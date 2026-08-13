@@ -5370,9 +5370,17 @@ body.cms-editing{margin-left:56px}
 .cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}
 .cms-editing [data-cms-section]:hover{outline-style:solid}
 .cms-editing [data-cms-section-content]{min-height:2em}
-.cms-sec-ui{position:absolute;top:8px;right:8px;z-index:2147482996;display:flex;gap:2px;
+/* Straddles the section's top edge (half above, half below) so it reads
+ * as a tab on the boundary instead of covering the first line of a
+ * wide/full-width section's content. Dimmed until the section (or the
+ * pill itself) is hovered \u2014 low idle opacity rather than hidden so it
+ * stays discoverable, and still works on touch where hover needs a tap. */
+.cms-sec-ui{position:absolute;top:0;right:12px;transform:translateY(-50%);
+z-index:2147482996;display:flex;gap:2px;
 background:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;
-padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35)}
+padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35);
+opacity:.25;transition:opacity .15s ease}
+.cms-editing [data-cms-section]:hover .cms-sec-ui,.cms-sec-ui:hover{opacity:1}
 .cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
 border-radius:999px;padding:6px 9px;cursor:pointer}
 .cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}
