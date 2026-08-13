@@ -20,8 +20,13 @@ func (s *server) usersList(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	actor := s.currentUser(r)
+	rows := make([]userRow, len(users))
+	for i := range users {
+		rows[i] = userRow{User: users[i], CanManage: canManageUser(actor, &users[i])}
+	}
 	data := s.newTemplateData(r)
-	data.Users = users
+	data.Users = rows
 	s.render(w, http.StatusOK, "users", data)
 }
 
@@ -170,7 +175,9 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 // only: a non-admin holder of the users permission can deactivate the
 // editors they manage, but erasing an account is beyond their reach.
 // Nobody deletes their own account — the same rule as deactivation, and
-// it guarantees whoever is deleting still exists afterwards.
+// it guarantees whoever is deleting still exists afterwards. A superadmin
+// account is deletable only by another superadmin, matching canManage:
+// an admin who cannot edit one has no business erasing it either.
 func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
 	actor := s.currentUser(r)
 	if actor == nil || !actor.Role.IsAdmin() {
@@ -179,6 +186,10 @@ func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := s.userFromURL(w, r)
 	if !ok {
+		return
+	}
+	if target.Role == auth.RoleSuperadmin && !actor.Role.IsSuperadmin() {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 	if actor.ID == target.ID {
@@ -279,15 +290,42 @@ func (s *server) masqueradeExit(w http.ResponseWriter, r *http.Request) {
 }
 
 // canManage reports whether the acting user may open or edit the target
-// account. Admin roles manage everyone; a non-admin holder of the users
-// permission manages editor accounts only — an admin's password, role,
-// or two-factor reset is never within an editor's reach.
+// account. Superadmins manage everyone; an admin manages admins and
+// editors but not superadmins; a non-admin holder of the users permission
+// manages editor accounts only — an admin's password, role, or two-factor
+// reset is never within an editor's reach.
+//
+// The superadmin exclusion is what makes the role assignment check in
+// parseUserForm mean anything. Barring an admin from *assigning* superadmin
+// while still letting them edit an existing one would leave the escalation
+// wide open: set the superadmin's password, then log in as them.
 func (s *server) canManage(r *http.Request, target *auth.User) bool {
-	actor := s.currentUser(r)
-	if actor == nil {
+	return canManageUser(s.currentUser(r), target)
+}
+
+// canManageUser is the rule canManage applies, written against the two
+// accounts alone so the users list can ask the same question once per row.
+// The list used to decide for itself in template syntax, which drifts: it
+// offered an Edit link to viewers the route then answered with a 403.
+func canManageUser(actor, target *auth.User) bool {
+	if actor == nil || target == nil {
+		return false
+	}
+	if actor.Role.IsSuperadmin() {
+		return true
+	}
+	if target.Role == auth.RoleSuperadmin {
 		return false
 	}
 	return actor.Role.IsAdmin() || target.Role == auth.RoleEditor
+}
+
+// userRow is one line of the users table: the account, plus whether the
+// viewer may open it. Computing this in the handler keeps the table and
+// the route reading from the same rule.
+type userRow struct {
+	auth.User
+	CanManage bool
 }
 
 // mergeGrants bounds a grant change to what the actor may give or take:
@@ -377,9 +415,19 @@ func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string,
 	} else if _, err := mail.ParseAddress(u.Email); err != nil {
 		errs["email"] = s.tr(r, "That doesn't look like a valid email address.")
 	}
-	if !u.Role.Valid() {
+	// Role assignment is bounded by the actor's own role, and superadmin is
+	// bounded separately from admin: IsAdmin is true for both, so checking
+	// only that would let an admin mint a superadmin and log in as it,
+	// walking around every SuperadminOnly gate in the product.
+	actor := s.currentUser(r)
+	switch {
+	case !u.Role.Valid():
 		errs["role"] = s.tr(r, "Choose a role.")
-	} else if u.Role != auth.RoleEditor && !s.currentUser(r).Role.IsAdmin() {
+	case actor == nil:
+		errs["role"] = s.tr(r, "Only administrators can assign admin roles.")
+	case u.Role == auth.RoleSuperadmin && !actor.Role.IsSuperadmin():
+		errs["role"] = s.tr(r, "Only superadministrators can assign the superadmin role.")
+	case u.Role != auth.RoleEditor && !actor.Role.IsAdmin():
 		errs["role"] = s.tr(r, "Only administrators can assign admin roles.")
 	}
 	if isNew && password == "" {

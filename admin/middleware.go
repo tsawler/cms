@@ -117,6 +117,42 @@ func (s *server) requireGrant(p auth.Permission) func(http.Handler) http.Handler
 	}
 }
 
+// mediaPermissions is every permission that opens the media library: the
+// CMS's own content grants, plus whichever host permissions declared
+// GrantsMedia.
+//
+// PermUsers is deliberately absent. Managing accounts is not editing
+// content, and a user manager who holds nothing else has no page, post, or
+// record to put a picture on.
+func (s *server) mediaPermissions() []auth.Permission {
+	perms := []auth.Permission{auth.PermPages, auth.PermBlogs, auth.PermNews}
+	for _, d := range s.deps.Permissions {
+		if d.GrantsMedia {
+			perms = append(perms, d.Key)
+		}
+	}
+	return perms
+}
+
+// canUseMedia reports whether this request may reach the media library.
+// Admin roles pass on Can alone, as they do everywhere — an admin already
+// holds the content grants implicitly, so gating them here would be a
+// distinction the rest of the product does not draw.
+func (s *server) canUseMedia(r *http.Request) bool {
+	return s.currentUser(r).CanAny(s.mediaPermissions()...)
+}
+
+// requireMedia gates the media library on any of mediaPermissions.
+func (s *server) requireMedia(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.canUseMedia(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // requireAnyPerm is requirePerm for handlers that several permissions
 // unlock — the shared Blog & News area needs either feed, not both.
 func (s *server) requireAnyPerm(perms ...auth.Permission) func(http.Handler) http.Handler {
@@ -129,6 +165,99 @@ func (s *server) requireAnyPerm(perms ...auth.Permission) func(http.Handler) htt
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// Request body ceilings, applied by the csrf middleware — see readToken
+// for why they have to live there rather than in the handlers.
+const (
+	// DefaultMaxRequestBytes bounds an authenticated unsafe request when
+	// the host sets no Deps.MaxRequestBytes and there is no media manager
+	// to size one from.
+	DefaultMaxRequestBytes = 64 << 20
+
+	// maxAnonRequestBytes bounds one that arrives without a session user.
+	// Every form a signed-out visitor can legitimately post — login, the
+	// two-factor code, forgot-password, reset-password — is a handful of
+	// short fields, so this is generous by three orders of magnitude and
+	// still refuses the interesting case: a multipart body aimed at
+	// /admin/login by someone with no account at all.
+	maxAnonRequestBytes = 1 << 20
+
+	// csrfParseMemory is what the middleware keeps in memory while
+	// parsing; anything beyond it goes to a temp file, bounded in total by
+	// the ceilings above. Matches the net/http default that
+	// PostFormValue used to apply implicitly, so upload behaviour is
+	// unchanged in every respect except being bounded.
+	csrfParseMemory = 32 << 20
+)
+
+// maxRequestBytes is the ceiling for this request's body.
+//
+// Signed-in staff may post an inventory upload of many photos at once;
+// nobody signed out has any business sending more than a form's worth of
+// fields. Reading the session directly rather than calling currentUser
+// keeps this off the database — the answer only has to be "is anyone
+// logged in", and requireUser does the real check downstream.
+func (s *server) maxRequestBytes(r *http.Request) int64 {
+	if s.deps.Sessions.GetInt64(r.Context(), sessionKeyUserID) == 0 {
+		return maxAnonRequestBytes
+	}
+	if s.deps.MaxRequestBytes > 0 {
+		return s.deps.MaxRequestBytes
+	}
+	// Sized from the media limits when the host configured them, so
+	// raising MaxVideoBytes does not silently need this raised too.
+	if s.deps.Media != nil {
+		if limit := s.uploadLimit(); limit > DefaultMaxRequestBytes {
+			return limit + (1 << 20) // multipart framing and sibling fields
+		}
+	}
+	return DefaultMaxRequestBytes
+}
+
+// readToken pulls the CSRF token from the header, or failing that from the
+// form body — and is where the request body's ceiling is established,
+// because this is the first thing in the whole chain to touch it.
+//
+// That ordering is the reason it matters. PostFormValue on a multipart
+// request calls ParseMultipartForm, which streams the *entire* body,
+// spilling past its memory limit into temp files with no cap on the
+// total. Worse, ParseMultipartForm returns nil immediately once
+// r.MultipartForm is set, so every limit a handler sets afterwards —
+// http.MaxBytesReader on a body already consumed, ParseMultipartForm with
+// a smaller memory bound — is dead code that reads as if it works.
+// Bounding the body has to happen here or it does not happen at all.
+//
+// Reports false when the body exceeded its ceiling, having already
+// answered 413: an oversized upload deserves a better answer than the
+// "invalid or missing CSRF token" it would otherwise collect, since the
+// token was neither.
+func (s *server) readToken(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if sent := r.Header.Get("X-CSRF-Token"); sent != "" {
+		// The body is untouched on this path, so a handler's own
+		// MaxBytesReader still governs it. This is how the JS uploaders
+		// post, and why they were never affected.
+		return sent, true
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestBytes(r))
+
+	var err error
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		err = r.ParseMultipartForm(csrfParseMemory)
+	} else {
+		err = r.ParseForm()
+	}
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return "", false
+		}
+		// Any other parse failure is a malformed body, which the token
+		// comparison below refuses on its own.
+	}
+	return r.PostFormValue("csrf_token"), true
 }
 
 // csrf implements a session-bound synchronizer token. Safe methods ensure a
@@ -145,9 +274,9 @@ func (s *server) csrf(next http.Handler) http.Handler {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 		default:
-			sent := r.Header.Get("X-CSRF-Token")
-			if sent == "" {
-				sent = r.PostFormValue("csrf_token")
+			sent, ok := s.readToken(w, r)
+			if !ok {
+				return
 			}
 			if subtle.ConstantTimeCompare([]byte(sent), []byte(token)) != 1 {
 				http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)

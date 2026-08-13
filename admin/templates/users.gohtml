@@ -41,7 +41,11 @@
             {{end}}
         </td>
         {{end}}
-        <td class="cms-table-actions"><a href="{{$.AdminPath}}/users/{{.ID}}">{{$.T "Edit"}}</a></td>
+        {{- /* CanManage is canManageUser, decided per row in the handler —
+               the same rule the route enforces, rather than a second copy
+               of it here. The route refuses either way; this only stops the
+               table offering a door that is shut. */}}
+        <td class="cms-table-actions">{{if .CanManage}}<a href="{{$.AdminPath}}/users/{{.ID}}">{{$.T "Edit"}}</a>{{end}}</td>
     </tr>
     {{else}}
     <tr><td colspan="{{if .IsSuperadmin}}6{{else}}5{{end}}" class="cms-muted">{{.T "No users yet."}}</td></tr>

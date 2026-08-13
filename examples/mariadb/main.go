@@ -127,8 +127,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	if created {
-		logger.Warn("created initial admin — change this password",
-			"email", adminEmail, "password", adminPassword)
+		// Not the password: logs get shipped, tailed, and aggregated, so a
+		// credential written here outlives the terminal it appeared in.
+		// Whoever configured it already knows it.
+		logger.Warn("created initial admin — sign in and change the password",
+			"email", adminEmail)
 	}
 
 	// Give a fresh install something at "/" instead of a 404. An empty
