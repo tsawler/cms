@@ -15,6 +15,7 @@ var envVars = []string{
 	"S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET",
 	"S3_KEY_PREFIX", "S3_APPLY_PUBLIC_POLICY",
 	"CAP_URL", "CAP_INTERNAL_URL", "CAP_SITE_KEY", "CAP_SECRET", "CAP_WIDGET",
+	"CMS_SESSION_REDIS_ADDR", "CMS_SESSION_REDIS_PASSWORD", "CMS_SESSION_REDIS_DB",
 	"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE",
 	"CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
@@ -34,9 +35,9 @@ func TestConfigFromEnvEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty environment: %v", err)
 	}
-	if cfg.S3 != nil || cfg.Captcha != nil || cfg.Tailwind != nil {
-		t.Errorf("empty environment enabled features: S3=%v Captcha=%v Tailwind=%v",
-			cfg.S3, cfg.Captcha, cfg.Tailwind)
+	if cfg.S3 != nil || cfg.Captcha != nil || cfg.Tailwind != nil || cfg.Redis != nil {
+		t.Errorf("empty environment enabled features: S3=%v Captcha=%v Tailwind=%v Redis=%v",
+			cfg.S3, cfg.Captcha, cfg.Tailwind, cfg.Redis)
 	}
 	if cfg.RememberFor != 0 || cfg.MediaWebPQuality != 0 || cfg.MediaMaxVideoMB != 0 {
 		t.Errorf("empty environment set values: %+v", cfg)
@@ -72,25 +73,28 @@ func TestConfigFromEnvMediaAdopt(t *testing.T) {
 func TestConfigFromEnvFull(t *testing.T) {
 	clearEnv(t)
 	for k, v := range map[string]string{
-		"S3_ENDPOINT":            "s3.example.com",
-		"S3_REGION":              "us-east-1",
-		"S3_BUCKET":              "my-site",
-		"S3_ACCESS_KEY":          "key",
-		"S3_SECRET":              "secret",
-		"S3_KEY_PREFIX":          "prod",
-		"S3_APPLY_PUBLIC_POLICY": "1",
-		"CAP_URL":                "http://localhost:3300",
-		"CAP_INTERNAL_URL":       "http://cap:3000",
-		"CAP_SITE_KEY":           "site",
-		"CAP_SECRET":             "sk-x",
-		"CAP_WIDGET":             "visible",
-		"CMS_REMEMBER_DAYS":      "14",
-		"CMS_POSTS_PER_PAGE":     "6",
-		"CMS_ADMIN_PER_PAGE":     "40",
-		"CMS_MEDIA_WEBP_QUALITY": "0.5",
-		"CMS_MEDIA_MAX_VIDEO_MB": "128",
-		"CMS_TAILWIND_COMMAND":   "./tw.sh {content} {output}",
-		"CMS_TAILWIND_DIR":       "assets",
+		"S3_ENDPOINT":                "s3.example.com",
+		"S3_REGION":                  "us-east-1",
+		"S3_BUCKET":                  "my-site",
+		"S3_ACCESS_KEY":              "key",
+		"S3_SECRET":                  "secret",
+		"S3_KEY_PREFIX":              "prod",
+		"S3_APPLY_PUBLIC_POLICY":     "1",
+		"CAP_URL":                    "http://localhost:3300",
+		"CAP_INTERNAL_URL":           "http://cap:3000",
+		"CAP_SITE_KEY":               "site",
+		"CAP_SECRET":                 "sk-x",
+		"CAP_WIDGET":                 "visible",
+		"CMS_SESSION_REDIS_ADDR":     "localhost:6379",
+		"CMS_SESSION_REDIS_PASSWORD": "hunter2",
+		"CMS_SESSION_REDIS_DB":       "2",
+		"CMS_REMEMBER_DAYS":          "14",
+		"CMS_POSTS_PER_PAGE":         "6",
+		"CMS_ADMIN_PER_PAGE":         "40",
+		"CMS_MEDIA_WEBP_QUALITY":     "0.5",
+		"CMS_MEDIA_MAX_VIDEO_MB":     "128",
+		"CMS_TAILWIND_COMMAND":       "./tw.sh {content} {output}",
+		"CMS_TAILWIND_DIR":           "assets",
 	} {
 		t.Setenv(k, v)
 	}
@@ -115,6 +119,12 @@ func TestConfigFromEnvFull(t *testing.T) {
 	if cfg.Captcha.URL != "http://localhost:3300" || cfg.Captcha.InternalURL != "http://cap:3000" ||
 		cfg.Captcha.SiteKey != "site" || cfg.Captcha.Secret != "sk-x" || !cfg.Captcha.Visible {
 		t.Errorf("Captcha = %+v", cfg.Captcha)
+	}
+	if cfg.Redis == nil {
+		t.Fatal("Redis not configured")
+	}
+	if cfg.Redis.Addr != "localhost:6379" || cfg.Redis.Password != "hunter2" || cfg.Redis.DB != 2 {
+		t.Errorf("Redis = %+v", cfg.Redis)
 	}
 	if cfg.RememberFor != 14*24*time.Hour {
 		t.Errorf("RememberFor = %v, want 336h", cfg.RememberFor)
@@ -167,6 +177,17 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 			if _, err := ConfigFromEnv(); err == nil {
 				t.Errorf("%s=%q: expected an error, got nil", k, bad)
 			}
+		}
+	}
+
+	// The Redis database number is only read once an address enables Redis
+	// sessions at all, matching how the S3_ vars ride on S3_ENDPOINT.
+	for _, bad := range []string{"primary", "-1"} {
+		clearEnv(t)
+		t.Setenv("CMS_SESSION_REDIS_ADDR", "localhost:6379")
+		t.Setenv("CMS_SESSION_REDIS_DB", bad)
+		if _, err := ConfigFromEnv(); err == nil {
+			t.Errorf("CMS_SESSION_REDIS_DB=%q: expected an error, got nil", bad)
 		}
 	}
 }

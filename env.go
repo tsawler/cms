@@ -23,6 +23,9 @@ import (
 //   - CAP_URL, CAP_INTERNAL_URL, CAP_SITE_KEY, CAP_SECRET,
 //     CAP_WIDGET (=visible) → Captcha. Setting CAP_URL enables the
 //     login CAPTCHA.
+//   - CMS_SESSION_REDIS_ADDR, CMS_SESSION_REDIS_PASSWORD,
+//     CMS_SESSION_REDIS_DB → Redis. Setting CMS_SESSION_REDIS_ADDR moves
+//     session storage from the cms_sessions table to Redis.
 //   - CMS_REMEMBER_DAYS → RememberFor, in days.
 //   - CMS_POSTS_PER_PAGE → PostsPerPage, how many posts a paginated blog
 //     or news listing shows on one page.
@@ -75,6 +78,20 @@ func ConfigFromEnv() (Config, error) {
 			SiteKey:     os.Getenv("CAP_SITE_KEY"),
 			Secret:      os.Getenv("CAP_SECRET"),
 			Visible:     os.Getenv("CAP_WIDGET") == "visible",
+		}
+	}
+
+	if addr := os.Getenv("CMS_SESSION_REDIS_ADDR"); addr != "" {
+		cfg.Redis = &RedisConfig{
+			Addr:     addr,
+			Password: os.Getenv("CMS_SESSION_REDIS_PASSWORD"),
+		}
+		if v := os.Getenv("CMS_SESSION_REDIS_DB"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return Config{}, fmt.Errorf("cms: CMS_SESSION_REDIS_DB %q is not a database number", v)
+			}
+			cfg.Redis.DB = n
 		}
 	}
 

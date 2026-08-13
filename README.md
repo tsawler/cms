@@ -1776,7 +1776,8 @@ own stylesheet defines.
 The example loads variables from a `.env` file — `examples/basic/.env`
 first, falling back to one at the repo root — without overriding
 anything already set in the real environment. The `CMS_TAILWIND_*`,
-`S3_*`, and `CAP_*` variables plus `CMS_SITE_URL`, `CMS_REMEMBER_DAYS`,
+`S3_*`, `CAP_*`, and `CMS_SESSION_REDIS_*` variables plus `CMS_SITE_URL`,
+`CMS_REMEMBER_DAYS`,
 `CMS_POSTS_PER_PAGE`, `CMS_ADMIN_PER_PAGE` and the two `CMS_MEDIA_*` knobs are read by
 `cms.ConfigFromEnv`, which any host can
 use to fill those `Config` fields; the rest are the example's own.
@@ -1790,6 +1791,9 @@ Everything read:
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
+| `CMS_SESSION_REDIS_ADDR` | unset (sessions stay in the database) | Redis server address, `host:port`. Setting it moves login-session storage from the `cms_sessions` table to Redis (keys prefixed `cms_session:`) and makes the other `CMS_SESSION_REDIS_*` variables relevant. |
+| `CMS_SESSION_REDIS_PASSWORD` | unset (no auth) | Password for that Redis server. |
+| `CMS_SESSION_REDIS_DB` | `0` | Redis logical database number. An invalid or negative value is a startup error. |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_POSTS_PER_PAGE` | `10` | How many posts a paginated `{{cmsFeed}}` listing shows per page. An invalid or non-positive value is a startup error. A template can override it per listing with `{{cmsFeed "blog" 6}}`. |
 | `CMS_ADMIN_PER_PAGE` | `25` | How many rows a paginated admin list shows per page (Blog & News, and Pages). Separate from `CMS_POSTS_PER_PAGE`: an editor's table wants more rows than a public listing. An invalid or non-positive value is a startup error. |
@@ -1883,6 +1887,11 @@ overwritten by the next build (and marked `linguist-generated`).
   `UPDATE cms_pages SET template_name = replace(template_name, '.tmpl', '.gohtml');`
 - All tables are prefixed `cms_`, so the CMS can share a database with the
   host app.
+- **Login sessions can live in Redis instead of the database.** Set
+  `Config.Redis` (or `CMS_SESSION_REDIS_ADDR`) and sessions move from the
+  `cms_sessions` table to Redis under `cms_session:` keys, with Redis's own
+  key expiry replacing the hourly cleanup sweep. Everything else stays in
+  the database; leave it unset and sessions do too.
 - `Migrate` is safe to run on every startup and from multiple instances
   concurrently. On MySQL and MariaDB it is not transactional — see
   [Schema](#schema).
