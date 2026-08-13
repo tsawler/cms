@@ -83,6 +83,17 @@
 </aside>
 {{end}}
 <main class="cms-main{{if .PageWide}} cms-main-wide{{end}}">
+    {{if .MasqueradeFrom}}
+    {{- /* A superadmin working as someone else. The banner is the only way
+           back, so it renders on every page while the masquerade lasts. */}}
+    <div class="cms-masquerade" role="status">
+        <span>{{.T "You are working as"}} <strong>{{.User.Name}}</strong></span>
+        <form method="post" action="{{.AdminPath}}/masquerade/exit">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{.T "Switch back to"}} {{.MasqueradeFrom.Name}}</button>
+        </form>
+    </div>
+    {{end}}
     {{with .Flash}}<div class="cms-flash">{{.}}</div>{{end}}
     {{template "content" .}}
     {{with .Version}}<footer class="cms-main-foot">CMS {{.}}</footer>{{end}}

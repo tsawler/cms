@@ -195,6 +195,89 @@ func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 }
 
+// userMasquerade signs the session in as the target user, so a superadmin
+// can see the admin — and the public site's in-place editor — exactly as
+// that user does. The superadmin's own ID is parked in the session and
+// masqueradeExit restores it; nothing about the target account changes.
+// Superadmin-only, enforced by the route's middleware: the swap grants the
+// target's entire session, so nothing less than the top role may start one.
+func (s *server) userMasquerade(w http.ResponseWriter, r *http.Request) {
+	actor := s.currentUser(r)
+	target, ok := s.userFromURL(w, r)
+	if !ok {
+		return
+	}
+	if target.ID == actor.ID {
+		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+		return
+	}
+	// An inactive account can't log in, and a masqueraded session would
+	// hit the same wall at its very next request.
+	if !target.Active {
+		s.flash(r, s.tr(r, "You cannot become an inactive user."))
+		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+		return
+	}
+
+	ctx := r.Context()
+	// Masquerading from inside a masquerade (the first target was another
+	// superadmin) keeps the original owner: exit always returns to the
+	// account that actually logged in.
+	owner := s.deps.Sessions.GetInt64(ctx, sessionKeyMasqueradeFrom)
+	if owner == 0 {
+		owner = actor.ID
+	}
+	// A fresh session token on privilege change, same as login. RenewToken
+	// keeps the session's data, so the parked owner survives it.
+	if err := s.deps.Sessions.RenewToken(ctx); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.deps.Sessions.Put(ctx, sessionKeyMasqueradeFrom, owner)
+	s.deps.Sessions.Put(ctx, sessionKeyUserID, target.ID)
+	s.deps.Logger.Info("cms admin: masquerade started", "as", target.Email, "by", actor.Email)
+	http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
+}
+
+// masqueradeExit returns a masquerading session to its owner. It sits
+// behind requireUser alone — whoever the session is currently signed in
+// as may end the masquerade; the target is usually not a superadmin.
+func (s *server) masqueradeExit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ownerID := s.deps.Sessions.GetInt64(ctx, sessionKeyMasqueradeFrom)
+	if ownerID == 0 {
+		http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
+		return
+	}
+	owner, err := s.deps.Users.GetByID(ctx, ownerID)
+	if err != nil && !errors.Is(err, auth.ErrNotFound) {
+		s.serverError(w, err)
+		return
+	}
+	if err != nil || !owner.Active {
+		// The owner was deleted or deactivated mid-masquerade: there is
+		// nobody to return to, so the session ends like a logout.
+		if err := s.deps.Sessions.Destroy(ctx); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		http.Redirect(w, r, s.deps.AdminPath+"/login", http.StatusSeeOther)
+		return
+	}
+	masked := s.currentUser(r)
+	if err := s.deps.Sessions.RenewToken(ctx); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.deps.Sessions.Remove(ctx, sessionKeyMasqueradeFrom)
+	s.deps.Sessions.Put(ctx, sessionKeyUserID, owner.ID)
+	if masked != nil {
+		s.deps.Logger.Info("cms admin: masquerade ended", "user", owner.Email, "was", masked.Email)
+	}
+	s.flash(r, s.tr(r, "You are back in your own account."))
+	http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+}
+
 // canManage reports whether the acting user may open or edit the target
 // account. Admin roles manage everyone; a non-admin holder of the users
 // permission manages editor accounts only — an admin's password, role,

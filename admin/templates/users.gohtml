@@ -13,6 +13,9 @@
         <th>{{.T "Email"}}</th>
         <th>{{.T "Role"}}</th>
         <th>{{.T "Status"}}</th>
+        {{- /* The Become column exists only for superadmins — the one
+               role the masquerade route lets through. */}}
+        {{if .IsSuperadmin}}<th></th>{{end}}
         <th></th>
     </tr>
     </thead>
@@ -23,10 +26,25 @@
         <td>{{.Email}}</td>
         <td><span class="cms-badge">{{$.T (printf "%s" .Role)}}</span></td>
         <td>{{if .Active}}<span class="cms-badge cms-badge-ok">{{$.T "active"}}</span>{{else}}<span class="cms-badge cms-badge-off">{{$.T "inactive"}}</span>{{end}}</td>
+        {{if $.IsSuperadmin}}
+        <td class="cms-table-actions">
+            {{- /* Become: sign this session in as the user. Never on your
+                   own row, and never into an inactive account, which
+                   couldn't log in. The route enforces both, and the
+                   superadmin gate, server-side. */}}
+            {{if and .Active (ne .ID $.User.ID)}}
+            <form method="post" action="{{$.AdminPath}}/users/{{.ID}}/masquerade">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm"
+                        title="{{$.T "See the admin exactly as this user does. A banner offers the way back."}}">{{$.T "Become"}}</button>
+            </form>
+            {{end}}
+        </td>
+        {{end}}
         <td class="cms-table-actions"><a href="{{$.AdminPath}}/users/{{.ID}}">{{$.T "Edit"}}</a></td>
     </tr>
     {{else}}
-    <tr><td colspan="5" class="cms-muted">{{.T "No users yet."}}</td></tr>
+    <tr><td colspan="{{if .IsSuperadmin}}6{{else}}5{{end}}" class="cms-muted">{{.T "No users yet."}}</td></tr>
     {{end}}
     </tbody>
 </table>

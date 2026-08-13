@@ -270,6 +270,15 @@ var frStrings = map[string]string{
 	"admin":         "admin",
 	"superadmin":    "superadmin",
 
+	// Masquerade: the users-list button, the layout's banner, and the
+	// handlers' messages.
+	"Become": "Devenir",
+	"See the admin exactly as this user does. A banner offers the way back.": "Voyez l'admin exactement comme cet utilisateur le voit. Un bandeau offre le chemin du retour.",
+	"You are working as":                  "Vous travaillez en tant que",
+	"Switch back to":                      "Revenir à",
+	"You cannot become an inactive user.": "Vous ne pouvez pas devenir un utilisateur inactif.",
+	"You are back in your own account.":   "Vous êtes de retour dans votre propre compte.",
+
 	// User form and handler.
 	"Edit user":                                "Modifier l'utilisateur",
 	"Back to users":                            "Retour aux utilisateurs",

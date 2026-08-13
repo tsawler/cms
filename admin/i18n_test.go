@@ -18,27 +18,31 @@ import (
 // missing field fails the test instead of a live request.
 func TestTemplatesRenderInFrench(t *testing.T) {
 	data := templateData{
-		AdminPath:     "/admin",
-		AdminLang:     "fr",
-		LangToggle:    "en",
-		User:          &auth.User{Name: "Test", Role: auth.RoleAdmin},
-		Users:         []auth.User{{Name: "A", Email: "a@example.com", Role: auth.RoleEditor, Active: true}},
-		FormUser:      &auth.User{Role: auth.RoleEditor},
-		PagesEnabled:  true,
-		PostsEnabled:  true,
-		MediaEnabled:  true,
-		Pages:         []content.Page{{Title: "Home", Status: content.StatusPublished}},
-		FormPage:      &content.Page{ID: 1, Slug: "home", Status: content.StatusPublished},
-		Posts:         []content.Post{{}},
-		FormPost:      &content.Post{},
-		Snippets:      []snippets.Snippet{{Name: "S"}},
-		FormSnippet:   &snippets.Snippet{},
-		SectionStyles: render.DefaultSectionStyles(),
-		Locales:       []string{"en", "fr"},
-		EditLocale:    "fr",
-		HasDraftEdits: true,
-		Regions:       []render.Region{{Name: "body", Kind: "sections"}, {Name: "lede", Kind: "text"}, {Name: "hero", Kind: "image"}},
-		RememberHours: 24,
+		AdminPath:  "/admin",
+		AdminLang:  "fr",
+		LangToggle: "en",
+		// A superadmin mid-masquerade, viewing a user who isn't them: this
+		// executes the users list's Become button and the layout's
+		// masquerade banner alongside everything the admin role renders.
+		User:           &auth.User{ID: 1, Name: "Test", Role: auth.RoleSuperadmin},
+		MasqueradeFrom: &auth.User{ID: 9, Name: "Owner", Role: auth.RoleSuperadmin},
+		Users:          []auth.User{{ID: 2, Name: "A", Email: "a@example.com", Role: auth.RoleEditor, Active: true}},
+		FormUser:       &auth.User{Role: auth.RoleEditor},
+		PagesEnabled:   true,
+		PostsEnabled:   true,
+		MediaEnabled:   true,
+		Pages:          []content.Page{{Title: "Home", Status: content.StatusPublished}},
+		FormPage:       &content.Page{ID: 1, Slug: "home", Status: content.StatusPublished},
+		Posts:          []content.Post{{}},
+		FormPost:       &content.Post{},
+		Snippets:       []snippets.Snippet{{Name: "S"}},
+		FormSnippet:    &snippets.Snippet{},
+		SectionStyles:  render.DefaultSectionStyles(),
+		Locales:        []string{"en", "fr"},
+		EditLocale:     "fr",
+		HasDraftEdits:  true,
+		Regions:        []render.Region{{Name: "body", Kind: "sections"}, {Name: "lede", Kind: "text"}, {Name: "hero", Kind: "image"}},
+		RememberHours:  24,
 	}
 	// EditLocale drives IsDefaultLocale, and the default-locale tab is
 	// where the standalone discard/unpublish/delete forms live — so render
