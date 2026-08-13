@@ -348,6 +348,7 @@ func New(d Deps) http.Handler {
 			r.Post("/users/new", s.userCreate)
 			r.Get("/users/{id}", s.userEdit)
 			r.Post("/users/{id}", s.userUpdate)
+			r.Post("/users/{id}/delete", s.userDelete)
 		})
 	})
 

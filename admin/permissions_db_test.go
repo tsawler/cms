@@ -372,3 +372,106 @@ func TestUserManagementEscalationGuards(t *testing.T) {
 		}
 	})
 }
+
+// Deleting an account is for admin roles only: a non-admin holder of
+// the users permission is refused, an admin (or superadmin) succeeds,
+// and nobody — however privileged — deletes their own account.
+func TestUserDelete(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		srv, users, _ := permTestServer(t, db)
+		ctx := context.Background()
+
+		seedPermUser(t, users, "manager@example.com", auth.RoleEditor, auth.PermUsers)
+		victim := seedPermUser(t, users, "victim@example.com", auth.RoleEditor, auth.PermBlogs)
+		boss := seedPermUser(t, users, "boss@example.com", auth.RoleAdmin)
+		seedPermUser(t, users, "super@example.com", auth.RoleSuperadmin)
+
+		deletePath := func(id int64) string {
+			return "/admin/users/" + strconv.FormatInt(id, 10) + "/delete"
+		}
+
+		editPage := func(client *http.Client, id int64) string {
+			resp, err := client.Get(srv.URL + "/admin/users/" + strconv.FormatInt(id, 10))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return string(body)
+		}
+
+		// A users-permission editor manages editors but cannot erase them —
+		// no delete button on the form, and the POST itself is refused.
+		client := newClient(t)
+		logIn(t, srv, client, "manager@example.com", "password123")
+		csrf := csrfFrom(t, srv, client, "/admin/")
+		if strings.Contains(editPage(client, victim.ID), "Delete user") {
+			t.Error("delete button offered to a non-admin user manager")
+		}
+		resp, _ := postForm(t, srv, client, deletePath(victim.ID), url.Values{"csrf_token": {csrf}})
+		if resp.StatusCode != 403 {
+			t.Errorf("editor manager deleting = %d, want 403", resp.StatusCode)
+		}
+		if _, err := users.GetByID(ctx, victim.ID); err != nil {
+			t.Fatal("victim was deleted by a non-admin user manager")
+		}
+
+		// An admin sees the button on others' accounts but not their own,
+		// and self-deletion is refused even if posted directly.
+		adminClient := newClient(t)
+		logIn(t, srv, adminClient, "boss@example.com", "password123")
+		adminCSRF := csrfFrom(t, srv, adminClient, "/admin/")
+		if !strings.Contains(editPage(adminClient, victim.ID), "Delete user") {
+			t.Error("no delete button for an admin on an editor's form")
+		}
+		if strings.Contains(editPage(adminClient, boss.ID), "Delete user") {
+			t.Error("delete button offered on the admin's own form")
+		}
+		resp, page := postForm(t, srv, adminClient, deletePath(boss.ID), url.Values{"csrf_token": {adminCSRF}})
+		if resp.StatusCode != 200 {
+			t.Errorf("self-delete = %d, want 200 after redirect", resp.StatusCode)
+		}
+		if !strings.Contains(page, "You cannot delete your own account.") {
+			t.Error("no self-delete guard message after redirect")
+		}
+		if _, err := users.GetByID(ctx, boss.ID); err != nil {
+			t.Fatal("admin deleted their own account")
+		}
+
+		// An admin deletes an editor, grants and all.
+		resp, page = postForm(t, srv, adminClient, deletePath(victim.ID), url.Values{"csrf_token": {adminCSRF}})
+		if resp.StatusCode != 200 {
+			t.Fatalf("admin deleting editor = %d, want 200 after redirect", resp.StatusCode)
+		}
+		if !strings.Contains(page, "User deleted.") {
+			t.Error("no deletion flash after redirect")
+		}
+		if _, err := users.GetByID(ctx, victim.ID); err == nil {
+			t.Error("victim still exists after admin delete")
+		}
+
+		// A superadmin deletes an admin.
+		superClient := newClient(t)
+		logIn(t, srv, superClient, "super@example.com", "password123")
+		superCSRF := csrfFrom(t, srv, superClient, "/admin/")
+		resp, _ = postForm(t, srv, superClient, deletePath(boss.ID), url.Values{"csrf_token": {superCSRF}})
+		if resp.StatusCode != 200 {
+			t.Fatalf("superadmin deleting admin = %d, want 200 after redirect", resp.StatusCode)
+		}
+		if _, err := users.GetByID(ctx, boss.ID); err == nil {
+			t.Error("admin still exists after superadmin delete")
+		}
+
+		// The deleted admin's live session is dead: their next request
+		// bounces to login because the account behind it is gone.
+		resp2, err := adminClient.Get(srv.URL + "/admin/users")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp2.Body)
+		resp2.Body.Close()
+		if got := resp2.Request.URL.Path; !strings.HasSuffix(got, "/admin/login") {
+			t.Errorf("deleted admin's request landed on %s, want the login page", got)
+		}
+	})
+}
