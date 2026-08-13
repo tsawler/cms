@@ -9,6 +9,7 @@ package admin
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexedwards/scs/v2"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/internal/dbtest"
 	"github.com/tsawler/cms/internal/sqldb"
@@ -93,6 +95,62 @@ func TestMasqueradeRoundTrip(t *testing.T) {
 		}
 		if strings.Contains(page, "You are working as") {
 			t.Fatalf("banner still up after exit:\n%s", page)
+		}
+	})
+}
+
+// A SuperadminOnly host section through a masquerade: the nav link and
+// the section itself must follow the role the session is working as, not
+// the superadmin who owns it — becoming an admin or editor hides the
+// link and closes the door, and exiting brings both back.
+func TestMasqueradeSuperadminOnlySection(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		users := auth.NewStore(db)
+		h := New(Deps{
+			Sessions:  scs.New(),
+			Users:     users,
+			Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+			AdminPath: "/admin",
+			Sections: []Section{{Path: "feeds", NavLabel: "Feeds", SuperadminOnly: true,
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					io.WriteString(w, "the feeds page")
+				})}},
+		})
+		mux := http.NewServeMux()
+		mux.Handle("/admin/", http.StripPrefix("/admin", h))
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+
+		seedPermUser(t, users, "super@example.com", auth.RoleSuperadmin)
+		admin := seedPermUser(t, users, "admin@example.com", auth.RoleAdmin)
+
+		client := newClient(t)
+		logIn(t, srv, client, "super@example.com", "password123")
+		csrf := csrfFrom(t, srv, client, "/admin/users")
+
+		// The superadmin's own dashboard links the section, and it opens.
+		if _, page := getPage(t, srv, client, "/admin/"); !strings.Contains(page, "/admin/x/feeds/") {
+			t.Fatalf("superadmin's nav is missing the Feeds link:\n%s", page)
+		}
+		if resp, page := getPage(t, srv, client, "/admin/x/feeds/"); resp.StatusCode != http.StatusOK || !strings.Contains(page, "the feeds page") {
+			t.Fatalf("feeds section for superadmin: status = %d, want 200 with the host page", resp.StatusCode)
+		}
+
+		// Become the admin: the link is gone and the door is shut.
+		resp, page := postForm(t, srv, client, masqueradePath(admin.ID), url.Values{"csrf_token": {csrf}})
+		if resp.StatusCode != http.StatusOK || !strings.Contains(page, "You are working as") {
+			t.Fatalf("masquerade as admin: status = %d, banner missing:\n%s", resp.StatusCode, page)
+		}
+		if strings.Contains(page, "/admin/x/feeds/") {
+			t.Fatalf("masquerading as an admin still shows the Feeds link:\n%s", page)
+		}
+		if resp, _ := getPage(t, srv, client, "/admin/x/feeds/"); resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("feeds section while masquerading as admin: status = %d, want 403", resp.StatusCode)
+		}
+
+		// Back to the superadmin: the link returns.
+		if _, page := postForm(t, srv, client, "/admin/masquerade/exit", url.Values{"csrf_token": {csrf}}); !strings.Contains(page, "/admin/x/feeds/") {
+			t.Fatalf("nav missing the Feeds link after exiting the masquerade:\n%s", page)
 		}
 	})
 }
