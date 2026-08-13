@@ -223,6 +223,7 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
 .cms-traffic h2 { margin-bottom: .2rem; }
 .cms-traffic > .cms-muted { font-size: .86rem; margin: 0; }
 .cms-traffic-body {
+    position: relative; /* the hover tip is placed against this box */
     display: flex;
     flex-wrap: wrap;
     gap: 1.25rem 2.5rem;
@@ -279,7 +280,38 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
     color: var(--cms-spruce);
 }
 .cms-traffic-bar { fill: var(--cms-spruce); }
-.cms-traffic-col:hover .cms-traffic-bar { fill: var(--cms-spruce-hover); }
+.cms-traffic-col:hover .cms-traffic-bar,
+.cms-traffic-col:focus .cms-traffic-bar { fill: var(--cms-spruce-hover); }
+/* The tip itself answers focus, so the columns skip the outline the
+   admin gives other focusable things. */
+.cms-traffic-col:focus { outline: none; }
+/* The hover readout admin.js positions over the chart: ink flipped to
+   paper so it reads over any bar, the count leading in mono and the
+   date under it. pointer-events stays off so the tip never steals the
+   hover that opened it. */
+.cms-traffic-tip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--cms-ink);
+    color: var(--cms-paper);
+    border-radius: var(--cms-radius);
+    padding: .4rem .65rem;
+    white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(26, 35, 29, .28);
+    z-index: 4;
+}
+.cms-traffic-tip strong {
+    display: block;
+    font-family: var(--cms-mono);
+    font-size: .8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.cms-traffic-tip span {
+    display: block;
+    font-size: .72rem;
+    color: rgba(246, 246, 242, .72);
+}
 .cms-traffic-grid { stroke: var(--cms-fog); stroke-width: 1; stroke-dasharray: 3 3; }
 .cms-traffic-axis { stroke: var(--cms-fog); stroke-width: 1; }
 .cms-traffic-tick, .cms-traffic-day, .cms-traffic-count {

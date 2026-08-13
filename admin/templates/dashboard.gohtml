@@ -82,9 +82,12 @@
         {{end}}
         <line class="cms-traffic-axis" x1="{{.PlotX}}" x2="{{.PlotX2}}" y1="{{.Baseline}}" y2="{{.Baseline}}"></line>
         <text class="cms-traffic-tick" x="{{.TickX}}" y="{{.Baseline}}" text-anchor="end" dy="0.32em">0</text>
+        {{- /* Each column is focusable and carries its readout in data
+             attributes; admin.js shows the styled tip below on hover or
+             focus. The aria-label says the same thing in one line. */ -}}
         {{range .Bars}}
-        <g class="cms-traffic-col">
-            <title>{{.Title}}</title>
+        <g class="cms-traffic-col" role="img" tabindex="0" aria-label="{{.Title}}"
+           data-tip-views="{{.TipViews}}" data-tip-date="{{.TipDate}}">
             <rect class="cms-traffic-hit" x="{{.HitX}}" y="{{.HitY}}" width="{{.HitW}}" height="{{.HitH}}" fill="transparent"></rect>
             {{if .Path}}<path class="cms-traffic-bar" d="{{.Path}}"></path>{{end}}
             {{if .ShowCount}}<text class="cms-traffic-count" x="{{.CountX}}" y="{{.CountY}}" text-anchor="middle">{{.Count}}</text>{{end}}
@@ -92,6 +95,7 @@
         </g>
         {{end}}
     </svg>
+    <div class="cms-traffic-tip" aria-hidden="true" hidden><strong></strong><span></span></div>
     {{if .TopPages}}
     <div class="cms-traffic-top">
         <h3>{{$.T "Top pages"}}</h3>

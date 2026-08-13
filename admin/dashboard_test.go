@@ -176,7 +176,8 @@ func TestDashboardTemplateTraffic(t *testing.T) {
 			Path: barPath(50, chartBaseline, 44, 80),
 			HitX: 40, HitY: chartTop, HitW: 84, HitH: 100,
 			LabelX: 82, LabelY: chartLabelY, Label: "Mon",
-			Title: "Aug 10, 2026 — 5 page views", Count: 5,
+			Title:    "Aug 10, 2026 — 5 page views",
+			TipViews: "5 page views", TipDate: "Aug 10, 2026", Count: "5",
 			CountX: 82, CountY: 74, ShowCount: true,
 		}},
 	}
@@ -185,7 +186,10 @@ func TestDashboardTemplateTraffic(t *testing.T) {
 		t.Fatalf("rendering dashboard with traffic: %v", err)
 	}
 	out := sb.String()
-	for _, want := range []string{"<svg", "cms-traffic-bar", "Aug 10, 2026 — 5 page views", ">Mon</text>",
+	for _, want := range []string{"<svg", "cms-traffic-bar", ">Mon</text>",
+		`aria-label="Aug 10, 2026 — 5 page views"`, `tabindex="0"`,
+		`data-tip-views="5 page views"`, `data-tip-date="Aug 10, 2026"`,
+		`class="cms-traffic-tip"`,
 		"cms-traffic-top", `<a href="/used-cars"`, ">/used-cars</a>"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("traffic chart is missing %s", want)
@@ -201,6 +205,18 @@ func TestDashboardTemplateTraffic(t *testing.T) {
 	out = sb.String()
 	if strings.Contains(out, "<svg") || !strings.Contains(out, "No page views recorded yet") {
 		t.Error("empty traffic should render the note instead of a chart")
+	}
+}
+
+func TestGroupDigits(t *testing.T) {
+	en := map[int]string{0: "0", 7: "7", 999: "999", 1000: "1,000", 84315: "84,315", 1234567: "1,234,567"}
+	for n, want := range en {
+		if got := groupDigits(n, "en"); got != want {
+			t.Errorf("groupDigits(%d, en) = %q, want %q", n, got, want)
+		}
+	}
+	if got := groupDigits(84315, "fr"); got != "84\u00a0315" {
+		t.Errorf("groupDigits(84315, fr) = %q, want %q", got, "84\u00a0315")
 	}
 }
 
