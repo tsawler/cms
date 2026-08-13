@@ -149,6 +149,17 @@ type PermissionDef struct {
 	Key             auth.Permission
 	Label           string
 	AdminsNeedGrant bool
+
+	// GrantsMedia opens the media library to holders of this permission.
+	//
+	// The library is shared: one bucket behind every section that puts a
+	// picture on the site, and a bulk delete inside it reaches all of
+	// them. So it is not open to anyone merely signed in — it is open to
+	// people who edit something that carries media. The CMS's own pages,
+	// blogs, and news imply that on their own; a host section has to say
+	// so, because only the host knows whether its records have pictures in
+	// them.
+	GrantsMedia bool
 }
 
 var sectionPathRE = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)

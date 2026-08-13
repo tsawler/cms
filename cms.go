@@ -237,6 +237,18 @@ type Config struct {
 	// does. Tuning one must not disturb the other.
 	AdminPerPage int
 
+	// AdminMaxRequestBytes caps the body of an unsafe admin request from a
+	// signed-in user. Zero, the default, is sized from the media manager's
+	// limits; negative values are invalid.
+	//
+	// Raise it when the admin accepts an upload larger than that — a
+	// host section taking many files in one multipart post is the usual
+	// reason, since the cap covers the whole body rather than any one
+	// file. Requests carrying no session are held to a much smaller fixed
+	// ceiling whatever this says, so raising it does not widen what a
+	// signed-out caller can send.
+	AdminMaxRequestBytes int64
+
 	// PostTemplate is the page template blog and news posts render with.
 	// A post is an ordinary page underneath — its slug lives under blog/
 	// or news/ and its body is edited in place like any page, sections
@@ -487,6 +499,9 @@ func New(cfg Config) (*CMS, error) {
 	if cfg.AdminPerPage == 0 {
 		cfg.AdminPerPage = admin.DefaultPerPage
 	}
+	if cfg.AdminMaxRequestBytes < 0 {
+		return nil, fmt.Errorf("cms: AdminMaxRequestBytes must not be negative, got %d", cfg.AdminMaxRequestBytes)
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -641,6 +656,7 @@ func New(cfg Config) (*CMS, error) {
 		Locales:         cfg.Locales,
 		RememberFor:     cfg.RememberFor,
 		PerPage:         cfg.AdminPerPage,
+		MaxRequestBytes: cfg.AdminMaxRequestBytes,
 		Version:         Version(),
 	})
 	return c, nil

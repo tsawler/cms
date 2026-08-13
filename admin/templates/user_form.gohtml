@@ -34,6 +34,11 @@
             <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>{{.T "Editor — can edit content"}}</option>
             {{if .IsAdmin}}
             <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>{{.T "Admin — can also manage users"}}</option>
+            {{end}}
+            {{- /* Superadmin is offered only to superadmins. This mirrors the
+                 server-side gate in parseUserForm rather than standing in for
+                 it — the option being absent from the markup stops nothing. */}}
+            {{if .IsSuperadmin}}
             <option value="superadmin" {{if eq .FormUser.Role "superadmin"}}selected{{end}}>{{.T "Superadmin — can also edit raw page HTML"}}</option>
             {{end}}
         </select>

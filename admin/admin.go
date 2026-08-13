@@ -86,6 +86,19 @@ type Deps struct {
 	// The zero value falls back to DefaultPerPage, like RememberFor.
 	PerPage int
 
+	// MaxRequestBytes caps the body of an unsafe request from a signed-in
+	// user. It is enforced by the CSRF middleware, which is the first
+	// thing to read the body and therefore the only place a cap can still
+	// take effect — see readToken.
+	//
+	// Raise it above the largest upload the admin accepts, remembering
+	// that a multipart post carries every field at once: a form taking
+	// forty 32 MB photos needs more than 32 MB here. The zero value is
+	// sized from the media manager's own limits, or DefaultMaxRequestBytes
+	// when there is none. Requests with no session user are held to a much
+	// smaller fixed ceiling regardless of this value.
+	MaxRequestBytes int64
+
 	// SiteBaseURL returns the site's absolute public base
 	// ("scheme://host", no trailing slash) for the given request, so the
 	// admin can offer links that work when pasted somewhere else. Nil
@@ -321,23 +334,31 @@ func New(d Deps) http.Handler {
 			})
 		}
 
+		// The media library, for anyone who edits something that carries
+		// media — see mediaPermissions. Gated as a group rather than per
+		// route: the picker's read endpoints matter as much as the bulk
+		// delete, since a library listing is a list of what the site holds.
 		if d.Media != nil {
-			r.Get("/media", s.mediaList)
-			r.Post("/media/upload", s.mediaUpload)
-			r.Post("/media/{id}/alt", s.mediaUpdateAlt)
-			r.Post("/media/{id}/rename", s.mediaRename)
-			r.Post("/media/{id}/delete", s.mediaDelete)
-			r.Post("/media/{id}/move", s.mediaMove)
-			r.Post("/media/bulk/move", s.mediaBulkMove)
-			r.Post("/media/bulk/delete", s.mediaBulkDelete)
-			r.Post("/media/folders/new", s.mediaFolderCreate)
-			r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireMedia)
 
-			r.Get("/api/media", s.apiMediaList)
-			r.Post("/api/media", s.apiMediaUpload)
-			r.Post("/api/media/{id}/poster", s.apiMediaSetPoster)
-			r.Get("/api/media/folders", s.apiFoldersList)
-			r.Post("/api/media/folders", s.apiFolderCreate)
+				r.Get("/media", s.mediaList)
+				r.Post("/media/upload", s.mediaUpload)
+				r.Post("/media/{id}/alt", s.mediaUpdateAlt)
+				r.Post("/media/{id}/rename", s.mediaRename)
+				r.Post("/media/{id}/delete", s.mediaDelete)
+				r.Post("/media/{id}/move", s.mediaMove)
+				r.Post("/media/bulk/move", s.mediaBulkMove)
+				r.Post("/media/bulk/delete", s.mediaBulkDelete)
+				r.Post("/media/folders/new", s.mediaFolderCreate)
+				r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
+
+				r.Get("/api/media", s.apiMediaList)
+				r.Post("/api/media", s.apiMediaUpload)
+				r.Post("/api/media/{id}/poster", s.apiMediaSetPoster)
+				r.Get("/api/media/folders", s.apiFoldersList)
+				r.Post("/api/media/folders", s.apiFolderCreate)
+			})
 		}
 
 		// Host-registered sections, behind the same session, CSRF, and
@@ -437,8 +458,9 @@ type templateData struct {
 	RememberDays  int
 	RememberHours int
 
-	// User management pages.
-	Users      []auth.User
+	// User management pages. Users carries a per-row CanManage so the
+	// table offers Edit exactly where the route allows it.
+	Users      []userRow
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
@@ -486,7 +508,9 @@ type templateData struct {
 	// or an external URL as it stands. "" when unset.
 	FormPostThumb string
 
-	// Media pages.
+	// Media pages. MediaEnabled means the library is both configured and
+	// open to this user — it drives the sidebar link, and offering one the
+	// route answers with a 403 would be worse than not offering it.
 	MediaEnabled bool
 	Media        []media.View // images
 	Videos       []media.View
@@ -616,7 +640,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		Flash:         s.deps.Sessions.PopString(r.Context(), sessionKeyFlash),
 		PagesEnabled:  s.deps.Renderer != nil,
 		PostsEnabled:  s.deps.Renderer != nil && s.deps.PostTemplate.File != "",
-		MediaEnabled:  s.deps.Media != nil,
+		MediaEnabled:  s.deps.Media != nil && s.canUseMedia(r),
 		ForgotEnabled: s.deps.Mailer != nil,
 		Locales:       s.deps.Locales,
 		EditLocale:    s.deps.DefaultLocale,
