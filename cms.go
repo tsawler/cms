@@ -32,12 +32,14 @@ import (
 	"time"
 
 	"github.com/alexedwards/scs/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/tsawler/cms/admin"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/captcha"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/editor"
 	"github.com/tsawler/cms/internal/dialect"
+	"github.com/tsawler/cms/internal/redisstore"
 	"github.com/tsawler/cms/internal/sessiondata"
 	"github.com/tsawler/cms/internal/sessionstore"
 	"github.com/tsawler/cms/internal/sqldb"
@@ -70,6 +72,21 @@ const (
 	// startup, not only the first.
 	MediaAdoptReconcile = media.AdoptReconcile
 )
+
+// RedisConfig locates a Redis server for session storage; see Config.Redis.
+type RedisConfig struct {
+	// Addr is the server address, host:port, e.g. "localhost:6379".
+	Addr string
+
+	// Password authenticates to the server. Leave empty when the server
+	// has no AUTH configured.
+	Password string
+
+	// DB is the logical database number. The default, 0, is right unless
+	// the instance is shared and sessions should live in their own
+	// database.
+	DB int
+}
 
 // EditorStyle is one entry in the in-place editor's Styles menu; see
 // render.EditorStyle.
@@ -169,6 +186,20 @@ type Config struct {
 	// over HTTPS. Enable in production; leave off for local development
 	// over plain HTTP.
 	SecureCookies bool
+
+	// Redis moves session storage from the cms_sessions table to Redis.
+	// When set, sessions live under cms_session: keys — the prefix keeps
+	// them distinct in an instance shared with the host application — and
+	// Redis's own key expiry replaces the hourly cleanup sweep. When nil,
+	// the default, sessions stay in the database.
+	//
+	// Nothing else moves: users, content, and settings remain in DB, so
+	// Redis here is purely a performance/locality choice for the
+	// per-request session lookup. Set it from the environment with
+	// CMS_SESSION_REDIS_ADDR; see ConfigFromEnv. Like DB, the connection
+	// is not dialed or verified by New; a wrong address surfaces on the
+	// first request that touches a session.
+	Redis *RedisConfig
 
 	// TemplateFS holds the host application's page templates (often an
 	// embed.FS). If nil, the public Pages handler serves a placeholder.
@@ -505,7 +536,18 @@ func New(cfg Config) (*CMS, error) {
 	}
 
 	sessions := scs.New()
-	sessions.Store = sessionstore.New(db)
+	if cfg.Redis != nil {
+		if cfg.Redis.Addr == "" {
+			return nil, errors.New("cms: Config.Redis.Addr is required when Redis is set")
+		}
+		sessions.Store = redisstore.New(redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Addr,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		}))
+	} else {
+		sessions.Store = sessionstore.New(db)
+	}
 	sessions.Lifetime = cfg.SessionLifetime
 	sessions.Cookie.Name = "cms_session"
 	// Session cookies by default; ticking "Remember me" at login makes

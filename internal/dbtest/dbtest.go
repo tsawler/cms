@@ -92,7 +92,7 @@ func Each(t *testing.T, fn func(t *testing.T, db *sqldb.DB)) {
 	if testing.Short() {
 		t.Skip("dbtest: skipping database test in -short mode")
 	}
-	skipWithoutDocker(t)
+	SkipWithoutDocker(t)
 
 	for _, engine := range engines {
 		t.Run(string(engine), func(t *testing.T) {
@@ -296,9 +296,9 @@ var (
 	dockerErr  error
 )
 
-// skipWithoutDocker skips the calling test when there is no usable Docker
+// SkipWithoutDocker skips the calling test when there is no usable Docker
 // daemon, so the unit-test suite still runs on machines without one.
-func skipWithoutDocker(t *testing.T) {
+func SkipWithoutDocker(t *testing.T) {
 	t.Helper()
 	dockerOnce.Do(func() {
 		provider, err := testcontainers.NewDockerProvider()
