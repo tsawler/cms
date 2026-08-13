@@ -174,6 +174,59 @@
         });
     });
 
+    // Dashboard traffic chart: the hover readout. Each column carries its
+    // text in data attributes, and this shows a styled tip the moment the
+    // pointer (or keyboard focus) arrives — the native <title> tooltip the
+    // chart once used appears on the browser's own slow schedule and takes
+    // no styling. Geometry lands on el.style via the CSSOM, which the CSP
+    // allows; only inline style attributes are forbidden.
+    var trafficTip = document.querySelector(".cms-traffic-tip");
+    if (trafficTip) {
+        var tipViews = trafficTip.querySelector("strong");
+        var tipDate = trafficTip.querySelector("span");
+        var tipHome = trafficTip.parentElement; // .cms-traffic-body, position: relative
+
+        var colOf = function (e) {
+            return e.target.closest ? e.target.closest(".cms-traffic-col") : null;
+        };
+
+        var showTip = function (col) {
+            tipViews.textContent = col.getAttribute("data-tip-views");
+            tipDate.textContent = col.getAttribute("data-tip-date");
+            trafficTip.hidden = false; // unhide before measuring
+
+            // Centred on the column, sitting just above its bar; a zero
+            // day has no bar, so sit above the weekday label instead —
+            // that is where its bar would be. Clamped so the end columns'
+            // tips stay inside the chart body.
+            var home = tipHome.getBoundingClientRect();
+            var colBox = col.getBoundingClientRect();
+            var anchor = col.querySelector(".cms-traffic-bar") ||
+                col.querySelector(".cms-traffic-day");
+            var anchorTop = anchor ? anchor.getBoundingClientRect().top : colBox.top;
+            var left = colBox.left - home.left + colBox.width / 2 - trafficTip.offsetWidth / 2;
+            left = Math.max(0, Math.min(left, home.width - trafficTip.offsetWidth));
+            trafficTip.style.left = Math.round(left) + "px";
+            trafficTip.style.top = Math.round(anchorTop - home.top - trafficTip.offsetHeight - 8) + "px";
+        };
+
+        document.addEventListener("pointerover", function (e) {
+            var col = colOf(e);
+            if (col) showTip(col);
+        });
+        document.addEventListener("pointerout", function (e) {
+            var col = colOf(e);
+            if (col && !col.contains(e.relatedTarget)) trafficTip.hidden = true;
+        });
+        document.addEventListener("focusin", function (e) {
+            var col = colOf(e);
+            if (col) showTip(col);
+        });
+        document.addEventListener("focusout", function (e) {
+            if (colOf(e)) trafficTip.hidden = true;
+        });
+    }
+
     // Slug suggestion on the new-page form: fill [data-slug-target] from
     // [data-slug-source] until the user edits the slug themselves.
     var source = document.querySelector("[data-slug-source]");

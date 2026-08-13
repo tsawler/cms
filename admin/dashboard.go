@@ -4,8 +4,11 @@
 // The chart is inline SVG with geometry computed here rather than styled
 // in the browser, because the admin's CSP allows no inline styles: every
 // coordinate is an SVG attribute and every colour comes from a stylesheet
-// class. One bar per day, a native <title> tooltip per column, and a
-// count label on the busiest day only.
+// class. One bar per day, a count label on the busiest day only, and a
+// hover tooltip per column: each column carries its readout in data
+// attributes, and admin.js shows a styled tip instantly — the native
+// <title> tooltip appears on the browser's own slow schedule and takes
+// no styling.
 
 package admin
 
@@ -14,6 +17,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tsawler/cms/auth"
@@ -114,7 +119,9 @@ type trafficChart struct {
 
 // trafficBar is one day's column: the bar outline (empty on a zero day),
 // an invisible full-column hover target, the weekday label under it, and
-// the native-tooltip text for the whole column.
+// the tooltip text for the whole column — TipViews and TipDate feed the
+// styled hover tip, Title is the same readout in one line for the
+// column's aria-label.
 type trafficBar struct {
 	Path           string
 	HitX, HitY     float64
@@ -122,7 +129,9 @@ type trafficBar struct {
 	LabelX, LabelY float64
 	Label          string
 	Title          string
-	Count          int
+	TipViews       string
+	TipDate        string
+	Count          string // the busiest day's label, digits grouped
 	CountX, CountY float64
 	ShowCount      bool
 }
@@ -193,10 +202,12 @@ func (s *server) trafficChart(r *http.Request) *trafficChart {
 			HitX: round1(x0), HitY: chartTop,
 			HitW: round1(slot), HitH: chartLabelY - chartTop,
 			LabelX: round1(x0 + slot/2), LabelY: chartLabelY,
-			Label: s.tr(r, day.Weekday().String()[:3]),
-			Title: fmt.Sprintf("%s — %d %s", datefmt.Short(day, lang), n, s.tr(r, "page views")),
-			Count: n,
+			Label:    s.tr(r, day.Weekday().String()[:3]),
+			TipViews: groupDigits(n, lang) + " " + s.tr(r, "page views"),
+			TipDate:  datefmt.Short(day, lang),
+			Count:    groupDigits(n, lang),
 		}
+		b.Title = b.TipDate + " — " + b.TipViews
 		if n > 0 {
 			b.Path = barPath(bx, chartBaseline, barW, h)
 			if n == maxViews && !labeled {
@@ -244,4 +255,23 @@ func niceCeil(n int) int {
 // rather than a float64's full expansion.
 func round1(v float64) float64 {
 	return math.Round(v*10) / 10
+}
+
+// groupDigits writes a count the way the admin language reads one:
+// "1,234" in English, "1 234" — a non-breaking space — in French. The
+// chart's counts are never negative.
+func groupDigits(n int, lang string) string {
+	sep := ","
+	if lang == "fr" {
+		sep = "\u00a0"
+	}
+	digits := strconv.Itoa(n)
+	var b strings.Builder
+	for i, d := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteString(sep)
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
 }
