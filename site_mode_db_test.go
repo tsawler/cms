@@ -18,16 +18,36 @@ import (
 // /robots.txt tells crawlers to stay out. Production says none of it, and
 // leaves /robots.txt to the host.
 
-// setMode stores a mode and defeats the mode cache, which would
+// setMode stores a mode and defeats the settings cache, which would
 // otherwise hold the previous answer for a few seconds.
 func setMode(t *testing.T, c *CMS, mode string) {
 	t.Helper()
 	if err := c.content.SetSiteMode(context.Background(), mode); err != nil {
 		t.Fatalf("SetSiteMode(%q): %v", mode, err)
 	}
-	c.modeMu.Lock()
-	c.modeAt = time.Time{}
-	c.modeMu.Unlock()
+	expireSiteCache(c)
+}
+
+// setRobots stores a site robots.txt, leaving the rest of the settings
+// alone, and defeats the cache the same way.
+func setRobots(t *testing.T, c *CMS, body string) {
+	t.Helper()
+	ctx := context.Background()
+	site, err := c.content.SiteSettings(ctx)
+	if err != nil {
+		t.Fatalf("SiteSettings: %v", err)
+	}
+	site.RobotsTxt = body
+	if err := c.content.SaveSiteSettings(ctx, site); err != nil {
+		t.Fatalf("SaveSiteSettings: %v", err)
+	}
+	expireSiteCache(c)
+}
+
+func expireSiteCache(c *CMS) {
+	c.siteMu.Lock()
+	c.siteAt = time.Time{}
+	c.siteMu.Unlock()
 }
 
 func TestPagesRobotsFollowSiteMode(t *testing.T) {
@@ -80,13 +100,79 @@ func TestPagesRobotsFollowSiteMode(t *testing.T) {
 		if got := get("/").Header().Get("X-Robots-Tag"); got != "" {
 			t.Errorf("production: X-Robots-Tag = %q, want no header at all", got)
 		}
-		// The CMS claims /robots.txt only while the site is in
-		// development, so a host serving its own keeps serving it once
-		// the site goes live. Unclaimed, the path is an ordinary page
-		// lookup, and no page has that slug.
+		// With nothing stored, the CMS does not claim /robots.txt in
+		// production, so a host serving its own keeps serving it once the
+		// site goes live. Unclaimed, the path is an ordinary page lookup,
+		// and no page has that slug.
 		if rec := get("/robots.txt"); rec.Code != http.StatusNotFound {
 			t.Errorf("production: GET /robots.txt status %d, want 404 (the CMS should not claim it)",
 				rec.Code)
+		}
+	})
+}
+
+// A robots.txt stored in the site settings is served verbatim once the
+// site is live — and is ignored while it is not, where the development
+// Disallow has to win.
+func TestPagesServeStoredRobotsTxt(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSeedTestCMS(t, db)
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		if _, err := c.SeedHomePage(ctx, "templates/pages/standard.gohtml", "Welcome"); err != nil {
+			t.Fatalf("SeedHomePage: %v", err)
+		}
+		h := c.Pages()
+
+		get := func(path string) *httptest.ResponseRecorder {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			return rec
+		}
+
+		const stored = "User-agent: *\nDisallow: /admin\n\nSitemap: https://example.com/sitemap.xml\n"
+
+		setMode(t, c, content.ModeProduction)
+		setRobots(t, c, stored)
+
+		rec := get("/robots.txt")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("production: GET /robots.txt status %d, want 200", rec.Code)
+		}
+		if body := rec.Body.String(); body != stored {
+			t.Errorf("production: /robots.txt = %q, want the stored file %q", body, stored)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+			t.Errorf("production: /robots.txt Content-Type = %q, want text/plain", ct)
+		}
+		// An edit has to take effect when it is made.
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("production: /robots.txt Cache-Control = %q, want no-store", cc)
+		}
+		if got := rec.Header().Get("X-Robots-Tag"); got != "" {
+			t.Errorf("production: X-Robots-Tag = %q, want no header at all", got)
+		}
+
+		// Back into development: the stored file is written for the live
+		// site and must not be handed to a crawler while the site is
+		// being hidden.
+		setMode(t, c, content.ModeDevelopment)
+
+		rec = get("/robots.txt")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("development: GET /robots.txt status %d, want 200", rec.Code)
+		}
+		if body := rec.Body.String(); body != robotsTxt {
+			t.Errorf("development: /robots.txt = %q, want the development Disallow %q", body, robotsTxt)
+		}
+
+		// Clearing it gives the path back to the host.
+		setMode(t, c, content.ModeProduction)
+		setRobots(t, c, "")
+		if rec := get("/robots.txt"); rec.Code != http.StatusNotFound {
+			t.Errorf("production: GET /robots.txt status %d after clearing, want 404", rec.Code)
 		}
 	})
 }

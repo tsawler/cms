@@ -114,6 +114,24 @@ export function openSiteSettings() {
                     : "The site is open to search engines. It can take days or weeks for pages to " +
                       "appear in results.";
             } });
+            // The live site's robots.txt, in the same hands as the mode:
+            // both decide what crawlers are told. Left empty the CMS
+            // serves nothing at that address, so an app already serving
+            // its own file keeps doing so.
+            fields.push({ id: "robotsTxt", label: "robots.txt", type: "textarea", mono: true,
+                rows: 6, value: s.robotsTxt,
+                placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: https://example.com/sitemap.xml" });
+            fields.push({ type: "note", span: true, text: function (v) {
+                return v.mode === "development"
+                    ? "Served once the site is in production. While it is in development the CMS " +
+                      "serves its own “Disallow: /” instead, so this file cannot invite crawlers " +
+                      "into an unfinished site."
+                    : (v.robotsTxt || "").trim()
+                        ? "Served at /robots.txt. Crawlers may cache it for a day or so before " +
+                          "they notice a change."
+                        : "Empty — the CMS serves nothing at /robots.txt, leaving the address to " +
+                          "the app hosting it.";
+            } });
         }
         openDialog({
             message: "Site settings",
@@ -131,13 +149,14 @@ export function openSiteSettings() {
                 loginInNav: values.loginInNav === "1",
                 // Site-wide CSS/JS has its own editor (wrench → Site
                 // CSS & JS); carry the stored values through so this
-                // save doesn't wipe them. The mode field is absent for
-                // everyone but superadmins, and carries through the same
-                // way — the server ignores it from anyone else in any
-                // case.
+                // save doesn't wipe them. The mode and robots.txt fields
+                // are absent for everyone but superadmins, and carry
+                // through the same way — the server ignores them from
+                // anyone else in any case.
                 siteCss: s.siteCss || "",
                 siteJs: s.siteJs || "",
                 mode: values.mode !== undefined ? values.mode : (s.mode || ""),
+                robotsTxt: values.robotsTxt !== undefined ? values.robotsTxt : (s.robotsTxt || ""),
             };
             api("/settings", {
                 method: "PUT",

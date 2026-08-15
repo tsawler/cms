@@ -29,6 +29,12 @@ type SiteSettings struct {
 	// production). Development asks search engines to leave the site
 	// alone; see Development. Changing it is superadmin-only.
 	Mode string
+	// RobotsTxt is the site's own /robots.txt, served verbatim once the
+	// site is in production. "" — the default — leaves the path to the
+	// host, which is what a site that predates this setting keeps
+	// getting. Development ignores it and serves its own Disallow; see
+	// Development. Editing it is superadmin-only, like Mode.
+	RobotsTxt string
 }
 
 // The two site modes. A site under construction sits in development,
@@ -69,6 +75,7 @@ const (
 	settingSiteCSS    = "site_css"
 	settingSiteJS     = "site_js"
 	settingSiteMode   = "site_mode"
+	settingRobotsTxt  = "robots_txt"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -105,6 +112,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteJS = v
 		case settingSiteMode:
 			out.Mode = v
+		case settingRobotsTxt:
+			out.RobotsTxt = v
 		}
 	}
 	return out, rows.Err()
@@ -131,6 +140,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingSiteCSS:    in.SiteCSS,
 		settingSiteJS:     in.SiteJS,
 		settingSiteMode:   in.Mode,
+		settingRobotsTxt:  in.RobotsTxt,
 	} {
 		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `

@@ -1155,11 +1155,11 @@ In development the CMS:
   `{{cmsHead}}`.
 - serves `/robots.txt` with `Disallow: /`.
 
-In production it does none of those things, and — importantly — does not
-claim `/robots.txt` at all. If your app serves its own (with a `Sitemap:`
-line, or rules for a particular crawler), it keeps serving it the moment
-the site goes live; the CMS's copy is only there while the site is
-hidden.
+In production it does none of those things, and — unless you have written
+a robots.txt in the site settings (below) — does not claim `/robots.txt`
+at all. If your app serves its own (with a `Sitemap:` line, or rules for
+a particular crawler), it keeps serving it the moment the site goes live;
+the CMS's copy is only there while the site is hidden.
 
 Two things worth knowing:
 
@@ -1182,6 +1182,43 @@ Everywhere else the mode stays visible: while a site is in development
 the admin sidebar carries a **Development** stamp under the brand, on
 every page, because the failure this feature invites is a finished site
 nobody remembered to switch over.
+
+### A robots.txt for the live site
+
+Under the mode switch — and, like it, superadmin-only — the site settings
+dialog carries a **robots.txt** box. Whatever you write there is served
+verbatim at `/robots.txt` once the site is in production:
+
+```
+User-agent: *
+Disallow: /private
+
+Sitemap: https://example.com/sitemap.xml
+```
+
+Three rules govern it, and they are worth stating plainly:
+
+- **Empty means the CMS serves nothing there.** That is the default and
+  the behaviour every existing site keeps: the path stays the host app's,
+  and an app already serving its own file is unaffected by this feature
+  existing.
+- **Development ignores it.** A hidden site serves its own `Disallow: /`
+  no matter what is stored, because a file written for the live site
+  would otherwise invite crawlers into an unfinished one. The box says so
+  while the site is in development.
+- **Only superadmins may edit it.** Admins and editors see the dialog and
+  save the rest of it normally; their save carries the stored file
+  through untouched, the same way it carries the mode.
+
+Responses are sent `Cache-Control: no-store`, so an edit is live at once
+as far as any proxy is concerned. Crawlers cache `robots.txt` on their
+own schedule regardless — Google for about a day — so a change takes
+effect on their next fetch, not yours.
+
+This is a text box, not a validator: the CMS caps the length and
+normalizes line endings, and otherwise serves what you typed. A
+`Disallow` that hides a page from search does not make it unreachable —
+that is the same caveat as development mode, and worth re-reading above.
 
 ## Host data in CMS pages
 

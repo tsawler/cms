@@ -451,12 +451,14 @@ type CMS struct {
 	cssBuilder *cssRebuilder // nil unless Config.Tailwind is set
 	cssOnce    sync.Once     // schedules the initial build on first traffic
 
-	// The site mode, cached: every public response consults it, including
-	// the media and asset routes that read no settings otherwise. See
-	// developmentMode.
-	modeMu  sync.Mutex
-	modeDev bool
-	modeAt  time.Time
+	// The public-facing settings — the site mode and the stored
+	// robots.txt — cached together: every public response consults the
+	// mode, including the media and asset routes that read no settings
+	// otherwise, and both come from the one read. See siteFlags.
+	siteMu     sync.Mutex
+	siteDev    bool
+	siteRobots string
+	siteAt     time.Time
 }
 
 // New validates cfg, applies defaults, and returns a ready CMS. It does not
@@ -935,12 +937,18 @@ func (c *CMS) Pages() http.Handler {
 		// what covers the responses no <meta> tag can reach: the RSS
 		// feeds, and the media proxy serving images and PDFs that search
 		// engines index in their own right.
-		if c.developmentMode(r.Context()) {
+		dev, robots := c.siteFlags(r.Context())
+		if dev {
 			w.Header().Set("X-Robots-Tag", robotsDirective)
-			if r.URL.Path == robotsPath {
-				c.serveRobotsTxt(w)
-				return
-			}
+			// Development's own Disallow wins over a stored robots.txt:
+			// the stored one is written for the live site, and a site
+			// that is being hidden must not hand crawlers a file that
+			// invites them in.
+			robots = robotsTxt
+		}
+		if r.URL.Path == robotsPath && robots != "" {
+			c.serveRobotsTxt(w, robots)
+			return
 		}
 		// Media and the editor script are served outside the session
 		// wrapper so their responses stay cacheable.
@@ -972,10 +980,11 @@ func (c *CMS) Pages() http.Handler {
 
 // robotsPath is the address crawlers look for their instructions at, and
 // robotsDirective is what a site in development answers every request
-// with. The CMS claims neither in production: a host that serves its own
-// robots.txt — with a sitemap line, or rules for one crawler — keeps
-// doing so once the site goes live, and gets these only while the site
-// is being built.
+// with. In production the CMS claims the path only when a superadmin has
+// stored a robots.txt in the site settings: a host that serves its own —
+// with a sitemap line, or rules for one crawler — keeps doing so once
+// the site goes live, and an install that stores nothing is left exactly
+// as it was.
 const (
 	robotsPath      = "/robots.txt"
 	robotsDirective = "noindex, nofollow"
@@ -993,12 +1002,16 @@ const (
 // and disallow" before reaching for this as a takedown.)
 const robotsTxt = "User-agent: *\nDisallow: /\n"
 
-func (c *CMS) serveRobotsTxt(w http.ResponseWriter) {
+// serveRobotsTxt answers /robots.txt with body: either the development
+// Disallow above or the robots.txt a superadmin stored.
+func (c *CMS) serveRobotsTxt(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// No caching: the switch to production has to take effect when it is
-	// flipped, not whenever an intermediary decides it is done with this.
+	// No caching: the switch to production — and an edit to the stored
+	// file — has to take effect when it is made, not whenever an
+	// intermediary decides it is done with this. Crawlers cache
+	// robots.txt on their own schedule regardless.
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, robotsTxt)
+	_, _ = io.WriteString(w, body)
 }
 
 // siteModeCacheTTL is how long an instance trusts its in-memory copy of
@@ -1008,35 +1021,43 @@ func (c *CMS) serveRobotsTxt(w http.ResponseWriter) {
 // Short, because the whole point of the setting is the moment it changes.
 const siteModeCacheTTL = 5 * time.Second
 
-// developmentMode reports whether the site is in development, from a
-// briefly-cached copy of the stored setting.
+// siteFlags reports whether the site is in development and what it has
+// stored for /robots.txt, from a briefly-cached copy of the settings.
 //
-// It is consulted on every public response, including media and asset
-// routes that touch the database for nothing else, so it cannot be a
-// query per request. A read that fails falls back to the last known
-// answer; with no answer yet — the database is unreachable at the first
-// request — it says development, because a site nobody can serve pages
-// for has nothing to gain from being crawled, and an unfinished site
-// landing in an index is the mistake that is hard to take back.
-func (c *CMS) developmentMode(ctx context.Context) bool {
+// The mode is consulted on every public response, including media and
+// asset routes that touch the database for nothing else, so it cannot be
+// a query per request; the robots.txt rides along on the same read. A
+// read that fails falls back to the last known answer; with no answer
+// yet — the database is unreachable at the first request — it says
+// development, because a site nobody can serve pages for has nothing to
+// gain from being crawled, and an unfinished site landing in an index is
+// the mistake that is hard to take back.
+func (c *CMS) siteFlags(ctx context.Context) (dev bool, robots string) {
 	if c.content == nil {
-		return false // no store to ask; only a hand-built CMS in a test
+		return false, "" // no store to ask; only a hand-built CMS in a test
 	}
-	c.modeMu.Lock()
-	dev, at := c.modeDev, c.modeAt
-	c.modeMu.Unlock()
+	c.siteMu.Lock()
+	dev, robots, at := c.siteDev, c.siteRobots, c.siteAt
+	c.siteMu.Unlock()
 	if !at.IsZero() && time.Since(at) < siteModeCacheTTL {
-		return dev
+		return dev, robots
 	}
 	site, err := c.content.SiteSettings(ctx)
 	if err != nil {
 		c.cfg.Logger.Error("cms: reading the site mode", "err", err)
-		return at.IsZero() || dev
+		return at.IsZero() || dev, robots
 	}
-	dev = site.Development()
-	c.modeMu.Lock()
-	c.modeDev, c.modeAt = dev, time.Now()
-	c.modeMu.Unlock()
+	dev, robots = site.Development(), site.RobotsTxt
+	c.siteMu.Lock()
+	c.siteDev, c.siteRobots, c.siteAt = dev, robots, time.Now()
+	c.siteMu.Unlock()
+	return dev, robots
+}
+
+// developmentMode reports whether the site is in development; it is what
+// the renderer is handed to decide the robots <meta> tag.
+func (c *CMS) developmentMode(ctx context.Context) bool {
+	dev, _ := c.siteFlags(ctx)
 	return dev
 }
 

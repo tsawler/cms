@@ -633,6 +633,7 @@ var frStrings = map[string]string{
 	"The logo needs to be an uploaded image or a web address.":         "Le logo doit être une image téléversée ou une adresse web.",
 	"The favicon needs to be an uploaded image or a web address.":      "Le favicon doit être une image téléversée ou une adresse web.",
 	"The site-wide code is too long.":                                  "Le code global du site est trop long.",
+	"The robots.txt is too long.":                                      "Le fichier robots.txt est trop long.",
 	"Saving the site settings failed — try again.":                     "L'enregistrement des paramètres du site a échoué — réessayez.",
 	"Deleting the page failed — try again.":                            "La suppression de la page a échoué — réessayez.",
 	"Too many sections on one page.":                                   "Trop de sections sur une même page.",
