@@ -2754,6 +2754,9 @@
 
   // ../src/settings.js
   var ALIGNS = ["left", "center", "right"];
+  function defaultRobotsTxt() {
+    return "User-agent: *\nDisallow: " + adminPath + "/\n";
+  }
   function applySettings(s) {
     var robots = document.querySelector("meta[data-cms-robots]");
     if (s.mode === "development") {
@@ -2857,6 +2860,41 @@
         fields.push({ type: "note", span: true, text: function(v) {
           return v.mode === "development" ? "Search engines are asked not to index the site. Anyone with the address can still read it \u2014 this hides the site from search, it does not make it private." : "The site is open to search engines. It can take days or weeks for pages to appear in results.";
         } });
+        fields.push({
+          id: "sitemap",
+          label: "Publish a sitemap at /sitemap.xml",
+          type: "check",
+          value: s.sitemap
+        });
+        fields.push({ type: "note", span: true, text: function(v) {
+          if (v.sitemap !== "1") {
+            return "Off \u2014 the CMS serves nothing at /sitemap.xml, leaving the address to the app hosting it.";
+          }
+          return v.mode === "development" ? "Listed once the site is in production. A site in development publishes no sitemap \u2014 it is asking not to be crawled." : "Every published, public page is listed, in every language, and the address is added to the robots.txt below.";
+        } });
+        var storedRobots = !!(s.robotsTxt || "").trim();
+        fields.push({
+          id: "robotsTxt",
+          label: "robots.txt",
+          type: "textarea",
+          mono: true,
+          rows: 6,
+          value: storedRobots ? s.robotsTxt : defaultRobotsTxt(),
+          placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: " + window.location.origin + "/sitemap.xml"
+        });
+        fields.push({ type: "note", span: true, text: function(v) {
+          if (v.mode === "development") {
+            return "Served once the site is in production. While it is in development the CMS serves its own \u201CDisallow: /\u201D instead, so this file cannot invite crawlers into an unfinished site.";
+          }
+          if (!(v.robotsTxt || "").trim()) {
+            return "Empty \u2014 the CMS serves nothing at /robots.txt, leaving the address to the app hosting it.";
+          }
+          var sitemapLine = v.sitemap === "1" ? ", with a Sitemap: line added unless you write your own" : "";
+          if (!storedRobots) {
+            return "A starting point \u2014 nothing is stored yet. Saving serves this at /robots.txt" + sitemapLine + ", taking that address over from the app hosting the site; clearing the box hands it back.";
+          }
+          return "Served at /robots.txt" + sitemapLine + ". Crawlers may cache it for a day or so before they notice a change.";
+        } });
       }
       openDialog({
         message: "Site settings",
@@ -2872,13 +2910,15 @@
           loginInNav: values.loginInNav === "1",
           // Site-wide CSS/JS has its own editor (wrench → Site
           // CSS & JS); carry the stored values through so this
-          // save doesn't wipe them. The mode field is absent for
-          // everyone but superadmins, and carries through the same
-          // way — the server ignores it from anyone else in any
-          // case.
+          // save doesn't wipe them. The mode and robots.txt fields
+          // are absent for everyone but superadmins, and carry
+          // through the same way — the server ignores them from
+          // anyone else in any case.
           siteCss: s.siteCss || "",
           siteJs: s.siteJs || "",
-          mode: values.mode !== void 0 ? values.mode : s.mode || ""
+          mode: values.mode !== void 0 ? values.mode : s.mode || "",
+          robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : s.robotsTxt || "",
+          sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap
         };
         api("/settings", {
           method: "PUT",

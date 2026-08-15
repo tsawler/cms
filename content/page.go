@@ -250,6 +250,51 @@ func (s *Store) All(ctx context.Context, locale string) ([]Page, error) {
 	})
 }
 
+// SitemapEntry is one page as a sitemap sees it: where it lives and when
+// it last changed. No metadata — a sitemap lists addresses, and the
+// titles and descriptions belong to the pages themselves.
+type SitemapEntry struct {
+	Slug      string
+	UpdatedAt time.Time
+}
+
+// SitemapPages returns every page a search engine may be pointed at:
+// published, publicly visible, and not a system page. Posts come back
+// alongside ordinary pages — a post is a page, so one pass covers both —
+// ordered by slug.
+//
+// UpdatedAt is the page row's, which moves when a page is published,
+// unpublished, renamed, or has its visibility changed, and stays put
+// while a draft is edited (those writes land on cms_blocks). That makes
+// it the date the live page last changed, which is what a sitemap's
+// lastmod means.
+//
+// A non-positive limit returns everything; callers that serve the result
+// in one document pass the protocol's ceiling.
+func (s *Store) SitemapPages(ctx context.Context, limit int) ([]SitemapEntry, error) {
+	q := `
+		SELECT p.slug, p.updated_at
+		FROM cms_pages p
+		WHERE NOT p.is_system
+		  AND p.status = 'published'
+		  AND p.visibility = 'public'
+		ORDER BY p.slug`
+	var args []any
+	if limit > 0 {
+		q += ` LIMIT $1`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (SitemapEntry, error) {
+		var e SitemapEntry
+		err := row.Scan(&e.Slug, &e.UpdatedAt)
+		return e, err
+	})
+}
+
 // Counts returns how many non-post pages and how many posts exist — the
 // numbers the admin shows beside its Pages and Blog & News nav entries.
 func (s *Store) Counts(ctx context.Context) (pages, posts int, err error) {

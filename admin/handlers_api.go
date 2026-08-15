@@ -516,6 +516,11 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		// value back, and an editor seeing "Development" explains why the
 		// site is not turning up in search.
 		"mode": mode,
+		// Likewise the robots.txt and the sitemap switch: editing them is
+		// superadmin-only, but every save carries them through, and both
+		// are visible to the whole internet in any case.
+		"robotsTxt": site.RobotsTxt,
+		"sitemap":   site.Sitemap,
 	})
 }
 
@@ -523,14 +528,21 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 // every rendered page unboundedly.
 const maxSiteCodeLen = 100_000
 
+// maxRobotsLen caps the stored robots.txt. Real ones are a few lines;
+// crawlers stop reading long before this (Google gives up past 500 KiB),
+// so anything approaching it is a paste into the wrong field.
+const maxRobotsLen = 10_000
+
 // apiSaveSettings stores the site-wide settings. Like menus they have no
 // draft state: the change is live immediately. Site-wide CSS/JS is
 // written raw into every page, so only admins may change it — a non-admin
 // editor's request keeps whatever is already stored.
-// Whether the site is findable at all is a superadmin's call, so the mode
-// is held to the same carry-through rule as the code fields.
+// Whether the site is findable at all is a superadmin's call, so the
+// mode, the site's robots.txt, and the sitemap switch are held to the
+// same carry-through rule as the code fields.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode"}
+// "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode", "robotsTxt",
+// "sitemap"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
@@ -540,7 +552,11 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LoginInNav bool   `json:"loginInNav"`
 		SiteCSS    string `json:"siteCss"`
 		SiteJS     string `json:"siteJs"`
-		Mode       string `json:"mode"`
+		// Pointers: absent and empty mean different things here — see
+		// the carry-through comment below.
+		Mode      *string `json:"mode"`
+		RobotsTxt *string `json:"robotsTxt"`
+		Sitemap   *bool   `json:"sitemap"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -568,33 +584,54 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The favicon needs to be an uploaded image or a web address."))
 		return
 	}
-	// Two fields here are not everyone's to change: site-wide CSS/JS is
+	// Four fields here are not everyone's to change: site-wide CSS/JS is
 	// injected raw, so it stays admin-only just like per-page code, and
-	// the mode decides whether the site is findable at all, which is a
-	// superadmin's call. Anyone may still change the rest — their request
-	// carries the stored values through unchanged rather than being
-	// refused, since the dialog sends the whole object every time.
+	// the mode, the robots.txt, and the sitemap switch all decide how the
+	// site meets search engines, which is a superadmin's call. Anyone may
+	// still change the rest — their request carries the stored values
+	// through unchanged rather than being refused, since the dialog sends
+	// the whole object every time. So the stored settings are what every
+	// field this request may not set falls back to, and are read on each
+	// save.
 	//
-	// Superadmin is a superset of admin, so a non-superadmin is the only
-	// case that has to read what is stored.
+	// The superadmin fields carry through when they are merely absent
+	// from the body, too, which is why they are pointers: the Site CSS &
+	// JS panel PUTs the settings without them, and a missing mode read as
+	// "" would mean production — silently pulling a development site into
+	// search on an unrelated save.
+	current, err := s.deps.Content.SiteSettings(r.Context())
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api loading site settings", "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
+		return
+	}
 	u := s.currentUser(r)
 	isAdmin := u != nil && u.Role.IsAdmin()
-	isSuper := u != nil && u.Role.IsSuperadmin()
-	css, js, mode := body.SiteCSS, body.SiteJS, body.Mode
-	if !isSuper {
-		current, err := s.deps.Content.SiteSettings(r.Context())
-		if err != nil {
-			s.deps.Logger.Error("cms admin: api loading site settings", "err", err)
-			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
-			return
+	isSuper := u != nil && u.Role.IsSuperadmin() // a superset of admin
+	css, js := current.SiteCSS, current.SiteJS
+	if isAdmin {
+		css, js = body.SiteCSS, body.SiteJS
+	}
+	mode, robots, sitemap := current.Mode, current.RobotsTxt, current.Sitemap
+	if isSuper {
+		if body.Mode != nil {
+			mode = *body.Mode
 		}
-		mode = current.Mode
-		if !isAdmin {
-			css, js = current.SiteCSS, current.SiteJS
+		if body.RobotsTxt != nil {
+			// CRLF in, LF out: the field is a browser textarea, which
+			// submits CRLF, and the value is served byte-for-byte.
+			robots = strings.ReplaceAll(*body.RobotsTxt, "\r\n", "\n")
+		}
+		if body.Sitemap != nil {
+			sitemap = *body.Sitemap
 		}
 	}
 	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
+		return
+	}
+	if len(robots) > maxRobotsLen {
+		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The robots.txt is too long."))
 		return
 	}
 	if !content.ValidMode(mode) {
@@ -610,6 +647,8 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		SiteCSS:    css,
 		SiteJS:     js,
 		Mode:       mode,
+		RobotsTxt:  robots,
+		Sitemap:    sitemap,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))

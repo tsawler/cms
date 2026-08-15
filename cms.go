@@ -451,12 +451,21 @@ type CMS struct {
 	cssBuilder *cssRebuilder // nil unless Config.Tailwind is set
 	cssOnce    sync.Once     // schedules the initial build on first traffic
 
-	// The site mode, cached: every public response consults it, including
-	// the media and asset routes that read no settings otherwise. See
-	// developmentMode.
-	modeMu  sync.Mutex
-	modeDev bool
-	modeAt  time.Time
+	// The public-facing settings, cached together: every public response
+	// consults the site mode, including the media and asset routes that
+	// read no settings otherwise, and the rest come from the one read.
+	// See siteFlags.
+	siteMu  sync.Mutex
+	siteVal siteFacts
+	siteAt  time.Time
+
+	// The rendered sitemap, cached: it costs a query over every page, and
+	// nothing stops a client from asking for it in a loop. See
+	// serveSitemap.
+	sitemapMu   sync.Mutex
+	sitemapBody []byte
+	sitemapBase string // the base URL sitemapBody was built for
+	sitemapAt   time.Time
 }
 
 // New validates cfg, applies defaults, and returns a ready CMS. It does not
@@ -775,10 +784,12 @@ func (c *CMS) Migrate(ctx context.Context) error {
 //
 // A site being set up for the first time is also put into development mode
 // (see content.SiteSettings.Mode), so it is not indexed while it is being
-// built. The superadmin switches it to production when it is ready to be
-// found. Existing sites are left alone: they are already live, and having
-// an upgrade quietly pull them out of search results would be a far worse
-// surprise than having to flip a switch once.
+// built, and has the generated sitemap turned on. The superadmin switches
+// the mode to production when the site is ready to be found. Existing
+// sites are left alone on both counts: they are already live, and having
+// an upgrade quietly pull them out of search results — or claim a URL
+// their own app already answers — would be a far worse surprise than
+// having to flip a switch once.
 func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool, error) {
 	n, err := c.users.Count(ctx)
 	if err != nil {
@@ -802,6 +813,14 @@ func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool
 		return false, err
 	}
 	if err := c.content.SetSiteMode(ctx, content.ModeDevelopment); err != nil {
+		return false, err
+	}
+	// A new site also gets the generated sitemap, for the mirror-image
+	// reason: nothing of the host's can be shadowed on a site that did
+	// not exist a moment ago, and a site whose every URL the CMS knows
+	// may as well publish them. Existing sites stay off — see the
+	// comment above SiteSettings.Sitemap.
+	if err := c.content.SetSitemap(ctx, true); err != nil {
 		return false, err
 	}
 	c.cfg.Logger.Info("cms: created initial admin user", "email", email)
@@ -935,12 +954,22 @@ func (c *CMS) Pages() http.Handler {
 		// what covers the responses no <meta> tag can reach: the RSS
 		// feeds, and the media proxy serving images and PDFs that search
 		// engines index in their own right.
-		if c.developmentMode(r.Context()) {
+		site := c.siteFlags(r.Context())
+		if site.dev {
 			w.Header().Set("X-Robots-Tag", robotsDirective)
-			if r.URL.Path == robotsPath {
-				c.serveRobotsTxt(w)
+		}
+		if r.URL.Path == robotsPath {
+			if body := c.robotsBody(r, site); body != "" {
+				c.serveRobotsTxt(w, body)
 				return
 			}
+		}
+		// A site in development publishes no sitemap: it is asking not to
+		// be crawled, and a list of every URL it has is the opposite of
+		// that.
+		if r.URL.Path == sitemapPath && site.sitemap && !site.dev {
+			c.serveSitemap(w, r)
+			return
 		}
 		// Media and the editor script are served outside the session
 		// wrapper so their responses stay cacheable.
@@ -972,10 +1001,11 @@ func (c *CMS) Pages() http.Handler {
 
 // robotsPath is the address crawlers look for their instructions at, and
 // robotsDirective is what a site in development answers every request
-// with. The CMS claims neither in production: a host that serves its own
-// robots.txt — with a sitemap line, or rules for one crawler — keeps
-// doing so once the site goes live, and gets these only while the site
-// is being built.
+// with. In production the CMS claims the path only when a superadmin has
+// stored a robots.txt in the site settings: a host that serves its own —
+// with a sitemap line, or rules for one crawler — keeps doing so once
+// the site goes live, and an install that stores nothing is left exactly
+// as it was.
 const (
 	robotsPath      = "/robots.txt"
 	robotsDirective = "noindex, nofollow"
@@ -993,12 +1023,53 @@ const (
 // and disallow" before reaching for this as a takedown.)
 const robotsTxt = "User-agent: *\nDisallow: /\n"
 
-func (c *CMS) serveRobotsTxt(w http.ResponseWriter) {
+// robotsBody is what /robots.txt should answer with, or "" to leave the
+// path unclaimed so the host app's own handler sees it.
+//
+// Development serves its own Disallow over anything stored: the stored
+// file is written for the live site, and a site that is being hidden must
+// not hand crawlers a file that invites them in.
+func (c *CMS) robotsBody(r *http.Request, site siteFacts) string {
+	if site.dev {
+		return robotsTxt
+	}
+	if site.robots == "" {
+		return ""
+	}
+	if !site.sitemap {
+		return site.robots
+	}
+	return withSitemapLine(site.robots, c.siteBaseURL(r)+sitemapPath)
+}
+
+// withSitemapLine adds a Sitemap: line for the generated sitemap to a
+// stored robots.txt, so turning the sitemap on is enough to advertise it.
+// A file that already names a sitemap is left exactly as written — the
+// author pointing at their own is the likelier intent, and robots.txt
+// takes any number of Sitemap lines, so a second one would only muddy
+// which is meant.
+func withSitemapLine(body, url string) string {
+	for line := range strings.SplitSeq(body, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "sitemap:") {
+			return body
+		}
+	}
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return body + "\nSitemap: " + url + "\n"
+}
+
+// serveRobotsTxt answers /robots.txt with body: either the development
+// Disallow above or the robots.txt a superadmin stored.
+func (c *CMS) serveRobotsTxt(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// No caching: the switch to production has to take effect when it is
-	// flipped, not whenever an intermediary decides it is done with this.
+	// No caching: the switch to production — and an edit to the stored
+	// file — has to take effect when it is made, not whenever an
+	// intermediary decides it is done with this. Crawlers cache
+	// robots.txt on their own schedule regardless.
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, robotsTxt)
+	_, _ = io.WriteString(w, body)
 }
 
 // siteModeCacheTTL is how long an instance trusts its in-memory copy of
@@ -1008,36 +1079,54 @@ func (c *CMS) serveRobotsTxt(w http.ResponseWriter) {
 // Short, because the whole point of the setting is the moment it changes.
 const siteModeCacheTTL = 5 * time.Second
 
-// developmentMode reports whether the site is in development, from a
-// briefly-cached copy of the stored setting.
+// siteFacts is the public face of the site settings: what the CMS needs
+// to answer a request from anyone who is not logged in.
+type siteFacts struct {
+	dev     bool   // the site is in development; keep it out of indexes
+	robots  string // the stored /robots.txt, "" for none
+	sitemap bool   // serve a generated /sitemap.xml
+}
+
+// siteFlags reports the site facts from a briefly-cached copy of the
+// settings.
 //
-// It is consulted on every public response, including media and asset
-// routes that touch the database for nothing else, so it cannot be a
-// query per request. A read that fails falls back to the last known
-// answer; with no answer yet — the database is unreachable at the first
-// request — it says development, because a site nobody can serve pages
-// for has nothing to gain from being crawled, and an unfinished site
-// landing in an index is the mistake that is hard to take back.
-func (c *CMS) developmentMode(ctx context.Context) bool {
+// The mode is consulted on every public response, including media and
+// asset routes that touch the database for nothing else, so it cannot be
+// a query per request; the other two ride along on the same read. A read
+// that fails falls back to the last known answer; with no answer yet —
+// the database is unreachable at the first request — it says
+// development, because a site nobody can serve pages for has nothing to
+// gain from being crawled, and an unfinished site landing in an index is
+// the mistake that is hard to take back.
+func (c *CMS) siteFlags(ctx context.Context) siteFacts {
 	if c.content == nil {
-		return false // no store to ask; only a hand-built CMS in a test
+		return siteFacts{} // no store to ask; only a hand-built CMS in a test
 	}
-	c.modeMu.Lock()
-	dev, at := c.modeDev, c.modeAt
-	c.modeMu.Unlock()
+	c.siteMu.Lock()
+	got, at := c.siteVal, c.siteAt
+	c.siteMu.Unlock()
 	if !at.IsZero() && time.Since(at) < siteModeCacheTTL {
-		return dev
+		return got
 	}
 	site, err := c.content.SiteSettings(ctx)
 	if err != nil {
 		c.cfg.Logger.Error("cms: reading the site mode", "err", err)
-		return at.IsZero() || dev
+		if at.IsZero() {
+			got.dev = true
+		}
+		return got
 	}
-	dev = site.Development()
-	c.modeMu.Lock()
-	c.modeDev, c.modeAt = dev, time.Now()
-	c.modeMu.Unlock()
-	return dev
+	got = siteFacts{dev: site.Development(), robots: site.RobotsTxt, sitemap: site.Sitemap}
+	c.siteMu.Lock()
+	c.siteVal, c.siteAt = got, time.Now()
+	c.siteMu.Unlock()
+	return got
+}
+
+// developmentMode reports whether the site is in development; it is what
+// the renderer is handed to decide the robots <meta> tag.
+func (c *CMS) developmentMode(ctx context.Context) bool {
+	return c.siteFlags(ctx).dev
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {

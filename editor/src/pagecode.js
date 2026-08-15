@@ -186,6 +186,11 @@ export function initPageCode() {
         // Site scope: the settings PUT carries the full settings object,
         // so re-fetch the rest at save time — a stale copy would clobber
         // settings-dialog edits made while this panel sat open.
+        //
+        // The superadmin-only fields (mode, robotsTxt) are deliberately
+        // left out rather than echoed back: the server carries an absent
+        // one through unchanged, and sending the mode from here is how a
+        // save of unrelated CSS once flipped a development site live.
         var put = codeState.scope === "site"
             ? api("/settings").then(function (s) {
                 return api("/settings", {
