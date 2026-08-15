@@ -35,6 +35,13 @@ type SiteSettings struct {
 	// getting. Development ignores it and serves its own Disallow; see
 	// Development. Editing it is superadmin-only, like Mode.
 	RobotsTxt string
+	// Sitemap makes the CMS serve a sitemap of every published, public
+	// page at /sitemap.xml. Off — the default — leaves that address to
+	// the host app, so an upgrade never shadows a sitemap it already
+	// serves; SeedAdmin turns it on for brand-new sites. A site in
+	// development serves none regardless: it has nothing it wants found.
+	// Switching it is superadmin-only, like Mode.
+	Sitemap bool
 }
 
 // The two site modes. A site under construction sits in development,
@@ -76,6 +83,7 @@ const (
 	settingSiteJS     = "site_js"
 	settingSiteMode   = "site_mode"
 	settingRobotsTxt  = "robots_txt"
+	settingSitemap    = "sitemap"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -114,6 +122,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.Mode = v
 		case settingRobotsTxt:
 			out.RobotsTxt = v
+		case settingSitemap:
+			out.Sitemap = v == "1"
 		}
 	}
 	return out, rows.Err()
@@ -127,9 +137,12 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	loginInNav := ""
+	loginInNav, sitemap := "", ""
 	if in.LoginInNav {
 		loginInNav = "1"
+	}
+	if in.Sitemap {
+		sitemap = "1"
 	}
 	for k, v := range map[string]string{
 		settingMenuAlign:  in.MenuAlign,
@@ -141,6 +154,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingSiteJS:     in.SiteJS,
 		settingSiteMode:   in.Mode,
 		settingRobotsTxt:  in.RobotsTxt,
+		settingSitemap:    sitemap,
 	} {
 		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `
@@ -160,9 +174,25 @@ func (s *Store) SetSiteMode(ctx context.Context, mode string) error {
 	if !ValidMode(mode) {
 		return fmt.Errorf("content: %q is not a site mode", mode)
 	}
+	return s.setSetting(ctx, settingSiteMode, mode)
+}
+
+// SetSitemap turns the generated sitemap on or off on its own, for the
+// same reason SetSiteMode exists: seeding a new site sets this one key
+// and has no opinion about the others.
+func (s *Store) SetSitemap(ctx context.Context, on bool) error {
+	v := ""
+	if on {
+		v = "1"
+	}
+	return s.setSetting(ctx, settingSitemap, v)
+}
+
+// setSetting upserts one key, leaving every other setting alone.
+func (s *Store) setSetting(ctx context.Context, key, value string) error {
 	keyCol := s.db.Dialect().Quote("key")
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO cms_settings (`+keyCol+`, value) VALUES ($1, $2)
-		ON CONFLICT (`+keyCol+`) DO UPDATE SET value = EXCLUDED.value`, settingSiteMode, mode)
+		ON CONFLICT (`+keyCol+`) DO UPDATE SET value = EXCLUDED.value`, key, value)
 	return err
 }

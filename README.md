@@ -1196,12 +1196,26 @@ Disallow: /private
 Sitemap: https://example.com/sitemap.xml
 ```
 
+On a site that has never stored one, the box opens on a working starting
+point rather than empty — crawl everything except the admin, at whatever
+`Config.AdminPath` you mounted it on:
+
+```
+User-agent: *
+Disallow: /admin/
+```
+
+Nothing is stored until you save, and the note under the box says so: the
+save is what takes `/robots.txt` over from the host app. Clear the box and
+save to hand it back.
+
 Three rules govern it, and they are worth stating plainly:
 
 - **Empty means the CMS serves nothing there.** That is the default and
   the behaviour every existing site keeps: the path stays the host app's,
   and an app already serving its own file is unaffected by this feature
-  existing.
+  existing. The suggested text above is only ever a suggestion — it takes
+  a save to become real.
 - **Development ignores it.** A hidden site serves its own `Disallow: /`
   no matter what is stored, because a file written for the live site
   would otherwise invite crawlers into an unfinished one. The box says so
@@ -1219,6 +1233,78 @@ This is a text box, not a validator: the CMS caps the length and
 normalizes line endings, and otherwise serves what you typed. A
 `Disallow` that hides a page from search does not make it unreachable —
 that is the same caveat as development mode, and worth re-reading above.
+
+### A sitemap
+
+Above the robots.txt box, and superadmin-only in the same way, is
+**Publish a sitemap at /sitemap.xml**. With it on, the CMS generates a
+sitemap of every page it serves:
+
+```xml
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://example.com/</loc>
+    <lastmod>2026-08-15T12:04:11Z</lastmod>
+  </url>
+  <url>
+    <loc>https://example.com/about</loc>
+    <lastmod>2026-07-02T09:30:00Z</lastmod>
+  </url>
+</urlset>
+```
+
+**What it lists** is every page that is published *and* publicly visible
+— posts included, since a post is a page. Drafts and private pages are
+left out, which means the sitemap says exactly what an anonymous visitor
+could reach anyway.
+
+**`lastmod` is the live page's date, not the editor's.** It moves when a
+page is published, unpublished, renamed, or has its visibility changed,
+and stays put while someone works on a draft — draft edits are stored
+separately from the page row. So editing all afternoon without publishing
+does not tell search engines the page changed, which is correct: it
+hasn't.
+
+**Multi-locale sites list every language**, and each URL carries the
+`hreflang` alternates — including `x-default` — that `{{cmsHead}}` already
+emits in the page head, so the two agree about which URLs exist:
+
+```xml
+<url>
+  <loc>https://example.com/about</loc>
+  <xhtml:link rel="alternate" hreflang="en" href="https://example.com/about"/>
+  <xhtml:link rel="alternate" hreflang="fr" href="https://example.com/fr/about"/>
+  <xhtml:link rel="alternate" hreflang="x-default" href="https://example.com/about"/>
+</url>
+```
+
+**Turning it on advertises it.** If you have written a robots.txt, a
+`Sitemap:` line pointing at it is added to what gets served — unless your
+file already names a sitemap, in which case yours is left alone. An empty
+robots.txt box stays empty: the sitemap does not make the CMS start
+claiming `/robots.txt`.
+
+Three more things worth knowing:
+
+- **New sites get it; upgrades don't.** `SeedAdmin` turns it on for a
+  brand-new site, exactly as it starts one in development mode. An
+  existing site is left alone — if your app already serves its own
+  `/sitemap.xml`, an upgrade must not quietly take the address over.
+  Turn it on in the dialog when you want the CMS's.
+- **A site in development publishes none.** It is asking not to be
+  crawled; handing out a list of every URL it has is the opposite of
+  that. The switch stays where you left it and takes effect at the
+  production flip.
+- **The document is cached for five minutes.** A page published a moment
+  ago may not appear until then. That is a bound on cost, not a freshness
+  promise — crawlers refetch on their own far slower schedule. The URLs
+  come from `Config.SiteURL` when you set one, and otherwise from the
+  requesting host, so an install reached by several names answers each
+  with its own.
+
+Past 50,000 URLs — pages × locales — the extra pages are left out and a
+warning is logged. Splitting into a sitemap index is the fix, and does
+not exist yet.
 
 ## Host data in CMS pages
 

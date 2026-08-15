@@ -6,11 +6,24 @@
  * page in place so the result shows without a reload.
  * ------------------------------------------------------------------ */
 
-import { mediaEnabled, canPages, isSuperadmin } from "./state.js";
+import { adminPath, mediaEnabled, canPages, isSuperadmin } from "./state.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
 
 var ALIGNS = ["left", "center", "right"];
+
+// defaultRobotsTxt is what the robots.txt box offers a site that has
+// never stored one, so the superadmin starts from a working file instead
+// of a blank box: crawl everything except the admin, which sits behind a
+// login and has nothing worth indexing.
+//
+// No Sitemap: line. The server adds one when the sitemap is on, which
+// keeps it following the switch and the site's own host name rather than
+// freezing either into stored text — and a line typed here would suppress
+// that, being read as the author naming their own.
+function defaultRobotsTxt() {
+    return "User-agent: *\nDisallow: " + adminPath + "/\n";
+}
 
 // applySettings updates the current page in place: alignment classes on
 // every {{cmsNav}} nav, each {{cmsBrand}} span's logo and text, and the
@@ -114,23 +127,60 @@ export function openSiteSettings() {
                     : "The site is open to search engines. It can take days or weeks for pages to " +
                       "appear in results.";
             } });
+            // A sitemap of every published, public page. Off leaves
+            // /sitemap.xml to the host app, the same bargain the
+            // robots.txt box strikes.
+            fields.push({ id: "sitemap", label: "Publish a sitemap at /sitemap.xml",
+                type: "check", value: s.sitemap });
+            fields.push({ type: "note", span: true, text: function (v) {
+                if (v.sitemap !== "1") {
+                    return "Off — the CMS serves nothing at /sitemap.xml, leaving the address to " +
+                        "the app hosting it.";
+                }
+                return v.mode === "development"
+                    ? "Listed once the site is in production. A site in development publishes no " +
+                      "sitemap — it is asking not to be crawled."
+                    : "Every published, public page is listed, in every language, and the address " +
+                      "is added to the robots.txt below.";
+            } });
             // The live site's robots.txt, in the same hands as the mode:
             // both decide what crawlers are told. Left empty the CMS
             // serves nothing at that address, so an app already serving
-            // its own file keeps doing so.
+            // its own file keeps doing so. The placeholder shows this
+            // site's own sitemap address rather than a made-up one.
+            // Nothing stored yet shows the default rather than an empty
+            // box. Whether one was stored decides what the note says
+            // below, so it is read once here, before the dialog's own
+            // copy of the value starts changing.
+            var storedRobots = !!(s.robotsTxt || "").trim();
             fields.push({ id: "robotsTxt", label: "robots.txt", type: "textarea", mono: true,
-                rows: 6, value: s.robotsTxt,
-                placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: https://example.com/sitemap.xml" });
+                rows: 6, value: storedRobots ? s.robotsTxt : defaultRobotsTxt(),
+                placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: " +
+                    window.location.origin + "/sitemap.xml" });
             fields.push({ type: "note", span: true, text: function (v) {
-                return v.mode === "development"
-                    ? "Served once the site is in production. While it is in development the CMS " +
-                      "serves its own “Disallow: /” instead, so this file cannot invite crawlers " +
-                      "into an unfinished site."
-                    : (v.robotsTxt || "").trim()
-                        ? "Served at /robots.txt. Crawlers may cache it for a day or so before " +
-                          "they notice a change."
-                        : "Empty — the CMS serves nothing at /robots.txt, leaving the address to " +
-                          "the app hosting it.";
+                if (v.mode === "development") {
+                    return "Served once the site is in production. While it is in development the " +
+                        "CMS serves its own “Disallow: /” instead, so this file cannot invite " +
+                        "crawlers into an unfinished site.";
+                }
+                if (!(v.robotsTxt || "").trim()) {
+                    return "Empty — the CMS serves nothing at /robots.txt, leaving the address to " +
+                        "the app hosting it.";
+                }
+                // The difference matters: on a site with nothing stored,
+                // saving the dialog is what takes /robots.txt over from
+                // the app hosting it, and the box was filled in by us
+                // rather than by anyone here.
+                var sitemapLine = v.sitemap === "1"
+                    ? ", with a Sitemap: line added unless you write your own"
+                    : "";
+                if (!storedRobots) {
+                    return "A starting point — nothing is stored yet. Saving serves this at " +
+                        "/robots.txt" + sitemapLine + ", taking that address over from the app " +
+                        "hosting the site; clearing the box hands it back.";
+                }
+                return "Served at /robots.txt" + sitemapLine +
+                    ". Crawlers may cache it for a day or so before they notice a change.";
             } });
         }
         openDialog({
@@ -157,6 +207,7 @@ export function openSiteSettings() {
                 siteJs: s.siteJs || "",
                 mode: values.mode !== undefined ? values.mode : (s.mode || ""),
                 robotsTxt: values.robotsTxt !== undefined ? values.robotsTxt : (s.robotsTxt || ""),
+                sitemap: values.sitemap !== undefined ? values.sitemap === "1" : !!s.sitemap,
             };
             api("/settings", {
                 method: "PUT",

@@ -74,6 +74,52 @@ func TestAPISettingsRobotsTxtIsSuperadminOnly(t *testing.T) {
 	})
 }
 
+// Whether the site publishes a sitemap is the same kind of decision as
+// the mode and the robots.txt, and is held to the same role.
+func TestAPISettingsSitemapIsSuperadminOnly(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := settingsServer(db)
+
+		rec := httptest.NewRecorder()
+		s.apiSaveSettings(rec, settingsRequest(t, s, auth.RoleSuperadmin,
+			`{"siteName":"Acme","sitemap":true}`))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("superadmin save: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		if !storedSettings(t, s).Sitemap {
+			t.Fatal("the superadmin's save did not turn the sitemap on")
+		}
+
+		// Nobody else may turn it off, and everyone may still save the rest.
+		for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleEditor} {
+			rec := httptest.NewRecorder()
+			s.apiSaveSettings(rec, settingsRequest(t, s, role,
+				`{"siteName":"By `+string(role)+`","sitemap":false}`))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s save: status %d, want 200: %s", role, rec.Code, rec.Body)
+			}
+			site := storedSettings(t, s)
+			if !site.Sitemap {
+				t.Errorf("%s turned the sitemap off — it is superadmin-only", role)
+			}
+			if want := "By " + string(role); site.SiteName != want {
+				t.Errorf("%s: site name = %q, want %q", role, site.SiteName, want)
+			}
+		}
+
+		// The superadmin can turn it off again.
+		rec = httptest.NewRecorder()
+		s.apiSaveSettings(rec, settingsRequest(t, s, auth.RoleSuperadmin,
+			`{"siteName":"Acme","sitemap":false}`))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("superadmin save: status %d, want 200: %s", rec.Code, rec.Body)
+		}
+		if storedSettings(t, s).Sitemap {
+			t.Error("the superadmin's save did not turn the sitemap off")
+		}
+	})
+}
+
 // A browser textarea submits CRLF; the file is served byte-for-byte, so
 // the line endings are normalized on the way in.
 func TestAPISettingsRobotsTxtNormalizesLineEndings(t *testing.T) {
@@ -116,7 +162,7 @@ func TestAPISettingsAbsentSuperadminFieldsCarryThrough(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		s.apiSaveSettings(rec, settingsRequest(t, s, auth.RoleSuperadmin,
-			`{"siteName":"Acme","mode":"development","robotsTxt":"Disallow: /\n"}`))
+			`{"siteName":"Acme","mode":"development","robotsTxt":"Disallow: /\n","sitemap":true}`))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("superadmin save: status %d, want 200: %s", rec.Code, rec.Body)
 		}
@@ -135,6 +181,9 @@ func TestAPISettingsAbsentSuperadminFieldsCarryThrough(t *testing.T) {
 		}
 		if site.RobotsTxt != "Disallow: /\n" {
 			t.Errorf("a CSS save changed robots.txt to %q", site.RobotsTxt)
+		}
+		if !site.Sitemap {
+			t.Error("a CSS save turned the sitemap off — it sent no sitemap field at all")
 		}
 		if site.SiteCSS != "body{color:red}" {
 			t.Errorf("site CSS = %q, want the saved value", site.SiteCSS)
