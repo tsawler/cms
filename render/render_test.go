@@ -146,6 +146,48 @@ func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	}
 }
 
+// The editor offers to remove a slot's picture only where there is one to
+// remove, and it cannot tell from the page: the host's <img> looks the
+// same whether its src came from a stored block or from whatever the
+// template falls back to. So the edit render names the filled slots.
+func TestRenderEditModeNamesFilledImageSlots(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 3, TemplateName: "pages/home.gohtml", Title: "Home"}
+	blocks := []content.Block{
+		{Region: "hero", Kind: content.KindImage, Content: "/media/hero/web.webp"},
+		// Cleared: the region exists, holding nothing. It must not be
+		// listed, or the editor offers to remove what is already gone.
+		{Region: "banner", Kind: content.KindImage, Content: ""},
+		{Region: "aside", Kind: content.KindImage, Content: "/media/aside/web.webp"},
+		{Region: "main", Kind: content.KindHTML, Content: "<p>not an image</p>"},
+	}
+
+	var buf bytes.Buffer
+	err := r.Render(&buf, Input{Page: page, Blocks: blocks, Locale: "en", Edit: &EditInfo{
+		PageID: 3, AdminPath: "/admin", MediaEnabled: true,
+	}})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	// Sorted, so a map's iteration order cannot make the markup differ
+	// between two renders of the same page.
+	if want := `data-filled-images="[&#34;aside&#34;,&#34;hero&#34;]"`; !strings.Contains(buf.String(), want) {
+		t.Errorf("script tag is missing %s:\n%s", want, buf.String())
+	}
+
+	// A page with nothing stored still carries the attribute, so the
+	// editor never has to tell "no slots" from "old server".
+	buf.Reset()
+	if err := r.Render(&buf, Input{Page: page, Locale: "en", Edit: &EditInfo{
+		PageID: 3, AdminPath: "/admin", MediaEnabled: true,
+	}}); err != nil {
+		t.Fatalf("Render with no blocks: %v", err)
+	}
+	if !strings.Contains(buf.String(), `data-filled-images="[]"`) {
+		t.Errorf("empty page should list no filled slots:\n%s", buf.String())
+	}
+}
+
 // Unlisted templates parse and render like any other, but the editor's
 // new-page dialog only offers them to superadmins.
 func TestUnlistedTemplatesHiddenFromNonSuperadminDialog(t *testing.T) {

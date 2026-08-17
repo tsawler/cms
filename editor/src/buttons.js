@@ -313,6 +313,53 @@ export function hideVidUI() {
     $("vid-ui").classList.remove("on");
 }
 
+/* Template image slots — an <img data-cms-image="name"> the host's
+ * template put there — get a pencil (choose a picture from the media
+ * library) and, when the slot holds one, a trash can.
+ *
+ * They used to open the picker on the click itself, and that was the one
+ * editable thing on a page that answered a click with a modal. A slot is
+ * often the whole of something large — a card, a banner, a tile — so any
+ * stray click landed in it, and a slot inside a link (they usually are)
+ * had no reading of a click other than "open the library". Chrome first,
+ * dialog second, is what every other element here does. */
+var activeSlot = null;
+
+function showSlotUI(img) {
+    activeSlot = img;
+    var ui = $("slot-ui");
+    // Removing is offered only when there is something to remove: an
+    // untouched slot showing the template's own picture would otherwise
+    // have a trash can that does nothing visible.
+    var name = img.getAttribute("data-cms-image");
+    $("slot-clear").hidden = !state.filledSlots[name] && !state.imageValues[name];
+    ui.classList.add("on");
+    var r = img.getBoundingClientRect();
+    // Top-right corner, like the image and video chrome; above the slot
+    // when it is too small to hold the toolbar inside it.
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
+}
+
+export function hideSlotUI() {
+    activeSlot = null;
+    $("slot-ui").classList.remove("on");
+}
+
+// hideChrome puts away every floating toolbar except the one named, so a
+// click that raises one is also the click that dismisses the others.
+// Callers outside this module pass nothing, meaning "all of it".
+export function hideChrome(except) {
+    if (except !== "btn") hideButtonUI();
+    if (except !== "snip") hideSnipUI();
+    if (except !== "img") hideImgUI();
+    if (except !== "vid") hideVidUI();
+    if (except !== "slot") hideSlotUI();
+}
+
 // imageLink returns the <a> wrapping img when that anchor exists purely
 // for the image (no text of its own), else null.
 function imageLink(img) {
@@ -565,53 +612,55 @@ export function initButtons() {
         var t = e.target;
         var btn = t.closest ? t.closest("a.cms-btn") : null;
         if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
-        // Direct clicks on a rich-text image get the image gear; images
-        // in template slots ([data-cms-image]) keep their picker click.
+        // A template image slot gets the pencil chrome; only with the
+        // media library configured, since choosing a picture is the only
+        // thing it offers.
+        var slot = null;
+        if (!btn && mediaEnabled && t.closest) slot = t.closest("[data-cms-image]");
+        // Direct clicks on a rich-text image get the image gear instead.
+        // A slot is never one, even with no media library to offer it
+        // anything: its size, link and alt text are the template's.
         var img = null;
-        if (!btn && t.tagName === "IMG" && !t.closest("[data-cms-image]") &&
+        if (!btn && !slot && t.tagName === "IMG" && !t.closest("[data-cms-image]") &&
             t.closest("[data-cms-region],[data-cms-sections]")) {
             img = t;
         }
         // Videos and embeds are pointer-events:none while editing, so
         // they're found by position, not as the target.
         var vid = null;
-        if (!btn && !img) vid = mediaAtPoint(e.clientX, e.clientY);
+        if (!btn && !slot && !img) vid = mediaAtPoint(e.clientX, e.clientY);
         var snip = null;
-        if (!btn && !img && !vid && t.closest) {
+        if (!btn && !slot && !img && !vid && t.closest) {
             snip = t.closest(".cms-snippet");
             if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
         }
         if (btn) {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
-            hideSnipUI();
-            hideImgUI();
-            hideVidUI();
+            hideChrome("btn");
             showButtonUI(btn);
+        } else if (slot) {
+            // Slots are usually inside a link, and a click while editing
+            // must raise the toolbar rather than leave the page.
+            e.preventDefault();
+            e.stopPropagation();
+            hideChrome("slot");
+            showSlotUI(slot);
         } else if (img) {
             // No preventDefault: the click still gives TinyMCE the
             // selection (and its resize handles).
-            hideButtonUI();
-            hideSnipUI();
-            hideVidUI();
+            hideChrome("img");
             showImgUI(img);
         } else if (vid) {
-            hideButtonUI();
-            hideSnipUI();
-            hideImgUI();
+            hideChrome("vid");
             showVidUI(vid);
         } else if (snip) {
             // No preventDefault: the click still places the caret for
             // editing the snippet's text.
-            hideButtonUI();
-            hideImgUI();
-            hideVidUI();
+            hideChrome("snip");
             showSnipUI(snip);
         } else {
-            hideButtonUI();
-            hideSnipUI();
-            hideImgUI();
-            hideVidUI();
+            hideChrome();
         }
     }, true);
 
@@ -621,12 +670,14 @@ export function initButtons() {
         if (activeSnip) showSnipUI(activeSnip);
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
+        if (activeSlot) showSlotUI(activeSlot);
     }, true);
     window.addEventListener("resize", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
+        if (activeSlot) showSlotUI(activeSlot);
     });
 
     $("btn-set").addEventListener("click", function () {
@@ -1035,20 +1086,40 @@ export function initButtons() {
         lockButtons(); // the moved copy may contain a button
     });
 
-    document.addEventListener("click", function (e) {
-        if (!state.editing || !mediaEnabled) return;
-        var img = e.target.closest ? e.target.closest("[data-cms-image]") : null;
-        if (!img) return;
-        e.preventDefault();
-        e.stopPropagation();
+    $("slot-pick").addEventListener("click", function () {
+        if (!activeSlot) return;
+        var img = activeSlot;
         var name = img.getAttribute("data-cms-image");
+        hideSlotUI(); // the chrome floats above the picker's overlay
         openPicker("image", function (item) {
             img.src = item.web;
             if (item.alt) img.alt = item.alt;
             state.imageValues[name] = item.web;
+            state.filledSlots[name] = true;
             markDirty(name);
         });
-    }, true);
+    });
+
+    // Removing a picture is not deleting anything: the slot goes back to
+    // whatever the page's template draws when nobody has chosen one,
+    // which on many templates is a picture of its own. The editor has no
+    // way to show that here — it only exists on the server — so this
+    // says what will happen rather than pretending to preview it.
+    $("slot-clear").addEventListener("click", function () {
+        if (!activeSlot) return;
+        var img = activeSlot;
+        var name = img.getAttribute("data-cms-image");
+        hideSlotUI(); // the chrome floats above the dialog's overlay
+        cmsConfirm("Remove this picture? The slot goes back to the page's own, " +
+            "which you'll see the next time the page loads.",
+        "Remove picture", true).then(function (yes) {
+            if (!yes) return;
+            img.removeAttribute("src");
+            state.imageValues[name] = "";
+            delete state.filledSlots[name];
+            markDirty(name);
+        });
+    });
 
     window.addEventListener("beforeunload", function (e) {
         if (hasUnsaved()) {

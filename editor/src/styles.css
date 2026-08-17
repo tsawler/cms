@@ -28,7 +28,7 @@ transition:transform .25s ease,opacity .25s ease}
 /* ---- toast: status and confirmation messages, floated above the bar
    so they're visible even when the bar is busy or minimized ---- */
 .toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(8px);
-z-index:2147483001;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
+z-index:2147483007;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
 font-size:13px;line-height:1.4;max-width:min(28em,90vw);text-align:center;
 box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;visibility:hidden;
 transition:transform .2s ease,opacity .2s ease,visibility .2s}
@@ -103,10 +103,16 @@ box-shadow:0 4px 12px rgba(0,0,0,.35)}
 .btnui.on{display:flex}
 .btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
 border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
+/* The display above is an author rule, so it outranks the browser's own
+   [hidden]{display:none} and a hidden control would show regardless.
+   Slot chrome hides its trash can this way when there is no chosen
+   picture to remove. */
+.btnui button[hidden]{display:none}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del,#vid-del{color:#fca5a5}
-#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover{background:rgba(252,165,165,.2)}
+#btn-del,#snip-del,#img-del,#vid-del,#slot-clear{color:#fca5a5}
+#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover,
+#slot-clear:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
@@ -246,7 +252,12 @@ text-overflow:ellipsis}
 /* radio rows under the "Links to" heading */
 #mm .fld label.chk{margin:0 0 6px}
 
-/* ---- small dialog (replaces window.confirm / window.prompt) ---- */
+/* ---- small dialog (replaces window.confirm / window.prompt) ----
+   A dialog sits below .overlay/.panel by default, because a dialog can
+   open the media picker for one of its fields and must stay behind it.
+   The reverse also happens — the picker asks for a new folder name — so
+   openDialog adds .over when it opens on top of a panel, which lifts the
+   dialog above it for as long as it's up. ---- */
 .dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}
 .dlg-overlay.on{display:block}
 .dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
@@ -254,6 +265,8 @@ width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
 box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none;
 max-height:88vh;overflow-y:auto}
 .dlg.on{display:block}
+.dlg-overlay.over{z-index:2147483005}
+.dlg.over{z-index:2147483006}
 /* Settings panels: wider, and two fields to a row so a tab's worth of
    controls is taken in at a glance rather than scrolled through. */
 .dlg.wide{width:min(640px,94vw)}

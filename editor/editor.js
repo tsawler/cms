@@ -68,6 +68,21 @@
     pageTemplates = JSON.parse(cfg.pageTemplates || "[]") || [];
   } catch (e) {
   }
+  var filledImages = [];
+  try {
+    filledImages = JSON.parse(cfg.filledImages || "[]") || [];
+  } catch (e) {
+  }
+  function filledSlotMap() {
+    var out = {};
+    filledImages.forEach(function(name) {
+      out[name] = true;
+    });
+    return out;
+  }
+  function resetFilledSlots() {
+    state.filledSlots = filledSlotMap();
+  }
   var state = {
     pageStatus: cfg.status || "draft",
     visibility: cfg.visibility || "public",
@@ -85,6 +100,8 @@
     titleSaved: null,
     imageValues: {},
     // image region name -> chosen URL
+    filledSlots: filledSlotMap(),
+    // image region name -> true, when it holds a picture
     mceEditors: {},
     // region name -> TinyMCE editor instance
     sectionEditors: [],
@@ -2034,6 +2051,31 @@
     activeVid = null;
     $("vid-ui").classList.remove("on");
   }
+  var activeSlot = null;
+  function showSlotUI(img) {
+    activeSlot = img;
+    var ui = $("slot-ui");
+    var name = img.getAttribute("data-cms-image");
+    $("slot-clear").hidden = !state.filledSlots[name] && !state.imageValues[name];
+    ui.classList.add("on");
+    var r = img.getBoundingClientRect();
+    var top = r.top + 8;
+    if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
+    if (top < 64) top = r.bottom + 6;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
+  }
+  function hideSlotUI() {
+    activeSlot = null;
+    $("slot-ui").classList.remove("on");
+  }
+  function hideChrome(except) {
+    if (except !== "btn") hideButtonUI();
+    if (except !== "snip") hideSnipUI();
+    if (except !== "img") hideImgUI();
+    if (except !== "vid") hideVidUI();
+    if (except !== "slot") hideSlotUI();
+  }
   function imageLink(img) {
     var a = img.parentElement;
     if (!a || a.tagName !== "A" || a.classList.contains("cms-btn")) return null;
@@ -2228,44 +2270,40 @@
       var t = e.target;
       var btn = t.closest ? t.closest("a.cms-btn") : null;
       if (btn && !btn.closest("[data-cms-region],[data-cms-sections]")) btn = null;
+      var slot = null;
+      if (!btn && mediaEnabled && t.closest) slot = t.closest("[data-cms-image]");
       var img = null;
-      if (!btn && t.tagName === "IMG" && !t.closest("[data-cms-image]") && t.closest("[data-cms-region],[data-cms-sections]")) {
+      if (!btn && !slot && t.tagName === "IMG" && !t.closest("[data-cms-image]") && t.closest("[data-cms-region],[data-cms-sections]")) {
         img = t;
       }
       var vid = null;
-      if (!btn && !img) vid = mediaAtPoint(e.clientX, e.clientY);
+      if (!btn && !slot && !img) vid = mediaAtPoint(e.clientX, e.clientY);
       var snip = null;
-      if (!btn && !img && !vid && t.closest) {
+      if (!btn && !slot && !img && !vid && t.closest) {
         snip = t.closest(".cms-snippet");
         if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
       }
       if (btn) {
         e.preventDefault();
         btn.setAttribute("contenteditable", "false");
-        hideSnipUI();
-        hideImgUI();
-        hideVidUI();
+        hideChrome("btn");
         showButtonUI(btn);
+      } else if (slot) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideChrome("slot");
+        showSlotUI(slot);
       } else if (img) {
-        hideButtonUI();
-        hideSnipUI();
-        hideVidUI();
+        hideChrome("img");
         showImgUI(img);
       } else if (vid) {
-        hideButtonUI();
-        hideSnipUI();
-        hideImgUI();
+        hideChrome("vid");
         showVidUI(vid);
       } else if (snip) {
-        hideButtonUI();
-        hideImgUI();
-        hideVidUI();
+        hideChrome("snip");
         showSnipUI(snip);
       } else {
-        hideButtonUI();
-        hideSnipUI();
-        hideImgUI();
-        hideVidUI();
+        hideChrome();
       }
     }, true);
     window.addEventListener("scroll", function() {
@@ -2273,12 +2311,14 @@
       if (activeSnip) showSnipUI(activeSnip);
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
+      if (activeSlot) showSlotUI(activeSlot);
     }, true);
     window.addEventListener("resize", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
+      if (activeSlot) showSlotUI(activeSlot);
     });
     $("btn-set").addEventListener("click", function() {
       if (!activeBtn) return;
@@ -2772,20 +2812,36 @@
       unnestSnippets();
       lockButtons();
     });
-    document.addEventListener("click", function(e) {
-      if (!state.editing || !mediaEnabled) return;
-      var img = e.target.closest ? e.target.closest("[data-cms-image]") : null;
-      if (!img) return;
-      e.preventDefault();
-      e.stopPropagation();
+    $("slot-pick").addEventListener("click", function() {
+      if (!activeSlot) return;
+      var img = activeSlot;
       var name = img.getAttribute("data-cms-image");
+      hideSlotUI();
       openPicker("image", function(item2) {
         img.src = item2.web;
         if (item2.alt) img.alt = item2.alt;
         state.imageValues[name] = item2.web;
+        state.filledSlots[name] = true;
         markDirty(name);
       });
-    }, true);
+    });
+    $("slot-clear").addEventListener("click", function() {
+      if (!activeSlot) return;
+      var img = activeSlot;
+      var name = img.getAttribute("data-cms-image");
+      hideSlotUI();
+      cmsConfirm(
+        "Remove this picture? The slot goes back to the page's own, which you'll see the next time the page loads.",
+        "Remove picture",
+        true
+      ).then(function(yes) {
+        if (!yes) return;
+        img.removeAttribute("src");
+        state.imageValues[name] = "";
+        delete state.filledSlots[name];
+        markDirty(name);
+      });
+    });
     window.addEventListener("beforeunload", function(e) {
       if (hasUnsaved()) {
         e.preventDefault();
@@ -3900,10 +3956,7 @@
         setMsg(err.message);
       });
     } else {
-      hideButtonUI();
-      hideSnipUI();
-      hideImgUI();
-      hideVidUI();
+      hideChrome();
       removeRichEditors();
       reapplySectionClasses();
     }
@@ -4415,6 +4468,10 @@
     $("overlay").addEventListener("click", closePicker);
     document.addEventListener("keydown", function(e) {
       if (e.key !== "Escape") return;
+      if (isDialogOpen() && $("dlg").classList.contains("over")) {
+        dialogDismiss();
+        return;
+      }
       if ($("picker").classList.contains("on")) {
         closePicker();
         return;
@@ -4539,6 +4596,9 @@
       ok.textContent = opts.okLabel || "OK";
       ok.classList.toggle("danger", !!opts.danger);
       $("dlg").classList.toggle("wide", !!opts.wide);
+      var overPanel = $("overlay").classList.contains("on");
+      $("dlg-overlay").classList.toggle("over", overPanel);
+      $("dlg").classList.toggle("over", overPanel);
       $("dlg-overlay").classList.add("on");
       $("dlg").classList.add("on");
       (opts.prompt ? input : ok).focus();
@@ -4741,6 +4801,8 @@
     dlgPreview = null;
     $("dlg-overlay").classList.remove("on");
     $("dlg").classList.remove("on");
+    $("dlg-overlay").classList.remove("over");
+    $("dlg").classList.remove("over");
     var resolve = dlgResolve;
     dlgResolve = null;
     resolve(value);
@@ -4931,9 +4993,7 @@
       });
       $("save").disabled = true;
       if (state.pageStatus === "published") state.hasUnpublished = true;
-      hideButtonUI();
-      hideSnipUI();
-      hideImgUI();
+      hideChrome();
       refreshContentCSS();
       flash("Draft saved");
       updateChip();
@@ -5009,6 +5069,7 @@
         state.dirty = {};
         state.sectionsDirty = {};
         state.imageValues = {};
+        resetFilledSlots();
         state.titleDirty = false;
         $("save").disabled = true;
         setMsg("");
@@ -5135,7 +5196,7 @@ transition:transform .25s ease,opacity .25s ease}
 /* ---- toast: status and confirmation messages, floated above the bar
    so they're visible even when the bar is busy or minimized ---- */
 .toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(8px);
-z-index:2147483001;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
+z-index:2147483007;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
 font-size:13px;line-height:1.4;max-width:min(28em,90vw);text-align:center;
 box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;visibility:hidden;
 transition:transform .2s ease,opacity .2s ease,visibility .2s}
@@ -5210,10 +5271,16 @@ box-shadow:0 4px 12px rgba(0,0,0,.35)}
 .btnui.on{display:flex}
 .btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
 border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
+/* The display above is an author rule, so it outranks the browser's own
+   [hidden]{display:none} and a hidden control would show regardless.
+   Slot chrome hides its trash can this way when there is no chosen
+   picture to remove. */
+.btnui button[hidden]{display:none}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del,#vid-del{color:#fca5a5}
-#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover{background:rgba(252,165,165,.2)}
+#btn-del,#snip-del,#img-del,#vid-del,#slot-clear{color:#fca5a5}
+#btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover,
+#slot-clear:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
@@ -5353,7 +5420,12 @@ text-overflow:ellipsis}
 /* radio rows under the "Links to" heading */
 #mm .fld label.chk{margin:0 0 6px}
 
-/* ---- small dialog (replaces window.confirm / window.prompt) ---- */
+/* ---- small dialog (replaces window.confirm / window.prompt) ----
+   A dialog sits below .overlay/.panel by default, because a dialog can
+   open the media picker for one of its fields and must stay behind it.
+   The reverse also happens \u2014 the picker asks for a new folder name \u2014 so
+   openDialog adds .over when it opens on top of a panel, which lifts the
+   dialog above it for as long as it's up. ---- */
 .dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}
 .dlg-overlay.on{display:block}
 .dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
@@ -5361,6 +5433,8 @@ width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
 box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none;
 max-height:88vh;overflow-y:auto}
 .dlg.on{display:block}
+.dlg-overlay.over{z-index:2147483005}
+.dlg.over{z-index:2147483006}
 /* Settings panels: wider, and two fields to a row so a tab's worth of
    controls is taken in at a glance rather than scrolled through. */
 .dlg.wide{width:min(640px,94vw)}
@@ -5613,7 +5687,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();

@@ -8,7 +8,7 @@ import { $, ICONS } from "./shell.js";
 import { setMsg } from "./util.js";
 import { cmsPrompt } from "./dialogs.js";
 import { loadTinyMCE, initRichEditors, removeRichEditors } from "./richtext.js";
-import { lockButtons, hideButtonUI, hideSnipUI, hideImgUI, hideVidUI } from "./buttons.js";
+import { lockButtons, hideChrome } from "./buttons.js";
 import { closeDrawer } from "./snippets.js";
 import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
@@ -124,10 +124,7 @@ export function setEditing(on) {
             setMsg("");
         }).catch(function (err) { setMsg(err.message); });
     } else {
-        hideButtonUI();
-        hideSnipUI();
-        hideImgUI();
-        hideVidUI();
+        hideChrome();
         removeRichEditors();
         reapplySectionClasses();
     }

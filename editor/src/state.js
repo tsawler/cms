@@ -106,6 +106,30 @@ try {
     pageTemplates = JSON.parse(cfg.pageTemplates || "[]") || [];
 } catch (e) { /* no new-page button */ }
 
+// filledSlots is which image slots ({{cmsImage}}) hold a stored picture,
+// as {region name: true}. The page cannot be read for this — a slot's
+// <img> looks the same whether its src is a chosen picture or the
+// template's own fallback — so the server sends the list, and it is what
+// decides whether an image slot offers to remove anything. Mutable:
+// choosing a picture fills a slot, clearing one empties it.
+var filledImages = [];
+try {
+    filledImages = JSON.parse(cfg.filledImages || "[]") || [];
+} catch (e) { /* nothing offers to be cleared */ }
+
+function filledSlotMap() {
+    var out = {};
+    filledImages.forEach(function (name) { out[name] = true; });
+    return out;
+}
+
+// resetFilledSlots puts the map back to what the server sent, for Cancel
+// — which restores the page's images, and has to restore what the editor
+// believes about them along with it.
+export function resetFilledSlots() {
+    state.filledSlots = filledSlotMap();
+}
+
 export var state = {
     pageStatus: cfg.status || "draft",
     visibility: cfg.visibility || "public",
@@ -120,6 +144,7 @@ export var state = {
     // heading is emptied. Null until edit mode first reads the page.
     titleSaved: null,
     imageValues: {}, // image region name -> chosen URL
+    filledSlots: filledSlotMap(), // image region name -> true, when it holds a picture
     mceEditors: {}, // region name -> TinyMCE editor instance
     sectionEditors: [], // {el, ed, region} per section content container
     lastEditor: null, // most recently focused TinyMCE instance

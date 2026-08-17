@@ -2,12 +2,12 @@
  * Saving and publishing
  * ------------------------------------------------------------------ */
 
-import { state, cfg, pageId } from "./state.js";
+import { state, cfg, pageId, resetFilledSlots } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm, openDialog } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
-import { hideButtonUI, hideSnipUI, hideImgUI } from "./buttons.js";
+import { hideChrome } from "./buttons.js";
 import { saveTitle } from "./title.js";
 
 /* A save may make the server rebuild its generated Tailwind stylesheet
@@ -159,11 +159,9 @@ export function save() {
         $("save").disabled = true;
         if (state.pageStatus === "published") state.hasUnpublished = true;
         // Saving reads as "done with that element" — clear any floating
-        // gear/trash chrome (clicks on the bar deliberately keep it, so
-        // it would otherwise linger).
-        hideButtonUI();
-        hideSnipUI();
-        hideImgUI();
+        // chrome (clicks on the bar deliberately keep it, so it would
+        // otherwise linger).
+        hideChrome();
         refreshContentCSS();
         flash("Draft saved");
         updateChip();
@@ -244,6 +242,7 @@ export function initSaving() {
             state.dirty = {};
             state.sectionsDirty = {};
             state.imageValues = {};
+            resetFilledSlots(); // restoreSnapshot put the pictures back
             state.titleDirty = false;
             $("save").disabled = true;
             setMsg("");

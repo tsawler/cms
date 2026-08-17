@@ -160,6 +160,15 @@ export function initShell() {
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
         '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +
         "</div>" +
+        // Template image slots ({{cmsImage}}), whose chrome is a pencil
+        // rather than a gear: everything a gear would offer — size,
+        // link, caption — belongs to the template here, so the only
+        // choice left is which picture. The trash can shows only for a
+        // slot that actually holds one.
+        '<div class="btnui" id="slot-ui">' +
+        '<button id="slot-pick" title="Choose a picture">' + ICONS.pencil + "</button>" +
+        '<button id="slot-clear" title="Remove this picture">' + ICONS.trash + "</button>" +
+        "</div>" +
         '<div class="btnui" id="vid-ui">' +
         '<button id="vid-set" title="Change this video">' + ICONS.gear + "</button>" +
         '<button id="vid-del" title="Delete video">' + ICONS.trash + "</button>" +

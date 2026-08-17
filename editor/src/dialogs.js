@@ -126,6 +126,12 @@ export function openDialog(opts) {
         // opts.wide gives a settings dialog room to breathe — the
         // default width suits a question, not a panel of controls.
         $("dlg").classList.toggle("wide", !!opts.wide);
+        // A panel (the media picker, say) can ask a question of its own:
+        // the dialog then has to stack above the panel that opened it,
+        // rather than under it as it does when the dialog came first.
+        var overPanel = $("overlay").classList.contains("on");
+        $("dlg-overlay").classList.toggle("over", overPanel);
+        $("dlg").classList.toggle("over", overPanel);
         $("dlg-overlay").classList.add("on");
         $("dlg").classList.add("on");
         (opts.prompt ? input : ok).focus();
@@ -341,6 +347,8 @@ function settleDialog(value) {
     dlgPreview = null;
     $("dlg-overlay").classList.remove("on");
     $("dlg").classList.remove("on");
+    $("dlg-overlay").classList.remove("over");
+    $("dlg").classList.remove("over");
     var resolve = dlgResolve;
     dlgResolve = null;
     resolve(value);
