@@ -10,7 +10,7 @@
 
 import { state, mediaEnabled } from "./state.js";
 import { $, host } from "./shell.js";
-import { cmsConfirm, openDialog } from "./dialogs.js";
+import { cmsConfirm, openDialog, refreshDialog } from "./dialogs.js";
 import { markDirty, markSectionsDirty, hasUnsaved } from "./editing.js";
 import { openPicker } from "./media.js";
 import { unnestSnippets } from "./snippets.js";
@@ -191,14 +191,33 @@ IMG_PREVIEW_FRACTION[IMG_SIZES[1]] = 2 / 3;
 IMG_PREVIEW_FRACTION[IMG_SIZES[2]] = 1 / 2;
 IMG_PREVIEW_FRACTION[IMG_SIZES[3]] = 1 / 3;
 
+// imgPreviewSrc is the address the dialog's preview should draw: a file
+// chosen in the dialog wins over the one on the page, since the preview
+// shows what applying would produce.
+function imgPreviewSrc(img, v) {
+    if (v.file_web || v.file_orig) {
+        return v.orig === "1" ? (v.file_orig || v.file_web) : (v.file_web || v.file_orig);
+    }
+    return v.orig === "1"
+        ? (img.getAttribute("data-cms-orig") || img.getAttribute("src"))
+        : (img.getAttribute("data-cms-web") || img.getAttribute("src"));
+}
+
+// Measured proportions, keyed by address: a file chosen in the dialog
+// has none until the browser has loaded it, so the first draw guesses
+// and the load refreshes the dialog with the real shape.
+var imgRatios = {};
+
 // renderImgPreview draws the dialog's live preview: the image at its
 // chosen width on a white stand-in "page", with roundness, shadow,
 // rendition, and caption applied. Scaled down as needed so a tall
 // image can't blow up the dialog.
 function renderImgPreview(img, v, el) {
     el.innerHTML = "";
-    var ar = img.naturalWidth && img.naturalHeight
-        ? img.naturalWidth / img.naturalHeight : 4 / 3;
+    var src = imgPreviewSrc(img, v);
+    var ar = imgRatios[src] ||
+        (!v.file_web && !v.file_orig && img.naturalWidth && img.naturalHeight
+            ? img.naturalWidth / img.naturalHeight : 4 / 3);
     var pagePad = 16;
     var avail = (el.clientWidth || 320) - 2 * pagePad;
     var f = IMG_PREVIEW_FRACTION[v.size] || 0;
@@ -211,9 +230,14 @@ function renderImgPreview(img, v, el) {
         "display:inline-block;width:" + Math.round(avail * scale + 2 * pagePad) + "px;" +
         "padding:" + pagePad + "px;text-align:center";
     var pimg = document.createElement("img");
-    pimg.src = v.orig === "1"
-        ? (img.getAttribute("data-cms-orig") || img.getAttribute("src"))
-        : (img.getAttribute("data-cms-web") || img.getAttribute("src"));
+    pimg.src = src;
+    pimg.addEventListener("load", function () {
+        if (!pimg.naturalWidth || !pimg.naturalHeight) return;
+        var r = pimg.naturalWidth / pimg.naturalHeight;
+        if (imgRatios[src] === r) return; // already drawn at this shape
+        imgRatios[src] = r;
+        refreshDialog();
+    });
     pimg.style.cssText = "width:" + Math.round(w * scale) + "px;height:auto;" +
         "display:inline-block;vertical-align:top;" +
         "border-radius:" + (IMG_PREVIEW_ROUND[v.round] || "0") + ";" +
@@ -344,6 +368,18 @@ function applyImageSettings(img, v) {
     // Everything below the fold loads lazily; applying settings also
     // upgrades images inserted before this attribute existed.
     img.setAttribute("loading", "lazy");
+
+    // A different file chosen in the dialog. Both renditions are
+    // replaced together, so the rendition switch below still has both
+    // addresses to pick from, and TinyMCE's resize attributes go with
+    // the old file — the new one has its own proportions, and a stale
+    // width/height pair would distort it.
+    if (v.file_web || v.file_orig) {
+        img.setAttribute("data-cms-web", v.file_web || v.file_orig);
+        img.setAttribute("data-cms-orig", v.file_orig || v.file_web);
+        img.removeAttribute("width");
+        img.removeAttribute("height");
+    }
 
     swapClasses(img, IMG_SIZES, v.size);
     swapClasses(img, IMG_ROUND, v.round);
@@ -663,7 +699,17 @@ export function initButtons() {
         var link = imageLink(img);
         var fig = imageFigure(img);
         var fc = fig ? fig.querySelector("figcaption") : null;
-        var fields = [
+        var fields = [];
+        // Swapping the file in place, so the alt text, caption, link and
+        // styling already chosen for this image survive the change. It
+        // leads the Content tab because "wrong picture" is the reason to
+        // open this dialog that can't be fixed anywhere else.
+        if (mediaEnabled) {
+            fields.push({ id: "file", label: "Image file", type: "image", tab: "Content",
+                noClear: true, chooseLabel: "Replace…",
+                value: img.getAttribute("data-cms-web") || img.getAttribute("src") });
+        }
+        fields.push(
             { id: "alt", label: "Alternative text (screen readers, SEO)", type: "text", tab: "Content",
                 placeholder: "Describe the image", value: img.getAttribute("alt") || "" },
             { id: "caption", label: "Caption (optional)", type: "text", tab: "Content",
@@ -697,11 +743,14 @@ export function initButtons() {
                     { value: IMG_SHADOW[0], label: "Subtle" },
                     { value: IMG_SHADOW[1], label: "Strong" },
                 ] },
-        ];
+        );
         // The rendition choice only exists for images that recorded
-        // both URLs at insert time.
+        // both URLs at insert time. It heads the Style tab, so it goes in
+        // ahead of the display width rather than at a counted position —
+        // the fields before it depend on whether media is enabled.
         if (img.getAttribute("data-cms-orig") && img.getAttribute("data-cms-web")) {
-            fields.splice(4, 0, { id: "orig", label: "Use full-quality original", type: "check", tab: "Style",
+            var sizeAt = fields.findIndex(function (f) { return f.id === "size"; });
+            fields.splice(sizeAt, 0, { id: "orig", label: "Use full-quality original", type: "check", tab: "Style",
                 value: img.getAttribute("src") === img.getAttribute("data-cms-orig") });
         }
         openDialog({
@@ -716,7 +765,15 @@ export function initButtons() {
             var run = function () { applyImageSettings(img, v); };
             if (ed) ed.undoManager.transact(run); else run();
             markContainerDirty(img);
-            if (activeImg === img) showImgUI(img); // re-anchor around the new size
+            if (activeImg !== img) return;
+            showImgUI(img); // re-anchor around the new size
+            // A newly chosen file has no size on the page until the
+            // browser has it, so anchor again once it does.
+            if (v.file_web || v.file_orig) {
+                img.addEventListener("load", function () {
+                    if (activeImg === img) showImgUI(img);
+                }, { once: true });
+            }
         });
     });
 
