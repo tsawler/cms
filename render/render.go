@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1318,10 +1319,33 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 
 	out := buf.Bytes()
 	if edit != nil {
-		out = r.injectEditorScript(out, edit)
+		out = r.injectEditorScript(out, edit, filledImageRegions(byRegion))
 	}
 	_, err = w.Write(out)
 	return err
+}
+
+// filledImageRegions names the {{cmsImage}} regions this page has a
+// picture stored in, sorted.
+//
+// The editor cannot work this out for itself. An image slot is the
+// host's own <img> tag, and the src it carries may be a chosen picture
+// or whatever the template falls back to when the slot is empty — the
+// markup looks identical either way. That distinction is the difference
+// between offering to remove a picture and offering to remove nothing,
+// so the answer is sent along with the editor rather than guessed at.
+func filledImageRegions(byRegion map[string][]content.Block) []string {
+	var out []string
+	for name, blocks := range byRegion {
+		for _, b := range blocks {
+			if b.Kind == content.KindImage && b.Content != "" {
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	slices.Sort(out) // map order is random; the attribute should not be
+	return out
 }
 
 // sectionHTML renders one section block: a full-width <section> wrapper
@@ -1419,7 +1443,7 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 
 // injectEditorScript inserts the in-place editor's script tag before the
 // closing </body> tag (or at the end when there isn't one).
-func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
+func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages []string) []byte {
 	mediaFlag := "0"
 	if edit.MediaEnabled {
 		mediaFlag = "1"
@@ -1503,6 +1527,10 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 	if err != nil || edit.Locales == nil {
 		localesJSON = []byte("[]")
 	}
+	filledJSON, err := json.Marshal(filledImages)
+	if err != nil || filledImages == nil {
+		filledJSON = []byte("[]")
+	}
 	tag := `<script src="` + EditorScriptPath() + `" defer` +
 		` data-page-id="` + strconv.FormatInt(edit.PageID, 10) + `"` +
 		` data-slug="` + html.EscapeString(edit.Slug) + `"` +
@@ -1514,6 +1542,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo) []byte {
 		` data-locale="` + html.EscapeString(edit.Locale) + `"` +
 		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +
 		` data-media="` + mediaFlag + `"` +
+		` data-filled-images="` + html.EscapeString(string(filledJSON)) + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
 		` data-can-pages="` + canPagesFlag + `"` +

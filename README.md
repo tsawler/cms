@@ -30,6 +30,12 @@ To make an image editable in place, add `data-cms-image` to the tag:
 <img data-cms-image="hero" src="{{cmsImage "hero"}}" alt="...">
 ```
 
+Clicking one while editing raises a small toolbar on the image: a pencil,
+which opens the media library, and — only once the slot holds a chosen
+picture — a trash can, which puts it back to whatever the template draws
+when the slot is empty. There is no gear, because a slot's size, link and
+alt text belong to the template rather than to the person editing.
+
 ## Starting a new site
 
 `cms init` writes a runnable site — `main.go`, a base layout, page

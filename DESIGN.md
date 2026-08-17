@@ -127,7 +127,11 @@ version of each page with the editor script injected before `</body>`. In
 edit renders, `cmsText`/`cmsRegion` output is wrapped in marker elements
 (`<span/div data-cms-region data-cms-kind>`); images become in-place
 editable when the template adds `data-cms-image="region-name"` to the img
-tag (an attribute can't be wrapped from a template func).
+tag (an attribute can't be wrapped from a template func). Such a slot
+gets floating pencil/trash chrome like every other editable element, and
+the script tag carries `data-filled-images` — which slots hold a stored
+picture — because the markup alone can't distinguish a chosen picture
+from the template's own fallback.
 
 The glue script (vanilla JS, chrome in Shadow DOM) provides two pieces of
 persistent chrome — the **edit bar** (floating bottom pill: status chip,

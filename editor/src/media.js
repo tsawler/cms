@@ -275,7 +275,13 @@ export function initMedia() {
     document.addEventListener("keydown", function (e) {
         if (e.key !== "Escape") return;
         // The picker can sit above an open dialog (background image
-        // choice), so it takes Escape first.
+        // choice), so it takes Escape first — unless the dialog is the
+        // one stacked on top (the picker's own "new folder" prompt),
+        // which openDialog marks with .over.
+        if (isDialogOpen() && $("dlg").classList.contains("over")) {
+            dialogDismiss();
+            return;
+        }
         if ($("picker").classList.contains("on")) {
             closePicker();
             return;
