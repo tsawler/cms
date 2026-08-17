@@ -270,10 +270,16 @@ function buildImageField(wrap, f) {
     txt.className = "cval";
     var choose = document.createElement("button");
     choose.type = "button";
-    choose.textContent = "Choose…";
-    var clear = document.createElement("button");
-    clear.type = "button";
-    clear.textContent = "Clear";
+    choose.textContent = f.chooseLabel || "Choose…";
+    // f.noClear is for a field that stands for something already on the
+    // page — an image placed in content is replaced or deleted, never
+    // emptied, and its own trash can does the deleting.
+    var clear = null;
+    if (!f.noClear) {
+        clear = document.createElement("button");
+        clear.type = "button";
+        clear.textContent = "Clear";
+    }
     // The address is what the preview shows; the library id rides along
     // under "<id>_id" for callers that store the image rather than embed
     // it (the post dialogs), so the site can choose the size each slot
@@ -281,13 +287,20 @@ function buildImageField(wrap, f) {
     // library, which only ever arrives as a stored value.
     dlgValues[f.id] = f.value || "";
     dlgValues[f.id + "_id"] = f.mediaId || 0;
+    // Both renditions of a freshly chosen file, under "<id>_web" and
+    // "<id>_orig", for callers that embed the image and let the reader
+    // switch between them later (the image gear). Empty until something
+    // is chosen, which is how those callers tell "left alone" from
+    // "changed to this".
+    dlgValues[f.id + "_web"] = "";
+    dlgValues[f.id + "_orig"] = "";
     function show() {
         var v = dlgValues[f.id];
         thumb.hidden = !v;
         if (v) thumb.src = v;
         txt.hidden = !!v;
         txt.textContent = "None";
-        clear.hidden = !v;
+        if (clear) clear.hidden = !v;
     }
     choose.addEventListener("click", function () {
         // The media picker opens above the dialog; the dialog stays put
@@ -299,20 +312,26 @@ function buildImageField(wrap, f) {
             // SVGs are unaffected: every rendition of one is the SVG.
             dlgValues[f.id] = (f.prefer === "original" && item.original) || item.web;
             dlgValues[f.id + "_id"] = item.id || 0;
+            dlgValues[f.id + "_web"] = item.web || "";
+            dlgValues[f.id + "_orig"] = item.original || "";
             show();
             dlgChanged();
         });
     });
-    clear.addEventListener("click", function () {
-        dlgValues[f.id] = "";
-        dlgValues[f.id + "_id"] = 0;
-        show();
-        dlgChanged();
-    });
+    if (clear) {
+        clear.addEventListener("click", function () {
+            dlgValues[f.id] = "";
+            dlgValues[f.id + "_id"] = 0;
+            dlgValues[f.id + "_web"] = "";
+            dlgValues[f.id + "_orig"] = "";
+            show();
+            dlgChanged();
+        });
+    }
     row.appendChild(thumb);
     row.appendChild(txt);
     row.appendChild(choose);
-    row.appendChild(clear);
+    if (clear) row.appendChild(clear);
     wrap.appendChild(row);
     show();
 }

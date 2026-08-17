@@ -1952,9 +1952,17 @@
   IMG_PREVIEW_FRACTION[IMG_SIZES[1]] = 2 / 3;
   IMG_PREVIEW_FRACTION[IMG_SIZES[2]] = 1 / 2;
   IMG_PREVIEW_FRACTION[IMG_SIZES[3]] = 1 / 3;
+  function imgPreviewSrc(img, v) {
+    if (v.file_web || v.file_orig) {
+      return v.orig === "1" ? v.file_orig || v.file_web : v.file_web || v.file_orig;
+    }
+    return v.orig === "1" ? img.getAttribute("data-cms-orig") || img.getAttribute("src") : img.getAttribute("data-cms-web") || img.getAttribute("src");
+  }
+  var imgRatios = {};
   function renderImgPreview(img, v, el) {
     el.innerHTML = "";
-    var ar = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 4 / 3;
+    var src = imgPreviewSrc(img, v);
+    var ar = imgRatios[src] || (!v.file_web && !v.file_orig && img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 4 / 3);
     var pagePad = 16;
     var avail = (el.clientWidth || 320) - 2 * pagePad;
     var f = IMG_PREVIEW_FRACTION[v.size] || 0;
@@ -1963,7 +1971,14 @@
     var page = document.createElement("div");
     page.style.cssText = "background:#fff;border:1px solid #e3e6ea;border-radius:4px;display:inline-block;width:" + Math.round(avail * scale + 2 * pagePad) + "px;padding:" + pagePad + "px;text-align:center";
     var pimg = document.createElement("img");
-    pimg.src = v.orig === "1" ? img.getAttribute("data-cms-orig") || img.getAttribute("src") : img.getAttribute("data-cms-web") || img.getAttribute("src");
+    pimg.src = src;
+    pimg.addEventListener("load", function() {
+      if (!pimg.naturalWidth || !pimg.naturalHeight) return;
+      var r = pimg.naturalWidth / pimg.naturalHeight;
+      if (imgRatios[src] === r) return;
+      imgRatios[src] = r;
+      refreshDialog();
+    });
     pimg.style.cssText = "width:" + Math.round(w * scale) + "px;height:auto;display:inline-block;vertical-align:top;border-radius:" + (IMG_PREVIEW_ROUND[v.round] || "0") + ";" + (IMG_PREVIEW_SHADOW[v.shadow] ? "box-shadow:" + IMG_PREVIEW_SHADOW[v.shadow] + ";" : "");
     page.appendChild(pimg);
     var caption = (v.caption || "").trim();
@@ -2059,6 +2074,12 @@
   function applyImageSettings(img, v) {
     img.setAttribute("alt", (v.alt || "").trim());
     img.setAttribute("loading", "lazy");
+    if (v.file_web || v.file_orig) {
+      img.setAttribute("data-cms-web", v.file_web || v.file_orig);
+      img.setAttribute("data-cms-orig", v.file_orig || v.file_web);
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+    }
     swapClasses(img, IMG_SIZES, v.size);
     swapClasses(img, IMG_ROUND, v.round);
     swapClasses(img, IMG_SHADOW_ALL, v.shadow);
@@ -2372,7 +2393,19 @@
       var link = imageLink(img);
       var fig = imageFigure(img);
       var fc = fig ? fig.querySelector("figcaption") : null;
-      var fields = [
+      var fields = [];
+      if (mediaEnabled) {
+        fields.push({
+          id: "file",
+          label: "Image file",
+          type: "image",
+          tab: "Content",
+          noClear: true,
+          chooseLabel: "Replace\u2026",
+          value: img.getAttribute("data-cms-web") || img.getAttribute("src")
+        });
+      }
+      fields.push(
         {
           id: "alt",
           label: "Alternative text (screen readers, SEO)",
@@ -2443,9 +2476,12 @@
             { value: IMG_SHADOW[1], label: "Strong" }
           ]
         }
-      ];
+      );
       if (img.getAttribute("data-cms-orig") && img.getAttribute("data-cms-web")) {
-        fields.splice(4, 0, {
+        var sizeAt = fields.findIndex(function(f) {
+          return f.id === "size";
+        });
+        fields.splice(sizeAt, 0, {
           id: "orig",
           label: "Use full-quality original",
           type: "check",
@@ -2470,7 +2506,13 @@
         if (ed) ed.undoManager.transact(run);
         else run();
         markContainerDirty(img);
-        if (activeImg === img) showImgUI(img);
+        if (activeImg !== img) return;
+        showImgUI(img);
+        if (v.file_web || v.file_orig) {
+          img.addEventListener("load", function() {
+            if (activeImg === img) showImgUI(img);
+          }, { once: true });
+        }
       });
     });
     $("img-del").addEventListener("click", function() {
@@ -4648,38 +4690,49 @@
     txt.className = "cval";
     var choose = document.createElement("button");
     choose.type = "button";
-    choose.textContent = "Choose\u2026";
-    var clear = document.createElement("button");
-    clear.type = "button";
-    clear.textContent = "Clear";
+    choose.textContent = f.chooseLabel || "Choose\u2026";
+    var clear = null;
+    if (!f.noClear) {
+      clear = document.createElement("button");
+      clear.type = "button";
+      clear.textContent = "Clear";
+    }
     dlgValues[f.id] = f.value || "";
     dlgValues[f.id + "_id"] = f.mediaId || 0;
+    dlgValues[f.id + "_web"] = "";
+    dlgValues[f.id + "_orig"] = "";
     function show() {
       var v = dlgValues[f.id];
       thumb.hidden = !v;
       if (v) thumb.src = v;
       txt.hidden = !!v;
       txt.textContent = "None";
-      clear.hidden = !v;
+      if (clear) clear.hidden = !v;
     }
     choose.addEventListener("click", function() {
       openPicker("image", function(item2) {
         dlgValues[f.id] = f.prefer === "original" && item2.original || item2.web;
         dlgValues[f.id + "_id"] = item2.id || 0;
+        dlgValues[f.id + "_web"] = item2.web || "";
+        dlgValues[f.id + "_orig"] = item2.original || "";
         show();
         dlgChanged();
       });
     });
-    clear.addEventListener("click", function() {
-      dlgValues[f.id] = "";
-      dlgValues[f.id + "_id"] = 0;
-      show();
-      dlgChanged();
-    });
+    if (clear) {
+      clear.addEventListener("click", function() {
+        dlgValues[f.id] = "";
+        dlgValues[f.id + "_id"] = 0;
+        dlgValues[f.id + "_web"] = "";
+        dlgValues[f.id + "_orig"] = "";
+        show();
+        dlgChanged();
+      });
+    }
     row.appendChild(thumb);
     row.appendChild(txt);
     row.appendChild(choose);
-    row.appendChild(clear);
+    if (clear) row.appendChild(clear);
     wrap.appendChild(row);
     show();
   }
