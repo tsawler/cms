@@ -1017,6 +1017,11 @@ type mediaJSON struct {
 	Height   int    `json:"height"`
 	Thumb    string `json:"thumb"`
 	Web      string `json:"web"`
+	// Card is the middle rung of the image ladder, for a slot that knows
+	// it is smaller than a full-width one — a listing card, a tile in a
+	// grid — and says so with data-cms-rendition. Images only, so it is
+	// omitted rather than sent empty for files and videos.
+	Card     string `json:"card,omitempty"`
 	Original string `json:"original"`
 	Poster   string `json:"poster,omitempty"` // videos: full-size poster frame, if any
 }
@@ -1032,6 +1037,7 @@ func toMediaJSON(v media.View) mediaJSON {
 		Height:   v.Height,
 		Thumb:    v.ThumbURL,
 		Web:      v.WebURL,
+		Card:     v.CardURL,
 		Original: v.OriginalURL,
 		Poster:   v.PosterURL,
 	}
