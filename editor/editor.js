@@ -2052,6 +2052,10 @@
     $("vid-ui").classList.remove("on");
   }
   var activeSlot = null;
+  function slotRendition(img, item2) {
+    var rung = img.getAttribute("data-cms-rendition");
+    return rung && item2[rung] || item2.web;
+  }
   function showSlotUI(img) {
     activeSlot = img;
     var ui = $("slot-ui");
@@ -2818,9 +2822,10 @@
       var name = img.getAttribute("data-cms-image");
       hideSlotUI();
       openPicker("image", function(item2) {
-        img.src = item2.web;
+        var url = slotRendition(img, item2);
+        img.src = url;
         if (item2.alt) img.alt = item2.alt;
-        state.imageValues[name] = item2.web;
+        state.imageValues[name] = url;
         state.filledSlots[name] = true;
         markDirty(name);
       });

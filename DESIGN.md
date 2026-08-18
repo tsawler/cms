@@ -131,7 +131,10 @@ tag (an attribute can't be wrapped from a template func). Such a slot
 gets floating pencil/trash chrome like every other editable element, and
 the script tag carries `data-filled-images` — which slots hold a stored
 picture — because the markup alone can't distinguish a chosen picture
-from the template's own fallback.
+from the template's own fallback. An optional `data-cms-rendition` names
+the rung of the ladder a pick is stored at, defaulting to `web`: only the
+template knows how wide the slot is on the page, so only the template can
+say that a full-width image is more bytes than it will ever show.
 
 The glue script (vanilla JS, chrome in Shadow DOM) provides two pieces of
 persistent chrome — the **edit bar** (floating bottom pill: status chip,

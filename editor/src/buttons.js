@@ -325,6 +325,31 @@ export function hideVidUI() {
  * dialog second, is what every other element here does. */
 var activeSlot = null;
 
+/* slotRendition is which size of the chosen picture a slot gets.
+ *
+ * The default is "web", the full-width rung, because a slot is most often
+ * the banner across the top of a page and that is the size it wants. A
+ * template whose slot is smaller than that — a card, a tile three across
+ * a grid — says so on the element:
+ *
+ *     <img data-cms-image="lot-image-atvs" data-cms-rendition="card">
+ *
+ * and the picker stores that rung's URL instead, so the page holds the
+ * size it will actually display rather than one the browser has to
+ * shrink. The value is a rung of the ladder ("web", "card", "thumb"); an
+ * unknown name, or one the item has no URL for — a vector, a document, a
+ * video, none of which have a card — falls back to "web", which every
+ * item has.
+ *
+ * It is read at pick time rather than stored anywhere: the attribute
+ * belongs to the template, so a template that changes its mind about the
+ * size applies to the next picture chosen, and the ones already there
+ * keep working. */
+function slotRendition(img, item) {
+    var rung = img.getAttribute("data-cms-rendition");
+    return (rung && item[rung]) || item.web;
+}
+
 function showSlotUI(img) {
     activeSlot = img;
     var ui = $("slot-ui");
@@ -1092,9 +1117,10 @@ export function initButtons() {
         var name = img.getAttribute("data-cms-image");
         hideSlotUI(); // the chrome floats above the picker's overlay
         openPicker("image", function (item) {
-            img.src = item.web;
+            var url = slotRendition(img, item);
+            img.src = url;
             if (item.alt) img.alt = item.alt;
-            state.imageValues[name] = item.web;
+            state.imageValues[name] = url;
             state.filledSlots[name] = true;
             markDirty(name);
         });

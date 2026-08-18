@@ -36,6 +36,21 @@ picture — a trash can, which puts it back to whatever the template draws
 when the slot is empty. There is no gear, because a slot's size, link and
 alt text belong to the template rather than to the person editing.
 
+A chosen picture arrives at the full-width rendition, which is what a
+banner across the page wants. A slot smaller than that — a card, a tile
+three across a grid — asks for a smaller rung by name:
+
+```html
+<img data-cms-image="tile-atvs" data-cms-rendition="card"
+     src="{{cmsImage "tile-atvs"}}" alt="...">
+```
+
+so the page stores and serves the size it actually displays rather than
+one the browser has to shrink. The value is a rung of the rendition
+ladder — `web` (the default, bounded at 1600px), `card` (800px) or
+`thumb` — and anything the chosen item has no such rendition for, a
+vector included, falls back to `web`.
+
 ## Starting a new site
 
 `cms init` writes a runnable site — `main.go`, a base layout, page
