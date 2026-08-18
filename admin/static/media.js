@@ -73,6 +73,17 @@ function captureFrame(src, crossOrigin) {
     var active = 0;
     var succeeded = 0;
 
+    // KIND_TABS maps the kind the server reports to the tab that lists
+    // it, mirroring kindForTab on the server.
+    var KIND_TABS = { image: "images", video: "videos", file: "documents" };
+
+    // Where the finished files landed. The listing is partitioned by kind
+    // — one tab each — so a batch is often something the tab in front of
+    // the user does not list; closing reads these to pick a view that
+    // actually shows what was just sent. See destination().
+    var uploadedTabs = {};
+    var anyUnfiled = false;
+
     // t looks up a translated string the template put on the dialog, and
     // fills {placeholders} from vars.
     function t(name, vars) {
@@ -248,7 +259,13 @@ function captureFrame(src, crossOrigin) {
                 setProgress(job, 1);
                 setState(job, t("done"), "ok");
                 job.cancelBtn.remove();
-                if (body.filed === false) note(job, t("unfiled"), false);
+                if (body.media && KIND_TABS[body.media.kind]) {
+                    uploadedTabs[KIND_TABS[body.media.kind]] = true;
+                }
+                if (body.filed === false) {
+                    anyUnfiled = true;
+                    note(job, t("unfiled"), false);
+                }
             } else {
                 fail(job, (body && body.error) || t("failed"));
             }
@@ -294,6 +311,31 @@ function captureFrame(src, crossOrigin) {
         }
     }
 
+    // currentTab is the tab being browsed, mirroring the server's
+    // mediaTab: anything unknown or absent is the images tab.
+    function currentTab() {
+        var m = /[?&]tab=([^&]*)/.exec(window.location.search);
+        var tab = m ? decodeURIComponent(m[1]) : "";
+        return tab === "documents" || tab === "videos" ? tab : "images";
+    }
+
+    // destination is the tab to land on once the dialog closes, or "" to
+    // stay put and reload. A batch of one kind that this tab does not
+    // list would otherwise appear to have vanished: the reload would come
+    // back to the same tab, which lists only its own kind. A mixed batch
+    // has no single right answer, so it reloads and at least shows the
+    // part that belongs here.
+    //
+    // Uploads that switch tabs are always unfiled — the destination menu
+    // only offers this tab's folders, and the server unfiles anything
+    // aimed at a folder of the wrong kind — so the plain tab view shows
+    // them, and dropping the current folder and search is deliberate.
+    function destination() {
+        var tabs = Object.keys(uploadedTabs);
+        if (tabs.length !== 1 || tabs[0] === currentTab()) return "";
+        return window.location.pathname + "?tab=" + tabs[0];
+    }
+
     function finish() {
         stopBtn.hidden = true;
         moreBtn.hidden = false;
@@ -301,9 +343,11 @@ function captureFrame(src, crossOrigin) {
 
         // Every file landed: nothing in the queue needs reading, so close
         // — the close handler reloads the listing. A failure or a cancel
-        // keeps the dialog open so its rows and notes can be seen.
+        // keeps the dialog open so its rows and notes can be seen, and so
+        // does a file that missed its folder: closing on the same tick
+        // that writes that note would flash it past unread.
         var allDone = jobs.length > 0 && jobs.every(function (j) { return j.state === "done"; });
-        if (allDone) {
+        if (allDone && !anyUnfiled) {
             uploader.close();
             return;
         }
@@ -335,16 +379,20 @@ function captureFrame(src, crossOrigin) {
     });
 
     // Uploads change what the listing should show, so a dialog that
-    // uploaded anything closes by reloading rather than leaving a stale
-    // page behind. Closing mid-transfer stops what is left first: the
-    // reload would kill those requests anyway, and a row that reported
-    // progress and then silently vanished is worse than one marked
-    // canceled.
+    // uploaded anything closes by navigating rather than leaving a stale
+    // page behind — to the tab that lists what was sent when that is not
+    // the tab already on screen, otherwise a reload in place. Closing
+    // mid-transfer stops what is left first: the navigation would kill
+    // those requests anyway, and a row that reported progress and then
+    // silently vanished is worse than one marked canceled.
     uploader.addEventListener("close", function () {
         jobs.forEach(function (job) {
             if (job.state === "queued" || job.state === "uploading") cancel(job);
         });
-        if (succeeded > 0) window.location.reload();
+        if (succeeded === 0) return;
+        var dest = destination();
+        if (dest) window.location.href = dest;
+        else window.location.reload();
     });
 
     // ---------------------------------------------------------------
