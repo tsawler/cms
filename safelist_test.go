@@ -58,7 +58,11 @@ func TestDocsListDefaultClasses(t *testing.T) {
 		add(st.Class)
 	}
 	styles := render.DefaultSectionStyles()
-	for _, o := range append(append(styles.Backgrounds, styles.Widths...), styles.Corners...) {
+	// Every curated axis, Paddings included — the spacing classes are as
+	// invisible to a content scan as the widths are.
+	sectionOptions := append(append(styles.Backgrounds, styles.Widths...), styles.Corners...)
+	sectionOptions = append(sectionOptions, styles.Paddings...)
+	for _, o := range sectionOptions {
 		add(o.Class)
 		add(o.ContentClass)
 	}

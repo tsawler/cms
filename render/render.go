@@ -751,6 +751,13 @@ func (ss *SectionStyles) Padding(key string) SectionOption { return pickOption(s
 
 // DefaultSectionStyles is the Tailwind-first default set of section
 // settings. The classes need safelisting like editor styles do.
+//
+// Vertical spacing is an axis of its own rather than part of each width
+// preset, because bundled the two make "the same measure, but tighter"
+// inexpressible except as a second width option — and the option list
+// then multiplies by every spacing anyone wants. A host replacing these
+// wholesale can leave Paddings nil and keep its py-* inside the width
+// classes; the axis simply does not appear.
 func DefaultSectionStyles() *SectionStyles {
 	return &SectionStyles{
 		Backgrounds: []SectionOption{
@@ -760,9 +767,20 @@ func DefaultSectionStyles() *SectionStyles {
 			{Key: "accent", Label: "Accent", Class: "bg-blue-700", ContentClass: "prose-invert"},
 		},
 		Widths: []SectionOption{
-			{Key: "normal", Label: "Normal", Class: "prose prose-slate mx-auto max-w-3xl px-6 py-12"},
-			{Key: "wide", Label: "Wide", Class: "prose prose-slate mx-auto max-w-5xl px-6 py-12"},
-			{Key: "full", Label: "Full width", Class: "prose prose-slate max-w-none px-6 py-12"},
+			{Key: "normal", Label: "Normal", Class: "prose prose-slate mx-auto max-w-3xl px-6"},
+			{Key: "wide", Label: "Wide", Class: "prose prose-slate mx-auto max-w-5xl px-6"},
+			{Key: "full", Label: "Full width", Class: "prose prose-slate max-w-none px-6"},
+		},
+		// The vertical spacing these widths used to carry, as its own
+		// axis. The first entry is the default and is what content saved
+		// before the axis existed resolves to, so it has to be the py-12
+		// the widths held: nothing already published moves.
+		Paddings: []SectionOption{
+			{Key: "normal", Label: "Normal", Class: "py-12"},
+			{Key: "roomy", Label: "Roomy", Class: "py-20"},
+			{Key: "snug", Label: "Snug", Class: "py-6"},
+			{Key: "tight", Label: "Tight", Class: "py-3"},
+			{Key: "none", Label: "None", Class: "py-0"},
 		},
 		Corners: []SectionOption{
 			{Key: "none", Label: "None (square)", Class: ""},

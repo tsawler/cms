@@ -533,6 +533,13 @@ func New(cfg Config) (*CMS, error) {
 		// the default choices; an empty non-nil slice opts out.
 		cfg.SectionStyles.Corners = render.DefaultSectionStyles().Corners
 	}
+	// Paddings is deliberately NOT backfilled the way Corners is. Corner
+	// rounding sets a property nothing else claims, so handing it to a
+	// host that never asked is free. Vertical spacing is the opposite:
+	// the arrangement that predates the axis is a py-* inside each width
+	// preset, and appending a default py-12 to those would fight the
+	// spacing the host already chose. A host with its own SectionStyles
+	// opts in by declaring Paddings and taking the py-* out of Widths.
 	// Host template funcs: reject reserved names here rather than at the
 	// first render, and refuse RequestFuncs on its own — templates parse
 	// against TemplateFuncs, so a name declared only per request is one

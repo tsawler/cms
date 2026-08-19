@@ -779,7 +779,9 @@ entirely. The first option is the default and should normally be a
 no-class "none".
 
 `Paddings` is the vertical breathing room around a section's content, as
-its own axis:
+its own axis. It is configured by default — Normal / Roomy / Snug /
+Tight / None → `py-12` / `py-20` / `py-6` / `py-3` / `py-0` — and the
+default `Widths` carry no `py-*` of their own, so the two compose:
 
 ```go
 Paddings: []cms.SectionOption{
@@ -789,10 +791,7 @@ Paddings: []cms.SectionOption{
 },
 ```
 
-It is optional and nil by default, which renders exactly as it did
-before the setting existed — so keeping your `py-*` inside the `Widths`
-presets goes on working. Configure it and the spacing becomes
-independently choosable, which is worth doing for two reasons:
+Separating it from `Widths` is worth it for two reasons:
 
 - Bundled into `Widths`, "the same measure but tighter" has no
   expression except a second width option, and the list multiplies by
@@ -804,9 +803,15 @@ independently choosable, which is worth doing for two reasons:
 
 The class is emitted after the width class, so moving a `py-*` out of a
 width preset and into `Paddings` needs no thought about ordering. The
-first option is the default and is what content saved before you added
-the axis resolves to — make it match whatever padding your width presets
+first option is the default and is what content saved before the axis
+existed resolves to — make it match whatever padding your width presets
 used to carry and nothing already published will move.
+
+Replacing `SectionStyles` wholesale replaces this too: a host that keeps
+its `py-*` inside the width presets simply leaves `Paddings` nil and the
+axis does not appear. It is not backfilled the way `Corners` is, because
+a default `py-12` appended to width classes that already carry their own
+spacing would fight it.
 
 Safelist the default section classes along with the rest:
 
@@ -814,7 +819,8 @@ Safelist the default section classes along with the rest:
 safelist: [
     "bg-slate-50", "bg-slate-900", "bg-blue-700", "prose", "prose-slate",
     "prose-invert", "mx-auto", "max-w-3xl", "max-w-5xl", "max-w-none",
-    "px-6", "py-12", "rounded-lg", "rounded-2xl", "rounded-3xl",
+    "px-6", "py-12", "py-20", "py-6", "py-3", "py-0",
+    "rounded-lg", "rounded-2xl", "rounded-3xl",
 ],
 ```
 
