@@ -1141,6 +1141,18 @@ clear the name for a logo-only brand; the fallback argument shows until
 either is set. Saves are live immediately — like menus, there is no
 draft state.
 
+Where markup does not fit — the `<title>`, an `og:site_name` meta tag, a
+copyright line — `{{cmsSiteName "Fallback Name"}}` gives the same stored
+name as plain text, escaped for wherever it lands:
+
+```html
+<title>{{.Title}} — {{cmsSiteName "Example Site"}}</title>
+```
+
+Sites scaffolded before this function existed have the name written
+into `base.gohtml` as a literal; swap it for the call above and the
+title follows the dialog from then on.
+
 The favicon is picked from the media library — PNG, JPEG, GIF, WebP, or
 SVG, whichever you uploaded, unmodified rather than re-encoded — and
 `{{cmsHead}}` emits it as `<link rel="icon">` on every page. It is the

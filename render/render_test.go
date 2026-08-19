@@ -1228,3 +1228,48 @@ func TestRenderEmitsSiteFavicon(t *testing.T) {
 		t.Errorf("unset favicon should emit no link:\n%s", buf.String())
 	}
 }
+
+// TestRenderSiteName covers {{cmsSiteName}}: the stored name when there
+// is one, the template's fallback until then, and html/template escaping
+// wherever the text lands — the <title> being the place it is for.
+func TestRenderSiteName(t *testing.T) {
+	fsys := fstest.MapFS{
+		"base.gohtml": &fstest.MapFile{Data: []byte(
+			`{{define "base"}}<html><head><title>{{.Title}} — {{cmsSiteName "Fallback & Co"}}</title>{{cmsHead}}</head>` +
+				`<body><p data-name="{{cmsSiteName}}">{{cmsSiteName}}</p>{{cmsScripts}}</body></html>{{end}}`)},
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(`{{template "base" .}}`)},
+	}
+	r, err := New(fsys, []string{"base.gohtml"}, []PageTemplate{{File: "pages/home.gohtml", Label: "Home"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+
+	render := func(site content.SiteSettings) string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := r.Render(&buf, Input{Page: page, Locale: "en", Site: site}); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		return buf.String()
+	}
+
+	// Nothing saved yet: the fallback shows in <title>, and a call with
+	// no fallback renders nothing rather than a placeholder.
+	out := render(content.SiteSettings{})
+	if want := `<title>Home — Fallback &amp; Co</title>`; !strings.Contains(out, want) {
+		t.Errorf("unsaved name: want %q in:\n%s", want, out)
+	}
+	if want := `<p data-name="">` + `</p>`; !strings.Contains(out, want) {
+		t.Errorf("unsaved name without fallback should be empty, got:\n%s", out)
+	}
+
+	// A saved name wins over the fallback and is escaped for each context.
+	out = render(content.SiteSettings{SiteName: `Acme "Tools" <b>`})
+	if want := `<title>Home — Acme &#34;Tools&#34; &lt;b&gt;</title>`; !strings.Contains(out, want) {
+		t.Errorf("saved name in title: want %q in:\n%s", want, out)
+	}
+	if want := `<p data-name="Acme &#34;Tools&#34; &lt;b&gt;">Acme &#34;Tools&#34; &lt;b&gt;</p>`; !strings.Contains(out, want) {
+		t.Errorf("saved name in body: want %q in:\n%s", want, out)
+	}
+}

@@ -3,7 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{.Title}} — [[.SiteNameHTML]]</title>
+    {{/* cmsSiteName is the site name from the site-settings dialog, as
+         plain text; the argument shows until one has been saved. */}}
+    <title>{{.Title}} — {{cmsSiteName [[.SiteNameArg]]}}</title>
 [[if .Tailwind]]    {{/* Webfonts load here, before the stylesheet that uses them. Name
          the typeface in assets/theme.css to match. Example:
 
