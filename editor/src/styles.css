@@ -207,6 +207,10 @@ cursor:grab;background:#fff}
 /* Section presets: inline-insert mode hides them; add-a-section mode
    lists them first, clickable rather than draggable. */
 .snip.preset{cursor:pointer}
+/* The custom-code card has no thumbnail: it stands for a library
+   entry chosen on click, not for markup of its own. */
+.snip.code{cursor:pointer}
+.snip.code .sdesc{margin-top:2px}
 /* Adding a section: every card is a click target, so none of them
    should invite the drag that cannot create one. */
 .dlist.sections-mode .snip{cursor:pointer}

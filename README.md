@@ -604,6 +604,51 @@ safelist: [
 Deleting a snippet never changes pages that already inserted it — inserted
 snippets are ordinary page content.
 
+## Custom code blocks
+
+Some blocks are not content: an availability calendar, a pricing
+calculator, a third-party embed that needs a line of setup. These are
+**custom code blocks** — markup with its own `<script>` — and they are
+admin-only.
+
+They are not stored in the page. What a page holds is an inert
+placeholder naming a library entry:
+
+```html
+<div class="cms-snippet cms-code" data-cms-code="booking-widget"></div>
+```
+
+The code itself lives in a library behind the admin-only `/api/code`
+endpoints, and a public render swaps each placeholder for the markup its
+key names, keeping the placeholder's own `<div>` as the wrapper. A block
+finds itself with `document.currentScript.closest(".cms-code")`, so the
+same block used twice on one page still scopes to its own markup.
+
+The split is what makes the feature safe and durable at once. Region and
+section HTML is sanitized on every non-admin save: executable markup left
+inline would either be stripped — silently deleting the widget the first
+time an editor fixed a typo in the same section — or have to be
+safelisted, which would hand every editor a script-injection hole. A
+placeholder carries nothing executable, so it rides through the sanitizer
+untouched.
+
+To use one, an admin opens the **Snippets** drawer and clicks **Custom
+code**, then picks a library entry or creates one. On the page the block
+shows as a labelled card while editing; click it and press the `⟨/⟩`
+button in the block chrome to edit its code, which saves immediately and
+applies everywhere the key is used. The usual chrome moves and deletes
+the block like any other. Nothing executes while the page is being
+edited — an edit render leaves the placeholders alone — so the code runs
+on the public page and in the admin's preview, and nowhere else.
+
+Two things worth knowing:
+
+- Deleting a library entry leaves placeholders that name it rendering as
+  nothing; recreating the key brings them back.
+- For code that belongs to a *page* rather than to a spot in it, the
+  wrench menu's **Page CSS & JS** and **Site CSS & JS** panels are still
+  the right tool — they inject into `<head>` and before `</body>`.
+
 ## Sections
 
 Snippets live *inside* a region's column; **sections** let editors compose
@@ -1455,8 +1500,8 @@ Accounts have one of three **roles**, which encode trust:
 
 - **editor** — works on content, gated by per-user permissions (below).
 - **admin** — everything: all permissions implicitly, plus site-wide and
-  per-page CSS/JS (written into pages unsanitized) and user management
-  without restriction.
+  per-page CSS/JS (written into pages unsanitized), the custom-code block
+  library, and user management without restriction.
 - **superadmin** — admin plus snippet management (snippets are raw HTML
   injected into every editor), unlisted page templates in the new-page
   dialog, the development/production switch (whether the site may be

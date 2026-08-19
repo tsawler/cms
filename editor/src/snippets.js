@@ -3,13 +3,14 @@
  * buttons that open it, and the "new page" dialog on the rail.
  * ------------------------------------------------------------------ */
 
-import { state, pageTemplates, postsEnabled, mediaEnabled, canPages, canBlogs, canNews } from "./state.js";
+import { state, pageTemplates, postsEnabled, mediaEnabled, canPages, canBlogs, canNews, isAdmin } from "./state.js";
 import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { openDialog } from "./dialogs.js";
 import { markDirty, markSectionsDirty } from "./editing.js";
 import { lockButtons } from "./buttons.js";
 import { createSection, presetSectionHTML } from "./sections.js";
+import { chooseCodeBlock } from "./code.js";
 
 var snippetsLoaded = false;
 
@@ -212,6 +213,35 @@ export function updateRail() {
     $("rail-snips").classList.toggle("on", open && !state.pendingSection);
 }
 
+// codeCard is the drawer's entry for a custom-code block. Clicking it
+// asks which library entry to place, then inserts that entry's
+// placeholder the same way any other snippet's markup is inserted.
+function codeCard() {
+    var card = document.createElement("div");
+    card.className = "snip code";
+    var nm = document.createElement("p");
+    nm.className = "sname";
+    nm.textContent = "Custom code";
+    var tag = document.createElement("span");
+    tag.className = "stag";
+    tag.textContent = "Admin";
+    nm.appendChild(tag);
+    var desc = document.createElement("p");
+    desc.className = "sdesc";
+    desc.textContent = "Markup with its own JavaScript, kept in the code library.";
+    card.appendChild(nm);
+    card.appendChild(desc);
+    // The drawer stays open behind the chooser: closing it here would
+    // clear a pending "Add a section", and chooseSnippet closes it
+    // anyway once something is actually placed.
+    card.addEventListener("click", function () {
+        chooseCodeBlock(function (html) {
+            chooseSnippet({ name: "Custom code", html: html });
+        });
+    });
+    return card;
+}
+
 function loadSnippets() {
     var list = $("snip-list");
     list.innerHTML = '<span class="empty">Loading…</span>';
@@ -223,6 +253,11 @@ function loadSnippets() {
                 { className: "empty", textContent: "No snippets available." }));
             return;
         }
+        // Custom code is admin-only and has no markup of its own to
+        // preview: it is a reference to a library entry, chosen when the
+        // card is clicked. It leads the list rather than being filed
+        // under a category, because it is a different kind of thing.
+        if (isAdmin) list.appendChild(codeCard());
         body.snippets.forEach(function (sn) {
             var card = document.createElement("div");
             card.className = sn.settings ? "snip preset" : "snip";

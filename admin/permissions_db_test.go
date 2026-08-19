@@ -61,6 +61,7 @@ func permTestServer(t *testing.T, db *sqldb.DB) (*httptest.Server, *auth.Store, 
 		Content:       content.NewStore(db, "en"),
 		Renderer:      r,
 		Snippets:      snippets.NewStore(db),
+		CodeSnippets:  snippets.NewCodeStore(db),
 		PostTemplate:  postTemplate,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AdminPath:     "/admin",
@@ -215,6 +216,22 @@ func TestRouteAccessByPermission(t *testing.T) {
 			{"admin@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"oneoff.gohtml"}`, 400},
 			{"pages@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"post.gohtml"}`, 400},
 			{"super@example.com", "POST", "/admin/api/pages", `{"title":"T","template":"oneoff.gohtml"}`, 200},
+
+			// The custom-code library is admin-only, like per-page
+			// CSS/JS: a page's placeholder only names an entry, and
+			// these routes are the door to what the entry runs.
+			{"admin@example.com", "POST", "/admin/api/code", `{"name":"Widget"}`, 200},
+			{"admin@example.com", "GET", "/admin/api/code", "", 200},
+			{"admin@example.com", "GET", "/admin/api/code/widget", "", 200},
+			{"admin@example.com", "PUT", "/admin/api/code/widget", `{"name":"Widget","html":"<p>x</p>"}`, 200},
+			{"pages@example.com", "GET", "/admin/api/code", "", 403},
+			{"pages@example.com", "GET", "/admin/api/code/widget", "", 403},
+			{"pages@example.com", "PUT", "/admin/api/code/widget", `{"name":"Mine","html":"<script>x()</script>"}`, 403},
+			{"pages@example.com", "POST", "/admin/api/code", `{"name":"Sneaky"}`, 403},
+			{"pages@example.com", "DELETE", "/admin/api/code/widget", "", 403},
+			{"none@example.com", "GET", "/admin/api/code", "", 403},
+			{"admin@example.com", "DELETE", "/admin/api/code/widget", "", 200},
+			{"admin@example.com", "GET", "/admin/api/code/widget", "", 404},
 
 			// Snippets are superadmin's; users follows its permission.
 			{"super@example.com", "GET", "/admin/snippets", "", 200},

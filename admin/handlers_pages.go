@@ -15,6 +15,7 @@ import (
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
+	"github.com/tsawler/cms/snippets"
 )
 
 // editorHTMLPolicy sanitizes region HTML saved by non-admin users.
@@ -96,6 +97,12 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("loading").Matching(regexp.MustCompile(`^(?:lazy|eager)$`)).OnElements("iframe")
 	p.AllowAttrs("allow").Matching(regexp.MustCompile(`^[a-z-;* ]*$`)).OnElements("iframe")
 	p.AllowAttrs("allowfullscreen").Matching(regexp.MustCompile(`^(?:|allowfullscreen)$`)).OnElements("iframe")
+	// Custom-code blocks: the placeholder names a library entry and
+	// carries nothing executable itself, so it survives an editor's save
+	// like any other markup — which is the point of storing the code out
+	// of line. A key that no longer exists renders as the empty div it
+	// is. The key vocabulary is the library's own, not a second copy.
+	p.AllowAttrs("data-cms-code").Matching(snippets.CodeKeyPattern()).OnElements("div")
 	// The "Flexible space" snippet stores its height on the element.
 	p.AllowStyles("height").Matching(pixelHeightRe).Globally()
 	p.AllowAttrs("data-height").Matching(pixelHeightRe).OnElements("div")
@@ -624,6 +631,9 @@ func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
 		Locales: s.deps.Locales,
 		Site:    site,
 		Funcs:   s.hostFuncs(r),
+		// A preview is a public render with draft content, custom-code
+		// blocks included: seeing the widget is most of why it exists.
+		CodeSnippets: s.codeLookup(r),
 	}); err != nil {
 		s.serverError(w, err)
 	}

@@ -1073,6 +1073,12 @@ type Input struct {
 	// build the optional "Log in" nav link (Site.LoginInNav). Empty
 	// disables the link even when the setting is on.
 	AdminPath string
+	// CodeSnippets resolves the custom-code blocks a page references —
+	// the admin-written markup-and-JavaScript kept out of page content
+	// so the HTML sanitizer never has to carry it. Nil, or an edit
+	// render, leaves the placeholders alone: nothing executes in the
+	// editor, and what the editor saves back is what it was given.
+	CodeSnippets CodeLookup
 	// Funcs replaces the host template functions declared at construction
 	// (NewWithFuncs) for this render, entry by entry: a name it does not
 	// carry keeps the declared implementation. This is how a host binds
@@ -1107,6 +1113,17 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		return fmt.Errorf("render: cloning template set: %w", err)
 	}
 
+	// Custom-code blocks materialize here, before anything reads the
+	// content: every region kind then sees the real markup, and only a
+	// public render does. In edit mode the placeholders stay
+	// placeholders — an editing page must not run the code it is
+	// editing, and the editor saves back what it was handed.
+	shared := in.Shared
+	if edit == nil && in.CodeSnippets != nil {
+		blocks = expandCodeBlocks(blocks, in.CodeSnippets)
+		shared = expandCodeBlocks(shared, in.CodeSnippets)
+	}
+
 	byRegion := make(map[string][]content.Block)
 	for _, b := range blocks {
 		byRegion[b.Region] = append(byRegion[b.Region], b)
@@ -1129,7 +1146,7 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	}
 
 	bySharedRegion := make(map[string][]content.Block)
-	for _, b := range in.Shared {
+	for _, b := range shared {
 		bySharedRegion[b.Region] = append(bySharedRegion[b.Region], b)
 	}
 	// A shared region the site has never filled renders the template's own
@@ -2007,4 +2024,72 @@ func scriptsHTML(p *content.Page, site content.SiteSettings) template.HTML {
 	sb.WriteString(embedCode(site.SiteJS, "script", scriptCloseRe))
 	sb.WriteString(embedCode(p.BodyJS, "script", scriptCloseRe))
 	return template.HTML(sb.String())
+}
+
+// CodeLookup resolves a custom-code block's key to the markup stored for
+// it, reporting false when the library has no such entry (or it is
+// empty). Input.CodeSnippets carries one; snippets.CodeStore.Lookup
+// builds the usual implementation.
+type CodeLookup func(key string) (html string, ok bool)
+
+// codePlaceholderRe matches a custom-code placeholder as the editor
+// stores it: a <div> naming a library key and holding nothing. The key
+// vocabulary is snippets.ValidCodeKey's, repeated here so the pattern
+// stays a bounded one.
+//
+// "Holding nothing" has to be generous. TinyMCE pads an empty block
+// element when it serializes one, so what comes back from a save is
+// usually a &nbsp; and sometimes a <br> — filler, not content. Anything
+// past that is a div someone put real markup in, which is not a
+// placeholder and is left alone.
+var codePlaceholderRe = regexp.MustCompile(
+	`(?is)(<div\b[^>]*\bdata-cms-code="([a-z0-9][a-z0-9-]{0,63})"[^>]*>)` +
+		`(?:\s|&nbsp;|&#160;|&#xa0;|<br\b[^>]*>)*(</div>)`)
+
+// expandCode swaps each custom-code placeholder in stored content for the
+// markup its key names, keeping the placeholder's own opening tag as the
+// wrapper. Scripts in that markup therefore run where the block sits, and
+// each can find its own root with
+// document.currentScript.closest(".cms-code") even when the same block is
+// used twice on one page.
+//
+// A key with nothing behind it — deleted from the library, or never
+// created — leaves the empty placeholder, which renders as nothing.
+func expandCode(s string, lookup CodeLookup) string {
+	if lookup == nil || !strings.Contains(s, "data-cms-code=") {
+		return s
+	}
+	return codePlaceholderRe.ReplaceAllStringFunc(s, func(m string) string {
+		parts := codePlaceholderRe.FindStringSubmatch(m)
+		html, ok := lookup(parts[2])
+		if !ok {
+			return m
+		}
+		return parts[1] + html + parts[3]
+	})
+}
+
+// expandCodeBlocks is expandCode over a render's blocks. The slice is
+// copied rather than written through: it belongs to the caller, and the
+// expansion is this render's business — an edit render of the same blocks
+// must still see the placeholders.
+func expandCodeBlocks(blocks []content.Block, lookup CodeLookup) []content.Block {
+	if lookup == nil || len(blocks) == 0 {
+		return blocks
+	}
+	var out []content.Block
+	for i, b := range blocks {
+		expanded := expandCode(b.Content, lookup)
+		if expanded == b.Content {
+			continue
+		}
+		if out == nil {
+			out = append(out, blocks...)
+		}
+		out[i].Content = expanded
+	}
+	if out == nil {
+		return blocks
+	}
+	return out
 }

@@ -261,6 +261,9 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 		Locales: s.deps.Locales,
 		Site:    site,
 		Funcs:   s.hostFuncs(r),
+		// A preview is a public render with draft content, custom-code
+		// blocks included: seeing the widget is most of why it exists.
+		CodeSnippets: s.codeLookup(r),
 	})
 	if err != nil {
 		s.serverError(w, err)
