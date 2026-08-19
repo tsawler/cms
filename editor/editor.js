@@ -1311,6 +1311,102 @@
     wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  // ../src/code.js
+  var NEW = "+new";
+  var STARTER = '<div class="cms-code-body">\n  <!-- Your markup goes here. -->\n</div>\n<script>\n(function () {\n    var root = document.currentScript.closest(".cms-code");\n    // Your JavaScript goes here. `root` is this block on the page,\n    // so a block used twice still finds its own markup.\n}());\n<\/script>\n';
+  function codeBlockHTML(key) {
+    return '<div class="cms-snippet cms-code" data-cms-code="' + key + '"></div>';
+  }
+  function createCodeBlock() {
+    return cmsPrompt("Name for the new code block", "e.g. Booking widget", "Create").then(function(name) {
+      if (name === null || name.trim() === "") return null;
+      return api("/code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), html: STARTER })
+      });
+    }).catch(function(err) {
+      setMsg(err.message);
+      return null;
+    });
+  }
+  function chooseCodeBlock(insert) {
+    api("/code").then(function(body) {
+      var list = body.code || [];
+      if (list.length === 0) {
+        createCodeBlock().then(function(c) {
+          if (c) insertAndOffer(c, insert);
+        });
+        return;
+      }
+      var options = list.map(function(c) {
+        return { value: c.key, label: c.name };
+      });
+      options.push({ value: NEW, label: "New code block\u2026" });
+      openDialog({
+        message: "Which code block?",
+        okLabel: "Insert",
+        selects: [{ id: "key", label: "Code block", value: options[0].value, options }]
+      }).then(function(v) {
+        if (!v) return;
+        if (v.key === NEW) {
+          createCodeBlock().then(function(c) {
+            if (c) insertAndOffer(c, insert);
+          });
+          return;
+        }
+        var picked = list.filter(function(c) {
+          return c.key === v.key;
+        })[0];
+        insert(codeBlockHTML(v.key));
+        flash("Added " + (picked ? picked.name : v.key) + " \u2014 click the block, then \u27E8/\u27E9, to edit its code");
+      });
+    }).catch(function(err) {
+      setMsg(err.message);
+    });
+  }
+  function insertAndOffer(c, insert) {
+    insert(codeBlockHTML(c.key));
+    editCode(c);
+  }
+  function openCodeEditor(el) {
+    var key = el.getAttribute("data-cms-code");
+    if (!key) return;
+    api("/code/" + encodeURIComponent(key)).then(editCode).catch(function(err) {
+      cmsConfirm("This block's code is missing (" + key + "). Create it?", "Create").then(function(yes) {
+        if (!yes) {
+          setMsg(err.message);
+          return;
+        }
+        api("/code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, name: key, html: STARTER })
+        }).then(editCode).catch(function(e) {
+          setMsg(e.message);
+        });
+      });
+    });
+  }
+  function editCode(c) {
+    openSource({
+      title: "Custom code \u2014 " + c.name,
+      hint: "Markup and <script> for this block, shared by every page that uses it. Applying saves it straight away.",
+      html: c.html
+    }).then(function(html) {
+      if (html === null) return;
+      api("/code/" + encodeURIComponent(c.key), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: c.name, html })
+      }).then(function() {
+        flash("Code saved \u2014 it runs on the next page load");
+      }).catch(function(err) {
+        setMsg(err.message);
+      });
+    });
+  }
+
   // ../src/snippets.js
   var snippetsLoaded = false;
   var hostHeadCache = null;
@@ -1458,6 +1554,28 @@
     $("rail-add").classList.toggle("on", open && !!state.pendingSection);
     $("rail-snips").classList.toggle("on", open && !state.pendingSection);
   }
+  function codeCard() {
+    var card = document.createElement("div");
+    card.className = "snip code";
+    var nm = document.createElement("p");
+    nm.className = "sname";
+    nm.textContent = "Custom code";
+    var tag = document.createElement("span");
+    tag.className = "stag";
+    tag.textContent = "Admin";
+    nm.appendChild(tag);
+    var desc = document.createElement("p");
+    desc.className = "sdesc";
+    desc.textContent = "Markup with its own JavaScript, kept in the code library.";
+    card.appendChild(nm);
+    card.appendChild(desc);
+    card.addEventListener("click", function() {
+      chooseCodeBlock(function(html) {
+        chooseSnippet({ name: "Custom code", html });
+      });
+    });
+    return card;
+  }
   function loadSnippets() {
     var list = $("snip-list");
     list.innerHTML = '<span class="empty">Loading\u2026</span>';
@@ -1471,6 +1589,7 @@
         ));
         return;
       }
+      if (isAdmin) list.appendChild(codeCard());
       body.snippets.forEach(function(sn) {
         var card = document.createElement("div");
         card.className = sn.settings ? "snip preset" : "snip";
@@ -2645,6 +2764,10 @@
       if (!activeSnip) return;
       var el = activeSnip;
       hideSnipUI();
+      if (el.classList.contains("cms-code")) {
+        openCodeEditor(el);
+        return;
+      }
       openSource({
         title: "Block HTML",
         hint: "The markup of this block. Applied changes still need Save.",
@@ -5391,6 +5514,10 @@ cursor:grab;background:#fff}
 /* Section presets: inline-insert mode hides them; add-a-section mode
    lists them first, clickable rather than draggable. */
 .snip.preset{cursor:pointer}
+/* The custom-code card has no thumbnail: it stands for a library
+   entry chosen on click, not for markup of its own. */
+.snip.code{cursor:pointer}
+.snip.code .sdesc{margin-top:2px}
 /* Adding a section: every card is a click target, so none of them
    should invite the drag that cannot create one. */
 .dlist.sections-mode .snip{cursor:pointer}
@@ -5675,6 +5802,18 @@ background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.
 .cms-editing .cms-spacer::after{content:'\u2195 Space \xB7 ' attr(data-height) ' \u2014 click to adjust';
 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
 font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
+
+/* Custom-code blocks: stored content holds only an empty placeholder
+   naming a library entry, so while editing there is nothing to show but
+   the name. A public render puts the entry's markup inside this same
+   wrapper, which is why the card styling is scoped to edit mode. */
+.cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;
+outline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;
+background:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}
+.cms-editing .cms-code:hover{outline-style:solid}
+.cms-editing .cms-code::after{content:'\u27E8/\u27E9 Custom code \xB7 ' attr(data-cms-code);
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+font:11px system-ui,sans-serif;color:#1d4ed8;white-space:nowrap;pointer-events:none}
 
 /* Untranslated regions in edit mode: content shown is default-language
    fallback until it is edited in this locale. */

@@ -17,6 +17,7 @@ import { unnestSnippets } from "./snippets.js";
 import { chooseVideoInto } from "./videos.js";
 import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
+import { openCodeEditor } from "./code.js";
 import { flash } from "./util.js";
 
 var BTN_SIZES = {
@@ -951,6 +952,13 @@ export function initButtons() {
         if (!activeSnip) return;
         var el = activeSnip;
         hideSnipUI(); // the chrome floats above the modal's overlay
+        // A custom-code block's own markup is an empty placeholder —
+        // there is nothing to edit there. The same button opens the
+        // library entry it names, which is the code that actually runs.
+        if (el.classList.contains("cms-code")) {
+            openCodeEditor(el);
+            return;
+        }
         openSource({
             title: "Block HTML",
             hint: "The markup of this block. Applied changes still need Save.",

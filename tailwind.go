@@ -214,7 +214,10 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 		addList(st.Class)
 	}
 	if ss := c.cfg.SectionStyles; ss != nil {
-		for _, list := range [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners} {
+		// Every curated axis, Paddings included: a host that configures
+		// vertical spacing must not have to hand-safelist the classes
+		// its own settings dialog offers.
+		for _, list := range [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners, ss.Paddings} {
 			for _, o := range list {
 				addList(o.Class)
 				addList(o.ContentClass)

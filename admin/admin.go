@@ -54,9 +54,13 @@ type Deps struct {
 	// does, so a function that reads the request's context has to be
 	// bound here too or it behaves subtly differently under preview than
 	// in front of a visitor. Nil when the host registered none.
-	RequestFuncs   func(*http.Request) template.FuncMap
-	Media          *media.Manager // nil when the host has not configured an object store
-	Snippets       *snippets.Store
+	RequestFuncs func(*http.Request) template.FuncMap
+	Media        *media.Manager // nil when the host has not configured an object store
+	Snippets     *snippets.Store
+	// CodeSnippets is the custom-code library — the markup-and-JavaScript
+	// blocks pages reference by key. Nil leaves the editor's code API
+	// unmounted, so the drawer offers no code blocks.
+	CodeSnippets   *snippets.CodeStore
 	Captcha        *captcha.Client       // nil when login CAPTCHA is not configured
 	Mailer         Mailer                // nil disables the forgot-password flow
 	ConfigSnippets []snippets.Snippet    // host-registered palette entries
@@ -295,10 +299,20 @@ func New(d Deps) http.Handler {
 			r.Get("/api/snippets", s.apiSnippetsList)
 
 			// Per-page CSS/JS is written raw into pages: admin-only.
+			// So is the custom-code library, for the same reason — a
+			// page's placeholder only names an entry, and this is the
+			// door to what the entry actually runs.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/api/pages/{id}/code", s.apiGetPageCode)
 				r.Put("/api/pages/{id}/code", s.apiSavePageCode)
+				if d.CodeSnippets != nil {
+					r.Get("/api/code", s.apiCodeList)
+					r.Post("/api/code", s.apiCodeCreate)
+					r.Get("/api/code/{key}", s.apiCodeGet)
+					r.Put("/api/code/{key}", s.apiCodeSave)
+					r.Delete("/api/code/{key}", s.apiCodeDelete)
+				}
 			})
 
 			// Blog & news, when a post template is configured. Either

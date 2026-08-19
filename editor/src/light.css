@@ -148,6 +148,18 @@ background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.
 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
 font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
 
+/* Custom-code blocks: stored content holds only an empty placeholder
+   naming a library entry, so while editing there is nothing to show but
+   the name. A public render puts the entry's markup inside this same
+   wrapper, which is why the card styling is scoped to edit mode. */
+.cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;
+outline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;
+background:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}
+.cms-editing .cms-code:hover{outline-style:solid}
+.cms-editing .cms-code::after{content:'⟨/⟩ Custom code · ' attr(data-cms-code);
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+font:11px system-ui,sans-serif;color:#1d4ed8;white-space:nowrap;pointer-events:none}
+
 /* Untranslated regions in edit mode: content shown is default-language
    fallback until it is edited in this locale. */
 body.cms-editing [data-cms-fallback] {

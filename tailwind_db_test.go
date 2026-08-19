@@ -71,3 +71,44 @@ func TestContentCSSSingleton(t *testing.T) {
 		}
 	})
 }
+
+// TestClassTokensCoverEverySectionAxis pins the content stylesheet's
+// corpus to *all* the curated section settings. Padding was the axis
+// that got missed: a host could configure "Tight", the editor would
+// offer it, and the class behind it was never compiled — so choosing it
+// did nothing until someone hand-safelisted py-3 in their own build.
+func TestClassTokensCoverEverySectionAxis(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c, err := New(Config{
+			DB:      db.SQL(),
+			Dialect: db.Dialect().Name(),
+			Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			SectionStyles: &SectionStyles{
+				Backgrounds: []SectionOption{{Key: "dark", Label: "Dark",
+					Class: "bg-axis-background", ContentClass: "prose-axis-invert"}},
+				Widths:   []SectionOption{{Key: "wide", Label: "Wide", Class: "max-w-axis-width"}},
+				Corners:  []SectionOption{{Key: "soft", Label: "Soft", Class: "rounded-axis-corner"}},
+				Paddings: []SectionOption{{Key: "tight", Label: "Tight", Class: "py-axis-padding"}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("cms.New: %v", err)
+		}
+
+		tokens, err := c.collectClassTokens(ctx)
+		if err != nil {
+			t.Fatalf("collectClassTokens: %v", err)
+		}
+		have := make(map[string]bool, len(tokens))
+		for _, tok := range tokens {
+			have[tok] = true
+		}
+		for _, want := range []string{"bg-axis-background", "prose-axis-invert",
+			"max-w-axis-width", "rounded-axis-corner", "py-axis-padding"} {
+			if !have[want] {
+				t.Errorf("%q is not in the content stylesheet's class corpus", want)
+			}
+		}
+	})
+}

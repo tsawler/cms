@@ -440,11 +440,15 @@ type CMS struct {
 	cfg Config
 	// db wraps cfg.DB with the configured dialect; everything inside the
 	// CMS talks to this rather than to cfg.DB directly.
-	db         *sqldb.DB
-	sessions   *scs.SessionManager
-	users      *auth.Store
-	content    *content.Store
-	renderer   *render.Renderer
+	db       *sqldb.DB
+	sessions *scs.SessionManager
+	users    *auth.Store
+	content  *content.Store
+	renderer *render.Renderer
+	// code is the custom-code library: the markup-and-JavaScript blocks
+	// pages reference by key rather than store inline. See
+	// snippets.CodeSnippet.
+	code       *snippets.CodeStore
 	media      *media.Manager
 	objects    media.ObjectStore
 	admin      http.Handler
@@ -584,6 +588,7 @@ func New(cfg Config) (*CMS, error) {
 	users := auth.NewStore(db)
 	users.SetLogger(cfg.Logger)
 	contentStore := content.NewStore(db, cfg.Locales[0])
+	codeStore := snippets.NewCodeStore(db)
 
 	var renderer *render.Renderer
 	if cfg.TemplateFS != nil {
@@ -631,6 +636,7 @@ func New(cfg Config) (*CMS, error) {
 		users:    users,
 		content:  contentStore,
 		renderer: renderer,
+		code:     codeStore,
 		media:    mediaManager,
 		objects:  objects,
 	}
@@ -651,6 +657,7 @@ func New(cfg Config) (*CMS, error) {
 		RequestFuncs:    cfg.RequestFuncs,
 		Media:           mediaManager,
 		Snippets:        snippets.NewStore(db),
+		CodeSnippets:    codeStore,
 		Captcha:         capClient,
 		Mailer:          cfg.Mailer,
 		ConfigSnippets:  cfg.Snippets,
@@ -1283,6 +1290,12 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		BaseURL:   c.siteBaseURL(r),
 		Site:      site,
 		AdminPath: c.cfg.AdminPath,
+		// Custom-code blocks: stored content holds an inert placeholder
+		// naming a library entry, and a public render swaps in what the
+		// entry holds. Nothing is fetched until a placeholder is found,
+		// so pages without one cost no query — and an edit render never
+		// expands them at all.
+		CodeSnippets: c.codeLookup(r.Context()),
 		// Pagination for {{cmsFeed}} listings. Every page render carries
 		// it: which template paginates is the template's business, and
 		// none of this costs a query until one calls the func.
@@ -1326,6 +1339,17 @@ func likelyBot(ua string) bool {
 		}
 	}
 	return false
+}
+
+// codeLookup resolves custom-code keys for one render. It is lazy — the
+// renderer calls it only for placeholders it actually finds — and
+// memoized, so a page using the same block twice reads it once. A key
+// that fails to load renders as nothing rather than taking the page
+// down; the log says which one.
+func (c *CMS) codeLookup(ctx context.Context) render.CodeLookup {
+	return c.code.Lookup(ctx, func(key string, err error) {
+		c.cfg.Logger.Error("cms: loading custom code block", "key", key, "err", err)
+	})
 }
 
 // requestFuncs asks the host to bind its template functions to this
