@@ -472,7 +472,10 @@ func TestRenderSections(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `<section class="bg-slate-900"><div class="prose prose-slate max-w-none px-6 py-12 prose-invert"><p>First</p></div></section>`) {
+	// Width, then the background's content class, then the spacing —
+	// the order joinClasses emits, with the padding axis last so a host
+	// that moves its py-* there wins on source order.
+	if !strings.Contains(out, `<section class="bg-slate-900"><div class="prose prose-slate max-w-none px-6 prose-invert py-12"><p>First</p></div></section>`) {
 		t.Errorf("dark/full section markup wrong:\n%s", out)
 	}
 	if !strings.Contains(out, `<section><div class="prose prose-slate mx-auto max-w-3xl px-6 py-12"><p>Second</p></div></section>`) {

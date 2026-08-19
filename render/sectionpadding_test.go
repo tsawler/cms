@@ -87,3 +87,28 @@ func TestJoinClasses(t *testing.T) {
 		t.Errorf("joinClasses of empties = %q, want empty", got)
 	}
 }
+
+// TestDefaultPaddingLeavesPublishedContentAlone is the promise that made
+// it safe to turn the spacing axis on by default: a section stored
+// before the axis existed carries no padding key, and must render with
+// exactly the spacing the width presets used to bake in.
+func TestDefaultPaddingLeavesPublishedContentAlone(t *testing.T) {
+	r := &Renderer{sections: DefaultSectionStyles()}
+
+	legacy := r.sectionHTML(content.Block{
+		Kind: content.KindHTML, Content: "<p>x</p>",
+		Settings: map[string]string{"bg": "default", "width": "normal"},
+	}, false)
+	const want = `<div class="prose prose-slate mx-auto max-w-3xl px-6 py-12">`
+	if !strings.Contains(legacy, want) {
+		t.Errorf("a section with no padding key no longer renders as it did:\ngot  %s\nwant %s", legacy, want)
+	}
+
+	// And the axis is actually offered — the whole point of the default.
+	if got := r.sections.Padding("tight").Class; got != "py-3" {
+		t.Errorf(`Padding("tight") = %q, want "py-3"`, got)
+	}
+	if n := len(r.sections.Paddings); n != 5 {
+		t.Errorf("default Paddings has %d options, want 5", n)
+	}
+}
