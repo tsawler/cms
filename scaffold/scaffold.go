@@ -199,8 +199,8 @@ var manifest = []file{
 type templateData struct {
 	SiteName string
 	// SiteNameHTML is SiteName escaped as HTML, for the places a template
-	// puts it into markup directly: the <title>, and the {{cmsShared}}
-	// footer fallback, whose argument the renderer emits as raw HTML.
+	// puts it into markup directly: the {{cmsShared}} footer fallback,
+	// whose argument the renderer emits as raw HTML.
 	// Escaping also removes the quote that would otherwise close the
 	// template argument early, leaving a template that compiles but fails
 	// to parse when the first request renders it.
@@ -213,9 +213,10 @@ type templateData struct {
 	SiteNameHTML string
 	// SiteNameArg is SiteName as a complete Go-quoted string literal —
 	// quotes included, so the template writes {{cmsBrand [[.SiteNameArg]]}}
-	// rather than wrapping it. It is for funcs that escape their own
-	// output, {{cmsBrand}} being the one: handing that an HTML-escaped
-	// name renders the entities instead of the name.
+	// rather than wrapping it. It is for funcs whose output is escaped
+	// on the way out — {{cmsBrand}} escapes its own, {{cmsSiteName}}
+	// returns plain text for html/template to escape: handing either an
+	// HTML-escaped name renders the entities instead of the name.
 	SiteNameArg string
 	Program     string
 	Slug        string

@@ -193,6 +193,8 @@ The functions available in every template:
 | `{{cmsImage "key"}}` | an image URL from the media library |
 | `{{cmsSections "key"}}` | editor-composed full-width sections |
 | `{{cmsNav "key"}}` | a complete menu (markup, dropdowns, mobile toggle) |
+| `{{cmsBrand "Fallback"}}` | the site's logo and/or name from Site settings, as markup |
+| `{{cmsSiteName "Fallback"}}` | the site name from Site settings, as plain text (for `<title>`) |
 | `{{cmsMenu "key"}}` | raw menu entries, if you want to own the markup |
 | `{{cmsPosts "blog" 10}}` | the newest N blog/news entries |
 | `{{cmsFeed "blog"}}` | one `?page=`-worth of a feed, for paginated listings |

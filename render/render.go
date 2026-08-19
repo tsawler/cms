@@ -574,6 +574,7 @@ var stubFuncs = template.FuncMap{
 	"cmsMenu":        func(string) []MenuEntry { return nil },
 	"cmsNav":         func(string) template.HTML { return "" },
 	"cmsBrand":       func(...string) template.HTML { return "" },
+	"cmsSiteName":    func(...string) string { return "" },
 	"cmsHead":        func() template.HTML { return "" },
 	"cmsScripts":     func() template.HTML { return "" },
 	"cmsPosts":       func(string, int) []PostInfo { return nil },
@@ -1065,7 +1066,7 @@ type Input struct {
 	// BaseURL ("scheme://host", no trailing slash) makes hreflang
 	// alternate links absolute; empty omits them.
 	BaseURL string
-	// Site is the stored site-wide settings ({{cmsBrand}}, nav
+	// Site is the stored site-wide settings ({{cmsBrand}}, {{cmsSiteName}}, nav
 	// alignment). The zero value means "all defaults".
 	Site content.SiteSettings
 	// AdminPath is the URL prefix the admin area is mounted at, used to
@@ -1214,9 +1215,17 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			}
 			return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil, loginURL)
 		},
-		"cmsBrand":   func(fallback ...string) template.HTML { return brandHTML(in.Site, fallback) },
-		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
-		"cmsScripts": func() template.HTML { return scriptsHTML(page, in.Site) },
+		"cmsBrand": func(fallback ...string) template.HTML { return brandHTML(in.Site, fallback) },
+		// cmsSiteName is the stored site name as plain text, for the
+		// places {{cmsBrand}}'s markup does not fit: the <title>, an
+		// og:site_name meta tag, a copyright line. The optional fallback
+		// shows until a name has been saved in the site-settings dialog,
+		// so a fresh site reads the same before anyone opens it. The
+		// result is a string, not template.HTML, so html/template escapes
+		// it for wherever it lands.
+		"cmsSiteName": func(fallback ...string) string { return siteName(in.Site, fallback) },
+		"cmsHead":     func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
+		"cmsScripts":  func() template.HTML { return scriptsHTML(page, in.Site) },
 		"cmsPosts": func(feed string, limit int) []PostInfo {
 			if in.Posts == nil {
 				return nil
@@ -1637,6 +1646,18 @@ func writeNavItem(sb *strings.Builder, e MenuEntry, edit bool) {
 		sb.WriteString(` target="_blank" rel="noopener"`)
 	}
 	sb.WriteString(`>` + html.EscapeString(e.Label) + `</a></li>`)
+}
+
+// siteName renders {{cmsSiteName}}: the stored site name, or the
+// template's fallback while none has been saved.
+func siteName(site content.SiteSettings, fallback []string) string {
+	if site.SiteName != "" {
+		return site.SiteName
+	}
+	if len(fallback) > 0 {
+		return fallback[0]
+	}
+	return ""
 }
 
 // brandHTML renders {{cmsBrand}}: the stored site logo and/or site name

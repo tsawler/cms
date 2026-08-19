@@ -367,9 +367,10 @@ func read(t *testing.T, dir, name string) string {
 // front of the site's first visitor instead.
 //
 // The site name is the thing most likely to break one, because it is
-// interpolated into quoted template arguments ({{cmsBrand "…"}}, the
-// {{cmsShared}} fallback). A name carrying a quote closed the argument and
-// left an unparseable template; one carrying < put markup in the <title>.
+// interpolated into quoted template arguments ({{cmsBrand "…"}},
+// {{cmsSiteName "…"}}, the {{cmsShared}} fallback). A name carrying a
+// quote closed the argument and left an unparseable template; one
+// carrying < put markup in the <title>.
 // Hence a deliberately hostile name here rather than a tidy one.
 func TestGeneratedTemplatesParse(t *testing.T) {
 	dir := t.TempDir()
@@ -413,9 +414,11 @@ func TestGeneratedTemplatesParse(t *testing.T) {
 	// its own output, so it takes the name plain — handed an HTML-escaped
 	// one it renders the entities at the top of every page.
 	base := read(t, dir, "templates/base.gohtml")
-	if want := `{{cmsBrand "6\" Nails \\q Co & <b>"}}`; !strings.Contains(base, want) {
-		t.Errorf("cmsBrand is not passed the plain name.\n got: %s\nwant to contain: %s",
-			firstLineWith(base, "cmsBrand"), want)
+	for _, fn := range []string{"cmsBrand", "cmsSiteName"} {
+		if want := `{{` + fn + ` "6\" Nails \\q Co & <b>"}}`; !strings.Contains(base, want) {
+			t.Errorf("%s is not passed the plain name.\n got: %s\nwant to contain: %s",
+				fn, firstLineWith(base, fn), want)
+		}
 	}
 	// The {{cmsShared}} fallback is the opposite: the renderer emits it as
 	// raw HTML, so it has to arrive escaped.

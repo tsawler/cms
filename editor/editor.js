@@ -2909,6 +2909,16 @@
       }
     });
   }
+  function retitle(prevName, nextName) {
+    var brand = document.querySelector(".cms-brand");
+    var fallback = brand ? brand.dataset.cmsDefault || "" : "";
+    var from = prevName || fallback;
+    var to = nextName || fallback;
+    if (!from || from === to) return;
+    var at = document.title.lastIndexOf(from);
+    if (at === -1) return;
+    document.title = document.title.slice(0, at) + to + document.title.slice(at + from.length);
+  }
   function openSiteSettings() {
     if (!canPages) return;
     api("/settings").then(function(s) {
@@ -3029,6 +3039,7 @@
           body: JSON.stringify(next)
         }).then(function() {
           applySettings(next);
+          retitle(s.siteName, next.siteName);
           flash("Site settings saved.");
         }).catch(function(err) {
           setMsg(err.message);

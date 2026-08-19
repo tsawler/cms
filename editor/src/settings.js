@@ -86,6 +86,25 @@ function applySettings(s) {
     });
 }
 
+// retitle follows a renamed site into the browser tab. A template that
+// builds its <title> with {{cmsSiteName "Fallback"}} shows the stored
+// name there, but the title is plain text with no marker around the
+// name, so the editor can only find it by value: the name that was
+// showing before the save — the stored one, or failing that the brand's
+// template fallback, which is the same words in the scaffold — and swap
+// it for the new one. A title the name cannot be found in is left alone;
+// the next load renders it from the server anyway.
+function retitle(prevName, nextName) {
+    var brand = document.querySelector(".cms-brand");
+    var fallback = brand ? brand.dataset.cmsDefault || "" : "";
+    var from = prevName || fallback;
+    var to = nextName || fallback;
+    if (!from || from === to) return;
+    var at = document.title.lastIndexOf(from);
+    if (at === -1) return;
+    document.title = document.title.slice(0, at) + to + document.title.slice(at + from.length);
+}
+
 export function openSiteSettings() {
     if (!canPages) return; // the save would 403; the menu entry is hidden too
     api("/settings").then(function (s) {
@@ -215,6 +234,7 @@ export function openSiteSettings() {
                 body: JSON.stringify(next),
             }).then(function () {
                 applySettings(next);
+                retitle(s.siteName, next.siteName);
                 flash("Site settings saved.");
             }).catch(function (err) { setMsg(err.message); });
         });
