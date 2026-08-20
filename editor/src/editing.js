@@ -13,6 +13,7 @@ import { closeDrawer } from "./snippets.js";
 import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
 import { setTitleEditing } from "./title.js";
+import { collapseCode, reviveCode } from "./code.js";
 
 // Shared regions ("site:footer" and friends) are site furniture: they
 // take the pages permission to edit, so for anyone without it they are
@@ -55,6 +56,10 @@ function takeSnapshot() {
 export function restoreSnapshot(s) {
     s.regs.forEach(function (r) { r.el.innerHTML = r.html; });
     (s.secs || []).forEach(function (c) { c.el.innerHTML = c.html; });
+    // The snapshot was taken with the code blocks collapsed, so putting
+    // it back re-empties them; setEditing's deferred revive fills the
+    // restored elements rather than the ones just discarded.
+    reviveCode();
     s.imgs.forEach(function (i) {
         if (i.src === null) i.el.removeAttribute("src");
         else i.el.setAttribute("src", i.src);
@@ -65,7 +70,14 @@ export function restoreSnapshot(s) {
 
 export function setEditing(on) {
     state.editing = on;
-    if (on) state.snapshot = takeSnapshot();
+    // Custom-code blocks go back to their placeholder before anything
+    // else looks at the page: the snapshot Cancel restores from, the
+    // HTML TinyMCE takes over, and the markup a save serializes all have
+    // to be the empty placeholder, never a widget's output.
+    if (on) {
+        collapseCode();
+        state.snapshot = takeSnapshot();
+    }
     document.body.classList.toggle("cms-editing", on);
     $("edit-ic").innerHTML = on ? ICONS.check : ICONS.pencil;
     $("edit-label").textContent = on ? "Done" : "Edit";
@@ -127,6 +139,10 @@ export function setEditing(on) {
         hideChrome();
         removeRichEditors();
         reapplySectionClasses();
+        // Back to viewing: fill the code blocks in again and let them
+        // run, so the page reads the way a visitor's does. Deferred a
+        // turn, because Cancel restores its snapshot after this returns.
+        reviveCode();
     }
 }
 

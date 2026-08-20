@@ -158,12 +158,13 @@ func TestExpandCodeNilLookup(t *testing.T) {
 	}
 }
 
-// TestRenderExpandsCodeBlocksOnlyWhenPublic is the whole contract end to
-// end: a public render runs the block, an edit render of the same
-// content hands the editor back the placeholder it saved — nothing
-// executes in the page being edited, and a save cannot bake the expanded
-// markup into stored content.
-func TestRenderExpandsCodeBlocksOnlyWhenPublic(t *testing.T) {
+// TestRenderParksCodeBlockScriptsWhileEditing is the whole contract end
+// to end: both renders fill the block in, so a logged-in editor sees the
+// same page a visitor does — but an edit render parks the scripts under
+// a type no browser runs, so nothing executes in the page being edited.
+// The placeholder's own tag survives either way, which is what lets the
+// editor empty the block again and save back what it was handed.
+func TestRenderParksCodeBlockScriptsWhileEditing(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
 	blocks := []content.Block{
@@ -178,7 +179,9 @@ func TestRenderExpandsCodeBlocksOnlyWhenPublic(t *testing.T) {
 	}
 	in := Input{
 		Page: page, Blocks: blocks, Shared: shared, Locale: "en",
-		CodeSnippets: lookup(map[string]string{"widget": `<script>ran()</script>`}, nil),
+		CodeSnippets: lookup(map[string]string{
+			"widget": `<b>hi</b><script>ran()</script>`,
+		}, nil),
 	}
 
 	var buf bytes.Buffer
@@ -196,10 +199,97 @@ func TestRenderExpandsCodeBlocksOnlyWhenPublic(t *testing.T) {
 	if err := r.Render(&buf, in); err != nil {
 		t.Fatalf("Render (edit): %v", err)
 	}
-	if strings.Contains(buf.String(), "<script>ran()</script>") {
-		t.Errorf("an edit render expanded a code block:\n%s", buf.String())
+	out := buf.String()
+	if strings.Contains(out, "<script>ran()</script>") {
+		t.Errorf("an edit render left a code block's script runnable:\n%s", out)
 	}
-	if n := strings.Count(buf.String(), `data-cms-code="widget"`); n != 3 {
-		t.Errorf("edit render shows %d placeholders, want 3:\n%s", n, buf.String())
+	if n := strings.Count(out, `<script type="`+InertScriptType+`">ran()</script>`); n != 3 {
+		t.Errorf("edit render parked %d scripts, want 3:\n%s", n, out)
+	}
+	// The markup around the script still renders — that is the point of
+	// filling the block in at all.
+	if n := strings.Count(out, "<b>hi</b>"); n != 3 {
+		t.Errorf("edit render showed the block's markup %d times, want 3:\n%s", n, out)
+	}
+	if n := strings.Count(out, `data-cms-code="widget"`); n != 3 {
+		t.Errorf("edit render shows %d placeholders, want 3:\n%s", n, out)
+	}
+}
+
+// TestInertScripts covers the tag rewriting itself: the type an author
+// wrote is preserved for the editor to restore, everything else about
+// the tag is left alone, and markup with no script is not touched.
+func TestInertScripts(t *testing.T) {
+	parked := `<script type="` + InertScriptType + `"`
+	cases := []struct {
+		name string
+		in   string
+		want []string
+		not  []string
+	}{
+		{
+			name: "bare script",
+			in:   `<p>a</p><script>go()</script>`,
+			want: []string{`<p>a</p>` + parked + `>go()</script>`},
+		},
+		{
+			name: "keeps other attributes",
+			in:   `<script src="/w.js" defer></script>`,
+			want: []string{parked + ` src="/w.js" defer>`},
+		},
+		{
+			name: "stashes the author's type",
+			in:   `<script type="module">go()</script>`,
+			want: []string{parked + ` data-cms-type="module">go()</script>`},
+			not:  []string{`<script type="module"`},
+		},
+		{
+			name: "single-quoted and spaced type",
+			in:   `<script TYPE = 'text/javascript' id="w">go()</script>`,
+			want: []string{`data-cms-type="text/javascript"`, `id="w"`},
+		},
+		{
+			name: "no script, no change",
+			in:   `<div class="x">plain</div>`,
+			want: []string{`<div class="x">plain</div>`},
+			not:  []string{InertScriptType},
+		},
+		{
+			name: "every script in the block",
+			in:   `<script>a()</script><b>x</b><script>b()</script>`,
+			want: []string{parked + `>a()</script>`, parked + `>b()</script>`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inertScripts(tc.in)
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("inertScripts(%q) = %q, want it to contain %q", tc.in, got, w)
+				}
+			}
+			for _, n := range tc.not {
+				if strings.Contains(got, n) {
+					t.Errorf("inertScripts(%q) = %q, should not contain %q", tc.in, got, n)
+				}
+			}
+		})
+	}
+}
+
+// TestInertCodePassesMissingKeysThrough keeps the wrapper honest: a key
+// the library does not have still reports false, so the placeholder is
+// left exactly as it was rather than filled with nothing.
+func TestInertCodePassesMissingKeysThrough(t *testing.T) {
+	lu := inertCode(lookup(map[string]string{"a": "<script>x()</script>"}, nil))
+	if _, ok := lu("gone"); ok {
+		t.Error("a missing key resolved")
+	}
+	html, ok := lu("a")
+	if !ok {
+		t.Fatal("a known key did not resolve")
+	}
+	if !strings.Contains(html, InertScriptType) {
+		t.Errorf("a resolved key came back unparked: %q", html)
 	}
 }

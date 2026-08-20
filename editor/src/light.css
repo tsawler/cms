@@ -148,10 +148,12 @@ background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.
 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
 font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
 
-/* Custom-code blocks: stored content holds only an empty placeholder
-   naming a library entry, so while editing there is nothing to show but
-   the name. A public render puts the entry's markup inside this same
-   wrapper, which is why the card styling is scoped to edit mode. */
+/* Custom-code blocks: entering edit mode empties the block back to the
+   placeholder stored content holds, so while editing there is nothing to
+   show but the name. Every other state — a visitor's page, and a
+   logged-in editor's while merely viewing — has the entry's markup
+   inside this same wrapper, which is why the card styling is scoped to
+   edit mode. */
 .cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;
 outline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;
 background:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}

@@ -878,6 +878,35 @@ func ValidBackgroundPosition(s string) string {
 	return s
 }
 
+// EditorAppliedClasses are the Tailwind classes the in-place editor can
+// put into content on its own — chosen from a dialog rather than typed,
+// and carried in by no snippet, so nothing that scans stored content
+// sees them until after the first save that happens to use one.
+//
+// That gap is the whole reason this list exists. A class the editor
+// offers but nothing compiles is the worst kind of bug to meet: the
+// setting appears to work, the class really does change on the element,
+// and the page does not move. The list is folded into the generated
+// content stylesheet's corpus so a fresh install is covered, and the
+// docs' safelists are checked against it so the two cannot drift.
+//
+// Keep it in step with the editor script: today its only entries are the
+// block gear's Columns control (editor/src/columns.js), which writes a
+// grid track count on grid blocks and a column-count on flow blocks.
+// Widening the counts that control offers means widening this.
+func EditorAppliedClasses() []string {
+	return []string{
+		// Grid blocks. The stock library writes its counts at the sm:
+		// breakpoint, which is the prefix the control preserves.
+		"sm:grid-cols-2", "sm:grid-cols-3", "sm:grid-cols-4",
+		// Flow blocks ("Article text"), and the gutter the control
+		// writes alongside them when it converts a prose block. gap-8 is
+		// carried by stock snippets too, but a host that replaced the
+		// whole library would otherwise have it compiled by nothing.
+		"columns-1", "columns-2", "columns-3", "gap-8",
+	}
+}
+
 // DefaultEditorStyles is the Tailwind-first default Styles menu, used when
 // the host does not configure its own. Every class here must be safelisted
 // in the site's Tailwind build (see the README) — editor content lives in
@@ -1093,9 +1122,11 @@ type Input struct {
 	AdminPath string
 	// CodeSnippets resolves the custom-code blocks a page references —
 	// the admin-written markup-and-JavaScript kept out of page content
-	// so the HTML sanitizer never has to carry it. Nil, or an edit
-	// render, leaves the placeholders alone: nothing executes in the
-	// editor, and what the editor saves back is what it was given.
+	// so the HTML sanitizer never has to carry it. Nil leaves the
+	// placeholders alone, and so, in effect, does an edit render: it
+	// fills them, but with every <script> parked under InertScriptType,
+	// so nothing executes and the editor still saves back the
+	// placeholder it was given.
 	CodeSnippets CodeLookup
 	// Funcs replaces the host template functions declared at construction
 	// (NewWithFuncs) for this render, entry by entry: a name it does not
@@ -1132,14 +1163,25 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	}
 
 	// Custom-code blocks materialize here, before anything reads the
-	// content: every region kind then sees the real markup, and only a
-	// public render does. In edit mode the placeholders stay
-	// placeholders — an editing page must not run the code it is
-	// editing, and the editor saves back what it was handed.
+	// content: every region kind then sees the real markup, wherever the
+	// render is going.
+	//
+	// An edit render gets the same markup with its <script> tags parked
+	// under a type no browser runs (inertScripts). A logged-in editor
+	// therefore sees the block where the block sits instead of an empty
+	// hole, the editor script revives the scripts on a page that is only
+	// being viewed, and entering edit mode empties the block back to the
+	// placeholder that stored content actually holds — so nothing runs
+	// in the page being edited and a save still writes back what it was
+	// handed.
 	shared := in.Shared
-	if edit == nil && in.CodeSnippets != nil {
-		blocks = expandCodeBlocks(blocks, in.CodeSnippets)
-		shared = expandCodeBlocks(shared, in.CodeSnippets)
+	if in.CodeSnippets != nil {
+		lookup := in.CodeSnippets
+		if edit != nil {
+			lookup = inertCode(lookup)
+		}
+		blocks = expandCodeBlocks(blocks, lookup)
+		shared = expandCodeBlocks(shared, lookup)
 	}
 
 	byRegion := make(map[string][]content.Block)
@@ -2085,6 +2127,57 @@ func expandCode(s string, lookup CodeLookup) string {
 		}
 		return parts[1] + html + parts[3]
 	})
+}
+
+// InertScriptType is the type an edit render gives every <script> inside
+// a custom-code block. No browser knows it, so the parser stores the
+// element and runs nothing — which is the point: an editing page must
+// not run the code it is editing, and a logged-in editor merely looking
+// at the page should still see the block rather than a hole where it
+// goes. The editor script swaps these back for live scripts while the
+// page is being viewed, and empties the block when edit mode starts.
+const InertScriptType = "text/cms-code"
+
+// scriptOpenRe matches a <script> start tag and captures its attributes.
+// Bounded like codePlaceholderRe, and applied only to library markup an
+// admin wrote — never to anything an editor can save.
+var scriptOpenRe = regexp.MustCompile(`(?is)<script\b([^>]*)>`)
+
+// scriptTypeRe finds a type attribute in a start tag's attribute text,
+// capturing the value quoted either way or bare.
+var scriptTypeRe = regexp.MustCompile(`(?is)\stype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+
+// inertScripts rewrites every <script> in a block's markup to the inert
+// type, stashing whatever type it had on data-cms-type so the editor can
+// put it back. The rest of the tag — src, defer, an id — is left alone:
+// a script the browser will not run is a script it does not fetch
+// either, so those attributes go inert along with it.
+func inertScripts(s string) string {
+	if !strings.Contains(strings.ToLower(s), "<script") {
+		return s
+	}
+	return scriptOpenRe.ReplaceAllStringFunc(s, func(tag string) string {
+		attrs := scriptOpenRe.FindStringSubmatch(tag)[1]
+		parked := ` type="` + InertScriptType + `"`
+		if m := scriptTypeRe.FindStringSubmatch(attrs); m != nil {
+			was := m[1] + m[2] + m[3]
+			attrs = scriptTypeRe.ReplaceAllString(attrs, "")
+			parked += ` data-cms-type="` + html.EscapeString(was) + `"`
+		}
+		return "<script" + parked + attrs + ">"
+	})
+}
+
+// inertCode wraps a CodeLookup so every block it resolves comes back
+// parked. An edit render uses it, and nothing else does.
+func inertCode(lookup CodeLookup) CodeLookup {
+	return func(key string) (string, bool) {
+		markup, ok := lookup(key)
+		if !ok {
+			return markup, false
+		}
+		return inertScripts(markup), true
+	}
 }
 
 // expandCodeBlocks is expandCode over a render's blocks. The slice is

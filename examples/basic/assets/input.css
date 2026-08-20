@@ -24,7 +24,7 @@
  * CMS README. The generated content stylesheet also covers these once
  * content uses them; listing them here keeps the editor styled even
  * before first save. */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-3xl rounded-full aspect-video border border-b border-b-2 border-slate-200 border-slate-300 p-1 p-2 p-4 align-top font-semibold w-auto odd:bg-slate-50 overflow-x-auto object-cover");
+@source inline("columns-1 columns-2 columns-3 text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-3xl rounded-full aspect-video border border-b border-b-2 border-slate-200 border-slate-300 p-1 p-2 p-4 align-top font-semibold w-auto odd:bg-slate-50 overflow-x-auto object-cover");
 
 /* The section settings behind the ⚙ on a section: background, content
  * width, vertical spacing, corners. These are chosen in a dialog and

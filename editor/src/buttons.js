@@ -18,6 +18,8 @@ import { chooseVideoInto } from "./videos.js";
 import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
 import { openCodeEditor } from "./code.js";
+import { columnsField, applyColumns, confirmColumns } from "./columns.js";
+import { findOwningEditor, runWithUndo } from "./undo.js";
 import { flash } from "./util.js";
 
 var BTN_SIZES = {
@@ -121,11 +123,34 @@ function syncDescendantColors(el, forced) {
     });
 }
 
+// classRadius reports the corner rounding el would have from its classes
+// alone, in pixels — the value to treat as "as designed".
+//
+// It has to be measured rather than read, because the gear's own inline
+// style is what getComputedStyle would otherwise report. So the override
+// is lifted for the length of one measurement and put straight back;
+// nothing is painted in between, since layout is read synchronously.
+//
+// A block with different corners (rounded-t-lg, say) computes to a list
+// like "8px 8px 0px 0px" and parseInt keeps the first — which is the
+// same number the dialog's slider shows, so baseline and choice are
+// compared on equal terms and an untouched slider still writes nothing.
+function classRadius(el) {
+    var override = el.style.borderRadius;
+    if (override) el.style.borderRadius = "";
+    var base = parseInt(getComputedStyle(el).borderRadius, 10) || 0;
+    if (override) el.style.borderRadius = override;
+    return base;
+}
+
 // applySnippetSettings writes the gear's choices as inline styles on the
 // block root (they beat whatever classes the snippet came with, and are
 // saved as part of the content — no schema anywhere), plus a data
 // attribute so the dialog can re-select the spacing preset later.
-function applySnippetSettings(el, v) {
+//
+// baseRadius is the block's class-derived rounding (see classRadius),
+// measured before the dialog opened.
+function applySnippetSettings(el, v, baseRadius) {
     el.style.backgroundColor = v.bgcolor || "";
     el.style.color = v.textcolor || "";
     syncDescendantColors(el, !!v.textcolor);
@@ -135,7 +160,14 @@ function applySnippetSettings(el, v) {
     el.style.marginBottom = sp ? sp.margin : "";
     if (sp) el.setAttribute("data-cms-snip-spacing", v.spacing);
     else el.removeAttribute("data-cms-snip-spacing");
-    el.style.borderRadius = v.radius === "" ? "" : (parseInt(v.radius, 10) || 0) + "px";
+    // Only a radius that differs from the block's own classes is worth
+    // storing. Writing one that matches would pin a class-derived value
+    // as a pixel override — so a later restyle of that class, or an edit
+    // to the snippet's markup, would stop reaching this block — and
+    // would leave "border-radius: 0px" on every unrounded block that
+    // ever had its colour changed.
+    var radius = parseInt(v.radius, 10) || 0;
+    el.style.borderRadius = radius === baseRadius ? "" : radius + "px";
     syncStyleShadow(el);
 }
 
@@ -564,19 +596,6 @@ function syncFigureAlignment(fig, img) {
     if (!img.getAttribute("class")) img.removeAttribute("class");
 }
 
-// findOwningEditor returns the TinyMCE instance managing the content
-// that contains el, so button changes join that editor's undo stack.
-export function findOwningEditor(el) {
-    var all = [];
-    Object.keys(state.mceEditors).forEach(function (k) { all.push(state.mceEditors[k]); });
-    state.sectionEditors.forEach(function (s) { all.push(s.ed); });
-    for (var i = 0; i < all.length; i++) {
-        var target = all[i].getElement && all[i].getElement();
-        if (target && target.contains(el)) return all[i];
-    }
-    return null;
-}
-
 function applyButtonSettings(btn, v) {
     var size = BTN_SIZES[v.size] ? v.size : "m";
     // An emptied text field keeps the current label rather than
@@ -764,7 +783,7 @@ export function initButtons() {
             if (!v) return;
             var ed = findOwningEditor(btn);
             var run = function () { applyButtonSettings(btn, v); };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             markContainerDirty(btn);
             if (activeBtn === btn) showButtonUI(btn); // re-anchor around the new size
         });
@@ -840,7 +859,7 @@ export function initButtons() {
             if (!v) return;
             var ed = findOwningEditor(img);
             var run = function () { applyImageSettings(img, v); };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             markContainerDirty(img);
             if (activeImg !== img) return;
             showImgUI(img); // re-anchor around the new size
@@ -875,7 +894,7 @@ export function initButtons() {
                     parent.remove();
                 }
             };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
             else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         });
@@ -913,7 +932,7 @@ export function initButtons() {
                     parent.remove();
                 }
             };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
             else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         });
@@ -940,7 +959,7 @@ export function initButtons() {
                     parent.remove();
                 }
             };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
             else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         });
@@ -977,7 +996,7 @@ export function initButtons() {
                 tpl.innerHTML = html;
                 el.parentNode.replaceChild(tpl.content, el);
             };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             unnestSnippets();
             lockButtons(); // the new markup may contain a button
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
@@ -994,26 +1013,39 @@ export function initButtons() {
         var baseBg = rgbToHex(cs.backgroundColor);
         var basePad = cs.padding;
         var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
+        // The rounding the block's classes give it, so Apply can tell a
+        // deliberate choice from the value the slider was merely showing.
+        var baseRadius = classRadius(el);
+        var setFields = [
+            { id: "bgcolor", label: "Background color", type: "color",
+                value: rgbToHex(el.style.backgroundColor) },
+            { id: "textcolor", label: "Text color", type: "color",
+                value: rgbToHex(el.style.color) },
+            { id: "spacing", label: "Spacing", type: "select",
+                value: el.getAttribute("data-cms-snip-spacing") || "",
+                options: [
+                    { value: "", label: "As designed" },
+                    { value: "compact", label: "Compact" },
+                    { value: "normal", label: "Comfortable" },
+                    { value: "roomy", label: "Roomy" },
+                ] },
+            // An override wins even when it is zero — a block squared off
+            // on purpose has to read back as 0, not as the rounding its
+            // classes would have given it. (`|| baseRadius` would not do:
+            // 0 is falsy, and that is exactly the deliberate case.)
+            { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40,
+                value: String(Math.min(40, el.style.borderRadius
+                    ? parseInt(el.style.borderRadius, 10) || 0
+                    : baseRadius)) },
+        ];
+        // Only a block that is a grid has a column count to set; for
+        // everything else the dialog is the four fields it always was.
+        var cols = columnsField(el);
+        if (cols) setFields.push(cols);
         openDialog({
             message: "Block settings",
             okLabel: "Apply",
-            fields: [
-                { id: "bgcolor", label: "Background color", type: "color",
-                    value: rgbToHex(el.style.backgroundColor) },
-                { id: "textcolor", label: "Text color", type: "color",
-                    value: rgbToHex(el.style.color) },
-                { id: "spacing", label: "Spacing", type: "select",
-                    value: el.getAttribute("data-cms-snip-spacing") || "",
-                    options: [
-                        { value: "", label: "As designed" },
-                        { value: "compact", label: "Compact" },
-                        { value: "normal", label: "Comfortable" },
-                        { value: "roomy", label: "Roomy" },
-                    ] },
-                { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40,
-                    value: String(Math.min(40, parseInt(el.style.borderRadius, 10) ||
-                        parseInt(cs.borderRadius, 10) || 0)) },
-            ],
+            fields: setFields,
             // A stand-in page: gray context lines above and below the
             // block, so spacing and background read as they will inline.
             preview: function (v, out) {
@@ -1041,15 +1073,33 @@ export function initButtons() {
                 // contrast choice is visible before it's applied.
                 var lineColor = v.textcolor ||
                     (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
-                [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]].forEach(function (d, i) {
-                    var line = document.createElement("div");
-                    line.style.cssText = "border-radius:3px";
-                    line.style.height = d[0];
-                    line.style.width = d[1];
-                    line.style.marginTop = i ? "6px" : "0";
-                    line.style.background = lineColor;
-                    box.appendChild(line);
-                });
+                var lines = function (into, shapes) {
+                    shapes.forEach(function (d, i) {
+                        var line = document.createElement("div");
+                        line.style.cssText = "border-radius:3px";
+                        line.style.height = d[0];
+                        line.style.width = d[1];
+                        line.style.marginTop = i ? "6px" : "0";
+                        line.style.background = lineColor;
+                        into.appendChild(line);
+                    });
+                };
+                // A grid block previews as its columns, so the count
+                // reads as a shape rather than as a number.
+                var cols = parseInt(v.columns, 10) || 1;
+                if (cols > 1) {
+                    var row = document.createElement("div");
+                    row.style.cssText = "display:flex;gap:8px";
+                    for (var c = 0; c < cols; c++) {
+                        var cell = document.createElement("div");
+                        cell.style.cssText = "flex:1 1 0;min-width:0";
+                        lines(cell, [["9px", "70%"], ["6px", "100%"], ["6px", "85%"]]);
+                        row.appendChild(cell);
+                    }
+                    box.appendChild(row);
+                } else {
+                    lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
+                }
                 page.appendChild(ctxLine());
                 page.appendChild(box);
                 page.appendChild(ctxLine());
@@ -1058,10 +1108,26 @@ export function initButtons() {
         }).then(function (v) {
             if (!v) return;
             var ed = findOwningEditor(el);
-            var run = function () { applySnippetSettings(el, v); };
-            if (ed) ed.undoManager.transact(run); else run();
-            markContainerDirty(el);
-            if (activeSnip === el) showSnipUI(el); // re-anchor around the new size
+            // Fewer columns can delete a cell someone wrote in, so that
+            // part asks first; the styling half never needs a question.
+            confirmColumns(el, v.columns).then(function (ok) {
+                // The block itself can change identity here: a bare
+                // paragraph asked for two columns grows a wrapper, and
+                // the wrapper is the block from then on. So columns go
+                // first and everything after works on what comes back.
+                var now = el;
+                var run = function () {
+                    if (ok) now = applyColumns(el, v.columns) || el;
+                    applySnippetSettings(now, v, baseRadius);
+                };
+                runWithUndo(ed, run);
+                lockButtons(); // a cloned column may have brought a button
+                markContainerDirty(now);
+                if (activeSnip === el) {
+                    activeSnip = now;
+                    showSnipUI(now); // re-anchor around the new size
+                }
+            });
         });
     });
 
@@ -1075,7 +1141,7 @@ export function initButtons() {
             var sectionsEl = el.closest("[data-cms-sections]");
             var ed = findOwningEditor(el);
             var run = function () { el.remove(); };
-            if (ed) ed.undoManager.transact(run); else run();
+            runWithUndo(ed, run);
             if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
             else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         });
@@ -1112,7 +1178,7 @@ export function initButtons() {
         var sectionsEl = el.closest("[data-cms-sections]");
         var ed = findOwningEditor(el);
         var run = function () { el.remove(); };
-        if (ed) ed.undoManager.transact(run); else run();
+        runWithUndo(ed, run);
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
         else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
         unnestSnippets(); // a drop inside another snippet lifts back out

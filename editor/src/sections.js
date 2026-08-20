@@ -8,6 +8,7 @@ import { cmsConfirm, openDialog, refreshDialog } from "./dialogs.js";
 import { markSectionsDirty } from "./editing.js";
 import { initInlineEditor } from "./richtext.js";
 import { lockButtons } from "./buttons.js";
+import { runWithUndo } from "./undo.js";
 import { openDrawer } from "./snippets.js";
 import { openSource } from "./source.js";
 import { flash } from "./util.js";
@@ -314,7 +315,7 @@ export function initSections() {
             }).then(function (html) {
                 if (html === null) return;
                 if (entry) {
-                    entry.ed.undoManager.transact(function () { entry.ed.setContent(html); });
+                    runWithUndo(entry.ed, function () { entry.ed.setContent(html); });
                 } else {
                     srcContent.innerHTML = html;
                 }

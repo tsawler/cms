@@ -520,7 +520,8 @@ places:
 
 - **`Config.Snippets`** — per-customer components, versioned with your
   code. Nil gets a Tailwind-first default library: inline blocks
-  (callout, call-to-action, two columns, quote, button link, video,
+  (callout, call-to-action, two columns, article text, quote, button
+  link, video,
   flexible space, plus imported blocks — button pair, pill buttons,
   filled and outline single buttons in both shapes, quote with
   portrait, and four article layouts) and the section presets described
@@ -548,6 +549,71 @@ places:
   `<iframe>` — no API key needed.
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks and
   section presets created after deployment.
+
+Clicking an inserted block raises its chrome — drag handle, `⟨/⟩` HTML
+source, ⚙ settings, trash. The ⚙ offers background and text colour,
+spacing, corner roundness, and — for a block that is a column layout — a
+**Columns** count.
+
+Two different things are called columns, and the control covers both,
+because an editor means one word by them:
+
+- A **grid** block (**Two columns**, **Feature grid**) is a row of
+  separate cells, each with its own content. Its count is the number of
+  grid tracks, offered as 2, 3, or 4.
+- A **flow** block (**Text**, **Article text**) is one continuous body
+  of prose split into newspaper columns — read down one and up into the
+  next. Its count is `column-count`, offered as 1, 2, or 3.
+
+A grid says so by carrying `grid-cols-N`; a flow says so by carrying
+`columns-N`. On top of those, **any block that is plain running text**
+gets the flow control even with no column class at all — the stock
+**Text** block being the one most people reach for. It reads as 1
+column, which is what it renders as, and choosing 2 or 3 converts it.
+
+Converting a bare `<p>` moves it inside a new `<div>` that becomes the
+block. That is worth doing for its own sake: pressing Enter in a bare
+paragraph splits it into two sibling blocks — right for a standalone
+paragraph, useless for an article — while inside the wrapper the
+paragraphs stay together and go on reading as one piece. A block that
+can already hold paragraphs (a callout, say) just gains the classes.
+
+**Article text** is the same shape as a starting point rather than a
+conversion: a `<div>` holding two paragraphs, shipped as `columns-1`.
+Reach for it when you know you are writing an article; reach for **Text**
+and change the count when you find out later.
+
+Blocks that hold placed things rather than written ones — a button, a
+video or photo slot, an image, a nested block — are not offered the
+control, and neither is an empty block. Changing a flow block's count is
+a class edit and nothing else, so nothing can be lost; the rest of this
+section is about grids, which are the harder case.
+
+Columns is two edits behind one number, because snippet markup keeps
+them apart. The grid's track count is a class (`sm:grid-cols-3`); the
+cells are the content. They usually match, and then changing the count
+adds or removes a cell to suit: a new column is a copy of the last one,
+so it keeps that snippet's classes and any photo or video slot it
+carried, with its words replaced by placeholders. Where they *don't*
+match — "Quote with portrait" is three tracks holding two cells, the
+second spanning two — only the class changes, which is the honest
+reading of "make it two columns" for a grid whose cells were never one
+per column. Removing a column that holds real content asks first.
+
+Two details worth knowing. The count is read from the *largest*
+`grid-cols-*` class on the element, so the common
+`grid-cols-1 sm:grid-cols-2` idiom edits the `sm:` rule and leaves the
+mobile stack alone. And a block holding several separate grids gets no
+control rather than a guess about which one was meant.
+
+Every class the control can write is declared in Go, by
+`render.EditorAppliedClasses` — these are classes the editor puts into
+content on its own, which no snippet carries and no scan of stored
+content can find until after the first save that uses one. They are
+folded into the generated content stylesheet's corpus so a fresh install
+is covered, and the safelists below are checked against them by a test,
+so the two cannot drift. Widening the counts the control offers means
+widening that list.
 
 ```go
 Snippets: []cms.Snippet{
@@ -586,6 +652,7 @@ safelist: [
     "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
     "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
     "grid", "gap-6", "gap-8", "sm:grid-cols-2", "sm:grid-cols-3",
+    "columns-1", "columns-2", "columns-3",
     "inline-block", "flex", "items-center", "justify-center",
     "w-full", "aspect-video", "border-2", "border-dashed",
     "border-slate-300",

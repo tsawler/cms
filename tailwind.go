@@ -213,6 +213,12 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 	for _, st := range c.cfg.EditorStyles {
 		addList(st.Class)
 	}
+	// Classes the editor applies by itself, which no snippet carries and
+	// no scan of stored content can find before the first save that uses
+	// one. See render.EditorAppliedClasses.
+	for _, cls := range render.EditorAppliedClasses() {
+		addList(cls)
+	}
 	if ss := c.cfg.SectionStyles; ss != nil {
 		// Every curated axis, Paddings included: a host that configures
 		// vertical spacing must not have to hand-safelist the classes
