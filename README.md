@@ -552,68 +552,87 @@ places:
 
 Clicking an inserted block raises its chrome — drag handle, `⟨/⟩` HTML
 source, ⚙ settings, trash. The ⚙ offers background and text colour,
-spacing, corner roundness, and — for a block that is a column layout — a
-**Columns** count.
+spacing, and corner roundness.
 
-Two different things are called columns, and the control covers both,
-because an editor means one word by them:
+#### Columns
 
-- A **grid** block (**Two columns**, **Feature grid**) is a row of
-  separate cells, each with its own content. Its count is the number of
-  grid tracks, offered as 2, 3, or 4.
-- A **flow** block (**Text**, **Article text**) is one continuous body
-  of prose split into newspaper columns — read down one and up into the
-  next. Its count is `column-count`, offered as 1, 2, or 3.
+A block that is a row of columns raises a **second, smaller toolbar**
+alongside the block chrome. It is drawn on the row's top border, centred
+over the column that was clicked — so it covers no content, and in a row
+of identical cells it is obvious which one it has hold of (that column is
+tinted too). Everything on it acts on that one column:
 
-A grid says so by carrying `grid-cols-N`; a flow says so by carrying
-`columns-N`. On top of those, **any block that is plain running text**
-gets the flow control even with no column class at all — the stock
-**Text** block being the one most people reach for. It reads as 1
-column, which is what it renders as, and choosing 2 or 3 converts it.
+| | |
+|---|---|
+| `‹` `›` | move this column along the row |
+| `⇥⇤` `⇤⇥` | make it narrower or wider, a track at a time |
+| `＋` | add a column after it |
+| 🗑 | remove it |
 
-Converting a bare `<p>` moves it inside a new `<div>` that becomes the
-block. That is worth doing for its own sake: pressing Enter in a bare
-paragraph splits it into two sibling blocks — right for a standalone
-paragraph, useless for an article — while inside the wrapper the
-paragraphs stay together and go on reading as one piece. A block that
-can already hold paragraphs (a callout, say) just gains the classes.
+A column here is a real box with its own content, never a slice of one
+continuous stream. That distinction is the whole design. CSS offers the
+other thing — `column-count`, which reflows text down one column and up
+into the next — and it is almost never what someone means by "put this
+in two columns"; it also puts the leading paragraph's top margin at the
+top of the first column and not the second, so the two start at visibly
+different heights.
 
-**Article text** is the same shape as a starting point rather than a
-conversion: a `<div>` holding two paragraphs, shipped as `columns-1`.
-Reach for it when you know you are writing an article; reach for **Text**
-and change the count when you find out later.
+**A plain text block has no columns yet**, so its toolbar shows only
+`＋`, captioned *Split into two columns*: what was there goes in the
+first column, a placeholder in the second. Blocks that hold placed
+things rather than written ones — a button, a video or photo slot, an
+image, a nested block — are not offered the split, and neither is an
+empty block. Once a block *is* a row, the full toolbar applies to it
+whatever it holds.
 
-Blocks that hold placed things rather than written ones — a button, a
-video or photo slot, an image, a nested block — are not offered the
-control, and neither is an empty block. Changing a flow block's count is
-a class edit and nothing else, so nothing can be lost; the rest of this
-section is about grids, which are the harder case.
+A new column is a copy of the one you added it after, so it keeps that
+row's classes and any photo or video slot it carried, with its words
+replaced by placeholders. Removing a column that holds real content asks
+first. Taking the last column out of a row removes the row, and where
+the row *is* the block, the block goes with it.
 
-Columns is two edits behind one number, because snippet markup keeps
-them apart. The grid's track count is a class (`sm:grid-cols-3`); the
-cells are the content. They usually match, and then changing the count
-adds or removes a cell to suit: a new column is a copy of the last one,
-so it keeps that snippet's classes and any photo or video slot it
-carried, with its words replaced by placeholders. Where they *don't*
-match — "Quote with portrait" is three tracks holding two cells, the
-second spanning two — only the class changes, which is the honest
-reading of "make it two columns" for a grid whose cells were never one
-per column. Removing a column that holds real content asks first.
+Two forms of row markup exist, and the tool moves between them exactly:
 
-Two details worth knowing. The count is read from the *largest*
+- the **even** form, `sm:grid-cols-K` with K cells carrying no span of
+  their own — what every stock snippet ships, and what a row goes back
+  to whenever its columns are equal and there are four or fewer;
+- the **spanned** form, `sm:grid-cols-12` with a `sm:col-span-N` on each
+  cell summing to twelve — taken on the moment a column is resized, or
+  when a row grows past four columns.
+
+Twelve divides by every track count the even form uses, so
+`sm:grid-cols-3` becomes twelve tracks of span 4 with nothing rounded
+and nothing moved. A row whose track count does not divide twelve (five
+tracks, seven) can still gain and lose columns; it just can't be
+resized, and says so by hiding those two buttons rather than by
+rounding. Resizing always steps a *pair* of neighbours — one track out
+of the column next door, or back into it — so the row stays exactly full
+and no sequence of clicks can leave a gap or an overflow. Six columns is
+the ceiling.
+
+Adding or removing a column re-evens the widths. That is deliberate:
+after a fourth column joins a row someone had set to 8-4, no
+redistribution of the old widths is the obvious one, and even columns
+are both predictable and one click from being reshaped again.
+
+Two details worth knowing. Counts are read from the *largest*
 `grid-cols-*` class on the element, so the common
 `grid-cols-1 sm:grid-cols-2` idiom edits the `sm:` rule and leaves the
-mobile stack alone. And a block holding several separate grids gets no
-control rather than a guess about which one was meant.
+mobile stack alone — and every rewrite goes back at the prefix it was
+read from. And a block holding several separate grids gets no tool
+rather than a guess about which one was meant.
 
-Every class the control can write is declared in Go, by
+Every class the tool can write is declared in Go, by
 `render.EditorAppliedClasses` — these are classes the editor puts into
 content on its own, which no snippet carries and no scan of stored
 content can find until after the first save that uses one. They are
 folded into the generated content stylesheet's corpus so a fresh install
 is covered, and the safelists below are checked against them by a test,
-so the two cannot drift. Widening the counts the control offers means
-widening that list.
+so the two cannot drift. Those are the `sm:` forms, because that is what
+every stock snippet uses. If your own snippets set their tracks at
+another breakpoint — or at none — the tool writes back at whatever prefix
+it read, and you have to safelist that prefix's `grid-cols-*` and
+`col-span-*` yourself.
 
 ```go
 Snippets: []cms.Snippet{
@@ -651,7 +670,8 @@ safelist: [
     "text-sm", "text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl",
     "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
     "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
-    "grid", "gap-6", "gap-8", "sm:grid-cols-2", "sm:grid-cols-3",
+    "grid", "gap-6", "gap-8", "sm:grid-cols-1", "sm:grid-cols-2",
+    "sm:grid-cols-3", "sm:grid-cols-12",
     "columns-1", "columns-2", "columns-3",
     "inline-block", "flex", "items-center", "justify-center",
     "w-full", "aspect-video", "border-2", "border-dashed",
@@ -662,7 +682,10 @@ safelist: [
     "border-slate-900", "h-0.5", "hover:bg-blue-600",
     "hover:bg-slate-300", "hover:bg-slate-900", "hover:text-white",
     "mr-2", "mt-2", "mt-4", "mt-6", "mt-10", "px-8", "size-24",
-    "sm:col-span-2", "sm:grid-cols-4", "text-5xl", "text-6xl",
+    "sm:col-span-1", "sm:col-span-2", "sm:col-span-3", "sm:col-span-4",
+    "sm:col-span-5", "sm:col-span-6", "sm:col-span-7", "sm:col-span-8",
+    "sm:col-span-9", "sm:col-span-10", "sm:col-span-11", "sm:col-span-12",
+    "sm:grid-cols-4", "text-5xl", "text-6xl",
     "sm:text-7xl", "text-slate-200", "text-slate-400", "text-slate-900",
     "tracking-widest", "uppercase", "w-10", "object-contain",
 ],

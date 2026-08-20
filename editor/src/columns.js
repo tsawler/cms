@@ -1,216 +1,271 @@
 /* ------------------------------------------------------------------ *
- * Column count — the "Columns" control in the block gear.
+ * Columns — a row of cells, and the edits that reshape it.
  *
- * Two different things are called columns, and the control covers both
- * because an editor means one word by them:
+ * A column here is a real box with its own content, never a slice of
+ * one continuous stream. That is the whole design, and it is worth
+ * saying plainly because CSS offers the other thing (`column-count`,
+ * which reflows text down one column and up into the next) and it is
+ * almost never what someone means by "put this in two columns". It also
+ * misbehaves in ways nobody asks for: the first column carries the
+ * leading paragraph's top margin while the continuation in the second
+ * does not, so the two start at visibly different heights.
  *
- *   - a GRID block ("Two columns", "Feature grid") is a row of separate
- *     cells, each holding its own content, and the count is the number
- *     of tracks (sm:grid-cols-3);
- *   - a FLOW block ("Article text") is one continuous body of prose
- *     split into newspaper columns, read down one and up into the next,
- *     and the count is column-count (columns-2).
+ * So: a row is a CSS grid, a cell is one of its children, and the edits
+ * are the ones an editor would name — add a column here, drop this one,
+ * make it wider, move it along. The model is borrowed from InnovaStudio
+ * ContentBuilder (licensed with source), whose column tool is the same
+ * five verbs against a flex row of cells; what is different is the width
+ * vocabulary, which is Tailwind track spans rather than inline widths,
+ * so a resized column stays responsive and needs no inline style the
+ * server's sanitizer would have to allow.
  *
- * Which one a block is, it says itself: a grid carries grid-cols-N, a
- * flow carries columns-N. A block carrying neither is not a column
- * layout and gets no control. Changing either by hand means opening the
- * block's HTML, which is exactly what an editor should not have to do;
- * this offers the same edit as a number.
+ * Two forms of row markup exist, and both are load-bearing:
  *
- * Two things are deliberately kept apart here, because in real snippet
- * markup they come apart:
+ *   - the EVEN form, `sm:grid-cols-K` with K cells carrying no span of
+ *     their own. This is what every stock snippet ships and what a row
+ *     goes back to whenever the cells are equal, because it is the form
+ *     a person reading the HTML would have written;
+ *   - the SPANNED form, `sm:grid-cols-12` with a `sm:col-span-N` on each
+ *     cell summing to twelve. A row takes this on the moment a column is
+ *     resized, which is the only edit that makes cells differ.
  *
- *   - the number of grid *tracks*, which is the class, and
- *   - the number of *children*, which is the content.
+ * Normalizing between them is exact, not approximate: twelve divides by
+ * every track count the even form uses, so `sm:grid-cols-3` becomes
+ * twelve tracks of span 4 with nothing rounded and nothing moved. A row
+ * whose track count does not divide twelve (five, seven) can still gain
+ * and lose columns; it just cannot be resized, and says so by disabling
+ * the control rather than by rounding.
  *
- * They usually match. They don't in "Quote with portrait" — three tracks
- * holding two children, the second spanning two columns — so this only
- * adds or removes a child when the block currently has one child per
- * track. Anywhere else the class alone changes, which is the honest
- * reading of "make it three columns" for a grid whose cells were never
- * one-per-column.
- *
- * A flow block has no such split: its content is one stream and the
- * count is purely presentational, so changing it is a class edit and
- * nothing else. Nothing can be lost, which is why only the grid path
- * ever asks before applying.
+ * The responsive prefix travels with the count. Stock markup writes its
+ * tracks at `sm:` — one column on a phone, K above it — and every rewrite
+ * here puts the new value back at whatever prefix it read the old one
+ * from, so the mobile stack underneath is never touched. A host whose
+ * snippets use a different breakpoint gets the same treatment and needs
+ * that breakpoint's classes in its own safelist; see
+ * render.EditorAppliedClasses for the ones this module ships.
  * ------------------------------------------------------------------ */
 
 import { cmsConfirm } from "./dialogs.js";
 
-// The two class vocabularies, each as a matcher and the stem a rewrite
-// puts back. Both capture the responsive prefix, if any — "grid-cols-2",
-// "sm:grid-cols-3", "lg:columns-2" — so the new count lands at the same
-// breakpoint the old one was written for.
-//
-// GRID.offered stops at four because every class the control can write
-// is then one a default snippet already uses, which is what keeps the
-// Tailwind safelists (and the generated content stylesheet) covering
-// them. FLOW starts at one because a single column is a real answer for
-// running text — it is the shape "Article text" ships in.
-var GRID = {
-    re: /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g,
-    stem: "grid-cols-",
-    marker: "grid-cols-",
-    offered: [2, 3, 4],
-};
-var FLOW = {
-    re: /(?:^|\s)((?:[a-z0-9]+:)*)columns-(\d+)(?=\s|$)/g,
-    stem: "columns-",
-    marker: "columns-",
-    offered: [1, 2, 3],
-};
+// The grid Tailwind's span vocabulary is built on. Not configurable:
+// col-span-N only means anything against a twelve-track row.
+var TRACKS = 12;
 
-// countsOn reads every column class of one kind off an element.
-function countsOn(el, kind) {
+// Above four the even form would need track counts no stock snippet
+// carries, so five and six columns are written in the spanned form
+// instead — which needs no new classes beyond the twelve spans already
+// safelisted. Six is the ceiling because a seventh column cannot be
+// given a span of two without the row overflowing.
+var EVEN_MAX = 4;
+var MAX_COLS = 6;
+
+// Both class vocabularies as matchers. The capture keeps the responsive
+// prefix — "grid-cols-2", "sm:grid-cols-3", "lg:col-span-4" — so a
+// rewrite lands at the breakpoint the original was written for.
+var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
+var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
+var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
+
+// readAll pulls every class of one kind off an element, as
+// {prefix, count} pairs in the order they appear.
+function readAll(el, re) {
     var out = [];
-    var cls = el.getAttribute ? el.getAttribute("class") || "" : "";
+    var cls = (el && el.getAttribute) ? el.getAttribute("class") || "" : "";
     var m;
-    kind.re.lastIndex = 0;
-    while ((m = kind.re.exec(cls)) !== null) {
+    re.lastIndex = 0;
+    while ((m = re.exec(cls)) !== null) {
         out.push({ prefix: m[1], count: parseInt(m[2], 10) });
-        // The lookahead for the trailing space is zero-width, so a class
-        // list of back-to-back matches would skip every other one
-        // without this.
-        kind.re.lastIndex = m.index + m[0].length - 1;
+        // The lookahead for the trailing space is zero-width, so
+        // back-to-back matches would skip every other one without this.
+        re.lastIndex = m.index + m[0].length - 1;
     }
     return out;
 }
 
-// widest returns the class that decides how many columns the block
-// *has*: the largest count. Tailwind's common idiom stacks a mobile
-// default under a breakpoint — "grid-cols-1 sm:grid-cols-2" is one
-// column on a phone and two everywhere else — and it is the two that an
-// editor means. Rewriting the largest leaves the mobile stack alone.
-function widest(el, kind) {
-    var all = countsOn(el, kind);
+// widest returns the class that decides the value in play: the largest.
+// Tailwind's common idiom stacks a mobile default under a breakpoint —
+// "grid-cols-1 sm:grid-cols-2" is one column on a phone and two
+// everywhere else — and it is the two that an editor means.
+function widest(el, re) {
+    var all = readAll(el, re);
     if (!all.length) return null;
     return all.reduce(function (a, b) { return b.count > a.count ? b : a; });
 }
 
-// carrierOf finds the element holding a column count of the given kind:
-// the block root when the root carries it ("Two columns", "Article
-// text"), otherwise the one descendant that does — most of the imported
-// library puts a heading first and the grid under it. A block holding
-// several such elements has no single answer, so it gets no control
-// rather than a guess.
-function carrierOf(block, kind) {
-    if (!block) return null;
-    if (widest(block, kind)) return block;
-    var inner = block.querySelectorAll('[class*="' + kind.marker + '"]');
-    return inner.length === 1 && widest(inner[0], kind) ? inner[0] : null;
+// setTracks rewrites the one grid-cols class the count was read from,
+// keeping its breakpoint prefix; any narrower one is a mobile stack and
+// stays exactly as it was.
+function setTracks(el, n) {
+    var cur = widest(el, GRID_RE);
+    if (!cur) return;
+    var target = cur.prefix + "grid-cols-" + cur.count;
+    var next = cur.prefix + "grid-cols-" + n;
+    el.className = el.className.split(/\s+/).map(function (c) {
+        return c === target ? next : c;
+    }).join(" ");
 }
 
-// FLOW_HOSTILE lists what stops a block being ordinary running text.
-// Media and buttons are placed things, not prose: splitting them over
-// columns is never what "two columns" meant, and a nested block is
-// another block's business. Links inside a sentence are fine, which is
-// why only a.cms-btn is named rather than every anchor.
-var FLOW_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet," +
+// setSpan gives a cell exactly one span class, at the row's prefix.
+// Passing 0 leaves it with none, which is the even form.
+function setSpan(cell, prefix, n) {
+    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function (c) {
+        return c !== "" && !SPAN_ONE.test(c);
+    });
+    if (n) kept.push(prefix + "col-span-" + n);
+    var cls = kept.join(" ");
+    if (cls) cell.setAttribute("class", cls);
+    else cell.removeAttribute("class");
+}
+
+// evenSpans splits twelve tracks over k cells as evenly as twelve
+// allows: five columns come out 3-3-2-2-2 rather than refusing to exist.
+function evenSpans(k) {
+    var base = Math.floor(TRACKS / k);
+    var rem = TRACKS % k;
+    var out = [];
+    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
+    return out;
+}
+
+// cellsOf lists a row's real cells. TinyMCE parks bogus <br>s inside
+// containers it is about to put a caret in, and one of those is not a
+// column.
+function cellsOf(row) {
+    return Array.prototype.slice.call(row.children).filter(function (el) {
+        return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
+    });
+}
+
+/* ---- finding the row -------------------------------------------- */
+
+// rowIn finds the element holding a track count: the block root when the
+// root carries it ("Two columns", "Quote with portrait"), otherwise the
+// one descendant that does — much of the imported library puts a heading
+// first and the grid under it. A block holding several such elements has
+// no single answer, so it gets no control rather than a guess.
+function rowIn(block) {
+    if (!block) return null;
+    if (widest(block, GRID_RE)) return block;
+    var inner = block.querySelectorAll('[class*="grid-cols-"]');
+    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
+}
+
+// SPLIT_HOSTILE lists what stops a block being ordinary running text
+// that could be split into columns. Media and buttons are placed things:
+// dividing a block built around one is a judgement about its design, not
+// a column edit, and a nested block is another block's business. Links
+// inside a sentence are fine, which is why only a.cms-btn is named
+// rather than every anchor.
+var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet," +
     "[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
 
-// isProse reports whether a block is plain running text that could be
-// flowed into columns although it carries no column class yet — the
-// stock "Text" block being the one everybody reaches for first.
-//
-// It has to hold words, so an empty block does not sprout a control over
-// nothing, and it has to hold nothing that is placed rather than
-// written.
-function isProse(block) {
+// canSplit reports whether a block is plain running text that could
+// become a two-column row — the stock "Text" block being the one
+// everybody reaches for first. It has to hold words, so an empty block
+// does not sprout a control over nothing, and nothing that is placed
+// rather than written.
+function canSplit(block) {
     if (!block || !(block.textContent || "").trim()) return false;
-    return !block.querySelector(FLOW_HOSTILE);
+    return !block.querySelector(SPLIT_HOSTILE);
 }
 
-// layoutOf reports which kind of column layout a block is, and the
-// element carrying the count. Grid is tested first: "columns-" is a
-// substring of nothing in the grid vocabulary, but testing in a fixed
-// order keeps a block that somehow carried both from being ambiguous.
+// columnTarget reports what the column tool should offer for a click at
+// `target` inside `block`, or null for a block that is neither a row nor
+// splittable.
 //
-// A block with neither class can still be a flow *candidate*: prose that
-// would become one the moment a count above one is chosen. It reports a
-// count of one, which is what it renders as, so the control opens saying
-// the truth about the block rather than proposing a change.
-function layoutOf(block) {
-    var grid = carrierOf(block, GRID);
-    if (grid) return { kind: GRID, el: grid, grid: true };
-    var flow = carrierOf(block, FLOW);
-    if (flow) return { kind: FLOW, el: flow, grid: false };
-    if (isProse(block)) return { kind: FLOW, el: block, grid: false, candidate: true };
-    return null;
-}
-
-// gridOf is layoutOf narrowed to grids, for the cell bookkeeping that
-// only ever applies to them.
-export function gridOf(block) {
-    var it = layoutOf(block);
-    return it && it.grid ? it.el : null;
-}
-
-// elementChildren is grid.children as a real array — the cells, ignoring
-// the whitespace text nodes between them.
-function elementChildren(grid) {
-    return Array.prototype.slice.call(grid.children);
-}
-
-// tracksAndCells reports the current column count and whether the block
-// is the simple one-child-per-column shape that may gain and lose cells.
-function tracksAndCells(grid) {
-    var cur = widest(grid, GRID);
-    var kids = elementChildren(grid);
-    return { count: cur.count, kids: kids, inStep: kids.length === cur.count };
-}
-
-// columnsField is the gear's "Columns" entry, or null for a block that
-// is not a column layout at all. The current count is always among the
-// options even when it is outside the offered range, so the select never
-// misreports what the block is.
-export function columnsField(block) {
-    var it = layoutOf(block);
-    if (!it) return null;
-    var count = it.candidate ? 1 : widest(it.el, it.kind).count;
-    var counts = it.kind.offered.slice();
-    if (counts.indexOf(count) === -1) {
-        counts.push(count);
-        counts.sort(function (a, b) { return a - b; });
+//   { mode: "cell",  … }  the click landed in one cell of a row
+//   { mode: "split", … }  the block is prose and could become a row
+//
+// In cell mode the flags say which edits are available, so the tool can
+// hide the buttons that would do nothing rather than offer them and
+// refuse: a lone cell cannot move or be narrowed, a full row cannot
+// grow, and a row whose track count does not divide twelve cannot be
+// resized at all.
+export function columnTarget(block, target) {
+    var row = rowIn(block);
+    if (!row) {
+        return canSplit(block) ? { mode: "split", block: block } : null;
     }
+    var cells = cellsOf(row);
+    if (!cells.length) return null;
+    // The click may be deep inside a cell, or on the row's own padding
+    // between cells; the latter has no column to act on.
+    var cell = null;
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i] === target || cells[i].contains(target)) { cell = cells[i]; break; }
+    }
+    if (!cell) return null;
+    var at = cells.indexOf(cell);
+    var tracks = widest(row, GRID_RE).count;
     return {
-        id: "columns",
-        label: "Columns",
-        type: "select",
-        value: String(count),
-        options: counts.map(function (n) {
-            return { value: String(n), label: n === 1 ? "1 (one flowing column)" : String(n) };
-        }),
+        mode: "cell",
+        row: row,
+        cell: cell,
+        index: at,
+        count: cells.length,
+        canAdd: cells.length < MAX_COLS,
+        // Resizing needs the spanned form, and reaching it exactly needs
+        // a track count twelve divides by.
+        canResize: cells.length > 1 && TRACKS % tracks === 0,
+        canMoveBack: at > 0,
+        canMoveOn: at < cells.length - 1,
     };
 }
 
-// droppedCells lists the cells a change to n columns would delete —
-// empty when nothing is lost, which is every case except shrinking a
-// grid whose cells are one per column.
-function droppedCells(block, n) {
-    var grid = gridOf(block);
-    if (!grid) return [];
-    var t = tracksAndCells(grid);
-    if (!t.inStep || !(n < t.count)) return [];
-    return t.kids.slice(n);
+/* ---- rewriting the row ------------------------------------------ */
+
+// spanned puts a row into the twelve-track form, preserving the relative
+// widths it already had: three tracks of span 1 and 2 become twelve of
+// span 4 and 8, which is the same layout written in the vocabulary a
+// resize can step through. Returns the cells' spans, or null when the
+// row's track count does not divide twelve.
+function spanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var factor = TRACKS / cur.count;
+    if (factor !== Math.floor(factor)) return null;
+    var cells = cellsOf(row);
+    var spans = cells.map(function (c) {
+        var s = widest(c, SPAN_RE);
+        return (s ? s.count : 1) * factor;
+    });
+    var total = spans.reduce(function (a, b) { return a + b; }, 0);
+    // A row whose spans do not add up to its tracks is one the markup
+    // never meant as a simple row of columns — a deliberately short row,
+    // or a wrapping one. Making the widths even is the only honest thing
+    // left, and it is what the next add or remove would do anyway.
+    if (total !== TRACKS) spans = evenSpans(cells.length);
+    setTracks(row, TRACKS);
+    cells.forEach(function (c, i) { setSpan(c, cur.prefix, spans[i]); });
+    return spans;
 }
 
-// confirmColumns asks before a change that would delete a cell holding
-// something — written text, or a picture. Resolves true to go ahead.
-// Losing an untouched placeholder cell is not worth a question, and
-// neither is adding columns.
-export function confirmColumns(block, value) {
-    var n = parseInt(value, 10);
-    if (!n) return Promise.resolve(true);
-    var lost = droppedCells(block, n).filter(function (cell) {
-        return (cell.textContent || "").trim() !== "" ||
-            cell.querySelector("img, video, iframe");
-    });
-    if (!lost.length) return Promise.resolve(true);
-    return cmsConfirm(lost.length === 1
-        ? "Removing a column deletes its content. Continue?"
-        : "Removing " + lost.length + " columns deletes their content. Continue?",
-    "Remove", true);
+// fixLayout re-stamps the widths after the cell count changes, so they
+// always add up to a full row — the one piece of ContentBuilder's column
+// tool that is pure bookkeeping, and the reason its rows can never drift
+// out of alignment.
+//
+// Widths go back to even, which is deliberate: after adding a fourth
+// column to a row someone had set to 8-4, no redistribution of the old
+// widths is the obvious one, and even columns are both predictable and
+// one click from being reshaped again.
+//
+// Four or fewer even columns are written in the even form, spans
+// stripped, because that is the markup a person would have written and
+// the markup every stock snippet already carries.
+function fixLayout(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return;
+    var cells = cellsOf(row);
+    if (!cells.length) return;
+    if (cells.length <= EVEN_MAX) {
+        setTracks(row, cells.length);
+        cells.forEach(function (c) { setSpan(c, cur.prefix, 0); });
+        return;
+    }
+    setTracks(row, TRACKS);
+    var spans = evenSpans(cells.length);
+    cells.forEach(function (c, i) { setSpan(c, cur.prefix, spans[i]); });
 }
 
 // blankText replaces the words in a cloned cell with a placeholder, so a
@@ -248,90 +303,127 @@ function cleanClone(cell) {
             }
         }
     });
+    // The mark naming the column the tool has hold of belongs to the
+    // original, not to a copy of it.
+    clone.classList.remove("cms-col-active");
     blankText(clone);
     return clone;
 }
 
-// setCount rewrites the one class the count was read from, keeping its
-// breakpoint prefix; any narrower one is a mobile stack and stays.
-function setCount(el, kind, n) {
-    var cur = widest(el, kind);
-    var target = cur.prefix + kind.stem + cur.count;
-    el.className = el.className.split(/\s+/).map(function (c) {
-        return c === target ? cur.prefix + kind.stem + n : c;
-    }).join(" ");
+/* ---- the edits --------------------------------------------------- */
+
+// addColumn puts a fresh column immediately after the one acted on — a
+// blanked copy of it, so it arrives with that row's own styling — and
+// re-evens the widths. Returns the new cell.
+export function addColumn(info) {
+    var clone = cleanClone(info.cell);
+    info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
 }
 
-// makeFlow turns a prose block that carries no column class into one
-// that does, and returns the element that is now the block.
-//
-// A block that can hold paragraphs only needs the classes. A bare <p>
-// cannot — paragraphs do not nest — so it is moved inside a new <div>
-// that takes over as the block. That is worth doing for its own sake:
-// pressing Enter in a bare paragraph splits it into two sibling blocks,
-// while inside the wrapper the paragraphs stay together and go on
-// reading as one piece of text, which is the whole point of flowing
-// them.
-function makeFlow(block, n) {
-    var classes = FLOW.stem + n + " gap-8";
-    if (block.tagName !== "P") {
-        block.className = (block.className + " " + classes).trim();
-        return block;
-    }
-    var wrap = document.createElement("div");
-    wrap.className = (block.className + " " + classes).trim();
-    block.parentNode.insertBefore(wrap, block);
-    // The paragraph keeps its own identity inside the wrapper, but not
-    // the marker that made it a block: there is one block here, and it
-    // is now the wrapper.
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
-    wrap.appendChild(block);
-    return wrap;
+// confirmRemove asks before deleting a column holding something someone
+// wrote or placed. An untouched placeholder column is not worth a
+// question. Resolves true to go ahead.
+export function confirmRemove(info) {
+    var cell = info.cell;
+    var used = (cell.textContent || "").trim() !== "" ||
+        cell.querySelector("img, video, iframe");
+    if (!used) return Promise.resolve(true);
+    return cmsConfirm(info.count === 1
+        ? "Deleting the last column deletes this block. Continue?"
+        : "Removing this column deletes its content. Continue?",
+    "Remove", true);
 }
 
-// applyColumns sets the block to n columns and returns the element that
-// is the block afterwards — the same one in every case but a bare
-// paragraph becoming a flow, which grows a wrapper (see makeFlow).
-//
-// For a flow block the count is the whole change: the content is one
-// stream, and how many columns it runs in is presentation. For a grid it
-// is the class always, and the cells too when the block is
-// one-child-per-column. Call it inside the owning editor's undo
-// transaction, like the rest of the gear.
-export function applyColumns(block, value) {
-    var n = parseInt(value, 10);
-    var it = layoutOf(block);
-    if (!it || !n) return block;
-
-    // Prose with no column class of its own renders as one column, so
-    // choosing one asks for nothing; anything more converts it.
-    if (it.candidate) {
-        return n > 1 ? makeFlow(block, n) : block;
-    }
-
-    var cur = widest(it.el, it.kind).count;
-    if (cur === n) return block;
-
-    if (!it.grid) {
-        setCount(it.el, it.kind, n);
+// removeColumn drops a column. Taking the last one out of a row leaves
+// nothing to hold, so the row goes too — and where the row *is* the
+// block, so does the block. Returns the element still standing, or null
+// when the block itself was removed, so the caller knows what to
+// re-anchor its chrome around.
+export function removeColumn(info, block) {
+    info.cell.remove();
+    if (cellsOf(info.row).length) {
+        fixLayout(info.row);
         return block;
     }
-
-    var grid = it.el;
-    var t = tracksAndCells(grid);
-    setCount(grid, GRID, n);
-
-    if (!t.inStep) return block;
-    if (n > t.count) {
-        // Clone the last cell rather than the first: in a grid that
-        // leads with a heading-ish cell, the last one is the ordinary
-        // repeating unit.
-        for (var i = t.count; i < n; i++) {
-            grid.appendChild(cleanClone(grid.lastElementChild));
-        }
-        return block;
+    if (info.row === block) {
+        block.remove();
+        return null;
     }
-    t.kids.slice(n).forEach(function (cell) { cell.remove(); });
+    info.row.remove();
     return block;
+}
+
+// resizeColumn widens or narrows a column by one track, taking the width
+// from (or giving it to) the neighbour on the side there is one — the
+// next column normally, the previous for the last column in the row.
+// Both stay at a track or more, so a column can never be squeezed out of
+// existence by resizing; use Remove for that.
+//
+// Stepping a *pair* rather than one column is what keeps the row full:
+// the total is invariant, so no combination of resizes can leave a gap
+// or an overflow.
+export function resizeColumn(info, delta) {
+    var spans = spanned(info.row);
+    if (!spans) return;
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var other = at < cells.length - 1 ? at + 1 : at - 1;
+    if (other < 0) return;
+    var mine = spans[at] + delta;
+    var theirs = spans[other] - delta;
+    if (mine < 1 || theirs < 1) return;
+    var prefix = widest(info.row, GRID_RE).prefix;
+    setSpan(cells[at], prefix, mine);
+    setSpan(cells[other], prefix, theirs);
+}
+
+// moveColumn swaps a column with its neighbour. Widths travel with the
+// cells rather than staying with the positions, which is what "move this
+// column" means: a narrow sidebar moved to the other end is still narrow.
+export function moveColumn(info, dir) {
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var to = at + dir;
+    if (to < 0 || to >= cells.length) return;
+    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
+    else info.row.insertBefore(cells[to], info.cell);
+}
+
+// splitIntoColumns turns a prose block into a two-column row: what was
+// there goes in the first column, a placeholder in the second. Returns
+// the element that is the block afterwards.
+//
+// A block that can hold divs keeps its identity and gains the grid
+// classes. A bare <p> cannot — paragraphs do not nest — so it moves
+// inside a new <div> that takes over as the block. That is worth doing
+// for its own sake: pressing Enter in a bare paragraph splits it into
+// two sibling blocks, while inside a column the paragraphs stay together
+// and go on reading as one piece of text.
+export function splitIntoColumns(block) {
+    var row = block;
+    if (block.tagName === "P") {
+        row = document.createElement("div");
+        row.className = block.className;
+        block.parentNode.insertBefore(row, block);
+        // The paragraph keeps its own identity inside the row, but not
+        // the marker that made it a block: there is one block here, and
+        // it is now the row.
+        block.classList.remove("cms-snippet");
+        if (!block.getAttribute("class")) block.removeAttribute("class");
+    }
+    var first = document.createElement("div");
+    while (row.firstChild) first.appendChild(row.firstChild);
+    if (row !== block) first.appendChild(block);
+    row.appendChild(first);
+
+    var second = document.createElement("div");
+    var p = document.createElement("p");
+    p.textContent = "Write something here.";
+    second.appendChild(p);
+    row.appendChild(second);
+
+    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
+    return row;
 }

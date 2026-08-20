@@ -18,7 +18,10 @@ import { chooseVideoInto } from "./videos.js";
 import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
 import { openCodeEditor } from "./code.js";
-import { columnsField, applyColumns, confirmColumns } from "./columns.js";
+import {
+    columnTarget, addColumn, confirmRemove, removeColumn,
+    resizeColumn, moveColumn, splitIntoColumns,
+} from "./columns.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
 import { flash } from "./util.js";
 
@@ -185,6 +188,144 @@ function showSnipUI(el) {
 export function hideSnipUI() {
     activeSnip = null;
     $("snip-ui").classList.remove("on");
+}
+
+/* Column chrome. A block that is a row of columns gets a second, smaller
+ * toolbar on top of the block chrome, anchored to the column that was
+ * clicked: everything on it acts on that one column. A prose block that
+ * is not a row yet gets the same toolbar showing nothing but ＋, which
+ * splits it into two columns — that being the only way a plain "Text"
+ * block ever becomes one.
+ *
+ * The pair is deliberate. The block chrome moves, restyles, and deletes
+ * the whole thing; this reshapes what is inside it. Which one someone
+ * wants is answered by which one they reach for, not by a mode. */
+var activeCol = null; // the columnTarget the chrome is attached to
+
+// placeColUI straddles the row's top border — half above, half below —
+// and centres the pill over the column it acts on.
+//
+// Both halves of that are load-bearing. Sitting *on* the boundary means
+// it never covers the first line of the column, which anchoring inside
+// the cell did; it is the same idiom the section toolbar already uses
+// (.cms-sec-ui in light.css), so a toolbar on an edge consistently
+// reads as belonging to the container it is drawn on. Centring on the
+// column rather than its left edge is what makes "this one" obvious in
+// a row of identical cells, and it keeps the pill clear of the block
+// chrome, which is left-aligned above the block.
+//
+// The top is the *row's*, not the cell's: cells rarely start at the same
+// height (a short one, a photo above text), and a toolbar that stepped
+// up and down as columns were clicked would read as belonging to the
+// content rather than to the row.
+function placeColUI() {
+    if (!activeCol) return;
+    var ui = $("col-ui");
+    var cell = activeCol.mode === "cell" ? activeCol.cell : activeCol.block;
+    var row = activeCol.mode === "cell" ? activeCol.row : activeCol.block;
+    // Measured, not assumed: the pill's width changes with how many of
+    // its buttons this column can use.
+    var box = ui.getBoundingClientRect();
+    var r = cell.getBoundingClientRect();
+    var top = row.getBoundingClientRect().top - box.height / 2;
+    // TinyMCE's toolbar is pinned to the top of the viewport; never
+    // slide underneath it.
+    if (top < 64) top = 64;
+    var left = r.left + (r.width - box.width) / 2;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+}
+
+// markActiveCell tints the one column every button on the toolbar acts
+// on. The class is stripped again at serialization time along with the
+// rest of the editor's marks (see clearColMarks) — it describes what is
+// selected right now, and nothing about it belongs in saved content.
+function markActiveCell(cell) {
+    document.querySelectorAll(".cms-col-active").forEach(function (el) {
+        if (el === cell) return;
+        el.classList.remove("cms-col-active");
+        // classList.remove leaves class="" behind on a cell whose only
+        // class was the mark, and an empty attribute would go on to be
+        // saved as content.
+        if (!el.getAttribute("class")) el.removeAttribute("class");
+    });
+    if (cell) cell.classList.add("cms-col-active");
+}
+
+function showColUI(block, target) {
+    var info = columnTarget(block, target);
+    if (!info) {
+        hideColUI();
+        return;
+    }
+    activeCol = info;
+    markActiveCell(info.mode === "cell" ? info.cell : null);
+    var cell = info.mode === "cell";
+    $("col-back").hidden = !cell || !info.canMoveBack;
+    $("col-on").hidden = !cell || !info.canMoveOn;
+    $("col-narrow").hidden = !cell || !info.canResize;
+    $("col-wide").hidden = !cell || !info.canResize;
+    $("col-del").hidden = !cell;
+    $("col-add").hidden = cell && !info.canAdd;
+    $("col-add").title = cell ? "Add a column" : "Split into two columns";
+    // Everything can be unavailable at once: a full row of one column
+    // offers only Remove, and a row already at the maximum offers only
+    // the moves. An empty pill would be a puzzle, so it stays away.
+    var any = ["col-back", "col-on", "col-narrow", "col-wide", "col-add", "col-del"]
+        .some(function (id) { return !$(id).hidden; });
+    if (!any) {
+        hideColUI();
+        return;
+    }
+    $("col-ui").classList.add("on");
+    placeColUI();
+}
+
+export function hideColUI() {
+    activeCol = null;
+    markActiveCell(null);
+    $("col-ui").classList.remove("on");
+}
+
+// afterColumnEdit puts everything back in step once a column edit has
+// landed: the block may have changed identity (a split paragraph grows a
+// row that becomes the block), the chrome has to re-measure around new
+// geometry, and the container needs marking dirty so the change can be
+// saved. `now` is the element the block is afterwards, or null when the
+// last column went and took the block with it — which is exactly why the
+// container is passed in rather than looked up from the block: a removed
+// element has no ancestors left to find it by.
+function afterColumnEdit(container, now, target) {
+    lockButtons(); // a cloned or moved column may carry a button
+    if (container) markContainerDirty(container);
+    if (!now) {
+        hideChrome();
+        return;
+    }
+    activeSnip = now;
+    showSnipUI(now);
+    showColUI(now, target || now);
+}
+
+// runColumnEdit is the shape every column button shares: make the change
+// inside the owning editor's undo transaction, then re-anchor. The
+// callback may return the block afterwards and the element the chrome
+// should re-resolve its column from; anything it leaves out is unchanged.
+function runColumnEdit(edit) {
+    if (!activeCol) return;
+    var info = activeCol;
+    var block = activeSnip;
+    var anchor = info.mode === "cell" ? info.cell : info.block;
+    var container = anchor.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(anchor);
+    var now = block;
+    var target = info.mode === "cell" ? info.cell : null;
+    runWithUndo(ed, function () {
+        var out = edit(info) || {};
+        if ("block" in out) now = out.block;
+        if ("target" in out) target = out.target;
+    });
+    afterColumnEdit(container, now, target);
 }
 
 /* Embedded images get a gear (alt text, caption, link, rendition, and
@@ -412,7 +553,9 @@ export function hideSlotUI() {
 // Callers outside this module pass nothing, meaning "all of it".
 export function hideChrome(except) {
     if (except !== "btn") hideButtonUI();
-    if (except !== "snip") hideSnipUI();
+    // Column chrome belongs to the block chrome: it is raised by the same
+    // click and never outlives it.
+    if (except !== "snip") { hideSnipUI(); hideColUI(); }
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -704,6 +847,9 @@ export function initButtons() {
             // editing the snippet's text.
             hideChrome("snip");
             showSnipUI(snip);
+            // The same click decides which column was meant, so the
+            // column tool follows the caret without a second one.
+            showColUI(snip, t);
         } else {
             hideChrome();
         }
@@ -713,6 +859,7 @@ export function initButtons() {
     window.addEventListener("scroll", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
+        if (activeCol) placeColUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -720,6 +867,7 @@ export function initButtons() {
     window.addEventListener("resize", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
+        if (activeCol) placeColUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1005,6 +1153,47 @@ export function initButtons() {
         });
     });
 
+    $("col-back").addEventListener("click", function () {
+        runColumnEdit(function (info) { moveColumn(info, -1); });
+    });
+    $("col-on").addEventListener("click", function () {
+        runColumnEdit(function (info) { moveColumn(info, 1); });
+    });
+    $("col-narrow").addEventListener("click", function () {
+        runColumnEdit(function (info) { resizeColumn(info, -1); });
+    });
+    $("col-wide").addEventListener("click", function () {
+        runColumnEdit(function (info) { resizeColumn(info, 1); });
+    });
+    $("col-add").addEventListener("click", function () {
+        runColumnEdit(function (info) {
+            if (info.mode === "split") {
+                var row = splitIntoColumns(info.block);
+                // Anchor on the new second column: it is the one holding
+                // a placeholder, so it is the one about to be written in.
+                return { block: row, target: row.lastElementChild };
+            }
+            return { target: addColumn(info) };
+        });
+    });
+    $("col-del").addEventListener("click", function () {
+        if (!activeCol || activeCol.mode !== "cell") return;
+        var info = activeCol;
+        var block = activeSnip;
+        // The removed column cannot anchor the chrome afterwards, so the
+        // neighbour that closes the gap is noted while it is still
+        // findable.
+        var near = info.cell.nextElementSibling || info.cell.previousElementSibling;
+        var container = info.cell.closest("[data-cms-region],[data-cms-sections]");
+        confirmRemove(info).then(function (yes) {
+            if (!yes) return;
+            var ed = findOwningEditor(info.row);
+            var now = block;
+            runWithUndo(ed, function () { now = removeColumn(info, block); });
+            afterColumnEdit(container, now, near);
+        });
+    });
+
     $("snip-set").addEventListener("click", function () {
         if (!activeSnip) return;
         var el = activeSnip;
@@ -1038,10 +1227,6 @@ export function initButtons() {
                     ? parseInt(el.style.borderRadius, 10) || 0
                     : baseRadius)) },
         ];
-        // Only a block that is a grid has a column count to set; for
-        // everything else the dialog is the four fields it always was.
-        var cols = columnsField(el);
-        if (cols) setFields.push(cols);
         openDialog({
             message: "Block settings",
             okLabel: "Apply",
@@ -1084,22 +1269,7 @@ export function initButtons() {
                         into.appendChild(line);
                     });
                 };
-                // A grid block previews as its columns, so the count
-                // reads as a shape rather than as a number.
-                var cols = parseInt(v.columns, 10) || 1;
-                if (cols > 1) {
-                    var row = document.createElement("div");
-                    row.style.cssText = "display:flex;gap:8px";
-                    for (var c = 0; c < cols; c++) {
-                        var cell = document.createElement("div");
-                        cell.style.cssText = "flex:1 1 0;min-width:0";
-                        lines(cell, [["9px", "70%"], ["6px", "100%"], ["6px", "85%"]]);
-                        row.appendChild(cell);
-                    }
-                    box.appendChild(row);
-                } else {
-                    lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
-                }
+                lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
                 page.appendChild(ctxLine());
                 page.appendChild(box);
                 page.appendChild(ctxLine());
@@ -1108,26 +1278,12 @@ export function initButtons() {
         }).then(function (v) {
             if (!v) return;
             var ed = findOwningEditor(el);
-            // Fewer columns can delete a cell someone wrote in, so that
-            // part asks first; the styling half never needs a question.
-            confirmColumns(el, v.columns).then(function (ok) {
-                // The block itself can change identity here: a bare
-                // paragraph asked for two columns grows a wrapper, and
-                // the wrapper is the block from then on. So columns go
-                // first and everything after works on what comes back.
-                var now = el;
-                var run = function () {
-                    if (ok) now = applyColumns(el, v.columns) || el;
-                    applySnippetSettings(now, v, baseRadius);
-                };
-                runWithUndo(ed, run);
-                lockButtons(); // a cloned column may have brought a button
-                markContainerDirty(now);
-                if (activeSnip === el) {
-                    activeSnip = now;
-                    showSnipUI(now); // re-anchor around the new size
-                }
-            });
+            runWithUndo(ed, function () { applySnippetSettings(el, v, baseRadius); });
+            markContainerDirty(el);
+            if (activeSnip === el) {
+                showSnipUI(el); // re-anchor around the new size
+                placeColUI(); // spacing moved the row the column tool sits in
+            }
         });
     });
 

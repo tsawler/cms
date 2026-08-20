@@ -303,6 +303,21 @@ export function initInlineEditor(el, onDirty, register) {
                         }
                     }
                 });
+                // cms-col-active tints the column the column tool has
+                // hold of. It is a selection, not content, and a save can
+                // happen while it is on — the chrome only clears once the
+                // request comes back — so it comes off here.
+                ed.serializer.addAttributeFilter("class", function (nodes) {
+                    for (var i = 0; i < nodes.length; i++) {
+                        var n = nodes[i];
+                        var cls = n.attr("class") || "";
+                        if (cls.indexOf("cms-col-active") === -1) continue;
+                        cls = cls.split(/\s+/).filter(function (c) {
+                            return c !== "" && c !== "cms-col-active";
+                        }).join(" ");
+                        n.attr("class", cls || null);
+                    }
+                });
             });
             // Both media buttons skip TinyMCE's URL dialogs and go
             // straight to the CMS media picker (library + upload).

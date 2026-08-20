@@ -415,6 +415,17 @@
               }
             }
           });
+          ed.serializer.addAttributeFilter("class", function(nodes) {
+            for (var i = 0; i < nodes.length; i++) {
+              var n = nodes[i];
+              var cls = n.attr("class") || "";
+              if (cls.indexOf("cms-col-active") === -1) continue;
+              cls = cls.split(/\s+/).filter(function(c) {
+                return c !== "" && c !== "cms-col-active";
+              }).join(" ");
+              n.attr("class", cls || null);
+            }
+          });
         });
         if (mediaEnabled) {
           ed.ui.registry.addButton("cmsimage", {
@@ -747,6 +758,7 @@
         }
       }
       if (n.classList.contains("cms-btn")) n.removeAttribute("contenteditable");
+      n.classList.remove("cms-col-active");
       if (n.getAttribute("class") === "") n.removeAttribute("class");
     });
     return clone.outerHTML;
@@ -2059,107 +2071,139 @@
   }
 
   // ../src/columns.js
-  var GRID = {
-    re: /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g,
-    stem: "grid-cols-",
-    marker: "grid-cols-",
-    offered: [2, 3, 4]
-  };
-  var FLOW = {
-    re: /(?:^|\s)((?:[a-z0-9]+:)*)columns-(\d+)(?=\s|$)/g,
-    stem: "columns-",
-    marker: "columns-",
-    offered: [1, 2, 3]
-  };
-  function countsOn(el, kind) {
+  var TRACKS = 12;
+  var EVEN_MAX = 4;
+  var MAX_COLS = 6;
+  var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
+  var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
+  var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
+  function readAll(el, re) {
     var out = [];
-    var cls = el.getAttribute ? el.getAttribute("class") || "" : "";
+    var cls = el && el.getAttribute ? el.getAttribute("class") || "" : "";
     var m;
-    kind.re.lastIndex = 0;
-    while ((m = kind.re.exec(cls)) !== null) {
+    re.lastIndex = 0;
+    while ((m = re.exec(cls)) !== null) {
       out.push({ prefix: m[1], count: parseInt(m[2], 10) });
-      kind.re.lastIndex = m.index + m[0].length - 1;
+      re.lastIndex = m.index + m[0].length - 1;
     }
     return out;
   }
-  function widest(el, kind) {
-    var all = countsOn(el, kind);
+  function widest(el, re) {
+    var all = readAll(el, re);
     if (!all.length) return null;
     return all.reduce(function(a, b) {
       return b.count > a.count ? b : a;
     });
   }
-  function carrierOf(block, kind) {
+  function setTracks(el, n) {
+    var cur = widest(el, GRID_RE);
+    if (!cur) return;
+    var target = cur.prefix + "grid-cols-" + cur.count;
+    var next = cur.prefix + "grid-cols-" + n;
+    el.className = el.className.split(/\s+/).map(function(c) {
+      return c === target ? next : c;
+    }).join(" ");
+  }
+  function setSpan(cell, prefix, n) {
+    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function(c) {
+      return c !== "" && !SPAN_ONE.test(c);
+    });
+    if (n) kept.push(prefix + "col-span-" + n);
+    var cls = kept.join(" ");
+    if (cls) cell.setAttribute("class", cls);
+    else cell.removeAttribute("class");
+  }
+  function evenSpans(k) {
+    var base = Math.floor(TRACKS / k);
+    var rem = TRACKS % k;
+    var out = [];
+    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
+    return out;
+  }
+  function cellsOf(row) {
+    return Array.prototype.slice.call(row.children).filter(function(el) {
+      return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
+    });
+  }
+  function rowIn(block) {
     if (!block) return null;
-    if (widest(block, kind)) return block;
-    var inner = block.querySelectorAll('[class*="' + kind.marker + '"]');
-    return inner.length === 1 && widest(inner[0], kind) ? inner[0] : null;
+    if (widest(block, GRID_RE)) return block;
+    var inner = block.querySelectorAll('[class*="grid-cols-"]');
+    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
   }
-  var FLOW_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
-  function isProse(block) {
+  var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
+  function canSplit(block) {
     if (!block || !(block.textContent || "").trim()) return false;
-    return !block.querySelector(FLOW_HOSTILE);
+    return !block.querySelector(SPLIT_HOSTILE);
   }
-  function layoutOf(block) {
-    var grid = carrierOf(block, GRID);
-    if (grid) return { kind: GRID, el: grid, grid: true };
-    var flow = carrierOf(block, FLOW);
-    if (flow) return { kind: FLOW, el: flow, grid: false };
-    if (isProse(block)) return { kind: FLOW, el: block, grid: false, candidate: true };
-    return null;
-  }
-  function gridOf(block) {
-    var it = layoutOf(block);
-    return it && it.grid ? it.el : null;
-  }
-  function elementChildren(grid) {
-    return Array.prototype.slice.call(grid.children);
-  }
-  function tracksAndCells(grid) {
-    var cur = widest(grid, GRID);
-    var kids = elementChildren(grid);
-    return { count: cur.count, kids, inStep: kids.length === cur.count };
-  }
-  function columnsField(block) {
-    var it = layoutOf(block);
-    if (!it) return null;
-    var count = it.candidate ? 1 : widest(it.el, it.kind).count;
-    var counts = it.kind.offered.slice();
-    if (counts.indexOf(count) === -1) {
-      counts.push(count);
-      counts.sort(function(a, b) {
-        return a - b;
-      });
+  function columnTarget(block, target) {
+    var row = rowIn(block);
+    if (!row) {
+      return canSplit(block) ? { mode: "split", block } : null;
     }
+    var cells = cellsOf(row);
+    if (!cells.length) return null;
+    var cell = null;
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] === target || cells[i].contains(target)) {
+        cell = cells[i];
+        break;
+      }
+    }
+    if (!cell) return null;
+    var at = cells.indexOf(cell);
+    var tracks = widest(row, GRID_RE).count;
     return {
-      id: "columns",
-      label: "Columns",
-      type: "select",
-      value: String(count),
-      options: counts.map(function(n) {
-        return { value: String(n), label: n === 1 ? "1 (one flowing column)" : String(n) };
-      })
+      mode: "cell",
+      row,
+      cell,
+      index: at,
+      count: cells.length,
+      canAdd: cells.length < MAX_COLS,
+      // Resizing needs the spanned form, and reaching it exactly needs
+      // a track count twelve divides by.
+      canResize: cells.length > 1 && TRACKS % tracks === 0,
+      canMoveBack: at > 0,
+      canMoveOn: at < cells.length - 1
     };
   }
-  function droppedCells(block, n) {
-    var grid = gridOf(block);
-    if (!grid) return [];
-    var t = tracksAndCells(grid);
-    if (!t.inStep || !(n < t.count)) return [];
-    return t.kids.slice(n);
-  }
-  function confirmColumns(block, value) {
-    var n = parseInt(value, 10);
-    if (!n) return Promise.resolve(true);
-    var lost = droppedCells(block, n).filter(function(cell) {
-      return (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
+  function spanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var factor = TRACKS / cur.count;
+    if (factor !== Math.floor(factor)) return null;
+    var cells = cellsOf(row);
+    var spans = cells.map(function(c) {
+      var s = widest(c, SPAN_RE);
+      return (s ? s.count : 1) * factor;
     });
-    if (!lost.length) return Promise.resolve(true);
-    return cmsConfirm(
-      lost.length === 1 ? "Removing a column deletes its content. Continue?" : "Removing " + lost.length + " columns deletes their content. Continue?",
-      "Remove",
-      true
-    );
+    var total = spans.reduce(function(a, b) {
+      return a + b;
+    }, 0);
+    if (total !== TRACKS) spans = evenSpans(cells.length);
+    setTracks(row, TRACKS);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
+    return spans;
+  }
+  function fixLayout(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return;
+    var cells = cellsOf(row);
+    if (!cells.length) return;
+    if (cells.length <= EVEN_MAX) {
+      setTracks(row, cells.length);
+      cells.forEach(function(c) {
+        setSpan(c, cur.prefix, 0);
+      });
+      return;
+    }
+    setTracks(row, TRACKS);
+    var spans = evenSpans(cells.length);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
   }
   function blankText(cell) {
     var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
@@ -2187,57 +2231,81 @@
         }
       }
     });
+    clone.classList.remove("cms-col-active");
     blankText(clone);
     return clone;
   }
-  function setCount(el, kind, n) {
-    var cur = widest(el, kind);
-    var target = cur.prefix + kind.stem + cur.count;
-    el.className = el.className.split(/\s+/).map(function(c) {
-      return c === target ? cur.prefix + kind.stem + n : c;
-    }).join(" ");
+  function addColumn(info) {
+    var clone = cleanClone(info.cell);
+    info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
   }
-  function makeFlow(block, n) {
-    var classes = FLOW.stem + n + " gap-8";
-    if (block.tagName !== "P") {
-      block.className = (block.className + " " + classes).trim();
-      return block;
-    }
-    var wrap = document.createElement("div");
-    wrap.className = (block.className + " " + classes).trim();
-    block.parentNode.insertBefore(wrap, block);
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
-    wrap.appendChild(block);
-    return wrap;
+  function confirmRemove(info) {
+    var cell = info.cell;
+    var used = (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
+    if (!used) return Promise.resolve(true);
+    return cmsConfirm(
+      info.count === 1 ? "Deleting the last column deletes this block. Continue?" : "Removing this column deletes its content. Continue?",
+      "Remove",
+      true
+    );
   }
-  function applyColumns(block, value) {
-    var n = parseInt(value, 10);
-    var it = layoutOf(block);
-    if (!it || !n) return block;
-    if (it.candidate) {
-      return n > 1 ? makeFlow(block, n) : block;
-    }
-    var cur = widest(it.el, it.kind).count;
-    if (cur === n) return block;
-    if (!it.grid) {
-      setCount(it.el, it.kind, n);
+  function removeColumn(info, block) {
+    info.cell.remove();
+    if (cellsOf(info.row).length) {
+      fixLayout(info.row);
       return block;
     }
-    var grid = it.el;
-    var t = tracksAndCells(grid);
-    setCount(grid, GRID, n);
-    if (!t.inStep) return block;
-    if (n > t.count) {
-      for (var i = t.count; i < n; i++) {
-        grid.appendChild(cleanClone(grid.lastElementChild));
-      }
-      return block;
+    if (info.row === block) {
+      block.remove();
+      return null;
     }
-    t.kids.slice(n).forEach(function(cell) {
-      cell.remove();
-    });
+    info.row.remove();
     return block;
+  }
+  function resizeColumn(info, delta) {
+    var spans = spanned(info.row);
+    if (!spans) return;
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var other = at < cells.length - 1 ? at + 1 : at - 1;
+    if (other < 0) return;
+    var mine = spans[at] + delta;
+    var theirs = spans[other] - delta;
+    if (mine < 1 || theirs < 1) return;
+    var prefix = widest(info.row, GRID_RE).prefix;
+    setSpan(cells[at], prefix, mine);
+    setSpan(cells[other], prefix, theirs);
+  }
+  function moveColumn(info, dir) {
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var to = at + dir;
+    if (to < 0 || to >= cells.length) return;
+    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
+    else info.row.insertBefore(cells[to], info.cell);
+  }
+  function splitIntoColumns(block) {
+    var row = block;
+    if (block.tagName === "P") {
+      row = document.createElement("div");
+      row.className = block.className;
+      block.parentNode.insertBefore(row, block);
+      block.classList.remove("cms-snippet");
+      if (!block.getAttribute("class")) block.removeAttribute("class");
+    }
+    var first = document.createElement("div");
+    while (row.firstChild) first.appendChild(row.firstChild);
+    if (row !== block) first.appendChild(block);
+    row.appendChild(first);
+    var second = document.createElement("div");
+    var p = document.createElement("p");
+    p.textContent = "Write something here.";
+    second.appendChild(p);
+    row.appendChild(second);
+    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
+    return row;
   }
 
   // ../src/buttons.js
@@ -2345,6 +2413,86 @@
   function hideSnipUI() {
     activeSnip = null;
     $("snip-ui").classList.remove("on");
+  }
+  var activeCol = null;
+  function placeColUI() {
+    if (!activeCol) return;
+    var ui = $("col-ui");
+    var cell = activeCol.mode === "cell" ? activeCol.cell : activeCol.block;
+    var row = activeCol.mode === "cell" ? activeCol.row : activeCol.block;
+    var box = ui.getBoundingClientRect();
+    var r = cell.getBoundingClientRect();
+    var top = row.getBoundingClientRect().top - box.height / 2;
+    if (top < 64) top = 64;
+    var left = r.left + (r.width - box.width) / 2;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+  }
+  function markActiveCell(cell) {
+    document.querySelectorAll(".cms-col-active").forEach(function(el) {
+      if (el === cell) return;
+      el.classList.remove("cms-col-active");
+      if (!el.getAttribute("class")) el.removeAttribute("class");
+    });
+    if (cell) cell.classList.add("cms-col-active");
+  }
+  function showColUI(block, target) {
+    var info = columnTarget(block, target);
+    if (!info) {
+      hideColUI();
+      return;
+    }
+    activeCol = info;
+    markActiveCell(info.mode === "cell" ? info.cell : null);
+    var cell = info.mode === "cell";
+    $("col-back").hidden = !cell || !info.canMoveBack;
+    $("col-on").hidden = !cell || !info.canMoveOn;
+    $("col-narrow").hidden = !cell || !info.canResize;
+    $("col-wide").hidden = !cell || !info.canResize;
+    $("col-del").hidden = !cell;
+    $("col-add").hidden = cell && !info.canAdd;
+    $("col-add").title = cell ? "Add a column" : "Split into two columns";
+    var any = ["col-back", "col-on", "col-narrow", "col-wide", "col-add", "col-del"].some(function(id) {
+      return !$(id).hidden;
+    });
+    if (!any) {
+      hideColUI();
+      return;
+    }
+    $("col-ui").classList.add("on");
+    placeColUI();
+  }
+  function hideColUI() {
+    activeCol = null;
+    markActiveCell(null);
+    $("col-ui").classList.remove("on");
+  }
+  function afterColumnEdit(container, now, target) {
+    lockButtons();
+    if (container) markContainerDirty(container);
+    if (!now) {
+      hideChrome();
+      return;
+    }
+    activeSnip = now;
+    showSnipUI(now);
+    showColUI(now, target || now);
+  }
+  function runColumnEdit(edit) {
+    if (!activeCol) return;
+    var info = activeCol;
+    var block = activeSnip;
+    var anchor = info.mode === "cell" ? info.cell : info.block;
+    var container = anchor.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(anchor);
+    var now = block;
+    var target = info.mode === "cell" ? info.cell : null;
+    runWithUndo(ed, function() {
+      var out = edit(info) || {};
+      if ("block" in out) now = out.block;
+      if ("target" in out) target = out.target;
+    });
+    afterColumnEdit(container, now, target);
   }
   var activeImg = null;
   var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
@@ -2474,7 +2622,10 @@
   }
   function hideChrome(except) {
     if (except !== "btn") hideButtonUI();
-    if (except !== "snip") hideSnipUI();
+    if (except !== "snip") {
+      hideSnipUI();
+      hideColUI();
+    }
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -2691,6 +2842,7 @@
       } else if (snip) {
         hideChrome("snip");
         showSnipUI(snip);
+        showColUI(snip, t);
       } else {
         hideChrome();
       }
@@ -2698,6 +2850,7 @@
     window.addEventListener("scroll", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
+      if (activeCol) placeColUI();
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -2705,6 +2858,7 @@
     window.addEventListener("resize", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
+      if (activeCol) placeColUI();
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -3055,6 +3209,51 @@
         flash("Block updated");
       });
     });
+    $("col-back").addEventListener("click", function() {
+      runColumnEdit(function(info) {
+        moveColumn(info, -1);
+      });
+    });
+    $("col-on").addEventListener("click", function() {
+      runColumnEdit(function(info) {
+        moveColumn(info, 1);
+      });
+    });
+    $("col-narrow").addEventListener("click", function() {
+      runColumnEdit(function(info) {
+        resizeColumn(info, -1);
+      });
+    });
+    $("col-wide").addEventListener("click", function() {
+      runColumnEdit(function(info) {
+        resizeColumn(info, 1);
+      });
+    });
+    $("col-add").addEventListener("click", function() {
+      runColumnEdit(function(info) {
+        if (info.mode === "split") {
+          var row = splitIntoColumns(info.block);
+          return { block: row, target: row.lastElementChild };
+        }
+        return { target: addColumn(info) };
+      });
+    });
+    $("col-del").addEventListener("click", function() {
+      if (!activeCol || activeCol.mode !== "cell") return;
+      var info = activeCol;
+      var block = activeSnip;
+      var near = info.cell.nextElementSibling || info.cell.previousElementSibling;
+      var container = info.cell.closest("[data-cms-region],[data-cms-sections]");
+      confirmRemove(info).then(function(yes) {
+        if (!yes) return;
+        var ed = findOwningEditor(info.row);
+        var now = block;
+        runWithUndo(ed, function() {
+          now = removeColumn(info, block);
+        });
+        afterColumnEdit(container, now, near);
+      });
+    });
     $("snip-set").addEventListener("click", function() {
       if (!activeSnip) return;
       var el = activeSnip;
@@ -3101,8 +3300,6 @@
           value: String(Math.min(40, el.style.borderRadius ? parseInt(el.style.borderRadius, 10) || 0 : baseRadius))
         }
       ];
-      var cols = columnsField(el);
-      if (cols) setFields.push(cols);
       openDialog({
         message: "Block settings",
         okLabel: "Apply",
@@ -3139,20 +3336,7 @@
               into.appendChild(line);
             });
           };
-          var cols2 = parseInt(v.columns, 10) || 1;
-          if (cols2 > 1) {
-            var row = document.createElement("div");
-            row.style.cssText = "display:flex;gap:8px";
-            for (var c = 0; c < cols2; c++) {
-              var cell = document.createElement("div");
-              cell.style.cssText = "flex:1 1 0;min-width:0";
-              lines(cell, [["9px", "70%"], ["6px", "100%"], ["6px", "85%"]]);
-              row.appendChild(cell);
-            }
-            box.appendChild(row);
-          } else {
-            lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
-          }
+          lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
           page.appendChild(ctxLine());
           page.appendChild(box);
           page.appendChild(ctxLine());
@@ -3161,20 +3345,14 @@
       }).then(function(v) {
         if (!v) return;
         var ed = findOwningEditor(el);
-        confirmColumns(el, v.columns).then(function(ok) {
-          var now = el;
-          var run = function() {
-            if (ok) now = applyColumns(el, v.columns) || el;
-            applySnippetSettings(now, v, baseRadius);
-          };
-          runWithUndo(ed, run);
-          lockButtons();
-          markContainerDirty(now);
-          if (activeSnip === el) {
-            activeSnip = now;
-            showSnipUI(now);
-          }
+        runWithUndo(ed, function() {
+          applySnippetSettings(el, v, baseRadius);
         });
+        markContainerDirty(el);
+        if (activeSnip === el) {
+          showSnipUI(el);
+          placeColUI();
+        }
       });
     });
     $("snip-del").addEventListener("click", function() {
@@ -5711,10 +5889,18 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 .btnui button[hidden]{display:none}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del,#vid-del,#slot-clear{color:#fca5a5}
+#btn-del,#snip-del,#img-del,#vid-del,#slot-clear,#col-del{color:#fca5a5}
 #btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover,
-#slot-clear:hover{background:rgba(252,165,165,.2)}
+#slot-clear:hover,#col-del:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
+/* The column tool is drawn on the row's top border (placeColUI centres
+   it there), so it covers nothing and can stay legible. Smaller and a
+   touch quieter than the block chrome above it all the same: it edits a
+   part of the block, not the block. */
+#col-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
+#col-ui:hover{opacity:1}
+#col-ui button{padding:4px 6px}
+#col-ui button svg{width:13px;height:13px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
 .rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
@@ -6012,6 +6198,14 @@ background:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}
 .cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
 .cms-editing .cms-snippet:hover{outline-style:solid!important}
 
+/* The column the column tool is acting on. Every button on that toolbar
+ * changes one column and leaves the rest alone, so which one it has hold
+ * of has to be visible \u2014 a row of identical cells is exactly where a
+ * guess goes wrong. Inset offset so the tint hugs the cell instead of
+ * bleeding into its neighbour's gutter. */
+.cms-editing .cms-col-active{outline:1.5px solid rgba(47,95,224,.55)!important;
+outline-offset:-1px;background-color:rgba(47,95,224,.05)}
+
 /* Admin tools (admintools.js): a wrench button appended to the site
  * nav's item list, so it spaces like one more menu item (pinned
  * top-left on pages without a nav) with the everyday admin actions.
@@ -6127,7 +6321,15 @@ body.cms-editing [data-cms-fallback] {
     gear: '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
     trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
     code: '<svg viewBox="0 0 24 24"><path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6z"/></svg>',
-    search: '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 10-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1114 9.5 4.5 4.5 0 019.5 14z"/></svg>'
+    search: '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 10-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1114 9.5 4.5 4.5 0 019.5 14z"/></svg>',
+    plus: '<svg viewBox="0 0 24 24"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>',
+    // The column tool's width pair: a column edge with arrows pulling in
+    // (narrower) or pushing out (wider). Deliberately not chevrons —
+    // those are the move buttons sitting next to them.
+    narrower: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M9 12 3 8v8zM15 12l6-4v8z"/></svg>',
+    wider: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M3 12l6-4v8zM21 12l-6-4v8z"/></svg>',
+    chevL: '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>',
+    chevR: '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>'
   };
   var host = null;
   var shadow = null;
@@ -6138,7 +6340,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div id="dlg-fields"></div><div id="dlg-preview" hidden></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();
