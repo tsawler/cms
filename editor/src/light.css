@@ -8,6 +8,21 @@
    transition matches the rail's appearance. */
 body{transition:margin-left .25s ease}
 body.cms-editing{margin-left:56px}
+/* The shared TinyMCE toolbar is pinned to the top of the viewport
+   (#cms-mce-toolbar), which works for the page's own content: a region
+   under it can be scrolled out from beneath it. The notice bar cannot —
+   it is the first thing in the document, so at scroll 0 it sits under
+   the toolbar and there is nowhere to scroll to. Editing it was
+   therefore very nearly impossible.
+
+   So edit mode reserves the toolbar's lane above the bar, exactly as it
+   reserves the left edge for the rail. The space is claimed on entering
+   edit mode rather than on focusing the bar, so the thing being clicked
+   never moves out from under the pointer — and the toolbar then opens
+   in the gap directly above the region it belongs to. Only a bar at the
+   top of the page needs this; one a template placed somewhere else is
+   the host's own layout and is left alone. */
+body.cms-editing > [data-cms-notice]:first-child{margin-top:76px;transition:margin-top .25s ease}
 .cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
 .cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
 .cms-editing [data-cms-region]:empty::before{content:'Click to edit…';opacity:.4}

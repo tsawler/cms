@@ -272,16 +272,27 @@ text-overflow:ellipsis}
    dialog above it for as long as it's up. ---- */
 .dlg-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147483001;display:none}
 .dlg-overlay.on{display:block}
+/* A column: heading, tab bar and actions hold their place while the
+   controls between them scroll. Before this the whole dialog scrolled,
+   which put Save below the fold of anything with more than a screenful
+   of settings — the one button the dialog exists for. */
 .dlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483002;
 width:min(400px,92vw);background:#fff;color:#1c2128;border-radius:12px;
 box-shadow:0 16px 48px rgba(0,0,0,.4);padding:20px;display:none;
-max-height:88vh;overflow-y:auto}
-.dlg.on{display:block}
+max-height:88vh;flex-direction:column}
+.dlg.on{display:flex}
+/* min-height:0 is what lets this shrink below its content and scroll —
+   a flex item's floor is its content size otherwise, and the dialog
+   would grow past max-height instead. */
+.dlg .dbody{flex:0 1 auto;min-height:0;overflow-y:auto}
 .dlg-overlay.over{z-index:2147483005}
 .dlg.over{z-index:2147483006}
 /* Settings panels: wider, and two fields to a row so a tab's worth of
    controls is taken in at a glance rather than scrolled through. */
-.dlg.wide{width:min(640px,94vw)}
+.dlg.wide{width:min(720px,94vw)}
+/* Top-anchored while tabbed, so switching tabs moves the content below
+   the bar and never the bar itself. */
+.dlg.tabbed{top:7vh;transform:translateX(-50%);max-height:86vh}
 .dlg.wide #dlg-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 .dlg.wide #dlg-fields .fld.span{grid-column:1 / -1}
 @media (max-width:560px){.dlg.wide #dlg-fields{grid-template-columns:1fr}}
@@ -321,19 +332,57 @@ background:#f8f9fb;display:flex;justify-content:center;align-items:center;min-he
 .dlg textarea.tinput{width:100%;padding:8px 12px;border:1px solid #d9dce1;border-radius:8px;
 font:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
 .dlg textarea.tinput:focus{outline:2px solid #2f5fe0;border-color:#2f5fe0}
+/* Rich field: a small toolbar over an editable box, styled to read as
+   one control with the plain inputs beside it. */
+.dlg .rich{border:1px solid #d9dce1;border-radius:8px;overflow:hidden;background:#fff}
+.dlg .rich:focus-within{outline:2px solid #2f5fe0;border-color:#2f5fe0}
+.dlg .rtb{display:flex;gap:2px;padding:4px 6px;background:#f7f8fa;
+border-bottom:1px solid #e3e6ea}
+.dlg .rtb button{display:inline-flex;align-items:center;justify-content:center;
+border:none;background:none;border-radius:6px;padding:3px 9px;height:26px;
+font-size:13px;line-height:1;color:#475467;min-width:28px}
+/* The icon buttons sit on the same baseline and weight as the lettered
+   ones; the glyphs are 24-unit drawings scaled down here rather than at
+   their shipped size. */
+.dlg .rtb button svg{width:17px;height:17px;fill:currentColor}
+.dlg .rtb button:hover{background:#e8edfb;color:#2149b8}
+.dlg .rtb button.on{background:#e8edfb;color:#2149b8}
+.dlg .rted{padding:8px 12px;font-size:13px;line-height:1.5;min-height:44px;
+outline:none;word-break:break-word}
+.dlg .rted a{color:#2149b8}
+/* The placeholder for an empty box. contenteditable is never really
+   empty — a stray <br> lives there — so the class is set from the text
+   rather than by :empty. */
+.dlg .rted.empty::before{content:attr(data-placeholder);color:#98a2b3}
+/* A link button pressed with nothing selected: a nudge at the words
+   rather than an error message for a mis-click. */
+.dlg .rted.nosel{background:#fdf3f2}
+.dlg .rturl{display:flex;gap:6px;padding:6px;background:#f7f8fa;
+border-bottom:1px solid #e3e6ea}
+.dlg .rturl[hidden]{display:none}
+.dlg .rturl input{flex:1;margin:0;font-size:12px;padding:5px 9px}
+.dlg .rturl button{padding:4px 10px;font-size:12px}
 .dlg textarea.tmono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
 .dlg .fld label.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:#475467;
 font-weight:400;margin:0}
 .dlg .chk input{width:auto;margin:0}
 /* tab bar */
 .dlg .tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #e3e6ea}
+/* display:flex above outranks the [hidden] attribute, which would
+   otherwise leave every tabless dialog with a stray rule under its
+   heading. */
+.dlg .tabs[hidden]{display:none}
 .dlg .tabs button{border:none;background:none;border-radius:0;padding:8px 14px;font-size:13px;
 color:#667085;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .dlg .tabs button:hover{background:none;color:#1c2128}
 .dlg .tabs button.on{color:#2149b8;border-bottom-color:#2f5fe0;font-weight:600}
 .dlg select{width:100%;padding:8px 10px;border:1px solid #d9dce1;border-radius:8px;
 font:inherit;font-size:13px;background:#fff}
-.dlg .acts{display:flex;justify-content:flex-end;gap:8px}
+/* Pinned under the scrolling body rather than scrolling with it. */
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px;flex:none}
+/* The settings panels get a hairline to sit against, since their
+   controls can run under it. A plain confirm has nothing to divide. */
+.dlg.wide .acts{padding-top:14px;border-top:1px solid #e3e6ea}
 .dlg button{font:inherit;color:#1c2128;background:#fff;border:1px solid #d9dce1;
 border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
 .dlg button:hover{background:#f4f5f7}

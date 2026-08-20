@@ -159,6 +159,12 @@ func TestSiteSettingsRoundTrip(t *testing.T) {
 			LoginInNav: true,
 			SiteCSS:    "body{margin:0}",
 			SiteJS:     "console.log('hi')",
+			// The notice bar's switch and look. Its words are not here:
+			// they are a shared region, stored with the rest of the
+			// site's content.
+			NoticeBar:         true,
+			NoticeStyle:       "warning",
+			NoticeDismissible: true,
 		}
 		if err := s.SaveSiteSettings(ctx, want); err != nil {
 			t.Fatalf("SaveSiteSettings: %v", err)
@@ -175,6 +181,7 @@ func TestSiteSettingsRoundTrip(t *testing.T) {
 		// the key/value upsert path.
 		want.SiteName = "Renamed Co"
 		want.LoginInNav = false
+		want.NoticeBar = false
 		if err := s.SaveSiteSettings(ctx, want); err != nil {
 			t.Fatalf("SaveSiteSettings(second): %v", err)
 		}

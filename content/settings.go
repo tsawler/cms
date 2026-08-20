@@ -42,6 +42,21 @@ type SiteSettings struct {
 	// development serves none regardless: it has nothing it wants found.
 	// Switching it is superadmin-only, like Mode.
 	Sitemap bool
+	// NoticeBar shows the site-wide notice bar — a thin strip above
+	// everything else on every page, for the message the whole site has
+	// to carry at once: a holiday closure, a delivery delay, a service
+	// interruption. Its words are not here: they live in the shared
+	// region render.NoticeRegion, so they translate, sanitize, and
+	// publish exactly like a footer does. These three settings are the
+	// bar itself.
+	NoticeBar bool
+	// NoticeStyle names the bar's colour scheme, one of the curated keys
+	// in render.NoticeStyles. "" is the first of them.
+	NoticeStyle string
+	// NoticeDismissible gives the bar a close button, and remembers the
+	// dismissal in the visitor's browser until the notice's words
+	// change. Off, the bar stays until it is switched off here.
+	NoticeDismissible bool
 }
 
 // The two site modes. A site under construction sits in development,
@@ -84,6 +99,10 @@ const (
 	settingSiteMode   = "site_mode"
 	settingRobotsTxt  = "robots_txt"
 	settingSitemap    = "sitemap"
+
+	settingNoticeBar         = "notice_bar"
+	settingNoticeStyle       = "notice_style"
+	settingNoticeDismissible = "notice_dismissible"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -124,6 +143,12 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.RobotsTxt = v
 		case settingSitemap:
 			out.Sitemap = v == "1"
+		case settingNoticeBar:
+			out.NoticeBar = v == "1"
+		case settingNoticeStyle:
+			out.NoticeStyle = v
+		case settingNoticeDismissible:
+			out.NoticeDismissible = v == "1"
 		}
 	}
 	return out, rows.Err()
@@ -144,6 +169,13 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 	if in.Sitemap {
 		sitemap = "1"
 	}
+	noticeBar, noticeDismissible := "", ""
+	if in.NoticeBar {
+		noticeBar = "1"
+	}
+	if in.NoticeDismissible {
+		noticeDismissible = "1"
+	}
 	for k, v := range map[string]string{
 		settingMenuAlign:  in.MenuAlign,
 		settingSiteName:   in.SiteName,
@@ -155,6 +187,10 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingSiteMode:   in.Mode,
 		settingRobotsTxt:  in.RobotsTxt,
 		settingSitemap:    sitemap,
+
+		settingNoticeBar:         noticeBar,
+		settingNoticeStyle:       in.NoticeStyle,
+		settingNoticeDismissible: noticeDismissible,
 	} {
 		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `

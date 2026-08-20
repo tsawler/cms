@@ -374,6 +374,98 @@ Shared regions are rich HTML only. `cmsText`, `cmsImage`, and
 `cmsSections` all exist to be placed by a page's own layout, and a
 site-wide sections stack is a page in a layout slot, not a region.
 
+### 4.2.2 The notice bar — a region and a switch, not a section
+
+"A thin bar at the top of every page for a holiday closure" looks like a
+section, and cannot be one: sections render inside `{{cmsSections}}`,
+which every layout places in `<main>`, below the header that carries the
+menu. Nothing an editor adds to a page's content can climb above the
+nav. It is also site-wide, and a section belongs to one page.
+
+So the bar is split between the two stores each half belongs in:
+
+- **Its words are a shared region** (`render.NoticeRegion`), edited in
+  place in the bar itself. That is what makes it translate, sanitize,
+  draft, and publish with no new machinery — and it is forced, not
+  merely convenient: `SiteSettings` is a flat key/value map with no
+  locale dimension, so a notice stored as a setting would be a single
+  string on a bilingual site.
+- **Its switch and look are settings** (`NoticeBar`, `NoticeStyle`,
+  `NoticeDismissible`). "Is there a notice today" is a state, not
+  content, and it has to be able to hide words that are still stored.
+
+Consequences worth writing down:
+
+- **Placement is a post-render injection, not a required template
+  call.** `{{cmsNotice}}` exists for layouts that want the bar
+  somewhere specific, but a template that never calls it gets the bar
+  inserted after its `<body>` tag once the render is done — the same
+  seam `injectEditorScript` uses. That is what lets an existing site
+  switch a bar on without touching its templates, which for a feature
+  whose whole point is "we need to say something today" is the
+  difference between a setting and a deployment.
+- **`SharedRegions()` contributes the region itself.** Saves are
+  validated against the union of regions the host's templates declare,
+  and the notice's may appear in none of them, so the renderer adds it
+  unconditionally. An unused region has no rows, so this costs nothing.
+- **The bar ships its own CSS**, like `cmsNav` and unlike sections:
+  the look must not depend on the host having safelisted anything.
+  It is emitted only on pages that carry a bar, plus every edit render
+  — where the settings dialog can conjure one client-side.
+- **Dismissal is keyed to the wording.** A closed notice is remembered
+  in `localStorage` against a digest of its own words, so rewriting the
+  notice re-shows it to everyone who dismissed the last one; a bar that
+  stayed closed for the *next* emergency would be worse than no bar.
+  The hiding happens from a `<head>` script that appends a style rule,
+  not from a handler at the end of the body, because the alternative is
+  a notice that flashes up and shoves the page down on every visit.
+  An edit render draws the same button and wires it to the same
+  handler, but hands it no key: a logged-in editor reading their own
+  site is a visitor, and a button that visibly does nothing reads as a
+  broken site — while a *remembered* dismissal would lock that editor
+  out of the words they were writing. The handler's other half is a
+  guard on `.cms-editing`: mid-edit the bar is a region with an editor
+  instance attached, and closing it would strand both.
+- **Edit mode reserves the toolbar's lane.** The shared TinyMCE toolbar
+  is pinned to the top of the viewport, which assumes a region under it
+  can be scrolled out from beneath it — an assumption the bar breaks by
+  being the first thing in the document, where scroll 0 leaves it
+  permanently underneath. Edit mode therefore pushes a top-of-page bar
+  down by the toolbar's height, the same deal `.cms-editing` already
+  strikes with the left rail. The space is claimed on entering edit mode
+  rather than on focusing the bar, so what is being clicked never moves
+  out from under the pointer.
+- **Two ways in, one store.** The settings dialog carries a plain-text
+  box for the wording as well, because "switch it on, then go find the
+  bar in the page" is two steps for what is one thought — and it left a
+  placeholder standing in the page, one stray Save away from being the
+  notice the site published. The box writes the same shared region
+  through the same regions endpoint, so drafting, publishing and
+  locales are untouched; it is seeded from the bar's live content
+  (unsaved typing included), and it writes **only when the words
+  actually changed**, so a visit to the dialog to change a colour
+  cannot disturb the notice it merely displayed.
+- **The dialog's box is a small rich field, not a textarea.** A notice
+  that cannot link to the page explaining it is half a notice, and a
+  plain-text box would have flattened one that could. It is ~200 lines
+  in `dialogs.js` (`type: "rich"`) rather than a second TinyMCE:
+  TinyMCE is lazy-loaded only in edit mode, renders its toolbar into
+  the light DOM at the top of the viewport, and would be a strange
+  thing to summon into a modal that opens while merely reading a page.
+  The field allows `strong`, `em`, `a[href]` and `br` and nothing else,
+  enforcing that with one sanitizer used on the way in *and* out — so
+  what it stores is only ever that list, which matters because the
+  server trusts an admin's markup. Formatting is applied by Range
+  surgery rather than `execCommand`, and the selection is read from the
+  field's own root (`ShadowRoot.getSelection()` where it exists, the
+  document's otherwise) with a containment check, so a selection the
+  buttons cannot see makes them do nothing rather than something
+  surprising.
+- **An empty bar is no bar.** TinyMCE leaves `<p><br></p>` behind when a
+  region is emptied, so "nothing written" is a content test rather than
+  a string comparison; an editor still sees a placeholder to type over,
+  and never a coloured strip with nothing in it.
+
 ### 4.3 Blog & news — posts are pages
 
 Requirement 5 could have been a parallel content pipeline (`cms_posts` +
