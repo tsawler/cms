@@ -1298,10 +1298,10 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		Site:      site,
 		AdminPath: c.cfg.AdminPath,
 		// Custom-code blocks: stored content holds an inert placeholder
-		// naming a library entry, and a public render swaps in what the
-		// entry holds. Nothing is fetched until a placeholder is found,
-		// so pages without one cost no query — and an edit render never
-		// expands them at all.
+		// naming a library entry, and a render swaps in what the entry
+		// holds. Nothing is fetched until a placeholder is found, so
+		// pages without one cost no query — and an edit render parks the
+		// scripts it swaps in rather than letting them run.
 		CodeSnippets: c.codeLookup(r.Context()),
 		// Pagination for {{cmsFeed}} listings. Every page render carries
 		// it: which template paginates is the template's business, and

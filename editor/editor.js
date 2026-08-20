@@ -147,6 +147,30 @@
     });
   }
 
+  // ../src/undo.js
+  function findOwningEditor(el) {
+    var all = [];
+    Object.keys(state.mceEditors).forEach(function(k) {
+      all.push(state.mceEditors[k]);
+    });
+    state.sectionEditors.forEach(function(s) {
+      all.push(s.ed);
+    });
+    for (var i = 0; i < all.length; i++) {
+      var target = all[i].getElement && all[i].getElement();
+      if (target && target.contains(el)) return all[i];
+    }
+    return null;
+  }
+  function runWithUndo(ed, run) {
+    if (!ed) {
+      run();
+      return;
+    }
+    ed.undoManager.transact(run);
+    ed.focus();
+  }
+
   // ../src/richtext.js
   var tinyLoading = null;
   function loadTinyMCE() {
@@ -477,7 +501,7 @@
               ]
             }).then(function(v) {
               if (!v) return;
-              ed.undoManager.transact(function() {
+              runWithUndo(ed, function() {
                 stampTable(t, {
                   lines: v.lines,
                   density: v.density,
@@ -594,7 +618,7 @@
     }
     var out = "";
     var depth = 0;
-    var pending = true;
+    var pending2 = true;
     function brk() {
       out = out.replace(/[ \t]+$/, "");
       if (out !== "" && out.charAt(out.length - 1) !== "\n") out += "\n";
@@ -604,24 +628,24 @@
     while (i < tokens.length) {
       var t = tokens[i];
       if (!t.tag && !t.comment) {
-        if (/^\s+$/.test(t.text) && (pending || isBoundary(tokens[i + 1]))) {
+        if (/^\s+$/.test(t.text) && (pending2 || isBoundary(tokens[i + 1]))) {
           i++;
           continue;
         }
-        if (pending) {
+        if (pending2) {
           brk();
           out += t.text.replace(/^\s+/, "");
         } else {
           out += t.text;
         }
-        pending = false;
+        pending2 = false;
         i++;
         continue;
       }
       if (t.comment) {
         brk();
         out += t.text;
-        pending = true;
+        pending2 = true;
         i++;
         continue;
       }
@@ -635,13 +659,13 @@
           i++;
           if (wasClose) break;
         }
-        pending = true;
+        pending2 = true;
         continue;
       }
       if (!BLOCK_TAGS[t.tag]) {
-        if (pending) brk();
+        if (pending2) brk();
         out += t.text;
-        pending = false;
+        pending2 = false;
         i++;
         continue;
       }
@@ -649,7 +673,7 @@
         depth = Math.max(0, depth - 1);
         brk();
         out += t.text;
-        pending = true;
+        pending2 = true;
         i++;
         continue;
       }
@@ -659,13 +683,13 @@
         for (var k = i; k <= end; k++) {
           out += tokens[k].tag || tokens[k].comment ? tokens[k].text : tokens[k].text.replace(/\s+/g, " ");
         }
-        pending = true;
+        pending2 = true;
         i = end + 1;
         continue;
       }
       out += t.text;
       if (!VOID_TAGS[t.tag] && !/\/>$/.test(t.text)) depth++;
-      pending = true;
+      pending2 = true;
       i++;
     }
     return out.replace(/[ \t]+$/, "");
@@ -1038,7 +1062,7 @@
         }).then(function(html) {
           if (html === null) return;
           if (entry) {
-            entry.ed.undoManager.transact(function() {
+            runWithUndo(entry.ed, function() {
               entry.ed.setContent(html);
             });
           } else {
@@ -1314,6 +1338,69 @@
   // ../src/code.js
   var NEW = "+new";
   var STARTER = '<div class="cms-code-body">\n  <!-- Your markup goes here. -->\n</div>\n<script>\n(function () {\n    var root = document.currentScript.closest(".cms-code");\n    // Your JavaScript goes here. `root` is this block on the page,\n    // so a block used twice still finds its own markup.\n}());\n<\/script>\n';
+  var INERT = "text/cms-code";
+  var sources = {};
+  function codeBlocks() {
+    return Array.prototype.slice.call(
+      document.querySelectorAll(".cms-code[data-cms-code]")
+    );
+  }
+  function activate(el) {
+    el.querySelectorAll("script").forEach(function(old) {
+      var live = document.createElement("script");
+      Array.prototype.forEach.call(old.attributes, function(a) {
+        if (a.name !== "type" && a.name !== "data-cms-type") {
+          live.setAttribute(a.name, a.value);
+        }
+      });
+      var type = old.getAttribute("data-cms-type");
+      if (type === null && old.getAttribute("type") !== INERT) {
+        type = old.getAttribute("type");
+      }
+      if (type !== null) live.setAttribute("type", type);
+      live.text = old.text;
+      old.parentNode.replaceChild(live, old);
+    });
+  }
+  function captureCode() {
+    codeBlocks().forEach(function(el) {
+      var key = el.getAttribute("data-cms-code");
+      if (key && !(key in sources)) sources[key] = el.innerHTML;
+    });
+  }
+  function fillCode() {
+    codeBlocks().forEach(function(el) {
+      var src = sources[el.getAttribute("data-cms-code")];
+      if (!src) return;
+      el.innerHTML = src;
+      activate(el);
+    });
+  }
+  var pending = false;
+  function reviveCode() {
+    if (pending) return;
+    pending = true;
+    Promise.resolve().then(function() {
+      pending = false;
+      fillCode();
+    });
+  }
+  function collapseCode() {
+    codeBlocks().forEach(function(el) {
+      el.innerHTML = "";
+    });
+  }
+  function cacheCode(key) {
+    if (key in sources) return;
+    api("/code/" + encodeURIComponent(key)).then(function(c) {
+      sources[c.key] = c.html;
+    }).catch(function() {
+    });
+  }
+  function initCode() {
+    captureCode();
+    fillCode();
+  }
   function codeBlockHTML(key) {
     return '<div class="cms-snippet cms-code" data-cms-code="' + key + '"></div>';
   }
@@ -1359,6 +1446,7 @@
           return c.key === v.key;
         })[0];
         insert(codeBlockHTML(v.key));
+        cacheCode(v.key);
         flash("Added " + (picked ? picked.name : v.key) + " \u2014 click the block, then \u27E8/\u27E9, to edit its code");
       });
     }).catch(function(err) {
@@ -1389,6 +1477,7 @@
     });
   }
   function editCode(c) {
+    sources[c.key] = c.html;
     openSource({
       title: "Custom code \u2014 " + c.name,
       hint: "Markup and <script> for this block, shared by every page that uses it. Applying saves it straight away.",
@@ -1400,7 +1489,8 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: c.name, html })
       }).then(function() {
-        flash("Code saved \u2014 it runs on the next page load");
+        sources[c.key] = html;
+        flash("Code saved \u2014 it runs when you leave edit mode");
       }).catch(function(err) {
         setMsg(err.message);
       });
@@ -1968,6 +2058,188 @@
     }, true);
   }
 
+  // ../src/columns.js
+  var GRID = {
+    re: /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g,
+    stem: "grid-cols-",
+    marker: "grid-cols-",
+    offered: [2, 3, 4]
+  };
+  var FLOW = {
+    re: /(?:^|\s)((?:[a-z0-9]+:)*)columns-(\d+)(?=\s|$)/g,
+    stem: "columns-",
+    marker: "columns-",
+    offered: [1, 2, 3]
+  };
+  function countsOn(el, kind) {
+    var out = [];
+    var cls = el.getAttribute ? el.getAttribute("class") || "" : "";
+    var m;
+    kind.re.lastIndex = 0;
+    while ((m = kind.re.exec(cls)) !== null) {
+      out.push({ prefix: m[1], count: parseInt(m[2], 10) });
+      kind.re.lastIndex = m.index + m[0].length - 1;
+    }
+    return out;
+  }
+  function widest(el, kind) {
+    var all = countsOn(el, kind);
+    if (!all.length) return null;
+    return all.reduce(function(a, b) {
+      return b.count > a.count ? b : a;
+    });
+  }
+  function carrierOf(block, kind) {
+    if (!block) return null;
+    if (widest(block, kind)) return block;
+    var inner = block.querySelectorAll('[class*="' + kind.marker + '"]');
+    return inner.length === 1 && widest(inner[0], kind) ? inner[0] : null;
+  }
+  var FLOW_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
+  function isProse(block) {
+    if (!block || !(block.textContent || "").trim()) return false;
+    return !block.querySelector(FLOW_HOSTILE);
+  }
+  function layoutOf(block) {
+    var grid = carrierOf(block, GRID);
+    if (grid) return { kind: GRID, el: grid, grid: true };
+    var flow = carrierOf(block, FLOW);
+    if (flow) return { kind: FLOW, el: flow, grid: false };
+    if (isProse(block)) return { kind: FLOW, el: block, grid: false, candidate: true };
+    return null;
+  }
+  function gridOf(block) {
+    var it = layoutOf(block);
+    return it && it.grid ? it.el : null;
+  }
+  function elementChildren(grid) {
+    return Array.prototype.slice.call(grid.children);
+  }
+  function tracksAndCells(grid) {
+    var cur = widest(grid, GRID);
+    var kids = elementChildren(grid);
+    return { count: cur.count, kids, inStep: kids.length === cur.count };
+  }
+  function columnsField(block) {
+    var it = layoutOf(block);
+    if (!it) return null;
+    var count = it.candidate ? 1 : widest(it.el, it.kind).count;
+    var counts = it.kind.offered.slice();
+    if (counts.indexOf(count) === -1) {
+      counts.push(count);
+      counts.sort(function(a, b) {
+        return a - b;
+      });
+    }
+    return {
+      id: "columns",
+      label: "Columns",
+      type: "select",
+      value: String(count),
+      options: counts.map(function(n) {
+        return { value: String(n), label: n === 1 ? "1 (one flowing column)" : String(n) };
+      })
+    };
+  }
+  function droppedCells(block, n) {
+    var grid = gridOf(block);
+    if (!grid) return [];
+    var t = tracksAndCells(grid);
+    if (!t.inStep || !(n < t.count)) return [];
+    return t.kids.slice(n);
+  }
+  function confirmColumns(block, value) {
+    var n = parseInt(value, 10);
+    if (!n) return Promise.resolve(true);
+    var lost = droppedCells(block, n).filter(function(cell) {
+      return (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
+    });
+    if (!lost.length) return Promise.resolve(true);
+    return cmsConfirm(
+      lost.length === 1 ? "Removing a column deletes its content. Continue?" : "Removing " + lost.length + " columns deletes their content. Continue?",
+      "Remove",
+      true
+    );
+  }
+  function blankText(cell) {
+    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var n;
+    while (n = walker.nextNode()) {
+      if ((n.nodeValue || "").trim() !== "") nodes.push(n);
+    }
+    nodes.forEach(function(node) {
+      var host2 = node.parentElement;
+      var heading = host2 && /^h[1-6]$/i.test(host2.tagName);
+      node.nodeValue = heading ? "Heading" : "Write something here.";
+    });
+  }
+  function cleanClone(cell) {
+    var clone = cell.cloneNode(true);
+    var all = [clone];
+    clone.querySelectorAll("*").forEach(function(el) {
+      all.push(el);
+    });
+    all.forEach(function(el) {
+      for (var i = el.attributes.length - 1; i >= 0; i--) {
+        if (el.attributes[i].name.indexOf("data-mce-") === 0) {
+          el.removeAttribute(el.attributes[i].name);
+        }
+      }
+    });
+    blankText(clone);
+    return clone;
+  }
+  function setCount(el, kind, n) {
+    var cur = widest(el, kind);
+    var target = cur.prefix + kind.stem + cur.count;
+    el.className = el.className.split(/\s+/).map(function(c) {
+      return c === target ? cur.prefix + kind.stem + n : c;
+    }).join(" ");
+  }
+  function makeFlow(block, n) {
+    var classes = FLOW.stem + n + " gap-8";
+    if (block.tagName !== "P") {
+      block.className = (block.className + " " + classes).trim();
+      return block;
+    }
+    var wrap = document.createElement("div");
+    wrap.className = (block.className + " " + classes).trim();
+    block.parentNode.insertBefore(wrap, block);
+    block.classList.remove("cms-snippet");
+    if (!block.getAttribute("class")) block.removeAttribute("class");
+    wrap.appendChild(block);
+    return wrap;
+  }
+  function applyColumns(block, value) {
+    var n = parseInt(value, 10);
+    var it = layoutOf(block);
+    if (!it || !n) return block;
+    if (it.candidate) {
+      return n > 1 ? makeFlow(block, n) : block;
+    }
+    var cur = widest(it.el, it.kind).count;
+    if (cur === n) return block;
+    if (!it.grid) {
+      setCount(it.el, it.kind, n);
+      return block;
+    }
+    var grid = it.el;
+    var t = tracksAndCells(grid);
+    setCount(grid, GRID, n);
+    if (!t.inStep) return block;
+    if (n > t.count) {
+      for (var i = t.count; i < n; i++) {
+        grid.appendChild(cleanClone(grid.lastElementChild));
+      }
+      return block;
+    }
+    t.kids.slice(n).forEach(function(cell) {
+      cell.remove();
+    });
+    return block;
+  }
+
   // ../src/buttons.js
   var BTN_SIZES = {
     s: { padding: "6px 14px", fontSize: "13px" },
@@ -2039,7 +2311,14 @@
       syncStyleShadow(n);
     });
   }
-  function applySnippetSettings(el, v) {
+  function classRadius2(el) {
+    var override = el.style.borderRadius;
+    if (override) el.style.borderRadius = "";
+    var base = parseInt(getComputedStyle(el).borderRadius, 10) || 0;
+    if (override) el.style.borderRadius = override;
+    return base;
+  }
+  function applySnippetSettings(el, v, baseRadius) {
     el.style.backgroundColor = v.bgcolor || "";
     el.style.color = v.textcolor || "";
     syncDescendantColors(el, !!v.textcolor);
@@ -2049,7 +2328,8 @@
     el.style.marginBottom = sp ? sp.margin : "";
     if (sp) el.setAttribute("data-cms-snip-spacing", v.spacing);
     else el.removeAttribute("data-cms-snip-spacing");
-    el.style.borderRadius = v.radius === "" ? "" : (parseInt(v.radius, 10) || 0) + "px";
+    var radius = parseInt(v.radius, 10) || 0;
+    el.style.borderRadius = radius === baseRadius ? "" : radius + "px";
     syncStyleShadow(el);
   }
   function showSnipUI(el) {
@@ -2330,20 +2610,6 @@
     if (!fig.getAttribute("class")) fig.removeAttribute("class");
     if (!img.getAttribute("class")) img.removeAttribute("class");
   }
-  function findOwningEditor(el) {
-    var all = [];
-    Object.keys(state.mceEditors).forEach(function(k) {
-      all.push(state.mceEditors[k]);
-    });
-    state.sectionEditors.forEach(function(s) {
-      all.push(s.ed);
-    });
-    for (var i = 0; i < all.length; i++) {
-      var target = all[i].getElement && all[i].getElement();
-      if (target && target.contains(el)) return all[i];
-    }
-    return null;
-  }
   function applyButtonSettings(btn, v) {
     var size = BTN_SIZES[v.size] ? v.size : "m";
     var label = (v.label || "").trim();
@@ -2544,8 +2810,7 @@
         var run = function() {
           applyButtonSettings(btn, v);
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         markContainerDirty(btn);
         if (activeBtn === btn) showButtonUI(btn);
       });
@@ -2666,8 +2931,7 @@
         var run = function() {
           applyImageSettings(img, v);
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         markContainerDirty(img);
         if (activeImg !== img) return;
         showImgUI(img);
@@ -2695,8 +2959,7 @@
             parent.remove();
           }
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
         else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       });
@@ -2732,8 +2995,7 @@
             parent.remove();
           }
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
         else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       });
@@ -2754,8 +3016,7 @@
             parent.remove();
           }
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
         else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       });
@@ -2786,8 +3047,7 @@
           tpl.innerHTML = html;
           el.parentNode.replaceChild(tpl.content, el);
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         unnestSnippets();
         lockButtons();
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
@@ -2802,43 +3062,51 @@
       var baseBg = rgbToHex(cs.backgroundColor);
       var basePad = cs.padding;
       var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
+      var baseRadius = classRadius2(el);
+      var setFields = [
+        {
+          id: "bgcolor",
+          label: "Background color",
+          type: "color",
+          value: rgbToHex(el.style.backgroundColor)
+        },
+        {
+          id: "textcolor",
+          label: "Text color",
+          type: "color",
+          value: rgbToHex(el.style.color)
+        },
+        {
+          id: "spacing",
+          label: "Spacing",
+          type: "select",
+          value: el.getAttribute("data-cms-snip-spacing") || "",
+          options: [
+            { value: "", label: "As designed" },
+            { value: "compact", label: "Compact" },
+            { value: "normal", label: "Comfortable" },
+            { value: "roomy", label: "Roomy" }
+          ]
+        },
+        // An override wins even when it is zero — a block squared off
+        // on purpose has to read back as 0, not as the rounding its
+        // classes would have given it. (`|| baseRadius` would not do:
+        // 0 is falsy, and that is exactly the deliberate case.)
+        {
+          id: "radius",
+          label: "Corner roundness",
+          type: "range",
+          min: 0,
+          max: 40,
+          value: String(Math.min(40, el.style.borderRadius ? parseInt(el.style.borderRadius, 10) || 0 : baseRadius))
+        }
+      ];
+      var cols = columnsField(el);
+      if (cols) setFields.push(cols);
       openDialog({
         message: "Block settings",
         okLabel: "Apply",
-        fields: [
-          {
-            id: "bgcolor",
-            label: "Background color",
-            type: "color",
-            value: rgbToHex(el.style.backgroundColor)
-          },
-          {
-            id: "textcolor",
-            label: "Text color",
-            type: "color",
-            value: rgbToHex(el.style.color)
-          },
-          {
-            id: "spacing",
-            label: "Spacing",
-            type: "select",
-            value: el.getAttribute("data-cms-snip-spacing") || "",
-            options: [
-              { value: "", label: "As designed" },
-              { value: "compact", label: "Compact" },
-              { value: "normal", label: "Comfortable" },
-              { value: "roomy", label: "Roomy" }
-            ]
-          },
-          {
-            id: "radius",
-            label: "Corner roundness",
-            type: "range",
-            min: 0,
-            max: 40,
-            value: String(Math.min(40, parseInt(el.style.borderRadius, 10) || parseInt(cs.borderRadius, 10) || 0))
-          }
-        ],
+        fields: setFields,
         // A stand-in page: gray context lines above and below the
         // block, so spacing and background read as they will inline.
         preview: function(v, out) {
@@ -2860,15 +3128,31 @@
           if (bg) box.style.background = bg;
           else box.style.border = "1px dashed #d9dce1";
           var lineColor = v.textcolor || (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
-          [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]].forEach(function(d, i) {
-            var line = document.createElement("div");
-            line.style.cssText = "border-radius:3px";
-            line.style.height = d[0];
-            line.style.width = d[1];
-            line.style.marginTop = i ? "6px" : "0";
-            line.style.background = lineColor;
-            box.appendChild(line);
-          });
+          var lines = function(into, shapes) {
+            shapes.forEach(function(d, i) {
+              var line = document.createElement("div");
+              line.style.cssText = "border-radius:3px";
+              line.style.height = d[0];
+              line.style.width = d[1];
+              line.style.marginTop = i ? "6px" : "0";
+              line.style.background = lineColor;
+              into.appendChild(line);
+            });
+          };
+          var cols2 = parseInt(v.columns, 10) || 1;
+          if (cols2 > 1) {
+            var row = document.createElement("div");
+            row.style.cssText = "display:flex;gap:8px";
+            for (var c = 0; c < cols2; c++) {
+              var cell = document.createElement("div");
+              cell.style.cssText = "flex:1 1 0;min-width:0";
+              lines(cell, [["9px", "70%"], ["6px", "100%"], ["6px", "85%"]]);
+              row.appendChild(cell);
+            }
+            box.appendChild(row);
+          } else {
+            lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
+          }
           page.appendChild(ctxLine());
           page.appendChild(box);
           page.appendChild(ctxLine());
@@ -2877,13 +3161,20 @@
       }).then(function(v) {
         if (!v) return;
         var ed = findOwningEditor(el);
-        var run = function() {
-          applySnippetSettings(el, v);
-        };
-        if (ed) ed.undoManager.transact(run);
-        else run();
-        markContainerDirty(el);
-        if (activeSnip === el) showSnipUI(el);
+        confirmColumns(el, v.columns).then(function(ok) {
+          var now = el;
+          var run = function() {
+            if (ok) now = applyColumns(el, v.columns) || el;
+            applySnippetSettings(now, v, baseRadius);
+          };
+          runWithUndo(ed, run);
+          lockButtons();
+          markContainerDirty(now);
+          if (activeSnip === el) {
+            activeSnip = now;
+            showSnipUI(now);
+          }
+        });
       });
     });
     $("snip-del").addEventListener("click", function() {
@@ -2898,8 +3189,7 @@
         var run = function() {
           el.remove();
         };
-        if (ed) ed.undoManager.transact(run);
-        else run();
+        runWithUndo(ed, run);
         if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
         else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       });
@@ -2932,8 +3222,7 @@
       var run = function() {
         el.remove();
       };
-      if (ed) ed.undoManager.transact(run);
-      else run();
+      runWithUndo(ed, run);
       if (regionEl) markDirty(regionEl.getAttribute("data-cms-region"));
       else if (sectionsEl) markSectionsDirty(sectionsEl.getAttribute("data-cms-sections"));
       unnestSnippets();
@@ -4041,6 +4330,7 @@
     (s.secs || []).forEach(function(c) {
       c.el.innerHTML = c.html;
     });
+    reviveCode();
     s.imgs.forEach(function(i) {
       if (i.src === null) i.el.removeAttribute("src");
       else i.el.setAttribute("src", i.src);
@@ -4050,7 +4340,10 @@
   }
   function setEditing(on) {
     state.editing = on;
-    if (on) state.snapshot = takeSnapshot();
+    if (on) {
+      collapseCode();
+      state.snapshot = takeSnapshot();
+    }
     document.body.classList.toggle("cms-editing", on);
     $("edit-ic").innerHTML = on ? ICONS.check : ICONS.pencil;
     $("edit-label").textContent = on ? "Done" : "Edit";
@@ -4098,6 +4391,7 @@
       hideChrome();
       removeRichEditors();
       reapplySectionClasses();
+      reviveCode();
     }
   }
   function clearFallbackBadge(selector) {
@@ -5803,10 +6097,12 @@ background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.
 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
 font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
 
-/* Custom-code blocks: stored content holds only an empty placeholder
-   naming a library entry, so while editing there is nothing to show but
-   the name. A public render puts the entry's markup inside this same
-   wrapper, which is why the card styling is scoped to edit mode. */
+/* Custom-code blocks: entering edit mode empties the block back to the
+   placeholder stored content holds, so while editing there is nothing to
+   show but the name. Every other state \u2014 a visitor's page, and a
+   logged-in editor's while merely viewing \u2014 has the entry's markup
+   inside this same wrapper, which is why the card styling is scoped to
+   edit mode. */
 .cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;
 outline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;
 background:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}
@@ -6173,6 +6469,7 @@ body.cms-editing [data-cms-fallback] {
   initDialogs();
   initLightDom();
   initEditing();
+  initCode();
   initTitle();
   initVideoSlots();
   initPhotoSlots();

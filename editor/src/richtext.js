@@ -7,6 +7,7 @@ import { api } from "./util.js";
 import { markDirty, markSectionsDirty, htmlRegions } from "./editing.js";
 import { openPicker } from "./media.js";
 import { openDialog } from "./dialogs.js";
+import { runWithUndo } from "./undo.js";
 
 var tinyLoading = null;
 
@@ -420,7 +421,7 @@ export function initInlineEditor(el, onDirty, register) {
                         ],
                     }).then(function (v) {
                         if (!v) return;
-                        ed.undoManager.transact(function () {
+                        runWithUndo(ed, function () {
                             stampTable(t, { lines: v.lines, density: v.density,
                                 striped: v.striped === "yes", width: v.width });
                         });

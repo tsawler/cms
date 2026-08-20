@@ -57,6 +57,11 @@ func TestDocsListDefaultClasses(t *testing.T) {
 	for _, st := range render.DefaultEditorStyles() {
 		add(st.Class)
 	}
+	// Classes the editor writes on its own — no snippet carries them, so
+	// nothing above would have collected them.
+	for _, cls := range render.EditorAppliedClasses() {
+		add(cls)
+	}
 	styles := render.DefaultSectionStyles()
 	// Every curated axis, Paddings included — the spacing classes are as
 	// invisible to a content scan as the widths are.

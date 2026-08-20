@@ -71,6 +71,22 @@ func DefaultSnippets() []Snippet {
 		// A plain paragraph: the workhorse block. Deliberately unstyled,
 		// so it picks up the section's own prose styles.
 		{Name: "Text", Group: "Basic", HTML: `<p class="cms-snippet">Write your text here.</p>`},
+		// Several paragraphs as one block, so they can be flowed into
+		// newspaper columns from the block gear. Deliberately not the
+		// "Text" block: pressing Enter in a bare paragraph splits it into
+		// two sibling blocks, which is right for a standalone paragraph
+		// and useless for an article — here the paragraphs stay inside
+		// this wrapper and read as one piece of running text.
+		//
+		// It ships columns-1 rather than nothing: that is how the block
+		// declares it is a flow, the way a grid block declares itself
+		// with grid-cols-N, and the gear's Columns control edits the
+		// number in place. No not-prose — this *is* prose, and should
+		// take the section's typography.
+		{Name: "Article text", Group: "Basic", HTML: `<div class="cms-snippet columns-1 gap-8">
+<p>Write the opening paragraph here. Press Enter for another — they stay in this block, so the text runs on as one piece.</p>
+<p>Set how many columns it flows into from the block settings, under the gear.</p>
+</div>`},
 		{Name: "Callout", Group: "Basic", HTML: `<div class="cms-snippet not-prose my-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900">
 <p class="font-semibold mb-1">Heads up</p>
 <p>Something worth knowing goes here.</p>
