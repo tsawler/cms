@@ -890,21 +890,40 @@ func ValidBackgroundPosition(s string) string {
 // content stylesheet's corpus so a fresh install is covered, and the
 // docs' safelists are checked against it so the two cannot drift.
 //
-// Keep it in step with the editor script: today its only entries are the
-// block gear's Columns control (editor/src/columns.js), which writes a
-// grid track count on grid blocks and a column-count on flow blocks.
-// Widening the counts that control offers means widening this.
+// Keep it in step with the editor script: today its entries are the
+// column tool's (editor/src/columns.js), which reshapes a block into a
+// row of columns and rewrites the track count and spans as columns are
+// added, removed, and resized. Widening what that tool offers means
+// widening this.
+//
+// The counts here are the sm: forms, which is what every stock snippet
+// uses. A host whose own snippets set their tracks at another breakpoint
+// — or at none — gets the same treatment, since the tool writes back at
+// whatever prefix it read, and has to safelist that prefix itself.
 func EditorAppliedClasses() []string {
-	return []string{
-		// Grid blocks. The stock library writes its counts at the sm:
-		// breakpoint, which is the prefix the control preserves.
-		"sm:grid-cols-2", "sm:grid-cols-3", "sm:grid-cols-4",
-		// Flow blocks ("Article text"), and the gutter the control
-		// writes alongside them when it converts a prose block. gap-8 is
-		// carried by stock snippets too, but a host that replaced the
-		// whole library would otherwise have it compiled by nothing.
+	classes := []string{
+		// Splitting a plain text block into columns builds the row from
+		// scratch. grid and gap-6 are carried by stock snippets too, but
+		// a host that replaced the whole library would otherwise have
+		// them compiled by nothing.
+		"grid", "gap-6",
+		// Even rows: up to four columns of equal width are written as a
+		// track count with no spans, which is the form stock snippets
+		// ship. One is what a row reduced to its last column becomes.
+		"sm:grid-cols-1", "sm:grid-cols-2", "sm:grid-cols-3", "sm:grid-cols-4",
+		// Uneven rows, and rows of five or six: twelve tracks with a
+		// span on every cell. Twelve divides by every even count above,
+		// so converting between the two forms is exact.
+		"sm:grid-cols-12",
+		// Flow blocks: no control writes these any more, but content
+		// saved by the Columns count the column tool replaced still
+		// carries them, and it has to go on compiling.
 		"columns-1", "columns-2", "columns-3", "gap-8",
 	}
+	for n := 1; n <= 12; n++ {
+		classes = append(classes, "sm:col-span-"+strconv.Itoa(n))
+	}
+	return classes
 }
 
 // DefaultEditorStyles is the Tailwind-first default Styles menu, used when

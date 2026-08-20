@@ -110,10 +110,18 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 .btnui button[hidden]{display:none}
 .btnui button:hover{background:rgba(255,255,255,.18)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del,#vid-del,#slot-clear{color:#fca5a5}
+#btn-del,#snip-del,#img-del,#vid-del,#slot-clear,#col-del{color:#fca5a5}
 #btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover,
-#slot-clear:hover{background:rgba(252,165,165,.2)}
+#slot-clear:hover,#col-del:hover{background:rgba(252,165,165,.2)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
+/* The column tool is drawn on the row's top border (placeColUI centres
+   it there), so it covers nothing and can stay legible. Smaller and a
+   touch quieter than the block chrome above it all the same: it edits a
+   part of the block, not the block. */
+#col-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
+#col-ui:hover{opacity:1}
+#col-ui button{padding:4px 6px}
+#col-ui button svg{width:13px;height:13px}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
 .rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;

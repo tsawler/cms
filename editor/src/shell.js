@@ -26,6 +26,14 @@ export var ICONS = {
     trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
     code: '<svg viewBox="0 0 24 24"><path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6z"/></svg>',
     search: '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 10-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1114 9.5 4.5 4.5 0 019.5 14z"/></svg>',
+    plus: '<svg viewBox="0 0 24 24"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>',
+    // The column tool's width pair: a column edge with arrows pulling in
+    // (narrower) or pushing out (wider). Deliberately not chevrons —
+    // those are the move buttons sitting next to them.
+    narrower: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M9 12 3 8v8zM15 12l6-4v8z"/></svg>',
+    wider: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M3 12l6-4v8zM21 12l-6-4v8z"/></svg>',
+    chevL: '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>',
+    chevR: '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>',
 };
 
 export var host = null;
@@ -155,6 +163,19 @@ export function initShell() {
         '<button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + "</button>" +
         '<button id="snip-set" title="Block settings">' + ICONS.gear + "</button>" +
         '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
+        "</div>" +
+        // The column tool, anchored to the column that was clicked
+        // rather than to the block — every button here acts on that one
+        // column. It rides alongside the block chrome above instead of
+        // replacing it, because a row and a column in it are two things
+        // to edit and an editor may well want either.
+        '<div class="btnui" id="col-ui">' +
+        '<button id="col-back" title="Move this column left">' + ICONS.chevL + "</button>" +
+        '<button id="col-on" title="Move this column right">' + ICONS.chevR + "</button>" +
+        '<button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + "</button>" +
+        '<button id="col-wide" title="Make this column wider">' + ICONS.wider + "</button>" +
+        '<button id="col-add" title="Add a column">' + ICONS.plus + "</button>" +
+        '<button id="col-del" title="Remove this column">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="btnui" id="img-ui">' +
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +

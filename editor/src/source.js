@@ -227,6 +227,9 @@ export function elementSource(el) {
             }
         }
         if (n.classList.contains("cms-btn")) n.removeAttribute("contenteditable");
+        // Marks the column the column tool has hold of; a selection, not
+        // content (see the matching serializer filter in richtext.js).
+        n.classList.remove("cms-col-active");
         if (n.getAttribute("class") === "") n.removeAttribute("class");
     });
     return clone.outerHTML;
