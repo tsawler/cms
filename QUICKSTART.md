@@ -193,6 +193,7 @@ The functions available in every template:
 | `{{cmsImage "key"}}` | an image URL from the media library |
 | `{{cmsSections "key"}}` | editor-composed full-width sections |
 | `{{cmsNav "key"}}` | a complete menu (markup, dropdowns, mobile toggle) |
+| `{{cmsNotice}}` | the site-wide notice bar, where you want it (optional — see below) |
 | `{{cmsBrand "Fallback"}}` | the site's logo and/or name from Site settings, as markup |
 | `{{cmsSiteName "Fallback"}}` | the site name from Site settings, as plain text (for `<title>`) |
 | `{{cmsMenu "key"}}` | raw menu entries, if you want to own the markup |
@@ -203,6 +204,13 @@ The functions available in every template:
 | `{{cmsLocales}}` | language-switcher links (multi-locale sites) |
 | `{{cmsHead}}` | meta description, favicon, per-page CSS, hreflang, robots — put in `<head>` |
 | `{{cmsScripts}}` | per-page JS — put before `</body>` |
+
+`{{cmsNotice}}` is the one entry you can leave out and still have: a
+site-wide notice bar — a holiday closure, a delivery delay — switched on
+in **Site settings** goes in above everything else on its own, right
+after your `<body>` tag, on every page. Call it only to put the bar
+somewhere else. The wording — with bold, italic and links — is written
+in the dialog, or in the bar itself like the footer. See [the notice bar](README.md#the-notice-bar).
 
 The dot (`.`) each page template receives carries `.Title`,
 `.Description`, `.Slug`, `.Locale`, and `.Post` (nil except on blog/news

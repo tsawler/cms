@@ -213,8 +213,13 @@ export function initShell() {
         '<div class="tabs" id="dlg-tabs" hidden></div>' +
         '<input type="text" id="dlg-input" hidden>' +
         '<p class="derr" id="dlg-err" hidden></p>' +
+        // The scrolling middle. The message, the tab bar, and the
+        // actions stay put; only the controls scroll, so a long panel
+        // never pushes Save off the bottom of the dialog.
+        '<div class="dbody">' +
         '<div id="dlg-fields"></div>' +
         '<div id="dlg-preview" hidden></div>' +
+        "</div>" +
         '<div class="acts">' +
         '<button id="dlg-cancel">Cancel</button>' +
         '<button id="dlg-ok" class="ok">OK</button>' +

@@ -575,6 +575,7 @@ var stubFuncs = template.FuncMap{
 	"cmsNav":         func(string) template.HTML { return "" },
 	"cmsBrand":       func(...string) template.HTML { return "" },
 	"cmsSiteName":    func(...string) string { return "" },
+	"cmsNotice":      func() template.HTML { return "" },
 	"cmsHead":        func() template.HTML { return "" },
 	"cmsScripts":     func() template.HTML { return "" },
 	"cmsPosts":       func(string, int) []PostInfo { return nil },
@@ -1245,6 +1246,26 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		return sb.String()
 	}
 
+	// A shared region whose blocks came from the default locale rather
+	// than this render's is flagged so the editor can badge it as
+	// untranslated. Hoisted out of the edit-only funcs below because the
+	// notice bar is built before them and asks the same question.
+	sharedFallback := func(key string) string {
+		blocks := bySharedRegion[key]
+		if len(blocks) == 0 || blocks[0].Locale == "" || blocks[0].Locale == locale {
+			return ""
+		}
+		return ` data-cms-fallback="1"`
+	}
+
+	// The site-wide notice bar, assembled before the template runs
+	// because {{cmsHead}} and {{cmsScripts}} both need its dismissal key
+	// as they go past, and the bar itself may have to be injected after
+	// the render when the template never places it.
+	noticeText := sharedRegion(NoticeRegion, nil)
+	bar := buildNotice(in.Site, noticeText, sharedFallback(NoticeRegion), edit != nil)
+	noticePlaced := false
+
 	funcs := template.FuncMap{
 		"cmsText":   func(key string) string { return text(key) },
 		"cmsRegion": func(key string) template.HTML { return template.HTML(region(key)) },
@@ -1320,8 +1341,18 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		// result is a string, not template.HTML, so html/template escapes
 		// it for wherever it lands.
 		"cmsSiteName": func(fallback ...string) string { return siteName(in.Site, fallback) },
-		"cmsHead":     func() template.HTML { return headHTML(page, r.contentCSSHref(), in) },
-		"cmsScripts":  func() template.HTML { return scriptsHTML(page, in.Site) },
+		// cmsNotice places the site-wide notice bar. A template that
+		// never calls it still gets one — the bar is injected after the
+		// <body> tag once the render is done — so this exists for the
+		// layout that wants it somewhere else: under a fixed header
+		// rather than above it, or inside a wrapper the site's own CSS
+		// grid expects to own the page.
+		"cmsNotice": func() template.HTML {
+			noticePlaced = true
+			return template.HTML(bar.HTML)
+		},
+		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in, bar) },
+		"cmsScripts": func() template.HTML { return scriptsHTML(page, in.Site, bar) },
 		"cmsPosts": func(feed string, limit int) []PostInfo {
 			if in.Posts == nil {
 				return nil
@@ -1366,13 +1397,6 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		// the shared prefix: the editor saves it to the site rather than
 		// to this page, and a page region of the same name stays a
 		// different region.
-		sharedFallback := func(key string) string {
-			blocks := bySharedRegion[key]
-			if len(blocks) == 0 || blocks[0].Locale == "" || blocks[0].Locale == locale {
-				return ""
-			}
-			return ` data-cms-fallback="1"`
-		}
 		funcs["cmsShared"] = func(key string, fb ...string) template.HTML {
 			return template.HTML(`<div data-cms-region="` + html.EscapeString(SharedRegionPrefix+key) +
 				`" data-cms-kind="html"` + sharedFallback(key) + `>` + sharedRegion(key, fb) + `</div>`)
@@ -1423,8 +1447,15 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	}
 
 	out := buf.Bytes()
+	// The notice bar goes in above everything the template drew, unless
+	// the template asked for it somewhere specific. Doing it here rather
+	// than obliging every layout to add a call is what lets a site that
+	// predates the bar switch one on without touching its templates.
+	if bar.HTML != "" && !noticePlaced {
+		out = insertAfterBodyTag(out, bar.HTML)
+	}
 	if edit != nil {
-		out = r.injectEditorScript(out, edit, filledImageRegions(byRegion))
+		out = r.injectEditorScript(out, edit, filledImageRegions(byRegion), noticeText)
 	}
 	_, err = w.Write(out)
 	return err
@@ -1548,7 +1579,8 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 
 // injectEditorScript inserts the in-place editor's script tag before the
 // closing </body> tag (or at the end when there isn't one).
-func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages []string) []byte {
+func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages []string,
+	noticeText string) []byte {
 	mediaFlag := "0"
 	if edit.MediaEnabled {
 		mediaFlag = "1"
@@ -1648,6 +1680,12 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages 
 		` data-locales="` + html.EscapeString(string(localesJSON)) + `"` +
 		` data-media="` + mediaFlag + `"` +
 		` data-filled-images="` + html.EscapeString(string(filledJSON)) + `"` +
+		// The notice bar's stored words, sent even when the bar is
+		// switched off: the settings dialog can switch it on, and a bar
+		// that came back showing the placeholder while the site had a
+		// notice written in it would be the editor telling a small lie
+		// — and one an editor could easily type straight over.
+		` data-notice="` + html.EscapeString(noticeText) + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
 		` data-can-pages="` + canPagesFlag + `"` +
@@ -1980,7 +2018,7 @@ func localeLinks(in Input) []LocaleLink {
 // hreflang alternates on multi-locale sites, the page's meta
 // description, and its per-page CSS. HeadCSS is written raw; editing it
 // is restricted to admins.
-func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
+func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template.HTML {
 	var sb strings.Builder
 	// A site still under construction asks to be left out of search
 	// results. The public site sends the same instruction as a header on
@@ -1993,6 +2031,22 @@ func headHTML(p *content.Page, contentCSS string, in Input) template.HTML {
 		sb.WriteString(`<meta name="robots" content="noindex, nofollow" data-cms-robots>` + "\n")
 	}
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
+	// The notice bar's styling, only where a bar can appear: on a page
+	// actually carrying one, and on any edit render — an editor can
+	// switch the bar on from the settings dialog, and it has to look
+	// right the moment it appears rather than after a reload. A site
+	// that never uses the bar carries none of this.
+	if bar.HTML != "" || in.Edit != nil {
+		sb.WriteString("<style>" + noticeCSS + "</style>\n")
+	}
+	// A notice this visitor has already closed is hidden here, from the
+	// <head>, rather than removed from the bottom of the page: by the
+	// time a script at the end of the body runs, the bar has been on
+	// screen long enough to flash and shove the page down. An empty key
+	// means there is no dismissible bar on this render.
+	if bar.Key != "" {
+		sb.WriteString("<script>" + noticeHideJS(bar.Key) + "</script>\n")
+	}
 	// The stored favicon, when there is one. Nothing is emitted otherwise,
 	// so a host template's own <link rel="icon"> — or the browser's
 	// /favicon.ico guess — keeps working until someone sets one here.
@@ -2097,9 +2151,15 @@ func embedCode(code, tag string, closeRe *regexp.Regexp) string {
 // site-wide JS before the page's own, so a page can build on it. Both
 // are written raw (plain code gets a <script> wrapper, markup passes
 // through verbatim); editing is restricted to admins.
-func scriptsHTML(p *content.Page, site content.SiteSettings) template.HTML {
+func scriptsHTML(p *content.Page, site content.SiteSettings, bar notice) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
+	// Wherever the close button is drawn it does something — on an edit
+	// render too, where the empty key makes it this pageview only. See
+	// notice.Close.
+	if bar.Close {
+		sb.WriteString("<script>" + noticeCloseJS(bar.Key) + "</script>\n")
+	}
 	sb.WriteString(embedCode(site.SiteJS, "script", scriptCloseRe))
 	sb.WriteString(embedCode(p.BodyJS, "script", scriptCloseRe))
 	return template.HTML(sb.String())

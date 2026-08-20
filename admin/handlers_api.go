@@ -521,6 +521,13 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		// are visible to the whole internet in any case.
 		"robotsTxt": site.RobotsTxt,
 		"sitemap":   site.Sitemap,
+		// The notice bar's switch and look. Its words are not settings —
+		// they are the shared region render.NoticeRegion, edited in the
+		// bar itself like any other shared content.
+		"noticeBar":         site.NoticeBar,
+		"noticeStyle":       render.ValidNoticeStyle(site.NoticeStyle),
+		"noticeDismissible": site.NoticeDismissible,
+		"noticeStyles":      render.NoticeStyles,
 	})
 }
 
@@ -542,7 +549,7 @@ const maxRobotsLen = 10_000
 // same carry-through rule as the code fields.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
 // "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode", "robotsTxt",
-// "sitemap"}
+// "sitemap", "noticeBar", "noticeStyle", "noticeDismissible"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
@@ -557,6 +564,13 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		Mode      *string `json:"mode"`
 		RobotsTxt *string `json:"robotsTxt"`
 		Sitemap   *bool   `json:"sitemap"`
+		// Pointers for the same reason, and a sharper one: the Site CSS
+		// & JS panel PUTs the settings it knows about, and a plain bool
+		// missing from that body would read as false and switch off a
+		// notice bar the site is relying on.
+		NoticeBar         *bool   `json:"noticeBar"`
+		NoticeStyle       *string `json:"noticeStyle"`
+		NoticeDismissible *bool   `json:"noticeDismissible"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -626,6 +640,24 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 			sitemap = *body.Sitemap
 		}
 	}
+	// The notice bar is site furniture like the menu alignment, so
+	// anyone who can open the dialog may switch it on — the words it
+	// carries go through the same save, sanitize, and publish path as
+	// any other shared content.
+	noticeBar, noticeStyle, noticeDismiss := current.NoticeBar, current.NoticeStyle, current.NoticeDismissible
+	if body.NoticeBar != nil {
+		noticeBar = *body.NoticeBar
+	}
+	if body.NoticeStyle != nil {
+		if *body.NoticeStyle != render.ValidNoticeStyle(*body.NoticeStyle) {
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Unknown notice bar style."))
+			return
+		}
+		noticeStyle = *body.NoticeStyle
+	}
+	if body.NoticeDismissible != nil {
+		noticeDismiss = *body.NoticeDismissible
+	}
 	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
 		return
@@ -649,6 +681,10 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		Mode:       mode,
 		RobotsTxt:  robots,
 		Sitemap:    sitemap,
+
+		NoticeBar:         noticeBar,
+		NoticeStyle:       noticeStyle,
+		NoticeDismissible: noticeDismiss,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))

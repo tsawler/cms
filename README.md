@@ -162,6 +162,7 @@ UI discovers them automatically:
 <div>{{cmsShared "footer"}}</div>       <!-- rich HTML shared by every page -->
 <img src="{{cmsImage "hero"}}">         <!-- image from the media library -->
 {{cmsSections "body"}}                  <!-- editor-composed full-width sections -->
+{{cmsNotice}}                           <!-- optional: place the site-wide notice bar -->
 <head> ... {{cmsHead}} ... </head>      <!-- meta description, favicon, robots, per-page CSS -->
 ... {{cmsScripts}} </body>              <!-- per-page JS -->
 ```
@@ -1264,6 +1265,97 @@ the admin's Pages list and is not reachable as a URL. That is what lets
 shared content reuse drafts, publishing, sanitization, and locales
 unchanged.
 
+## The notice bar
+
+A holiday closure, a delivery delay, a service interruption: the one
+thing the whole site has to say at once, above everything else, on every
+page. **Site settings → "Show a notice bar at the top of every page"**
+switches one on.
+
+It needs no template change. A layout that never mentions the bar gets
+it injected immediately after its `<body>` tag, which puts it above the
+header — and therefore above the menu — on every page of a site that
+predates the feature:
+
+```html
+<body>
+  <div class="cms-notice cms-notice-warning">…</div>   <!-- the CMS puts this here -->
+  <header>…{{cmsNav "main"}}…</header>
+```
+
+To place it yourself instead — under a fixed header rather than above
+it, or inside a wrapper your CSS grid owns — call `{{cmsNotice}}` and
+the bar renders there and nowhere else.
+
+**The words are not a setting.** They are a shared region — content,
+with everything that implies: per-language, sanitized, staged as a draft
+and live on the next Publish. That is deliberate; a settings value has
+no locale, and a notice that could only be written once would be wrong
+on half a bilingual site. `{{cmsShared "notice"}}` reaches the same
+content if you ever want it somewhere else as well.
+
+There are two ways to write them, and they store the same thing:
+
+- **In the dialog.** "What it says" is an editable box right under the
+  switch, with **bold**, *italic* and links — everything a notice bar
+  has ever wanted — so a closure notice is one visit: tick, write,
+  Save. The wording saves as a draft (the switch itself is live at
+  once, like every other setting) and goes live with the next Publish,
+  in the language being edited.
+- **In the bar.** Click into it on the page and type, exactly as you
+  edit the footer, with the site's full editor behind it.
+
+The two do not fight: the dialog's box shows whatever the bar currently
+holds, formatting and all, including typing you have not saved yet — and
+a save that leaves the wording untouched writes nothing at all, so
+visiting the dialog to change a colour cannot disturb the notice.
+
+The dialog's box keeps bold, italic, links and line breaks, and nothing
+else; ⌘B and ⌘I work, pasted text arrives as words, and a link is
+checked before it is accepted (`javascript:` and friends are refused).
+Anything richer than that — a picture in the bar, say — is written in
+the bar itself.
+
+Three switches go with it:
+
+- **Colour** — one of five curated schemes (dark, accent, warning,
+  alert, light). The CSS ships with the CMS rather than coming from your
+  Tailwind build, so the bar looks right on a site whose stylesheet has
+  never heard of it, and nothing here needs safelisting.
+- **"Let visitors close the notice"** — adds a close button. The
+  dismissal is remembered in the visitor's browser against the notice's
+  current wording, so **rewriting the notice shows it again** to
+  everyone who closed the last one. Without it the bar stays until it is
+  switched off. Logged in, the button closes the bar for that pageview
+  only and nothing is remembered — so you can see what visitors see
+  without losing the bar you may need to edit. While you are actually
+  editing the page it does nothing at all, since the bar is a region
+  you might be typing in.
+- **The switch itself** — off is off everywhere, whatever is written in
+  the bar.
+
+A bar switched on with nothing written in it shows to nobody; an editor
+sees it with a placeholder to type over. Emptying the notice therefore
+hides the bar as surely as switching it off does — and the placeholder
+itself is never stored, so it cannot reach the live site.
+
+### Making it scroll away under a fixed menu
+
+The bar sits in the normal flow at the top of the page, so if your
+header is sticky you get the behaviour for free — the notice scrolls out
+of sight and the menu stays pinned. This is all it takes, in your own
+stylesheet:
+
+```css
+header { position: sticky; top: 0; }
+```
+
+A `position: fixed` header is the case that needs work, because it is
+out of the flow and will sit on top of the bar; sticky is the simpler
+answer. Style the bar itself by overriding `.cms-notice` and friends —
+`.cms-notice-inner` is the centred container, `.cms-notice-text` wraps
+the editable words, `.cms-notice-close` is the close button.
+
 ## Site settings: brand, favicon & menu alignment
 
 The wrench menu's **Site settings** entry lets editors set the site
@@ -2232,7 +2324,9 @@ Bundled and imported components keep their own licenses:
 
 - **TinyMCE 6** (`editor/tinymce/`) — MIT, vendored and self-hosted; this
   is the last MIT-licensed release, and the version bundled here is
-  deliberately pinned to it. See `editor/tinymce/license.txt`.
+  deliberately pinned to it. See `editor/tinymce/license.txt`. Its
+  link/unlink glyphs are also used by the editor's own rich-text field
+  (`editor/src/dialogs.js`), so the two toolbars show the same icons.
 - **pako 2.1.0** (`admin/static/pako_inflate.min.js`) — MIT AND Zlib,
   vendored for the Cap proof-of-work captcha; the license banner is in
   the file itself.

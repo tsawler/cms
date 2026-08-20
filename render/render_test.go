@@ -1129,8 +1129,10 @@ func TestSharedRegionsAreSiteWideAndNotPageRegions(t *testing.T) {
 		names = append(names, region.Name)
 	}
 	// "footer" is declared by the layout both pages share, so it must come
-	// back once rather than once per template.
-	want := []string{"contact-strip", "footer"}
+	// back once rather than once per template. "notice" is the notice
+	// bar's own region, which the CMS contributes whether or not any
+	// template mentions it (see SharedRegions).
+	want := []string{"contact-strip", "footer", "notice"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Errorf("SharedRegions: got %v, want %v", names, want)

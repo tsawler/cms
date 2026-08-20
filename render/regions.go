@@ -38,13 +38,20 @@ func (r *Renderer) Regions(templateFile string) []Region {
 }
 
 // SharedRegions returns every shared region ({{cmsShared "key"}}) any of
-// the host's templates declares, deduplicated. Shared content has no
-// template of its own to be validated against — it is reached from
-// whichever page an editor happens to be on — so this union is what a save
-// checks a region name against.
+// the host's templates declares, deduplicated, plus the notice bar's
+// own (NoticeRegion). Shared content has no template of its own to be
+// validated against — it is reached from whichever page an editor
+// happens to be on — so this union is what a save checks a region name
+// against.
 func (r *Renderer) SharedRegions() []Region {
-	var out []Region
-	seen := map[string]bool{}
+	// The notice bar's words are a shared region the CMS owns rather
+	// than one a template declares: {{cmsNotice}} need never appear in
+	// any template — the bar is injected for layouts that don't place it
+	// — so nothing else here would vouch for the region and a save of it
+	// would be dropped on the floor. Listing it unconditionally costs
+	// nothing while the bar is off: a region nobody writes has no rows.
+	out := []Region{{Name: NoticeRegion, Kind: KindShared}}
+	seen := map[string]bool{NoticeRegion: true}
 	// Sorted, so the list does not shuffle with map iteration order.
 	files := make([]string, 0, len(r.sets))
 	for file := range r.sets {

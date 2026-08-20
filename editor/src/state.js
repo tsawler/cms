@@ -42,6 +42,14 @@ try {
     postInfo = JSON.parse(cfg.post || "null");
 } catch (e) { /* no post-settings gear */ }
 
+// The notice bar's stored words, sent whether or not the bar is
+// currently showing: switching it on in the settings dialog inserts the
+// bar client-side, and it should come back carrying what the site
+// already says rather than an empty placeholder. Mutable — the dialog
+// stashes the bar's current content here when it removes one, so a
+// switch off and on again does not throw away unsaved typing.
+export var notice = { html: cfg.notice || "" };
+
 // Where the editor's own assets live, derived from this script's URL
 // rather than written down.
 //
