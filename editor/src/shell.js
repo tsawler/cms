@@ -34,6 +34,25 @@ export var ICONS = {
     wider: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M3 12l6-4v8zM21 12l-6-4v8z"/></svg>',
     chevL: '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>',
     chevR: '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>',
+    // The block tool's move pair. Same chevrons turned a quarter, so a
+    // stack of blocks and a row of columns are moved by the same shape
+    // pointing the way the thing will go.
+    chevU: '<svg viewBox="0 0 24 24"><path d="M7.4 15.4 6 14l6-6 6 6-1.4 1.4L12 10.8z"/></svg>',
+    chevD: '<svg viewBox="0 0 24 24"><path d="M7.4 8.6 6 10l6 6 6-6-1.4-1.4L12 13.2z"/></svg>',
+    // The duplicate family: two boxes in the arrangement the edit
+    // leaves behind, with the *copy* filled in. Boxes rather than
+    // arrows on purpose — an arrow already means "move" on the two
+    // toolbars these sit on, and the thing worth showing about a
+    // duplicate is not a direction of travel but the pair that results.
+    // Which of the two is solid is what says where the new one lands.
+    dupUp: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="1.5"/>' +
+        '<rect x="5" y="15" width="14" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    dupDown: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/>' +
+        '<rect x="4" y="14" width="16" height="7" rx="1.5"/></svg>',
+    dupLeft: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/>' +
+        '<rect x="15" y="5" width="5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    dupRight: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/>' +
+        '<rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>',
 };
 
 export var host = null;
@@ -160,6 +179,20 @@ export function initShell() {
         "</div>" +
         '<div class="btnui" id="snip-ui">' +
         '<button id="snip-move" title="Drag to move this block" draggable="true">⠿</button>' +
+        // The move pair sits next to the drag handle because it is the
+        // same verb done precisely: dragging goes anywhere but travels
+        // through TinyMCE's drop caret, which can land a block inside
+        // its neighbour; stepping over one sibling cannot. Each arrow
+        // hides when there is nothing on that side to swap with.
+        '<button id="snip-up" title="Move this block up">' + ICONS.chevU + "</button>" +
+        '<button id="snip-down" title="Move this block down">' + ICONS.chevD + "</button>" +
+        // Duplicate lands the copy above or below rather than always
+        // in one place and leaving the arrows to finish the job, which
+        // is the older ContentBuilder ergonomic. Two presses to put a
+        // copy where it was wanted is one too many for the commonest
+        // edit there is.
+        '<button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + "</button>" +
+        '<button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + "</button>" +
         '<button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + "</button>" +
         '<button id="snip-set" title="Block settings">' + ICONS.gear + "</button>" +
         '<button id="snip-del" title="Delete this block">' + ICONS.trash + "</button>" +
@@ -174,6 +207,8 @@ export function initShell() {
         '<button id="col-on" title="Move this column right">' + ICONS.chevR + "</button>" +
         '<button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + "</button>" +
         '<button id="col-wide" title="Make this column wider">' + ICONS.wider + "</button>" +
+        '<button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + "</button>" +
+        '<button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + "</button>" +
         '<button id="col-add" title="Add a column">' + ICONS.plus + "</button>" +
         '<button id="col-del" title="Remove this column">' + ICONS.trash + "</button>" +
         "</div>" +

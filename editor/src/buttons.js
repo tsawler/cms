@@ -19,9 +19,10 @@ import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
 import { openCodeEditor } from "./code.js";
 import {
-    columnTarget, addColumn, confirmRemove, removeColumn,
-    resizeColumn, moveColumn, splitIntoColumns,
+    columnTarget, addColumn, duplicateColumn, confirmRemove, removeColumn,
+    resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
 } from "./columns.js";
+import { copyOf } from "./clone.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
 import { flash } from "./util.js";
 
@@ -174,10 +175,36 @@ function applySnippetSettings(el, v, baseRadius) {
     syncStyleShadow(el);
 }
 
+// blockSibling returns what sits directly above or below `el` in the
+// stack it belongs to — the thing the move arrows swap it with. Any
+// element counts, not only another block: a region may hold loose
+// paragraphs someone typed between two snippets, and stepping over one
+// of those in a single press is what "move this block up" plainly
+// means. What does not count is furniture: TinyMCE parks bogus <br>s
+// and placeholders wherever it is about to put a caret, and the editor
+// injects its own chrome into the page marked data-cms-ui. Neither is
+// something to trade places with — they are the same two things
+// elementSource strips before showing anyone a block's HTML.
+function blockSibling(el, dir) {
+    var n = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+    while (n && (n.tagName === "BR" || n.hasAttribute("data-mce-bogus") ||
+                 n.hasAttribute("data-cms-ui"))) {
+        n = dir < 0 ? n.previousElementSibling : n.nextElementSibling;
+    }
+    return n;
+}
+
 function showSnipUI(el) {
     activeSnip = el;
     var ui = $("snip-ui");
     ui.classList.add("on");
+    // An arrow with nothing on that side to swap with would be a button
+    // that does nothing, so it stays away — the same rule the column
+    // tool's moves follow. Recomputed on every anchor, which is also
+    // every scroll; two sibling walks are nothing next to the reflow
+    // getBoundingClientRect already costs.
+    $("snip-up").hidden = !blockSibling(el, -1);
+    $("snip-down").hidden = !blockSibling(el, 1);
     var r = el.getBoundingClientRect();
     var top = r.top - 44;
     if (top < 64) top = r.top + 8;
@@ -190,12 +217,75 @@ export function hideSnipUI() {
     $("snip-ui").classList.remove("on");
 }
 
+// moveBlock trades a block with its neighbour above or below. Sections
+// have had this since they existed (the up/down buttons in sections.js);
+// blocks have had only the drag handle, which is the same verb done
+// vaguely: a drag travels through TinyMCE's drop caret and can land a
+// block *inside* the one it was aimed past, which is why the handle's
+// dragend has to unnest and count twins afterwards. Swapping two
+// siblings has none of that to go wrong.
+function moveBlock(dir) {
+    if (!activeSnip) return;
+    var el = activeSnip;
+    var other = blockSibling(el, dir);
+    if (!other) return;
+    var ed = findOwningEditor(el);
+    runWithUndo(ed, function () {
+        if (dir < 0) el.parentNode.insertBefore(el, other);
+        else el.parentNode.insertBefore(other, el);
+    });
+    markContainerDirty(el);
+    // Both halves of re-anchoring matter. The block is at a new height,
+    // and it may have gone off-screen entirely if the neighbour it
+    // passed is a tall one — so bring it back into view first, then
+    // measure, or the chrome is placed against where the block was
+    // rather than where it now is. scrollIntoView with "nearest" moves
+    // nothing when the block is already visible, which is the usual case.
+    el.scrollIntoView({ block: "nearest" });
+    showSnipUI(el);
+    placeColUI(); // the column tool rides on the block and moved with it
+}
+
+// duplicateBlock puts a copy of a block directly above or below it.
+//
+// Both directions are offered rather than one plus the move arrows,
+// which is what ContentBuilder does and what this toolbar could have
+// done for one button less. Duplicating is the commonest edit there is
+// — three more of this card, another row like that one — and it almost
+// always has a side in mind; making half of those a duplicate followed
+// by a move is a worse trade than a button.
+//
+// The chrome follows the copy, not the original. The copy is what was
+// just made, so it is what is about to be typed into or moved, and
+// leaving the chrome behind on the original would make the page look
+// unchanged at the one moment it is not. addColumn already works this
+// way with the column it returns.
+function duplicateBlock(dir) {
+    if (!activeSnip) return;
+    var el = activeSnip;
+    var copy = copyOf(el);
+    var ed = findOwningEditor(el);
+    runWithUndo(ed, function () {
+        el.parentNode.insertBefore(copy, dir < 0 ? el : el.nextSibling);
+    });
+    markContainerDirty(copy);
+    lockButtons(); // the copy may carry a button
+    copy.scrollIntoView({ block: "nearest" });
+    showSnipUI(copy);
+    // No column is selected in a block nobody has clicked into yet, so
+    // this resolves to nothing and puts the column tool away; the next
+    // click inside the copy raises it against the cell that was meant.
+    showColUI(copy, copy);
+    flash("Block duplicated");
+}
+
 /* Column chrome. A block that is a row of columns gets a second, smaller
  * toolbar on top of the block chrome, anchored to the column that was
- * clicked: everything on it acts on that one column. A prose block that
- * is not a row yet gets the same toolbar showing nothing but ＋, which
- * splits it into two columns — that being the only way a plain "Text"
- * block ever becomes one.
+ * clicked: everything on it acts on that one column. A block that is
+ * not a row yet gets the same toolbar showing only the edits that could
+ * make it one — ＋ to split it in half, and the duplicate pair to stand
+ * it beside a copy of itself — those being the only ways a plain block
+ * ever becomes a row.
  *
  * The pair is deliberate. The block chrome moves, restyles, and deletes
  * the whole thing; this reshapes what is inside it. Which one someone
@@ -266,12 +356,29 @@ function showColUI(block, target) {
     $("col-narrow").hidden = !cell || !info.canResize;
     $("col-wide").hidden = !cell || !info.canResize;
     $("col-del").hidden = !cell;
-    $("col-add").hidden = cell && !info.canAdd;
+    // The duplicate pair is the one thing on this toolbar that means
+    // something in both modes, and it is the same sentence either way —
+    // "put another of this beside it". In a row that is a copied column
+    // and it goes when the row is full, the same gate ＋ uses; on a
+    // block that is not a row yet it is the block itself, copied into a
+    // fresh two-column row, and the only requirement is that there be
+    // something in the block to copy.
+    var canDup = cell ? info.canAdd : info.canPair;
+    $("col-dup-back").hidden = !canDup;
+    $("col-dup-on").hidden = !canDup;
+    $("col-dup-back").title = cell
+        ? "Duplicate this column to the left"
+        : "Duplicate this block to the left";
+    $("col-dup-on").title = cell
+        ? "Duplicate this column to the right"
+        : "Duplicate this block to the right";
+    $("col-add").hidden = cell ? !info.canAdd : !info.canSplit;
     $("col-add").title = cell ? "Add a column" : "Split into two columns";
     // Everything can be unavailable at once: a full row of one column
     // offers only Remove, and a row already at the maximum offers only
     // the moves. An empty pill would be a puzzle, so it stays away.
-    var any = ["col-back", "col-on", "col-narrow", "col-wide", "col-add", "col-del"]
+    var any = ["col-back", "col-on", "col-narrow", "col-wide",
+        "col-dup-back", "col-dup-on", "col-add", "col-del"]
         .some(function (id) { return !$(id).hidden; });
     if (!any) {
         hideColUI();
@@ -1165,6 +1272,23 @@ export function initButtons() {
     $("col-wide").addEventListener("click", function () {
         runColumnEdit(function (info) { resizeColumn(info, 1); });
     });
+    // One handler shape for both modes: inside a row it copies the
+    // column, and on a block that is not a row yet it copies the block
+    // into a new two-column row. Either way the chrome ends up anchored
+    // on the copy, which is the half about to be edited.
+    var dupBeside = function (dir) {
+        return function () {
+            runColumnEdit(function (info) {
+                if (info.mode === "cell") {
+                    return { target: duplicateColumn(info, dir) };
+                }
+                var made = duplicateBeside(info.block, dir);
+                return { block: made.row, target: made.copy };
+            });
+        };
+    };
+    $("col-dup-back").addEventListener("click", dupBeside(-1));
+    $("col-dup-on").addEventListener("click", dupBeside(1));
     $("col-add").addEventListener("click", function () {
         runColumnEdit(function (info) {
             if (info.mode === "split") {
@@ -1286,6 +1410,11 @@ export function initButtons() {
             }
         });
     });
+
+    $("snip-up").addEventListener("click", function () { moveBlock(-1); });
+    $("snip-down").addEventListener("click", function () { moveBlock(1); });
+    $("snip-dup-up").addEventListener("click", function () { duplicateBlock(-1); });
+    $("snip-dup-down").addEventListener("click", function () { duplicateBlock(1); });
 
     $("snip-del").addEventListener("click", function () {
         if (!activeSnip) return;

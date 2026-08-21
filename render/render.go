@@ -903,10 +903,11 @@ func ValidBackgroundPosition(s string) string {
 // whatever prefix it read, and has to safelist that prefix itself.
 func EditorAppliedClasses() []string {
 	classes := []string{
-		// Splitting a plain text block into columns builds the row from
-		// scratch. grid and gap-6 are carried by stock snippets too, but
-		// a host that replaced the whole library would otherwise have
-		// them compiled by nothing.
+		// The two edits that turn a block into a row — splitting a plain
+		// text block, and standing a block beside a copy of itself —
+		// build the row from scratch. grid and gap-6 are carried by
+		// stock snippets too, but a host that replaced the whole library
+		// would otherwise have them compiled by nothing.
 		"grid", "gap-6",
 		// Even rows: up to four columns of equal width are written as a
 		// track count with no spans, which is the form stock snippets
