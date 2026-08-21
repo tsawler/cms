@@ -2071,6 +2071,30 @@
     }, true);
   }
 
+  // ../src/clone.js
+  var MARKS = ["cms-col-active"];
+  function copyOf(el) {
+    var clone = el.cloneNode(true);
+    var all = [clone];
+    clone.querySelectorAll("*").forEach(function(n) {
+      all.push(n);
+    });
+    all.forEach(function(n) {
+      for (var i = n.attributes.length - 1; i >= 0; i--) {
+        if (n.attributes[i].name.indexOf("data-mce-") === 0) {
+          n.removeAttribute(n.attributes[i].name);
+        }
+      }
+      MARKS.forEach(function(m) {
+        n.classList.remove(m);
+      });
+      if (n.hasAttribute("class") && !n.getAttribute("class")) {
+        n.removeAttribute("class");
+      }
+    });
+    return clone;
+  }
+
   // ../src/columns.js
   var TRACKS = 12;
   var EVEN_MAX = 4;
@@ -2134,13 +2158,25 @@
   }
   var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
   function canSplit(block) {
-    if (!block || !(block.textContent || "").trim()) return false;
+    if (!block || !hasContent(block)) return false;
     return !block.querySelector(SPLIT_HOSTILE);
+  }
+  function hasContent(block) {
+    if (!block) return false;
+    if ((block.textContent || "").trim()) return true;
+    return !!block.querySelector("img, video, iframe,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
+  }
+  function canPair(block) {
+    if (!block || block.matches("[data-cms-code]")) return false;
+    return hasContent(block);
   }
   function columnTarget(block, target) {
     var row = rowIn(block);
     if (!row) {
-      return canSplit(block) ? { mode: "split", block } : null;
+      var split = canSplit(block);
+      var pair = canPair(block);
+      if (!split && !pair) return null;
+      return { mode: "split", block, canSplit: split, canPair: pair };
     }
     var cells = cellsOf(row);
     if (!cells.length) return null;
@@ -2220,25 +2256,19 @@
     });
   }
   function cleanClone(cell) {
-    var clone = cell.cloneNode(true);
-    var all = [clone];
-    clone.querySelectorAll("*").forEach(function(el) {
-      all.push(el);
-    });
-    all.forEach(function(el) {
-      for (var i = el.attributes.length - 1; i >= 0; i--) {
-        if (el.attributes[i].name.indexOf("data-mce-") === 0) {
-          el.removeAttribute(el.attributes[i].name);
-        }
-      }
-    });
-    clone.classList.remove("cms-col-active");
+    var clone = copyOf(cell);
     blankText(clone);
     return clone;
   }
   function addColumn(info) {
     var clone = cleanClone(info.cell);
     info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+  }
+  function duplicateColumn(info, dir) {
+    var clone = copyOf(info.cell);
+    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
     fixLayout(info.row);
     return clone;
   }
@@ -2307,6 +2337,20 @@
     row.appendChild(second);
     row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
     return row;
+  }
+  function duplicateBeside(block, dir) {
+    var row = document.createElement("div");
+    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
+    block.parentNode.insertBefore(row, block);
+    block.classList.remove("cms-snippet");
+    if (!block.getAttribute("class")) block.removeAttribute("class");
+    var first = document.createElement("div");
+    first.appendChild(block);
+    row.appendChild(first);
+    var copy = copyOf(first);
+    if (dir < 0) row.insertBefore(copy, first);
+    else row.appendChild(copy);
+    return { row, copy };
   }
 
   // ../src/buttons.js
@@ -2401,10 +2445,19 @@
     el.style.borderRadius = radius === baseRadius ? "" : radius + "px";
     syncStyleShadow(el);
   }
+  function blockSibling(el, dir) {
+    var n = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+    while (n && (n.tagName === "BR" || n.hasAttribute("data-mce-bogus") || n.hasAttribute("data-cms-ui"))) {
+      n = dir < 0 ? n.previousElementSibling : n.nextElementSibling;
+    }
+    return n;
+  }
   function showSnipUI(el) {
     activeSnip = el;
     var ui = $("snip-ui");
     ui.classList.add("on");
+    $("snip-up").hidden = !blockSibling(el, -1);
+    $("snip-down").hidden = !blockSibling(el, 1);
     var r = el.getBoundingClientRect();
     var top = r.top - 44;
     if (top < 64) top = r.top + 8;
@@ -2414,6 +2467,36 @@
   function hideSnipUI() {
     activeSnip = null;
     $("snip-ui").classList.remove("on");
+  }
+  function moveBlock(dir) {
+    if (!activeSnip) return;
+    var el = activeSnip;
+    var other = blockSibling(el, dir);
+    if (!other) return;
+    var ed = findOwningEditor(el);
+    runWithUndo(ed, function() {
+      if (dir < 0) el.parentNode.insertBefore(el, other);
+      else el.parentNode.insertBefore(other, el);
+    });
+    markContainerDirty(el);
+    el.scrollIntoView({ block: "nearest" });
+    showSnipUI(el);
+    placeColUI();
+  }
+  function duplicateBlock(dir) {
+    if (!activeSnip) return;
+    var el = activeSnip;
+    var copy = copyOf(el);
+    var ed = findOwningEditor(el);
+    runWithUndo(ed, function() {
+      el.parentNode.insertBefore(copy, dir < 0 ? el : el.nextSibling);
+    });
+    markContainerDirty(copy);
+    lockButtons();
+    copy.scrollIntoView({ block: "nearest" });
+    showSnipUI(copy);
+    showColUI(copy, copy);
+    flash("Block duplicated");
   }
   var activeCol = null;
   function placeColUI() {
@@ -2451,9 +2534,23 @@
     $("col-narrow").hidden = !cell || !info.canResize;
     $("col-wide").hidden = !cell || !info.canResize;
     $("col-del").hidden = !cell;
-    $("col-add").hidden = cell && !info.canAdd;
+    var canDup = cell ? info.canAdd : info.canPair;
+    $("col-dup-back").hidden = !canDup;
+    $("col-dup-on").hidden = !canDup;
+    $("col-dup-back").title = cell ? "Duplicate this column to the left" : "Duplicate this block to the left";
+    $("col-dup-on").title = cell ? "Duplicate this column to the right" : "Duplicate this block to the right";
+    $("col-add").hidden = cell ? !info.canAdd : !info.canSplit;
     $("col-add").title = cell ? "Add a column" : "Split into two columns";
-    var any = ["col-back", "col-on", "col-narrow", "col-wide", "col-add", "col-del"].some(function(id) {
+    var any = [
+      "col-back",
+      "col-on",
+      "col-narrow",
+      "col-wide",
+      "col-dup-back",
+      "col-dup-on",
+      "col-add",
+      "col-del"
+    ].some(function(id) {
       return !$(id).hidden;
     });
     if (!any) {
@@ -3230,6 +3327,19 @@
         resizeColumn(info, 1);
       });
     });
+    var dupBeside = function(dir) {
+      return function() {
+        runColumnEdit(function(info) {
+          if (info.mode === "cell") {
+            return { target: duplicateColumn(info, dir) };
+          }
+          var made = duplicateBeside(info.block, dir);
+          return { block: made.row, target: made.copy };
+        });
+      };
+    };
+    $("col-dup-back").addEventListener("click", dupBeside(-1));
+    $("col-dup-on").addEventListener("click", dupBeside(1));
     $("col-add").addEventListener("click", function() {
       runColumnEdit(function(info) {
         if (info.mode === "split") {
@@ -3355,6 +3465,18 @@
           placeColUI();
         }
       });
+    });
+    $("snip-up").addEventListener("click", function() {
+      moveBlock(-1);
+    });
+    $("snip-down").addEventListener("click", function() {
+      moveBlock(1);
+    });
+    $("snip-dup-up").addEventListener("click", function() {
+      duplicateBlock(-1);
+    });
+    $("snip-dup-down").addEventListener("click", function() {
+      duplicateBlock(1);
     });
     $("snip-del").addEventListener("click", function() {
       if (!activeSnip) return;
@@ -6877,7 +6999,22 @@ body.cms-editing [data-cms-fallback] {
     narrower: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M9 12 3 8v8zM15 12l6-4v8z"/></svg>',
     wider: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2z"/><path d="M3 12l6-4v8zM21 12l-6-4v8z"/></svg>',
     chevL: '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>',
-    chevR: '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>'
+    chevR: '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>',
+    // The block tool's move pair. Same chevrons turned a quarter, so a
+    // stack of blocks and a row of columns are moved by the same shape
+    // pointing the way the thing will go.
+    chevU: '<svg viewBox="0 0 24 24"><path d="M7.4 15.4 6 14l6-6 6 6-1.4 1.4L12 10.8z"/></svg>',
+    chevD: '<svg viewBox="0 0 24 24"><path d="M7.4 8.6 6 10l6 6 6-6-1.4-1.4L12 13.2z"/></svg>',
+    // The duplicate family: two boxes in the arrangement the edit
+    // leaves behind, with the *copy* filled in. Boxes rather than
+    // arrows on purpose — an arrow already means "move" on the two
+    // toolbars these sit on, and the thing worth showing about a
+    // duplicate is not a direction of travel but the pair that results.
+    // Which of the two is solid is what says where the new one lands.
+    dupUp: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="1.5"/><rect x="5" y="15" width="14" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    dupDown: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4" y="14" width="16" height="7" rx="1.5"/></svg>',
+    dupLeft: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="15" y="5" width="5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    dupRight: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="5" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>'
   };
   var host = null;
   var shadow = null;
@@ -6888,7 +7025,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();

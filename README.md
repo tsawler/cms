@@ -551,9 +551,32 @@ places:
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks and
   section presets created after deployment.
 
-Clicking an inserted block raises its chrome — drag handle, `⟨/⟩` HTML
-source, ⚙ settings, trash. The ⚙ offers background and text colour,
-spacing, and corner roundness.
+Clicking an inserted block raises its chrome:
+
+| | |
+|---|---|
+| `⠿` | drag the block anywhere on the page |
+| `⌃` `⌄` | move it up or down one place |
+| ▤ ▤ | duplicate it above or below |
+| `⟨/⟩` | edit the block's HTML |
+| ⚙ | block settings — background and text colour, spacing, corner roundness |
+| 🗑 | delete the block |
+
+The two move arrows trade the block with the one directly above or
+below it, and each hides when there is nothing on that side. They are
+the drag handle done precisely: a drag can go anywhere in the page but
+travels through the rich-text editor's drop caret, which will sometimes
+land a block *inside* the one it was aimed past; stepping over one
+sibling cannot.
+
+The duplicate pair copies the block whole and lands the copy on the
+side chosen, with the chrome following the copy — it is the thing just
+made, so it is the thing about to be typed into. A duplicated
+custom-code block keeps its key, so the two placeholders are two
+instances of one library entry, which is what the block's own starter
+script is written to expect.
+
+Everything on this toolbar is undoable with the usual keystroke.
 
 #### Columns
 
@@ -567,8 +590,14 @@ tinted too). Everything on it acts on that one column:
 |---|---|
 | `‹` `›` | move this column along the row |
 | `⇥⇤` `⇤⇥` | make it narrower or wider, a track at a time |
+| ▐▌ ▌▐ | duplicate it to the left or the right |
 | `＋` | add a column after it |
 | 🗑 | remove it |
+
+Duplicating keeps the column's contents; adding blanks them. Adding a
+column is making room for something not written yet, while duplicating
+one is wanting a second of what is already there — the third card in a
+row of cards, the fourth price tier.
 
 A column here is a real box with its own content, never a slice of one
 continuous stream. That distinction is the whole design. CSS offers the
@@ -578,13 +607,33 @@ in two columns"; it also puts the leading paragraph's top margin at the
 top of the first column and not the second, so the two start at visibly
 different heights.
 
-**A plain text block has no columns yet**, so its toolbar shows only
-`＋`, captioned *Split into two columns*: what was there goes in the
-first column, a placeholder in the second. Blocks that hold placed
-things rather than written ones — a button, a video or photo slot, an
-image, a nested block — are not offered the split, and neither is an
-empty block. Once a block *is* a row, the full toolbar applies to it
-whatever it holds.
+**A block that is not a row yet** gets the same toolbar with the two
+edits that can make it one:
+
+- `＋`, captioned *Split into two columns* — what was there goes in the
+  first column, a placeholder in the second. Blocks built around a
+  placed thing rather than a written one (a button, a video or photo
+  slot, an image, a nested block) are not offered this, and neither is
+  an empty block: cutting a block designed around a picture in half is
+  a judgement about its design, not a column edit.
+- ▐▌ ▌▐, *Duplicate this block to the left / right* — the block is
+  wrapped in a fresh two-column row with a copy of itself beside it.
+  Copying a block whole is not that judgement, so the button and photo
+  blocks the split refuses are welcome here; all it needs is something
+  in the block to copy. This is the only way left and right mean
+  anything for a block, since blocks are a stack and only columns sit
+  side by side.
+
+  The block goes into its column intact — background, padding and
+  rounding travelling with it — so a duplicated callout is two tinted
+  boxes side by side rather than one wide tint with the words twice
+  inside it. Custom-code blocks stay out: the wrapping row takes over
+  as the block, and a code block that is no longer the block can no
+  longer open its library entry from `⟨/⟩`. Duplicating one above or
+  below from the block chrome keeps it whole.
+
+Once a block *is* a row, the full toolbar applies to it whatever it
+holds.
 
 A new column is a copy of the one you added it after, so it keeps that
 row's classes and any photo or video slot it carried, with its words
@@ -2163,22 +2212,41 @@ own stylesheet defines.
 ### Environment variables
 
 The example loads variables from a `.env` file — `examples/basic/.env`
-first, falling back to one at the repo root — without overriding
-anything already set in the real environment. The `CMS_TAILWIND_*`,
-`S3_*`, `CAP_*`, and `CMS_SESSION_REDIS_*` variables plus `CMS_SITE_URL`,
-`CMS_REMEMBER_DAYS`,
-`CMS_POSTS_PER_PAGE`, `CMS_ADMIN_PER_PAGE` and the two `CMS_MEDIA_*` knobs are read by
-`cms.ConfigFromEnv`, which any host can
-use to fill those `Config` fields; the rest are the example's own.
-Everything read:
+first, falling back to one at the repo root — without overriding anything
+already set in the real environment.
+
+They come in two groups, and the difference matters as soon as you copy
+from here into your own site: five are the example's own program logic,
+and the rest are read by `cms.ConfigFromEnv`, which any host can call to
+fill those `Config` fields.
+
+#### The example's own
+
+The module never reads these. It takes its database from `Config.DB` — a
+`*sql.DB` you opened yourself — and its engine from `Config.Dialect`, so
+`CMS_DIALECT` is only how *this program* decides which driver to open and
+which default DSN to use. Naming these variables in your own `main.go` is
+a convention worth keeping, not something you inherit: sites generated by
+`cms init` read `DATABASE_URL`, `ADDR`, `CMS_ADMIN_EMAIL` and
+`CMS_ADMIN_PASSWORD`, but bake the driver in at generation time and have
+no `CMS_DIALECT`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CMS_DIALECT` | `postgres` | Database engine: `postgres`, or `mysql` for both MySQL and MariaDB. Selects the driver and the default `DATABASE_URL`. |
+| `CMS_DIALECT` | `postgres` | Database engine: `postgres`, or `mysql` for both MySQL and MariaDB. Selects the driver the example opens and the default `DATABASE_URL`, and is passed through to `Config.Dialect`. |
 | `DATABASE_URL` | Postgres: `postgres://cms:cms@localhost:5433/cms?sslmode=disable`; MySQL: `cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone='+00:00'&clientFoundRows=true` | Connection string, matching `docker-compose.yml`. A MySQL DSN you supply yourself must carry all four settings in the default. |
 | `ADDR` | `:4000` | HTTP listen address. |
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
 | `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
+
+#### Read by the module
+
+Everything `cms.ConfigFromEnv` fills in. An unset variable leaves its
+field zero and `New` applies the usual default; a set-but-malformed one is
+a startup error rather than a silent fallback.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. An invalid or non-positive value is a startup error. |
 | `CMS_SESSION_REDIS_ADDR` | unset (sessions stay in the database) | Redis server address, `host:port`. Setting it moves login-session storage from the `cms_sessions` table to Redis (keys prefixed `cms_session:`) and makes the other `CMS_SESSION_REDIS_*` variables relevant. |
 | `CMS_SESSION_REDIS_PASSWORD` | unset (no auth) | Password for that Redis server. |

@@ -46,6 +46,7 @@
  * ------------------------------------------------------------------ */
 
 import { cmsConfirm } from "./dialogs.js";
+import { copyOf } from "./clone.js";
 
 // The grid Tailwind's span vocabulary is built on. Not configurable:
 // col-span-N only means anything against a twelve-track row.
@@ -165,26 +166,63 @@ var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet," +
 // does not sprout a control over nothing, and nothing that is placed
 // rather than written.
 function canSplit(block) {
-    if (!block || !(block.textContent || "").trim()) return false;
+    if (!block || !hasContent(block)) return false;
     return !block.querySelector(SPLIT_HOSTILE);
 }
 
+// hasContent reports whether there is anything in a block at all. Words
+// count, and so does anything placed — a photo, a video, a map, an
+// embed — since a block can be built entirely out of one of those and
+// hold no text.
+function hasContent(block) {
+    if (!block) return false;
+    if ((block.textContent || "").trim()) return true;
+    return !!block.querySelector("img, video, iframe," +
+        "[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
+}
+
+// canPair reports whether a block can be stood beside a copy of itself.
+// Nearly anything with something in it can: copying a block whole is
+// not the judgement about its design that cutting one in half is, so
+// the button and photo blocks SPLIT_HOSTILE keeps out are welcome here.
+//
+// Custom-code blocks are the exception. Pairing wraps the block in a
+// new row which takes over as the block, and a cms-code element that is
+// no longer the block loses the contract its ⟨/⟩ button depends on —
+// that button opens the library entry the block names, and it can only
+// find it while the block is the code block (see buttons.js). Such a
+// block still duplicates above and below, which is where a second
+// instance of a widget is wanted anyway.
+function canPair(block) {
+    if (!block || block.matches("[data-cms-code]")) return false;
+    return hasContent(block);
+}
+
 // columnTarget reports what the column tool should offer for a click at
-// `target` inside `block`, or null for a block that is neither a row nor
-// splittable.
+// `target` inside `block`, or null for a block it can do nothing with.
 //
 //   { mode: "cell",  … }  the click landed in one cell of a row
-//   { mode: "split", … }  the block is prose and could become a row
+//   { mode: "split", … }  the block is not a row, but could become one
 //
 // In cell mode the flags say which edits are available, so the tool can
 // hide the buttons that would do nothing rather than offer them and
 // refuse: a lone cell cannot move or be narrowed, a full row cannot
 // grow, and a row whose track count does not divide twelve cannot be
 // resized at all.
+//
+// Split mode carries two flags because the two ways a block can become
+// a row do not apply to the same blocks. Dividing it needs prose
+// (canSplit); pairing it with a copy of itself needs only that there is
+// something there to copy, so a button block or a photo block — which
+// must never be cut in half — can still be stood next to a second of
+// itself.
 export function columnTarget(block, target) {
     var row = rowIn(block);
     if (!row) {
-        return canSplit(block) ? { mode: "split", block: block } : null;
+        var split = canSplit(block);
+        var pair = canPair(block);
+        if (!split && !pair) return null;
+        return { mode: "split", block: block, canSplit: split, canPair: pair };
     }
     var cells = cellsOf(row);
     if (!cells.length) return null;
@@ -288,24 +326,12 @@ function blankText(cell) {
     });
 }
 
-// cleanClone copies a cell for use as a new column: TinyMCE's shadow
-// attributes go (they describe the original's state, and a stale
-// data-mce-style would be written back over the copy's own on
-// serialization), and the words are replaced.
+// cleanClone copies a cell for use as a *new* column: a saveable copy
+// (copyOf handles the attributes that must not survive one) with the
+// words replaced, so it reads as something to fill in. Duplicating a
+// column keeps its words and so uses copyOf directly.
 function cleanClone(cell) {
-    var clone = cell.cloneNode(true);
-    var all = [clone];
-    clone.querySelectorAll("*").forEach(function (el) { all.push(el); });
-    all.forEach(function (el) {
-        for (var i = el.attributes.length - 1; i >= 0; i--) {
-            if (el.attributes[i].name.indexOf("data-mce-") === 0) {
-                el.removeAttribute(el.attributes[i].name);
-            }
-        }
-    });
-    // The mark naming the column the tool has hold of belongs to the
-    // original, not to a copy of it.
-    clone.classList.remove("cms-col-active");
+    var clone = copyOf(cell);
     blankText(clone);
     return clone;
 }
@@ -318,6 +344,25 @@ function cleanClone(cell) {
 export function addColumn(info) {
     var clone = cleanClone(info.cell);
     info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+}
+
+// duplicateColumn puts a copy of a column beside it, on the side asked
+// for, and re-evens the widths. It is addColumn's twin and differs in
+// the one way that matters: the words stay. Adding a column is making
+// room for something not written yet; duplicating one is wanting a
+// second of what is already there — the third card in a row of cards,
+// the fourth price tier — so blanking it would undo the whole point.
+//
+// Widths going back to even is the same call fixLayout documents for
+// every other cell-count change: after duplicating one half of an 8-4
+// row there is no obvious redistribution of the old widths, and even
+// columns are both predictable and one click from being reshaped.
+// Returns the new cell.
+export function duplicateColumn(info, dir) {
+    var clone = copyOf(info.cell);
+    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
     fixLayout(info.row);
     return clone;
 }
@@ -396,11 +441,12 @@ export function moveColumn(info, dir) {
 // the element that is the block afterwards.
 //
 // A block that can hold divs keeps its identity and gains the grid
-// classes. A bare <p> cannot — paragraphs do not nest — so it moves
-// inside a new <div> that takes over as the block. That is worth doing
-// for its own sake: pressing Enter in a bare paragraph splits it into
-// two sibling blocks, while inside a column the paragraphs stay together
-// and go on reading as one piece of text.
+// classes — splitting divides what is inside one box, so the box stays
+// and the halves go in it. A bare <p> cannot hold divs — paragraphs do
+// not nest — so it moves inside a new <div> that takes over as the
+// block. That is worth doing for its own sake: pressing Enter in a bare
+// paragraph splits it into two sibling blocks, while inside a column
+// the paragraphs stay together and go on reading as one piece of text.
 export function splitIntoColumns(block) {
     var row = block;
     if (block.tagName === "P") {
@@ -426,4 +472,38 @@ export function splitIntoColumns(block) {
 
     row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
     return row;
+}
+
+// duplicateBeside stands a block next to a copy of itself, which is the
+// only way "put another one of these here" can mean left or right for a
+// block: blocks are a stack, and only columns sit side by side.
+//
+// Unlike splitting, this always builds a *new* row around the block
+// rather than promoting the block into one, and the difference is the
+// whole point. Splitting divides what is inside one box, so the box
+// stays. Duplicating wants two of the box: a callout copied to the
+// right should be two tinted, padded callouts, not one wide tint with
+// the words twice inside it. So the block goes into a column whole —
+// its background, padding and rounding travelling with it — and the
+// copy is a copy of that column.
+//
+// Returns { row, copy }: what the block is afterwards, and the new
+// cell, so the chrome can anchor on what was just made.
+export function duplicateBeside(block, dir) {
+    var row = document.createElement("div");
+    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
+    block.parentNode.insertBefore(row, block);
+    // There is one block here now and it is the row; what was the block
+    // is a column's contents. (Leaving the marker on would have
+    // unnestSnippets lift the column straight back out of the row.)
+    block.classList.remove("cms-snippet");
+    if (!block.getAttribute("class")) block.removeAttribute("class");
+
+    var first = document.createElement("div");
+    first.appendChild(block);
+    row.appendChild(first);
+    var copy = copyOf(first);
+    if (dir < 0) row.insertBefore(copy, first);
+    else row.appendChild(copy);
+    return { row: row, copy: copy };
 }
