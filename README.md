@@ -1472,6 +1472,22 @@ the nav grow (`flex:1`) inside your header's flexbox and justifies the
 items within it. "Theme default" adds no class and leaves your layout
 alone.
 
+## Light or dark editing tools
+
+The editor's own chrome — the bottom edit bar, the left tool rail, the
+floating block/section/column toolbars, the wrench menu, and TinyMCE's
+formatting toolbar — is dark by default. On a site whose design is dark
+that is chrome you have to hunt for, so **Site settings → Editor →
+"Colour of the editing tools"** switches the lot to a pale scheme.
+
+It is a property of the site, stored with the rest of the settings and
+shared by everyone who edits it, and it changes nothing a visitor ever
+sees. Saving applies it straight away: the chrome repaints from a set of
+CSS custom properties, and any TinyMCE instances currently attached are
+rebuilt, since a TinyMCE skin (`oxide` / `oxide-dark`, both vendored) is
+fixed when an instance is created. Sites that predate the setting stay
+dark.
+
 ## Development & production: keeping a site out of search
 
 The same dialog carries a **Site mode** switch, which only superadmins

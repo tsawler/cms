@@ -8,9 +8,10 @@
 
 import { state, cfg, pageId, notice, adminPath, mediaEnabled, canPages, isSuperadmin } from "./state.js";
 import { api, setMsg, flash } from "./util.js";
-import { $ } from "./shell.js";
+import { $, setChromeTheme } from "./shell.js";
 import { openDialog, sanitizeRichHTML } from "./dialogs.js";
-import { initRichEditors } from "./richtext.js";
+import { initRichEditors, removeRichEditors } from "./richtext.js";
+import { injectSectionUI } from "./sections.js";
 import { markDirty, hasUnsaved, updateBarButtons } from "./editing.js";
 import { updateChip } from "./saving.js";
 
@@ -18,7 +19,14 @@ var ALIGNS = ["left", "center", "right"];
 
 // The settings dialog's tabs. Named where they are used as well as
 // listed, so a field cannot drift onto a tab that no longer exists.
-var BRAND = "Brand", MENU = "Menu", NOTICE = "Notice bar", SEARCH = "Search";
+var BRAND = "Brand", MENU = "Menu", NOTICE = "Notice bar", SEARCH = "Search",
+    EDITOR = "Editor";
+
+// The editor's two colour schemes, matching content.EditorTheme*.
+var EDITOR_THEMES = [
+    { key: "dark", label: "Dark — pale tools, for a light-coloured site" },
+    { key: "light", label: "Light — dark tools, for a dark-coloured site" },
+];
 
 // The notice bar's colour schemes, mirroring render.NoticeStyles — the
 // dialog's own copy, used until the server's list arrives with the
@@ -199,6 +207,25 @@ function noticeBlank(html) {
     return !html.replace(/<[^>]*>/g, "").replace(/&nbsp;|&#160;|&#xa0;/g, " ").trim();
 }
 
+// applyEditorTheme repaints the editing tools without a reload.
+//
+// The chrome is a class away — both halves of it are custom-property
+// palettes — but TinyMCE's toolbar is not: a skin is chosen when an
+// instance is built and never changes afterwards, so the instances have
+// to go and come back. That is exactly what entering edit mode does, and
+// it costs nothing here: an inline editor leaves its content in the page
+// when it lets go, and the dirty flags that decide what a save sends
+// live on `state`, not inside TinyMCE. Nothing to rebuild when the tools
+// are not out in the first place — the next Edit builds them with the
+// new skin.
+function applyEditorTheme(theme) {
+    setChromeTheme(theme);
+    if (!state.editing || !window.tinymce) return;
+    removeRichEditors();
+    initRichEditors();
+    injectSectionUI(); // removeRichEditors takes the section chrome with it
+}
+
 function noticeCloseButton() {
     var b = document.createElement("button");
     b.type = "button";
@@ -363,6 +390,26 @@ export function openSiteSettings() {
                 "written in it shows to nobody. You can also write it in the bar on the page " +
                 "itself — it is a shared region like the footer." + dismiss;
         } });
+        // The editing tools' own colours. Not a setting about the site
+        // at all — it changes nothing a visitor ever sees — but it is a
+        // property of the site all the same: dark chrome laid over a
+        // dark design stops reading as chrome, and every editor working
+        // on that site hits it.
+        fields.push({ id: "editorTheme", label: "Colour of the editing tools",
+            type: "select", value: s.editorTheme, tab: EDITOR, span: true,
+            options: EDITOR_THEMES.map(function (t) {
+                return { value: t.key, label: t.label };
+            }) });
+        fields.push({ type: "note", span: true, tab: EDITOR, text: function (v) {
+            var which = v.editorTheme === "light"
+                ? "The edit bar, the tool rail, the block and section toolbars and the " +
+                  "formatting toolbar are drawn pale, with dark text."
+                : "The edit bar, the tool rail, the block and section toolbars and the " +
+                  "formatting toolbar are drawn dark, with pale text.";
+            return which + " Pick whichever stands out against this site's own design — the " +
+                "tools disappear when they are the same shade as the page under them. It " +
+                "changes nothing a visitor sees, and it applies to everyone who edits here.";
+        } });
         // Whether the site may be indexed is a superadmin's switch. The
         // note under it spells out what the current choice does, because
         // "development" and "production" name a state, not a
@@ -441,7 +488,7 @@ export function openSiteSettings() {
         // Search is superadmin-only, and a tab with nothing behind it
         // would be a dead end — so the bar is built from what this user
         // can actually see.
-        var tabs = [BRAND, MENU, NOTICE];
+        var tabs = [BRAND, MENU, NOTICE, EDITOR];
         if (isSuperadmin) tabs.push(SEARCH);
         openDialog({
             message: "Site settings",
@@ -473,6 +520,7 @@ export function openSiteSettings() {
                 noticeBar: values.noticeBar === "1",
                 noticeStyle: values.noticeStyle,
                 noticeDismissible: values.noticeDismissible === "1",
+                editorTheme: values.editorTheme,
             };
             // The wording is content, so it does not ride the settings
             // PUT: it goes to the regions endpoint as the shared region
@@ -500,6 +548,10 @@ export function openSiteSettings() {
             }).then(function () {
                 applySettings(next);
                 retitle(s.siteName, next.siteName);
+                // Only when it actually changed: the rebuild it costs is
+                // cheap but not free, and there is no reason to pay it
+                // on a save that came here for the site name.
+                if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
                 if (!changed) {
                     flash("Site settings saved.");
                     return;

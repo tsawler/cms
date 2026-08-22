@@ -165,6 +165,10 @@ func TestSiteSettingsRoundTrip(t *testing.T) {
 			NoticeBar:         true,
 			NoticeStyle:       "warning",
 			NoticeDismissible: true,
+			// The in-place editor's own chrome, which is a property of
+			// the site the way its design is: dark tools vanish into a
+			// dark page.
+			EditorTheme: content.EditorThemeLight,
 		}
 		if err := s.SaveSiteSettings(ctx, want); err != nil {
 			t.Fatalf("SaveSiteSettings: %v", err)

@@ -57,6 +57,14 @@ type SiteSettings struct {
 	// dismissal in the visitor's browser until the notice's words
 	// change. Off, the bar stays until it is switched off here.
 	NoticeDismissible bool
+	// EditorTheme is the colour scheme of the in-place editor's own
+	// chrome — the edit bar, the tool rail, the floating block and
+	// section toolbars, and TinyMCE's formatting toolbar. "" and
+	// EditorThemeDark are the dark chrome the editor has always worn;
+	// EditorThemeLight swaps it for a pale one, which is what a site
+	// with a dark design of its own needs: dark chrome on a dark page
+	// stops reading as chrome at all.
+	EditorTheme string
 }
 
 // The two site modes. A site under construction sits in development,
@@ -87,6 +95,20 @@ func ValidMode(m string) bool {
 	return m == "" || m == ModeProduction || m == ModeDevelopment
 }
 
+// The in-place editor's two colour schemes. The empty value reads as
+// dark, so a site that predates this setting keeps the chrome it has
+// always had.
+const (
+	EditorThemeDark  = "dark"
+	EditorThemeLight = "light"
+)
+
+// ValidEditorTheme reports whether t is a theme that may be stored: one
+// of the two named schemes, or "" for the dark default.
+func ValidEditorTheme(t string) bool {
+	return t == "" || t == EditorThemeDark || t == EditorThemeLight
+}
+
 // Keys the settings are stored under in cms_settings.
 const (
 	settingMenuAlign  = "menu_align"
@@ -103,6 +125,8 @@ const (
 	settingNoticeBar         = "notice_bar"
 	settingNoticeStyle       = "notice_style"
 	settingNoticeDismissible = "notice_dismissible"
+
+	settingEditorTheme = "editor_theme"
 )
 
 // SiteSettings returns the stored site settings. Keys never saved come
@@ -149,6 +173,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.NoticeStyle = v
 		case settingNoticeDismissible:
 			out.NoticeDismissible = v == "1"
+		case settingEditorTheme:
+			out.EditorTheme = v
 		}
 	}
 	return out, rows.Err()
@@ -191,6 +217,8 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingNoticeBar:         noticeBar,
 		settingNoticeStyle:       in.NoticeStyle,
 		settingNoticeDismissible: noticeDismissible,
+
+		settingEditorTheme: in.EditorTheme,
 	} {
 		keyCol := tx.Dialect().Quote("key")
 		if _, err := tx.Exec(ctx, `

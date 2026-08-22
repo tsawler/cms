@@ -139,6 +139,12 @@ export function resetFilledSlots() {
 }
 
 export var state = {
+    // The editor's own chrome: "dark" (the default) or "light". A site
+    // whose design is dark needs the light one — dark chrome over a
+    // dark page is chrome you have to hunt for. Mutable: the site
+    // settings dialog switches it without a reload.
+    editorTheme: cfg.editorTheme === "light" ? "light" : "dark",
+
     pageStatus: cfg.status || "draft",
     visibility: cfg.visibility || "public",
     // True when a published page's saved draft differs from what's live.

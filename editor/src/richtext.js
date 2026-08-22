@@ -186,14 +186,18 @@ function initSectionEditors() {
 }
 
 export function initInlineEditor(el, onDirty, register) {
+    var light = state.editorTheme === "light";
     var opts = {
         target: el,
         inline: true,
         menubar: false,
-        // Dark chrome, matching the section toolbars and the shell's
-        // own UI. Content styles are unaffected: the dark skin's
-        // content.inline.css is identical to the light one's.
-        skin: "oxide-dark",
+        // Chrome to match the rest of the editor's, dark or light as
+        // the site settings say. Content styles are unaffected either
+        // way: oxide-dark's content.inline.css is identical to oxide's.
+        // The skin is fixed when the instance is built, so switching
+        // schemes without a reload means rebuilding them — see
+        // settings.js.
+        skin: light ? "oxide" : "oxide-dark",
         // In inline mode the toolbar floats docked to the region
         // as soon as it gains focus — a click is enough, no text
         // selection needed.
@@ -266,12 +270,13 @@ export function initInlineEditor(el, onDirty, register) {
                 // The Styles menu previews each entry with inline styles
                 // computed against the page: the page's own text color
                 // when a format sets none, plus an explicit transparent
-                // background. On the dark menu that makes dark previews
-                // (Serif, Monospace, …) illegible — the same failure the
-                // light menu had with White. Rewrite each preview into a
-                // dark-mode badge: keep the entry's hue but lift its
-                // lightness to read on the dark menu, over a faint pill
-                // tinted from the same color. The lift can't be phrased
+                // background. That leaves half the entries invisible —
+                // dark previews (Serif, Monospace, …) on the dark menu,
+                // White on the light one. Rewrite each preview into a
+                // badge: keep the entry's hue but drag its lightness to
+                // the end of the range the menu can show — up on the
+                // dark menu, down on the light one — over a faint pill
+                // tinted from the same color. The shift can't be phrased
                 // as `color: … from currentColor` — a later color
                 // declaration makes currentColor resolve to the menu's
                 // inherited color, not the entry's — so the entry color
@@ -289,7 +294,8 @@ export function initInlineEditor(el, onDirty, register) {
                     if (css.indexOf("background-color") === -1) {
                         var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
                         if (m) {
-                            css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
+                            css += "color:oklch(from " + m[1] + " " +
+                                (light ? "calc(min(l, 0.55))" : "calc(max(l, 0.8))") + " c h);";
                         }
                         css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
                     }
