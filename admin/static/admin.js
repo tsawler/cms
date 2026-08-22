@@ -153,6 +153,36 @@
         }
     });
 
+    // Toasts: a line about something that just happened without a page
+    // load. Anything that arrives *with* one is still the flash banner at
+    // the top of the page — this is for work the browser did in place,
+    // like a download that finished or failed.
+    var toastHost = null;
+    function toast(message, tone) {
+        if (!message) return;
+        if (!toastHost) {
+            toastHost = document.createElement("div");
+            toastHost.className = "cms-toasts";
+            // polite: it reports, it never asks. A screen reader should
+            // finish its sentence before hearing that a file saved.
+            toastHost.setAttribute("aria-live", "polite");
+            document.body.appendChild(toastHost);
+        }
+        var el = document.createElement("div");
+        el.className = "cms-toast" + (tone === "error" ? " cms-toast-error" : "");
+        el.textContent = message;
+        toastHost.appendChild(el);
+        // A failure is worth reading twice; a success is not.
+        setTimeout(function () {
+            el.classList.add("cms-toast-out");
+            setTimeout(function () { el.remove(); }, 300);
+        }, tone === "error" ? 6000 : 3500);
+    }
+    // The page scripts (media.js and friends) load after this one and
+    // share its behaviours through window, the same way they share the
+    // confirmation dialog.
+    window.cmsToast = toast;
+
     // Copy-to-clipboard: <button data-copy="https://...">
     document.addEventListener("click", function (e) {
         var btn = e.target.closest ? e.target.closest("[data-copy]") : null;

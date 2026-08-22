@@ -558,6 +558,70 @@ function captureFrame(src, crossOrigin) {
         sync();
     });
 
+    // ---------------------------------------------------------------
+    // Download
+    // ---------------------------------------------------------------
+
+    // Following the link is what a download normally is, and it reports
+    // nothing back: a file that never arrived looks exactly like one that
+    // did. Fetching it instead gives an answer to say out loud. The blob
+    // that costs is the reason for the ceiling — buffering half a
+    // gigabyte of video in memory to be able to say "done" is a worse
+    // trade than letting the browser stream it and saying so up front.
+    var maxFetchedBytes = 64 << 20;
+
+    function saveBlob(blob, name) {
+        var url = window.URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = name || "download";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Not revoked on the spot: a browser that has not started reading
+        // the blob yet would find it gone and save nothing.
+        setTimeout(function () { window.URL.revokeObjectURL(url); }, 60000);
+    }
+
+    function say(key, name) {
+        var toast = window.cmsToast;
+        if (!toast) return;
+        var text = downloadLink.getAttribute("data-t-" + key) || "";
+        toast(text.replace("{name}", name), key === "failed" ? "error" : "ok");
+    }
+
+    if (downloadLink) downloadLink.addEventListener("click", function (e) {
+        var href = downloadLink.getAttribute("href");
+        var item = selected().filter(function (x) { return x.getAttribute("data-id"); })[0];
+        if (!href || !item) return;
+
+        var name = item.getAttribute("data-name") || "";
+        if (Number(item.getAttribute("data-size") || 0) > maxFetchedBytes) {
+            // The link does the work; all we can honestly report is that
+            // it started.
+            say("started", name);
+            return;
+        }
+
+        e.preventDefault();
+        if (downloadLink.dataset.busy) return;
+        downloadLink.dataset.busy = "1";
+        window.fetch(href).then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.blob();
+        }).then(function (blob) {
+            saveBlob(blob, name);
+            say("done", name);
+        }).catch(function () {
+            // A 404 for an object the bucket lost, a session that expired
+            // while the page sat open, a network that dropped: all of it
+            // is one thing to the person who clicked.
+            say("failed", name);
+        }).then(function () {
+            delete downloadLink.dataset.busy;
+        });
+    });
+
     itemsEl.addEventListener("dblclick", function (e) {
         var el = e.target.closest(".cms-item");
         if (el) open(el);
@@ -726,8 +790,6 @@ function captureFrame(src, crossOrigin) {
         var factsEl = inspector.querySelector("[data-inspector-facts]");
         var renameForm = inspector.querySelector("[data-inspector-rename]");
         var altForm = inspector.querySelector("[data-inspector-alt]");
-        var copy = inspector.querySelector("[data-inspector-copy]");
-        var download = inspector.querySelector("[data-inspector-download]");
 
         preview.textContent = "";
         factsEl.textContent = "";
@@ -737,8 +799,6 @@ function captureFrame(src, crossOrigin) {
             nameEl.classList.add("cms-muted");
             renameForm.hidden = true;
             altForm.hidden = true;
-            copy.hidden = true;
-            if (download) download.hidden = true;
             return;
         }
 
@@ -803,14 +863,6 @@ function captureFrame(src, crossOrigin) {
             altForm.action = altForm.getAttribute("data-action-template")
                 .replace("{id}", el.getAttribute("data-id"));
             altForm.querySelector("input[name=alt]").value = el.getAttribute("data-alt") || "";
-        }
-
-        copy.hidden = false;
-        copy.setAttribute("data-copy", el.getAttribute("data-url") || "");
-
-        if (download) {
-            download.hidden = false;
-            setDownload(download, el);
         }
     }
 

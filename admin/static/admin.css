@@ -454,6 +454,47 @@ td.cms-slug { color: var(--cms-muted); }
     font-size: .92rem;
 }
 
+/* Toasts: what happened, when it happened without a page load. Bottom
+   right, out of the way of the actions above them, and stacked so a
+   second one never lands on the first. */
+.cms-toasts {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: .5rem;
+    /* Nothing to click: a toast must never sit on top of a button. */
+    pointer-events: none;
+}
+.cms-toast {
+    max-width: 22rem;
+    padding: .6rem .9rem;
+    background: var(--cms-spruce-tint);
+    border: 1px solid var(--cms-spruce-line);
+    color: var(--cms-spruce);
+    border-radius: var(--cms-radius);
+    font-size: .88rem;
+    box-shadow: 0 6px 18px rgba(31, 41, 33, .12);
+    animation: cms-toast-in .16s ease-out;
+}
+.cms-toast-error {
+    background: var(--cms-danger-tint);
+    border-color: var(--cms-danger-line);
+    color: var(--cms-danger);
+}
+.cms-toast-out { opacity: 0; transition: opacity .3s ease; }
+@keyframes cms-toast-in {
+    from { opacity: 0; transform: translateY(.4rem); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cms-toast { animation: none; }
+    .cms-toast-out { transition: none; }
+}
+
 /* Masquerade banner: a superadmin working as someone else. Brass, like
    the draft stamp — a state to notice, not an error. */
 .cms-masquerade {
@@ -1023,7 +1064,6 @@ body.cms-dragging .cms-table {
     font-family: var(--cms-mono);
     font-variant-numeric: tabular-nums;
 }
-.cms-inspector-download { margin-top: .4rem; }
 .cms-inspector-alt { margin-bottom: .75rem; }
 .cms-inspector-alt label {
     display: block;

@@ -148,6 +148,9 @@
                shown instead of saved. */}}
         <a class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-download download
            data-href-template="{{.AdminPath}}/media/{id}/download"
+           data-t-done="{{.T "{name} saved to your downloads."}}"
+           data-t-started="{{.T "Downloading {name} — see your browser's downloads."}}"
+           data-t-failed="{{.T "That file could not be downloaded."}}"
            aria-disabled="true">{{.T "Download"}}</a>
         <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form data-sel-delete
               data-confirm="{{.T "Delete the selected files? Pages still using them will break."}}">
@@ -321,10 +324,11 @@
                 <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{.T "Save"}}</button>
                 <p class="cms-hint">{{.T "Screen readers read this instead of the picture."}}</p>
             </form>
-            <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-block" data-inspector-copy>{{.T "Copy link"}}</button>
-            <a class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-block cms-inspector-download"
-               data-inspector-download download
-               data-href-template="{{.AdminPath}}/media/{id}/download" hidden>{{.T "Download"}}</a>
+            {{- /* No actions here: Copy link and Download both live in the
+                   selection bar, which is already acting on the one file
+                   this panel describes. The inspector tells you what a
+                   file is and lets you correct its name and description;
+                   what you can *do* with it is in one place. */}}
         </aside>
     </div>
 </div>
