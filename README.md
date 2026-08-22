@@ -599,6 +599,28 @@ column is making room for something not written yet, while duplicating
 one is wanting a second of what is already there — the third card in a
 row of cards, the fourth price tier.
 
+**A row also gets drag handles**, one on each boundary between two
+columns, drawn in the gutter. Dragging one snaps to the twelve tracks
+as you go, so what you see mid-gesture is what you get — a column's
+width *is* a track span, and a free-form drag would only have to round
+itself on release and make the layout jump. The whole drag is one undo
+level, and a drag that ends where it began leaves the markup untouched,
+including the conversion to the twelve-track form it would otherwise
+have made.
+
+The handles do not replace `⇥⇤` and `⇤⇥`. Those two are the keyboard
+and touch path, and they still say in words what the handle says by
+being where it is. What the handle adds is that it names its own pair:
+the buttons have to pick a neighbour by rule (the next column, or the
+previous one for the last in the row), while a boundary you grab is
+unambiguous.
+
+Handles appear only where those buttons do — a row whose track count
+does not divide twelve has neither. They also hide when the row is
+drawn stacked, which it is on a phone: there is no gutter to put one
+in, and a drag there would be editing the `sm:` width while showing the
+mobile layout.
+
 A column here is a real box with its own content, never a slice of one
 continuous stream. That distinction is the whole design. CSS offers the
 other thing — `column-count`, which reflows text down one column and up

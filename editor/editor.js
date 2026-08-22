@@ -163,6 +163,14 @@
     }
     return null;
   }
+  function beginUndo(ed) {
+    if (ed) ed.undoManager.beforeChange();
+  }
+  function endUndo(ed) {
+    if (!ed) return;
+    ed.undoManager.add();
+    ed.focus();
+  }
   function runWithUndo(ed, run) {
     if (!ed) {
       run();
@@ -170,392 +178,6 @@
     }
     ed.undoManager.transact(run);
     ed.focus();
-  }
-
-  // ../src/richtext.js
-  var tinyLoading = null;
-  function loadTinyMCE() {
-    if (window.tinymce) return Promise.resolve();
-    if (tinyLoading) return tinyLoading;
-    tinyLoading = new Promise(function(resolve, reject) {
-      var s = document.createElement("script");
-      s.src = EDITOR_BASE + "tinymce/tinymce.min.js";
-      s.onload = function() {
-        resolve();
-      };
-      s.onerror = function() {
-        tinyLoading = null;
-        reject(new Error("Could not load the editor \u2014 check your connection."));
-      };
-      document.head.appendChild(s);
-    });
-    return tinyLoading;
-  }
-  function uploadImage(blobInfo) {
-    var fd = new FormData();
-    fd.append("file", blobInfo.blob(), blobInfo.filename());
-    return api("/media", { method: "POST", body: fd }).then(function(body) {
-      return body.media.web;
-    });
-  }
-  var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
-  var TBL_LINES = {
-    rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
-    grid: { th: "border border-slate-300", td: "border border-slate-200" },
-    none: { th: "", td: "" }
-  };
-  var TBL_PAD = { compact: "p-1", normal: "p-2", spacious: "p-4" };
-  var TBL_STRIPE = "odd:bg-slate-50";
-  var TBL_CELL_TOKENS = [
-    "border",
-    "border-b",
-    "border-b-2",
-    "border-slate-200",
-    "border-slate-300",
-    "p-1",
-    "p-2",
-    "p-4",
-    "align-top",
-    "font-semibold"
-  ];
-  function tableStyleOptions(t) {
-    var cell = t.querySelector("td") || t.querySelector("th");
-    var cls = cell ? " " + cell.className + " " : "";
-    var has = function(tok) {
-      return cls.indexOf(" " + tok + " ") !== -1;
-    };
-    var virgin = !has("p-1") && !has("p-2") && !has("p-4");
-    var striped = false;
-    Array.prototype.forEach.call(t.rows, function(row) {
-      if (row.parentNode.nodeName !== "THEAD" && (" " + row.className + " ").indexOf(" " + TBL_STRIPE + " ") !== -1) {
-        striped = true;
-      }
-    });
-    return {
-      lines: has("border") ? "grid" : has("border-b") || has("border-b-2") || virgin ? "rows" : "none",
-      density: has("p-1") ? "compact" : has("p-4") ? "spacious" : "normal",
-      striped,
-      width: (" " + t.className + " ").indexOf(" w-auto ") !== -1 ? "fit" : "full"
-    };
-  }
-  function swapTokens(el, remove, add) {
-    var addToks = add ? add.split(" ") : [];
-    var keep = (el.className || "").split(/\s+/).filter(function(tok) {
-      return tok && remove.indexOf(tok) === -1 && addToks.indexOf(tok) === -1;
-    });
-    var cls = addToks.concat(keep).join(" ");
-    if (cls) el.className = cls;
-    else el.removeAttribute("class");
-  }
-  function stampCell(c, opt) {
-    var th = c.nodeName === "TH";
-    var add = (TBL_LINES[opt.lines][th ? "th" : "td"] + " " + TBL_PAD[opt.density] + (th ? " font-semibold" : " align-top")).trim();
-    if (th && !/(^|\s)text-(center|right)(\s|$)/.test(c.className || "")) {
-      add += " text-left";
-    }
-    swapTokens(c, TBL_CELL_TOKENS, add);
-  }
-  var TBL_WRAP = "cms-table-wrap";
-  function wrapTables(root) {
-    Array.prototype.forEach.call(root.querySelectorAll("table"), function(t) {
-      if (t.closest("." + TBL_WRAP)) return;
-      if (t.parentElement && t.parentElement.closest("table")) return;
-      var w = root.ownerDocument.createElement("div");
-      w.className = TBL_WRAP + " overflow-x-auto";
-      t.parentNode.insertBefore(w, t);
-      w.appendChild(t);
-    });
-    Array.prototype.forEach.call(root.querySelectorAll("div." + TBL_WRAP), function(w) {
-      if (w.querySelector("table")) return;
-      while (w.firstChild) w.parentNode.insertBefore(w.firstChild, w);
-      w.parentNode.removeChild(w);
-    });
-  }
-  function stampTable(t, opt) {
-    opt = opt || tableStyleOptions(t);
-    swapTokens(t, ["w-full", "w-auto"], opt.width === "fit" ? "w-auto" : "w-full");
-    Array.prototype.forEach.call(t.rows, function(row) {
-      var body = row.parentNode.nodeName !== "THEAD";
-      swapTokens(row, [TBL_STRIPE], body && opt.striped ? TBL_STRIPE : "");
-      Array.prototype.forEach.call(row.cells, function(c) {
-        stampCell(c, opt);
-      });
-    });
-  }
-  function escapeAttr(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-  }
-  function escapeText(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-  function initRichEditors() {
-    htmlRegions().forEach(function(el) {
-      var name = el.dataset.cmsRegion;
-      if (state.mceEditors[name]) return;
-      initInlineEditor(el, function() {
-        markDirty(name);
-      }, function(ed) {
-        state.mceEditors[name] = ed;
-      });
-    });
-    initSectionEditors();
-  }
-  function initSectionEditors() {
-    document.querySelectorAll("[data-cms-sections]").forEach(function(container) {
-      var region = container.getAttribute("data-cms-sections");
-      container.querySelectorAll("[data-cms-section-content]").forEach(function(el) {
-        var known = state.sectionEditors.some(function(s) {
-          return s.el === el;
-        });
-        if (known) return;
-        initInlineEditor(el, function() {
-          markSectionsDirty(region);
-        }, function(ed) {
-          state.sectionEditors.push({ el, ed, region });
-        });
-      });
-    });
-  }
-  function initInlineEditor(el, onDirty, register) {
-    var opts = {
-      target: el,
-      inline: true,
-      menubar: false,
-      // Dark chrome, matching the section toolbars and the shell's
-      // own UI. Content styles are unaffected: the dark skin's
-      // content.inline.css is identical to the light one's.
-      skin: "oxide-dark",
-      // In inline mode the toolbar floats docked to the region
-      // as soon as it gains focus — a click is enough, no text
-      // selection needed.
-      toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
-      fixed_toolbar_container: "#cms-mce-toolbar",
-      plugins: "lists link autolink table",
-      // Tables are structural only: no properties dialogs, no
-      // drag-resizing, no colgroups — every path that would write
-      // inline styles or width attributes is off. The look comes
-      // from the utility classes stampTable applies; the floating
-      // toolbar inside a table offers row/column/header operations.
-      table_default_styles: {},
-      table_default_attributes: {},
-      table_use_colgroups: false,
-      table_resize_bars: false,
-      object_resizing: "img",
-      table_header_type: "sectionCells",
-      table_toolbar: "tablerowheader | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol | cmstablegear tabledelete",
-      // Paste and drag-drop of image data still upload through
-      // the media API (these are core editor features, not part
-      // of the image-dialog plugin, which we don't use).
-      images_upload_handler: uploadImage,
-      automatic_uploads: true,
-      paste_data_images: mediaEnabled,
-      // Tailwind-first alignment: replace TinyMCE's default align
-      // formats, which write inline styles (text-align on blocks;
-      // display/margin on images), with utility classes. Classes
-      // survive the server-side sanitizer for non-admin editors and
-      // keep saved content styleable by the host's CSS. Images need
-      // their own rules: under Tailwind's preflight an <img> is a
-      // block element, so text-align on its parent can never move it.
-      formats: {
-        // Semantic tags instead of TinyMCE's span-with-inline-style
-        // defaults: the sanitizer strips every inline style except
-        // text-align, so the default forms would vanish from
-        // non-admin saves (including via the always-on Cmd+U/
-        // Cmd+Shift+S shortcuts).
-        underline: { inline: "u" },
-        strikethrough: { inline: "s" },
-        alignleft: [
-          { selector: alignBlocks, classes: "text-left" },
-          { selector: "img", classes: "float-left mr-6" }
-        ],
-        aligncenter: [
-          { selector: alignBlocks, classes: "text-center" },
-          { selector: "img", classes: "block mx-auto" }
-        ],
-        alignright: [
-          { selector: alignBlocks, classes: "text-right" },
-          { selector: "img", classes: "float-right ml-6" }
-        ]
-      },
-      // Never rewrite URLs relative to the current page — media
-      // lives at absolute paths like /cms/media/… and relative
-      // forms would break on nested pages.
-      convert_urls: false,
-      link_default_protocol: "https",
-      browser_spellcheck: true,
-      contextmenu: false,
-      setup: function(ed) {
-        register(ed);
-        ed.on("focus", function() {
-          state.lastEditor = ed;
-          state.lastEditorDirty = onDirty;
-        });
-        ed.on("PreInit", function() {
-          var getCssText = ed.formatter.getCssText;
-          ed.formatter.getCssText = function(format) {
-            var css = getCssText.call(ed.formatter, format).replace(
-              /background-color:\s*(?:transparent|rgba\([^)]*,\s*0\s*\))\s*;?/g,
-              ""
-            );
-            if (css && css.charAt(css.length - 1) !== ";") css += ";";
-            if (css.indexOf("background-color") === -1) {
-              var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
-              if (m) {
-                css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
-              }
-              css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
-            }
-            css += "padding:2px 8px;border-radius:4px;";
-            return css;
-          };
-          ed.serializer.addAttributeFilter("contenteditable", function(nodes) {
-            for (var i = 0; i < nodes.length; i++) {
-              var n = nodes[i];
-              if ((n.attr("class") || "").indexOf("cms-btn") !== -1) {
-                n.attr("contenteditable", null);
-              }
-            }
-          });
-          ed.serializer.addAttributeFilter("class", function(nodes) {
-            for (var i = 0; i < nodes.length; i++) {
-              var n = nodes[i];
-              var cls = n.attr("class") || "";
-              if (cls.indexOf("cms-col-active") === -1) continue;
-              cls = cls.split(/\s+/).filter(function(c) {
-                return c !== "" && c !== "cms-col-active";
-              }).join(" ");
-              n.attr("class", cls || null);
-            }
-          });
-        });
-        if (mediaEnabled) {
-          ed.ui.registry.addButton("cmsimage", {
-            icon: "image",
-            tooltip: "Insert image",
-            onAction: function() {
-              openPicker("image", function(item2) {
-                ed.insertContent('<img src="' + escapeAttr(item2.web) + '" alt="' + escapeAttr(item2.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr(item2.web) + '" data-cms-orig="' + escapeAttr(item2.original) + '">');
-                onDirty();
-              });
-            }
-          });
-          ed.ui.registry.addButton("cmsvideo", {
-            icon: "embed",
-            tooltip: "Insert video",
-            onAction: function() {
-              openPicker("video", function(item2) {
-                ed.insertContent('<video controls preload="metadata" src="' + escapeAttr(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr(item2.poster) + '"' : "") + "></video>");
-                onDirty();
-              });
-            }
-          });
-          ed.ui.registry.addIcon(
-            "cms-paperclip",
-            '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>'
-          );
-          ed.ui.registry.addButton("cmsdoc", {
-            icon: "cms-paperclip",
-            tooltip: "Link to a document",
-            onAction: function() {
-              openPicker("file", function(item2) {
-                var url = item2.original;
-                var selected = ed.selection.getContent({ format: "text" });
-                if (selected && selected.trim() !== "") {
-                  ed.execCommand("mceInsertLink", false, url);
-                } else {
-                  ed.insertContent('<a href="' + escapeAttr(url) + '">' + escapeText(item2.filename) + "</a>");
-                }
-                onDirty();
-              });
-            }
-          });
-        }
-        ed.on("NewCell", function(e) {
-          var t = e.node.closest ? e.node.closest("table") : null;
-          if (t) stampCell(e.node, tableStyleOptions(t));
-        });
-        ed.on("TableModified", function(e) {
-          if (e.table) stampTable(e.table);
-          wrapTables(ed.getBody());
-        });
-        ed.on("init change SetContent undo redo", function() {
-          wrapTables(ed.getBody());
-        });
-        ed.ui.registry.addButton("cmstablegear", {
-          icon: "table-classes",
-          tooltip: "Table style",
-          onAction: function() {
-            var t = ed.dom.getParent(ed.selection.getStart(), "table");
-            if (!t) return;
-            var cur = tableStyleOptions(t);
-            openDialog({
-              message: "Table style",
-              okLabel: "Apply",
-              selects: [
-                { id: "lines", label: "Lines", value: cur.lines, options: [
-                  { value: "rows", label: "Row dividers" },
-                  { value: "grid", label: "Full grid" },
-                  { value: "none", label: "No lines" }
-                ] },
-                { id: "striped", label: "Striped rows", value: cur.striped ? "yes" : "no", options: [
-                  { value: "no", label: "Off" },
-                  { value: "yes", label: "On" }
-                ] },
-                { id: "density", label: "Density", value: cur.density, options: [
-                  { value: "compact", label: "Compact" },
-                  { value: "normal", label: "Normal" },
-                  { value: "spacious", label: "Spacious" }
-                ] },
-                { id: "width", label: "Width", value: cur.width, options: [
-                  { value: "full", label: "Full width" },
-                  { value: "fit", label: "Fit content" }
-                ] }
-              ]
-            }).then(function(v) {
-              if (!v) return;
-              runWithUndo(ed, function() {
-                stampTable(t, {
-                  lines: v.lines,
-                  density: v.density,
-                  striped: v.striped === "yes",
-                  width: v.width
-                });
-              });
-              onDirty();
-            });
-          }
-        });
-        ed.on("input change undo redo SetContent", function() {
-          if (ed.isDirty()) onDirty();
-        });
-      }
-    };
-    opts.style_formats = [{
-      title: "Headings",
-      items: [
-        { title: "Heading 1", block: "h1" },
-        { title: "Heading 2", block: "h2" },
-        { title: "Heading 3", block: "h3" },
-        { title: "Heading 4", block: "h4" },
-        { title: "Paragraph", block: "p" }
-      ]
-    }].concat(styleFormats);
-    window.tinymce.init(opts);
-  }
-  function removeRichEditors() {
-    Object.keys(state.mceEditors).forEach(function(name) {
-      state.mceEditors[name].remove();
-    });
-    state.mceEditors = {};
-    state.sectionEditors.forEach(function(s) {
-      s.ed.remove();
-    });
-    state.sectionEditors = [];
-    state.lastEditor = null;
-    state.lastEditorDirty = null;
-    document.querySelectorAll("[data-cms-ui]").forEach(function(el) {
-      el.remove();
-    });
   }
 
   // ../src/source.js
@@ -1926,7 +1548,7 @@
   }
 
   // ../src/videos.js
-  function escapeAttr2(s) {
+  function escapeAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
   function embedURL(raw) {
@@ -1966,7 +1588,7 @@
   }
   function fillFromLibrary(el) {
     openPicker("video", function(item2) {
-      replaceEl(el, '<video controls preload="metadata" class="w-full rounded-lg" src="' + escapeAttr2(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr2(item2.poster) + '"' : "") + "></video>");
+      replaceEl(el, '<video controls preload="metadata" class="w-full rounded-lg" src="' + escapeAttr(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr(item2.poster) + '"' : "") + "></video>");
     });
   }
   function fillFromURL(el) {
@@ -1977,7 +1599,7 @@
         setMsg("That doesn't look like a YouTube or Vimeo link.");
         return;
       }
-      replaceEl(el, '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr2(src) + '" title="Video" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen=""></iframe>');
+      replaceEl(el, '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr(src) + '" title="Video" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen=""></iframe>');
     });
   }
   function chooseVideoInto(el, message) {
@@ -2011,7 +1633,7 @@
   }
 
   // ../src/maps.js
-  function escapeAttr3(s) {
+  function escapeAttr2(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
   function mapEmbedURL(raw) {
@@ -2055,7 +1677,7 @@
       }
       var region = el.closest("[data-cms-region]");
       var container = el.closest("[data-cms-sections]");
-      el.outerHTML = '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr3(src) + '" title="Map" loading="lazy"></iframe>';
+      el.outerHTML = '<iframe class="w-full aspect-video rounded-lg" src="' + escapeAttr2(src) + '" title="Map" loading="lazy"></iframe>';
       if (region) markDirty(region.getAttribute("data-cms-region"));
       else if (container) markSectionsDirty(container.getAttribute("data-cms-sections"));
     });
@@ -2194,6 +1816,9 @@
       mode: "cell",
       row,
       cell,
+      // Every cell, not just the one clicked: the resize handles are
+      // drawn on the boundaries between all of them.
+      cells,
       index: at,
       count: cells.length,
       canAdd: cells.length < MAX_COLS,
@@ -2309,6 +1934,17 @@
     setSpan(cells[at], prefix, mine);
     setSpan(cells[other], prefix, theirs);
   }
+  function toSpanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var spans = spanned(row);
+    if (!spans) return null;
+    return { cells: cellsOf(row), spans, prefix: cur.prefix };
+  }
+  function setPair(prefix, a, an, b, bn) {
+    setSpan(a, prefix, an);
+    setSpan(b, prefix, bn);
+  }
   function moveColumn(info, dir) {
     var cells = cellsOf(info.row);
     var at = cells.indexOf(info.cell);
@@ -2351,6 +1987,175 @@
     if (dir < 0) row.insertBefore(copy, first);
     else row.appendChild(copy);
     return { row, copy };
+  }
+
+  // ../src/colresize.js
+  var TOP_LIMIT = 64;
+  var hooks = {};
+  var active = null;
+  var drag = null;
+  function stacked(cells) {
+    var a = cells[0].getBoundingClientRect();
+    var b = cells[1].getBoundingClientRect();
+    return b.left < a.right;
+  }
+  function layout() {
+    if (!active) return;
+    var cells = active.cells;
+    if (stacked(cells)) {
+      active.handles.forEach(function(h) {
+        h.hidden = true;
+      });
+      return;
+    }
+    var row = active.row.getBoundingClientRect();
+    var top = Math.max(row.top, TOP_LIMIT);
+    var height = row.bottom - top;
+    active.handles.forEach(function(h, i) {
+      if (height <= 0) {
+        h.hidden = true;
+        return;
+      }
+      var a = cells[i].getBoundingClientRect();
+      var b = cells[i + 1].getBoundingClientRect();
+      h.hidden = false;
+      h.style.left = (a.right + b.left) / 2 + "px";
+      h.style.top = top + "px";
+      h.style.height = height + "px";
+    });
+  }
+  function placeHandles() {
+    if (drag) return;
+    layout();
+  }
+  function hideHandles() {
+    if (drag) return;
+    active = null;
+    var box = $("col-handles");
+    while (box.firstChild) box.removeChild(box.firstChild);
+  }
+  function showHandles(row, cells) {
+    if (drag) return;
+    hideHandles();
+    if (!row || !cells || cells.length < 2) return;
+    var box = $("col-handles");
+    var handles = [];
+    for (var i = 0; i < cells.length - 1; i++) handles.push(makeHandle(box, i));
+    active = { row, cells, handles };
+    layout();
+  }
+  function makeHandle(box, index) {
+    var h = document.createElement("div");
+    h.className = "colhandle";
+    h.setAttribute("aria-hidden", "true");
+    h.addEventListener("pointerdown", function(e) {
+      start(e, h, index);
+    });
+    box.appendChild(h);
+    return h;
+  }
+  function snapshot(row, cells) {
+    return {
+      row: row.getAttribute("class"),
+      cells: cells.map(function(c) {
+        return c.getAttribute("class");
+      })
+    };
+  }
+  function restore(row, cells, snap) {
+    setClass(row, snap.row);
+    cells.forEach(function(c, i) {
+      setClass(c, snap.cells[i]);
+    });
+  }
+  function setClass(el, v) {
+    if (v === null) el.removeAttribute("class");
+    else el.setAttribute("class", v);
+  }
+  function start(e, handle, index) {
+    if (!active || drag || e.button !== 0) return;
+    e.preventDefault();
+    var row = active.row;
+    var cells = active.cells;
+    var snap = snapshot(row, cells);
+    var ed = findOwningEditor(row);
+    beginUndo(ed);
+    var info = toSpanned(row);
+    if (!info || info.cells.length !== cells.length) {
+      restore(row, cells, snap);
+      return;
+    }
+    var a = info.cells[index];
+    var b = info.cells[index + 1];
+    var left = a.getBoundingClientRect().left;
+    var right = b.getBoundingClientRect().right;
+    var tracks = info.spans[index] + info.spans[index + 1];
+    var gap = parseFloat(window.getComputedStyle(row).columnGap) || 0;
+    var track = (right - left - (tracks - 1) * gap) / tracks;
+    if (!(track > 0)) {
+      restore(row, cells, snap);
+      return;
+    }
+    drag = {
+      row,
+      cells,
+      snap,
+      ed,
+      prefix: info.prefix,
+      a,
+      b,
+      left,
+      gap,
+      track,
+      tracks,
+      start: info.spans[index],
+      span: info.spans[index]
+    };
+    handle.classList.add("on");
+    handle.setPointerCapture(e.pointerId);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", cancel);
+    handle.addEventListener("lostpointercapture", cancel);
+    if (hooks.onStart) hooks.onStart();
+  }
+  function move(e) {
+    if (!drag) return;
+    var n = Math.round((e.clientX - drag.left + drag.gap / 2) / (drag.track + drag.gap));
+    if (n < 1) n = 1;
+    if (n > drag.tracks - 1) n = drag.tracks - 1;
+    if (n === drag.span) return;
+    drag.span = n;
+    setPair(drag.prefix, drag.a, n, drag.b, drag.tracks - n);
+    layout();
+  }
+  function finish(e, keep) {
+    if (!drag) return;
+    var d = drag;
+    drag = null;
+    var handle = e.currentTarget;
+    handle.classList.remove("on");
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", stop);
+    handle.removeEventListener("pointercancel", cancel);
+    handle.removeEventListener("lostpointercapture", cancel);
+    if (handle.hasPointerCapture && handle.hasPointerCapture(e.pointerId)) {
+      handle.releasePointerCapture(e.pointerId);
+    }
+    var changed = keep && d.span !== d.start;
+    if (!changed) restore(d.row, d.cells, d.snap);
+    else endUndo(d.ed);
+    layout();
+    if (hooks.onEnd) hooks.onEnd(d.row, changed);
+  }
+  function stop(e) {
+    finish(e, true);
+  }
+  function cancel(e) {
+    finish(e, false);
+  }
+  function initColResize(opts) {
+    hooks = opts || {};
   }
 
   // ../src/buttons.js
@@ -2559,11 +2364,14 @@
     }
     $("col-ui").classList.add("on");
     placeColUI();
+    if (cell && info.canResize) showHandles(info.row, info.cells);
+    else hideHandles();
   }
   function hideColUI() {
     activeCol = null;
     markActiveCell(null);
     $("col-ui").classList.remove("on");
+    hideHandles();
   }
   function afterColumnEdit(container, now, target) {
     lockButtons();
@@ -2902,6 +2710,21 @@
     return count;
   }
   function initButtons() {
+    initColResize({
+      // A drag rewrites the spans on every pointer move, and nothing
+      // repositions the pills in between — left up they would sit
+      // stale over a row moving underneath them.
+      onStart: function() {
+        $("col-ui").classList.add("dim");
+        $("snip-ui").classList.add("dim");
+      },
+      onEnd: function(row, changed) {
+        $("col-ui").classList.remove("dim");
+        $("snip-ui").classList.remove("dim");
+        placeColUI();
+        if (changed) markContainerDirty(row);
+      }
+    });
     document.addEventListener("click", function(e) {
       if (!state.editing) return;
       if (e.target === host) return;
@@ -2948,7 +2771,10 @@
     window.addEventListener("scroll", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
-      if (activeCol) placeColUI();
+      if (activeCol) {
+        placeColUI();
+        placeHandles();
+      }
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -2956,7 +2782,10 @@
     window.addEventListener("resize", function() {
       if (activeBtn) showButtonUI(activeBtn);
       if (activeSnip) showSnipUI(activeSnip);
-      if (activeCol) placeColUI();
+      if (activeCol) {
+        placeColUI();
+        placeHandles();
+      }
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -3565,6 +3394,395 @@
         e.preventDefault();
         e.returnValue = "";
       }
+    });
+  }
+
+  // ../src/richtext.js
+  var tinyLoading = null;
+  function loadTinyMCE() {
+    if (window.tinymce) return Promise.resolve();
+    if (tinyLoading) return tinyLoading;
+    tinyLoading = new Promise(function(resolve, reject) {
+      var s = document.createElement("script");
+      s.src = EDITOR_BASE + "tinymce/tinymce.min.js";
+      s.onload = function() {
+        resolve();
+      };
+      s.onerror = function() {
+        tinyLoading = null;
+        reject(new Error("Could not load the editor \u2014 check your connection."));
+      };
+      document.head.appendChild(s);
+    });
+    return tinyLoading;
+  }
+  function uploadImage(blobInfo) {
+    var fd = new FormData();
+    fd.append("file", blobInfo.blob(), blobInfo.filename());
+    return api("/media", { method: "POST", body: fd }).then(function(body) {
+      return body.media.web;
+    });
+  }
+  var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
+  var TBL_LINES = {
+    rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
+    grid: { th: "border border-slate-300", td: "border border-slate-200" },
+    none: { th: "", td: "" }
+  };
+  var TBL_PAD = { compact: "p-1", normal: "p-2", spacious: "p-4" };
+  var TBL_STRIPE = "odd:bg-slate-50";
+  var TBL_CELL_TOKENS = [
+    "border",
+    "border-b",
+    "border-b-2",
+    "border-slate-200",
+    "border-slate-300",
+    "p-1",
+    "p-2",
+    "p-4",
+    "align-top",
+    "font-semibold"
+  ];
+  function tableStyleOptions(t) {
+    var cell = t.querySelector("td") || t.querySelector("th");
+    var cls = cell ? " " + cell.className + " " : "";
+    var has = function(tok) {
+      return cls.indexOf(" " + tok + " ") !== -1;
+    };
+    var virgin = !has("p-1") && !has("p-2") && !has("p-4");
+    var striped = false;
+    Array.prototype.forEach.call(t.rows, function(row) {
+      if (row.parentNode.nodeName !== "THEAD" && (" " + row.className + " ").indexOf(" " + TBL_STRIPE + " ") !== -1) {
+        striped = true;
+      }
+    });
+    return {
+      lines: has("border") ? "grid" : has("border-b") || has("border-b-2") || virgin ? "rows" : "none",
+      density: has("p-1") ? "compact" : has("p-4") ? "spacious" : "normal",
+      striped,
+      width: (" " + t.className + " ").indexOf(" w-auto ") !== -1 ? "fit" : "full"
+    };
+  }
+  function swapTokens(el, remove, add) {
+    var addToks = add ? add.split(" ") : [];
+    var keep = (el.className || "").split(/\s+/).filter(function(tok) {
+      return tok && remove.indexOf(tok) === -1 && addToks.indexOf(tok) === -1;
+    });
+    var cls = addToks.concat(keep).join(" ");
+    if (cls) el.className = cls;
+    else el.removeAttribute("class");
+  }
+  function stampCell(c, opt) {
+    var th = c.nodeName === "TH";
+    var add = (TBL_LINES[opt.lines][th ? "th" : "td"] + " " + TBL_PAD[opt.density] + (th ? " font-semibold" : " align-top")).trim();
+    if (th && !/(^|\s)text-(center|right)(\s|$)/.test(c.className || "")) {
+      add += " text-left";
+    }
+    swapTokens(c, TBL_CELL_TOKENS, add);
+  }
+  var TBL_WRAP = "cms-table-wrap";
+  function wrapTables(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("table"), function(t) {
+      if (t.closest("." + TBL_WRAP)) return;
+      if (t.parentElement && t.parentElement.closest("table")) return;
+      var w = root.ownerDocument.createElement("div");
+      w.className = TBL_WRAP + " overflow-x-auto";
+      t.parentNode.insertBefore(w, t);
+      w.appendChild(t);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("div." + TBL_WRAP), function(w) {
+      if (w.querySelector("table")) return;
+      while (w.firstChild) w.parentNode.insertBefore(w.firstChild, w);
+      w.parentNode.removeChild(w);
+    });
+  }
+  function stampTable(t, opt) {
+    opt = opt || tableStyleOptions(t);
+    swapTokens(t, ["w-full", "w-auto"], opt.width === "fit" ? "w-auto" : "w-full");
+    Array.prototype.forEach.call(t.rows, function(row) {
+      var body = row.parentNode.nodeName !== "THEAD";
+      swapTokens(row, [TBL_STRIPE], body && opt.striped ? TBL_STRIPE : "");
+      Array.prototype.forEach.call(row.cells, function(c) {
+        stampCell(c, opt);
+      });
+    });
+  }
+  function escapeAttr3(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  function escapeText(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function initRichEditors() {
+    htmlRegions().forEach(function(el) {
+      var name = el.dataset.cmsRegion;
+      if (state.mceEditors[name]) return;
+      initInlineEditor(el, function() {
+        markDirty(name);
+      }, function(ed) {
+        state.mceEditors[name] = ed;
+      });
+    });
+    initSectionEditors();
+  }
+  function initSectionEditors() {
+    document.querySelectorAll("[data-cms-sections]").forEach(function(container) {
+      var region = container.getAttribute("data-cms-sections");
+      container.querySelectorAll("[data-cms-section-content]").forEach(function(el) {
+        var known = state.sectionEditors.some(function(s) {
+          return s.el === el;
+        });
+        if (known) return;
+        initInlineEditor(el, function() {
+          markSectionsDirty(region);
+        }, function(ed) {
+          state.sectionEditors.push({ el, ed, region });
+        });
+      });
+    });
+  }
+  function initInlineEditor(el, onDirty, register) {
+    var opts = {
+      target: el,
+      inline: true,
+      menubar: false,
+      // Dark chrome, matching the section toolbars and the shell's
+      // own UI. Content styles are unaffected: the dark skin's
+      // content.inline.css is identical to the light one's.
+      skin: "oxide-dark",
+      // In inline mode the toolbar floats docked to the region
+      // as soon as it gains focus — a click is enough, no text
+      // selection needed.
+      toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
+      fixed_toolbar_container: "#cms-mce-toolbar",
+      plugins: "lists link autolink table",
+      // Tables are structural only: no properties dialogs, no
+      // drag-resizing, no colgroups — every path that would write
+      // inline styles or width attributes is off. The look comes
+      // from the utility classes stampTable applies; the floating
+      // toolbar inside a table offers row/column/header operations.
+      table_default_styles: {},
+      table_default_attributes: {},
+      table_use_colgroups: false,
+      table_resize_bars: false,
+      object_resizing: "img",
+      table_header_type: "sectionCells",
+      table_toolbar: "tablerowheader | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol | cmstablegear tabledelete",
+      // Paste and drag-drop of image data still upload through
+      // the media API (these are core editor features, not part
+      // of the image-dialog plugin, which we don't use).
+      images_upload_handler: uploadImage,
+      automatic_uploads: true,
+      paste_data_images: mediaEnabled,
+      // Tailwind-first alignment: replace TinyMCE's default align
+      // formats, which write inline styles (text-align on blocks;
+      // display/margin on images), with utility classes. Classes
+      // survive the server-side sanitizer for non-admin editors and
+      // keep saved content styleable by the host's CSS. Images need
+      // their own rules: under Tailwind's preflight an <img> is a
+      // block element, so text-align on its parent can never move it.
+      formats: {
+        // Semantic tags instead of TinyMCE's span-with-inline-style
+        // defaults: the sanitizer strips every inline style except
+        // text-align, so the default forms would vanish from
+        // non-admin saves (including via the always-on Cmd+U/
+        // Cmd+Shift+S shortcuts).
+        underline: { inline: "u" },
+        strikethrough: { inline: "s" },
+        alignleft: [
+          { selector: alignBlocks, classes: "text-left" },
+          { selector: "img", classes: "float-left mr-6" }
+        ],
+        aligncenter: [
+          { selector: alignBlocks, classes: "text-center" },
+          { selector: "img", classes: "block mx-auto" }
+        ],
+        alignright: [
+          { selector: alignBlocks, classes: "text-right" },
+          { selector: "img", classes: "float-right ml-6" }
+        ]
+      },
+      // Never rewrite URLs relative to the current page — media
+      // lives at absolute paths like /cms/media/… and relative
+      // forms would break on nested pages.
+      convert_urls: false,
+      link_default_protocol: "https",
+      browser_spellcheck: true,
+      contextmenu: false,
+      setup: function(ed) {
+        register(ed);
+        ed.on("focus", function() {
+          state.lastEditor = ed;
+          state.lastEditorDirty = onDirty;
+        });
+        ed.on("PreInit", function() {
+          var getCssText = ed.formatter.getCssText;
+          ed.formatter.getCssText = function(format) {
+            var css = getCssText.call(ed.formatter, format).replace(
+              /background-color:\s*(?:transparent|rgba\([^)]*,\s*0\s*\))\s*;?/g,
+              ""
+            );
+            if (css && css.charAt(css.length - 1) !== ";") css += ";";
+            if (css.indexOf("background-color") === -1) {
+              var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
+              if (m) {
+                css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
+              }
+              css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
+            }
+            css += "padding:2px 8px;border-radius:4px;";
+            return css;
+          };
+          ed.serializer.addAttributeFilter("contenteditable", function(nodes) {
+            for (var i = 0; i < nodes.length; i++) {
+              var n = nodes[i];
+              if ((n.attr("class") || "").indexOf("cms-btn") !== -1) {
+                n.attr("contenteditable", null);
+              }
+            }
+          });
+          ed.serializer.addAttributeFilter("class", function(nodes) {
+            for (var i = 0; i < nodes.length; i++) {
+              var n = nodes[i];
+              var cls = n.attr("class") || "";
+              if (cls.indexOf("cms-col-active") === -1) continue;
+              cls = cls.split(/\s+/).filter(function(c) {
+                return c !== "" && c !== "cms-col-active";
+              }).join(" ");
+              n.attr("class", cls || null);
+            }
+          });
+        });
+        if (mediaEnabled) {
+          ed.ui.registry.addButton("cmsimage", {
+            icon: "image",
+            tooltip: "Insert image",
+            onAction: function() {
+              openPicker("image", function(item2) {
+                ed.insertContent('<img src="' + escapeAttr3(item2.web) + '" alt="' + escapeAttr3(item2.alt || "") + '" loading="lazy" data-cms-web="' + escapeAttr3(item2.web) + '" data-cms-orig="' + escapeAttr3(item2.original) + '">');
+                onDirty();
+              });
+            }
+          });
+          ed.ui.registry.addButton("cmsvideo", {
+            icon: "embed",
+            tooltip: "Insert video",
+            onAction: function() {
+              openPicker("video", function(item2) {
+                ed.insertContent('<video controls preload="metadata" src="' + escapeAttr3(item2.original) + '"' + (item2.poster ? ' poster="' + escapeAttr3(item2.poster) + '"' : "") + "></video>");
+                onDirty();
+              });
+            }
+          });
+          ed.ui.registry.addIcon(
+            "cms-paperclip",
+            '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>'
+          );
+          ed.ui.registry.addButton("cmsdoc", {
+            icon: "cms-paperclip",
+            tooltip: "Link to a document",
+            onAction: function() {
+              openPicker("file", function(item2) {
+                var url = item2.original;
+                var selected = ed.selection.getContent({ format: "text" });
+                if (selected && selected.trim() !== "") {
+                  ed.execCommand("mceInsertLink", false, url);
+                } else {
+                  ed.insertContent('<a href="' + escapeAttr3(url) + '">' + escapeText(item2.filename) + "</a>");
+                }
+                onDirty();
+              });
+            }
+          });
+        }
+        ed.on("NewCell", function(e) {
+          var t = e.node.closest ? e.node.closest("table") : null;
+          if (t) stampCell(e.node, tableStyleOptions(t));
+        });
+        ed.on("TableModified", function(e) {
+          if (e.table) stampTable(e.table);
+          wrapTables(ed.getBody());
+        });
+        ed.on("init change SetContent undo redo", function() {
+          wrapTables(ed.getBody());
+        });
+        ed.ui.registry.addButton("cmstablegear", {
+          icon: "table-classes",
+          tooltip: "Table style",
+          onAction: function() {
+            var t = ed.dom.getParent(ed.selection.getStart(), "table");
+            if (!t) return;
+            var cur = tableStyleOptions(t);
+            openDialog({
+              message: "Table style",
+              okLabel: "Apply",
+              selects: [
+                { id: "lines", label: "Lines", value: cur.lines, options: [
+                  { value: "rows", label: "Row dividers" },
+                  { value: "grid", label: "Full grid" },
+                  { value: "none", label: "No lines" }
+                ] },
+                { id: "striped", label: "Striped rows", value: cur.striped ? "yes" : "no", options: [
+                  { value: "no", label: "Off" },
+                  { value: "yes", label: "On" }
+                ] },
+                { id: "density", label: "Density", value: cur.density, options: [
+                  { value: "compact", label: "Compact" },
+                  { value: "normal", label: "Normal" },
+                  { value: "spacious", label: "Spacious" }
+                ] },
+                { id: "width", label: "Width", value: cur.width, options: [
+                  { value: "full", label: "Full width" },
+                  { value: "fit", label: "Fit content" }
+                ] }
+              ]
+            }).then(function(v) {
+              if (!v) return;
+              runWithUndo(ed, function() {
+                stampTable(t, {
+                  lines: v.lines,
+                  density: v.density,
+                  striped: v.striped === "yes",
+                  width: v.width
+                });
+              });
+              onDirty();
+            });
+          }
+        });
+        ed.on("input change undo redo SetContent", function() {
+          if (ed.isDirty()) onDirty();
+        });
+        ed.on("undo redo SetContent", function() {
+          hideChrome();
+        });
+      }
+    };
+    opts.style_formats = [{
+      title: "Headings",
+      items: [
+        { title: "Heading 1", block: "h1" },
+        { title: "Heading 2", block: "h2" },
+        { title: "Heading 3", block: "h3" },
+        { title: "Heading 4", block: "h4" },
+        { title: "Paragraph", block: "p" }
+      ]
+    }].concat(styleFormats);
+    window.tinymce.init(opts);
+  }
+  function removeRichEditors() {
+    Object.keys(state.mceEditors).forEach(function(name) {
+      state.mceEditors[name].remove();
+    });
+    state.mceEditors = {};
+    state.sectionEditors.forEach(function(s) {
+      s.ed.remove();
+    });
+    state.sectionEditors = [];
+    state.lastEditor = null;
+    state.lastEditorDirty = null;
+    document.querySelectorAll("[data-cms-ui]").forEach(function(el) {
+      el.remove();
     });
   }
 
@@ -4411,7 +4629,7 @@
       saveMenu(m.key);
     });
   }
-  var drag = null;
+  var drag2 = null;
   var indEl = null;
   function indicator() {
     if (!indEl) {
@@ -4465,7 +4683,7 @@
     var out = [];
     for (var i = 0; i < list.children.length; i++) {
       var c = list.children[i];
-      if (c.classList.contains("cms-nav-item") && c !== drag.li) out.push(c);
+      if (c.classList.contains("cms-nav-item") && c !== drag2.li) out.push(c);
     }
     return out;
   }
@@ -4501,7 +4719,7 @@
     if (b) b.setAttribute("aria-expanded", "true");
   }
   function updateDrop(e) {
-    var d = drag;
+    var d = drag2;
     d.drop = null;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     var nav = el && el.closest ? el.closest("nav[data-cms-menu]") : null;
@@ -4601,23 +4819,23 @@
       var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
       if (!li) return;
       var sx = e.clientX, sy = e.clientY;
-      var cancel = function() {
+      var cancel2 = function() {
         clearTimeout(pressTimer);
-        document.removeEventListener("pointerup", cancel, true);
-        document.removeEventListener("pointercancel", cancel, true);
+        document.removeEventListener("pointerup", cancel2, true);
+        document.removeEventListener("pointercancel", cancel2, true);
         document.removeEventListener("pointermove", onMove, true);
       };
       var onMove = function(me) {
-        if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) > 10) cancel();
+        if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) > 10) cancel2();
       };
       pressTimer = setTimeout(function() {
-        cancel();
+        cancel2();
         whenLoaded(function() {
           openModal(menuKeyOf(li), pathOf(li), null);
         });
       }, 550);
-      document.addEventListener("pointerup", cancel, true);
-      document.addEventListener("pointercancel", cancel, true);
+      document.addEventListener("pointerup", cancel2, true);
+      document.addEventListener("pointercancel", cancel2, true);
       document.addEventListener("pointermove", onMove, true);
     }, true);
     document.addEventListener("pointerdown", function(e) {
@@ -4625,7 +4843,7 @@
       var li = e.target.closest("nav[data-cms-menu] li.cms-nav-item");
       if (!li || !menus) return;
       var r = li.getBoundingClientRect();
-      drag = {
+      drag2 = {
         key: menuKeyOf(li),
         li,
         startX: e.clientX,
@@ -4636,27 +4854,27 @@
       };
     }, true);
     document.addEventListener("pointermove", function(e) {
-      if (!drag) return;
-      if (!drag.active) {
-        if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 8) return;
-        drag.active = true;
-        drag.path = pathOf(drag.li);
-        drag.ghost = makeGhost(drag.li, itemAt(drag.key, drag.path));
-        drag.offX = Math.max(12, Math.min(drag.offX, drag.ghost.offsetWidth - 12));
-        drag.offY = Math.max(6, Math.min(drag.offY, drag.ghost.offsetHeight - 6));
-        drag.li.classList.add("cms-nav-dragli");
+      if (!drag2) return;
+      if (!drag2.active) {
+        if (Math.abs(e.clientX - drag2.startX) + Math.abs(e.clientY - drag2.startY) < 8) return;
+        drag2.active = true;
+        drag2.path = pathOf(drag2.li);
+        drag2.ghost = makeGhost(drag2.li, itemAt(drag2.key, drag2.path));
+        drag2.offX = Math.max(12, Math.min(drag2.offX, drag2.ghost.offsetWidth - 12));
+        drag2.offY = Math.max(6, Math.min(drag2.offY, drag2.ghost.offsetHeight - 6));
+        drag2.li.classList.add("cms-nav-dragli");
         document.body.classList.add("cms-nav-dragging");
         indicator().style.display = "block";
       }
       e.preventDefault();
-      positionGhost(drag, e);
+      positionGhost(drag2, e);
       updateDrop(e);
-      drag.ghost.classList.toggle("nodrop", !drag.drop);
+      drag2.ghost.classList.toggle("nodrop", !drag2.drop);
     }, true);
     document.addEventListener("pointerup", function() {
-      if (!drag) return;
-      var d = drag;
-      drag = null;
+      if (!drag2) return;
+      var d = drag2;
+      drag2 = null;
       if (!d.active) return;
       suppressClick = true;
       var target = null;
@@ -4669,9 +4887,9 @@
       if (d.drop) applyDrop(d);
     }, true);
     document.addEventListener("keydown", function(e) {
-      if (e.key !== "Escape" || !drag) return;
-      var d = drag;
-      drag = null;
+      if (e.key !== "Escape" || !drag2) return;
+      var d = drag2;
+      drag2 = null;
       if (!d.active) return;
       suppressClick = true;
       endDragVisuals(d);
@@ -5091,8 +5309,8 @@
       if (e.key !== "Tab") return;
       e.preventDefault();
       var ta = $("code-ta");
-      var start = ta.selectionStart;
-      ta.setRangeText("  ", start, ta.selectionEnd, "end");
+      var start2 = ta.selectionStart;
+      ta.setRangeText("  ", start2, ta.selectionEnd, "end");
       codeState.dirty = true;
       stashCode();
       renderCode();
@@ -5313,9 +5531,9 @@
       var video = document.createElement("video");
       var done = false;
       var timer = setTimeout(function() {
-        finish(null);
+        finish2(null);
       }, 5e3);
-      function finish(blob) {
+      function finish2(blob) {
         if (done) return;
         done = true;
         clearTimeout(timer);
@@ -5325,19 +5543,19 @@
       video.muted = true;
       video.preload = "auto";
       video.addEventListener("error", function() {
-        finish(null);
+        finish2(null);
       });
       video.addEventListener("loadeddata", function() {
         try {
           video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
         } catch (e) {
-          finish(null);
+          finish2(null);
         }
       });
       video.addEventListener("seeked", function() {
         try {
           if (!video.videoWidth) {
-            finish(null);
+            finish2(null);
             return;
           }
           var canvas = document.createElement("canvas");
@@ -5345,10 +5563,10 @@
           canvas.height = video.videoHeight;
           canvas.getContext("2d").drawImage(video, 0, 0);
           canvas.toBlob(function(blob) {
-            finish(blob);
+            finish2(blob);
           }, "image/jpeg", 0.85);
         } catch (e) {
-          finish(null);
+          finish2(null);
         }
       });
       video.src = url;
@@ -6508,6 +6726,28 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 #col-ui button{padding:4px 6px}
 #col-ui button svg{width:13px;height:13px}
 
+/* Chrome that has to get out of the way of a drag without forgetting
+   what it was attached to. Nothing repositions the pills mid-gesture,
+   so left visible they would sit stale over a row that is moving. */
+.btnui.dim{opacity:0;pointer-events:none}
+
+/* ---- column resize handles ----
+   One per gutter in the active row, drawn on the boundary between two
+   columns. The hit area is wider than the line and wider than the
+   gutter it sits in: gap-6 is 24px, which is under any touch target
+   worth the name, so the handle overhangs into both columns while the
+   line it draws stays where the boundary actually is. Below the pills
+   in z-order (they are 2147483000) and below the rail, since it is
+   drawn over page content rather than over the chrome.
+   touch-action is what stops a touch drag scrolling the page instead. */
+#col-handles .colhandle{position:fixed;z-index:2147482998;width:24px;
+margin-left:-12px;cursor:col-resize;display:flex;align-items:center;
+justify-content:center;touch-action:none}
+#col-handles .colhandle[hidden]{display:none}
+.colhandle::before{content:"";width:2px;height:100%;border-radius:1px;
+background:rgba(37,99,235,.35);transition:background .12s,width .12s}
+.colhandle:hover::before,.colhandle.on::before{width:4px;background:#2563eb}
+
 /* ---- tool rail (left edge, edit mode only) ---- */
 .rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
 background:#1c2128;display:none;flex-direction:column;align-items:center;
@@ -7025,7 +7265,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div id="col-handles"></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     $("admin").href = adminPath + "/";
     updateChip();

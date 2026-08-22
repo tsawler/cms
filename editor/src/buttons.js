@@ -23,6 +23,7 @@ import {
     resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
 } from "./columns.js";
 import { copyOf } from "./clone.js";
+import { initColResize, showHandles, hideHandles, placeHandles } from "./colresize.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
 import { flash } from "./util.js";
 
@@ -386,12 +387,17 @@ function showColUI(block, target) {
     }
     $("col-ui").classList.add("on");
     placeColUI();
+    // The drag handles are the same edit as the narrower/wider pair, so
+    // they appear on exactly the rows those buttons do.
+    if (cell && info.canResize) showHandles(info.row, info.cells);
+    else hideHandles();
 }
 
 export function hideColUI() {
     activeCol = null;
     markActiveCell(null);
     $("col-ui").classList.remove("on");
+    hideHandles();
 }
 
 // afterColumnEdit puts everything back in step once a column edit has
@@ -901,6 +907,25 @@ function snipTwins(el) {
 }
 
 export function initButtons() {
+    initColResize({
+        // A drag rewrites the spans on every pointer move, and nothing
+        // repositions the pills in between — left up they would sit
+        // stale over a row moving underneath them.
+        onStart: function () {
+            $("col-ui").classList.add("dim");
+            $("snip-ui").classList.add("dim");
+        },
+        onEnd: function (row, changed) {
+            $("col-ui").classList.remove("dim");
+            $("snip-ui").classList.remove("dim");
+            // The pill is centred over the active column, which is a
+            // different width than it was; re-place it either way, since
+            // even an abandoned drag ends with the row measured afresh.
+            placeColUI();
+            if (changed) markContainerDirty(row);
+        },
+    });
+
     document.addEventListener("click", function (e) {
         if (!state.editing) return;
         if (e.target === host) return; // clicks on editor chrome keep the state
@@ -966,7 +991,7 @@ export function initButtons() {
     window.addEventListener("scroll", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
-        if (activeCol) placeColUI();
+        if (activeCol) { placeColUI(); placeHandles(); }
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -974,7 +999,7 @@ export function initButtons() {
     window.addEventListener("resize", function () {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
-        if (activeCol) placeColUI();
+        if (activeCol) { placeColUI(); placeHandles(); }
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
