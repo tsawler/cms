@@ -107,10 +107,14 @@
 {{$showFolders := and (not .CurrentFolder) (not .MediaQuery) (gt (len .Folders) 0)}}
 
 <div class="cms-browser">
-    {{- /* Selection actions. Hidden until something is selected: the
+    {{- /* Selection actions. Blank until something is selected: the
            per-item buttons this replaced were on screen at all times, four
-           to a tile, which is what made the old grid unreadable. */}}
-    <div class="cms-selbar" data-selbar hidden>
+           to a tile, which is what made the old grid unreadable. It keeps
+           its space while empty (data-empty hides it without taking it out
+           of the flow) — appearing between the two clicks of a double-click
+           would otherwise push the entry being opened out from under the
+           pointer. */}}
+    <div class="cms-selbar" data-selbar data-empty>
         <span class="cms-selbar-count" data-sel-count aria-live="polite"
               data-t-one="{{.T "1 selected"}}" data-t-many="{{.T "{n} selected"}}"></span>
         {{- /* Standing inside a folder, leaving it is the move people reach
@@ -136,6 +140,15 @@
             </select>
         </form>
         <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-copy>{{.T "Copy link"}}</button>
+        {{- /* A link, not a button: the href is the download, so it also
+               opens in a new tab, saves from the context menu, and works
+               the moment it is enabled. It points at the admin rather than
+               the object's own URL — on a bucket that URL is cross-origin,
+               where the download attribute is ignored and the file is
+               shown instead of saved. */}}
+        <a class="cms-btn cms-btn-ghost cms-btn-sm" data-sel-download download
+           data-href-template="{{.AdminPath}}/media/{id}/download"
+           aria-disabled="true">{{.T "Download"}}</a>
         <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form data-sel-delete
               data-confirm="{{.T "Delete the selected files? Pages still using them will break."}}">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -309,6 +322,9 @@
                 <p class="cms-hint">{{.T "Screen readers read this instead of the picture."}}</p>
             </form>
             <button type="button" class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-block" data-inspector-copy>{{.T "Copy link"}}</button>
+            <a class="cms-btn cms-btn-ghost cms-btn-sm cms-btn-block cms-inspector-download"
+               data-inspector-download download
+               data-href-template="{{.AdminPath}}/media/{id}/download" hidden>{{.T "Download"}}</a>
         </aside>
     </div>
 </div>

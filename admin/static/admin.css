@@ -349,7 +349,9 @@ a.cms-card:hover { border-color: var(--cms-spruce); }
     font-weight: 500;
 }
 .cms-btn-ghost:hover { color: var(--cms-ink); border-color: var(--cms-muted); }
-.cms-btn-block { width: 100%; }
+/* text-align: an anchor styled as a block button would otherwise sit its
+   label on the left, where the same class on a <button> centres it. */
+.cms-btn-block { width: 100%; text-align: center; }
 .cms-btn-danger {
     background: transparent;
     color: var(--cms-danger);
@@ -936,8 +938,10 @@ body.cms-dragging .cms-table {
     text-align: center;
 }
 
-/* Selection bar: appears only with a selection, which is the whole point
-   of moving the actions off the entries. */
+/* Selection bar: carries the actions that used to sit on every entry, and
+   reads blank until something is selected. It is hidden with visibility
+   rather than display, so the grid below it never moves: the first click of
+   a double-click must not shift the entry the second click is aimed at. */
 .cms-selbar {
     display: flex;
     align-items: center;
@@ -948,6 +952,7 @@ body.cms-dragging .cms-table {
     border: 1px solid var(--cms-spruce-line);
     border-radius: var(--cms-radius);
 }
+.cms-selbar[data-empty] { visibility: hidden; }
 .cms-selbar form { margin: 0; }
 .cms-selbar-count {
     font-size: .85rem;
@@ -965,7 +970,11 @@ body.cms-dragging .cms-table {
 }
 .cms-selbar .cms-btn-ghost { background: var(--cms-surface); }
 .cms-selbar-clear { margin-left: auto; }
-.cms-selbar [disabled] { opacity: .45; cursor: default; }
+/* A link with nothing to point at reads like a disabled button: an
+   anchor cannot carry the disabled attribute, so it says aria-disabled
+   and has no href to follow. */
+.cms-selbar [disabled],
+.cms-selbar [aria-disabled="true"] { opacity: .45; cursor: default; pointer-events: none; }
 
 /* Inspector */
 .cms-inspector {
@@ -1014,6 +1023,7 @@ body.cms-dragging .cms-table {
     font-family: var(--cms-mono);
     font-variant-numeric: tabular-nums;
 }
+.cms-inspector-download { margin-top: .4rem; }
 .cms-inspector-alt { margin-bottom: .75rem; }
 .cms-inspector-alt label {
     display: block;
