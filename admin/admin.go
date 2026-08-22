@@ -357,6 +357,7 @@ func New(d Deps) http.Handler {
 				r.Use(s.requireMedia)
 
 				r.Get("/media", s.mediaList)
+				r.Get("/media/{id}/download", s.mediaDownload)
 				r.Post("/media/upload", s.mediaUpload)
 				r.Post("/media/{id}/alt", s.mediaUpdateAlt)
 				r.Post("/media/{id}/rename", s.mediaRename)

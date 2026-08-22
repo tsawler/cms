@@ -483,6 +483,7 @@ function captureFrame(src, crossOrigin) {
     var moveSel = selbar.querySelector("[data-sel-move]");
     var upBtn = selbar.querySelector("[data-sel-up]"); // rendered only inside a folder
     var copyBtn = selbar.querySelector("[data-sel-copy]");
+    var downloadLink = selbar.querySelector("[data-sel-download]");
     var clearBtn = selbar.querySelector("[data-sel-clear]");
     // Both delete forms carry data-confirm, so each is found by its own
     // marker rather than by having the only confirmation in the bar.
@@ -640,11 +641,33 @@ function captureFrame(src, crossOrigin) {
     // ---------------------------------------------------------------
     // Selection bar and inspector
     // ---------------------------------------------------------------
+
+    // setDownload points a download link at one entry, or takes its href
+    // away. An anchor cannot be disabled, so without a file it loses the
+    // href — which is also what stops it being focused or followed — and
+    // says so to assistive tech.
+    function setDownload(link, item) {
+        if (!link) return;
+        var template = link.getAttribute("data-href-template");
+        var id = item && item.getAttribute("data-id");
+        if (template && id) {
+            link.href = template.replace("{id}", id);
+            link.removeAttribute("aria-disabled");
+        } else {
+            link.removeAttribute("href");
+            link.setAttribute("aria-disabled", "true");
+        }
+    }
+
     function sync() {
         var sel = selected();
         var files = sel.filter(function (x) { return x.getAttribute("data-id"); });
 
-        selbar.hidden = sel.length === 0;
+        // Blanked rather than removed: the bar keeps its space so the grid
+        // under it never jumps between the two clicks of a double-click.
+        if (sel.length === 0) selbar.setAttribute("data-empty", "");
+        else selbar.removeAttribute("data-empty");
+
         countEl.textContent = countEl.getAttribute("data-t-one") && sel.length === 1
             ? countEl.getAttribute("data-t-one")
             : (countEl.getAttribute("data-t-many") || "{n}").replace("{n}", sel.length);
@@ -680,6 +703,11 @@ function captureFrame(src, crossOrigin) {
         if (single) copyBtn.setAttribute("data-copy", single);
         else copyBtn.removeAttribute("data-copy");
 
+        // Same rule as Copy link: one file names one thing to download.
+        // A folder has no object of its own behind it, and several files
+        // would have to be zipped to be one download.
+        setDownload(downloadLink, files.length === 1 ? files[0] : null);
+
         renderInspector(files);
     }
 
@@ -699,6 +727,7 @@ function captureFrame(src, crossOrigin) {
         var renameForm = inspector.querySelector("[data-inspector-rename]");
         var altForm = inspector.querySelector("[data-inspector-alt]");
         var copy = inspector.querySelector("[data-inspector-copy]");
+        var download = inspector.querySelector("[data-inspector-download]");
 
         preview.textContent = "";
         factsEl.textContent = "";
@@ -709,6 +738,7 @@ function captureFrame(src, crossOrigin) {
             renameForm.hidden = true;
             altForm.hidden = true;
             copy.hidden = true;
+            if (download) download.hidden = true;
             return;
         }
 
@@ -777,6 +807,11 @@ function captureFrame(src, crossOrigin) {
 
         copy.hidden = false;
         copy.setAttribute("data-copy", el.getAttribute("data-url") || "");
+
+        if (download) {
+            download.hidden = false;
+            setDownload(download, el);
+        }
     }
 
     // ---------------------------------------------------------------

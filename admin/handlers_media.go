@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -298,6 +300,79 @@ func (s *server) mediaRename(w http.ResponseWriter, r *http.Request) {
 	}
 	s.flash(r, s.tr(r, "File renamed."))
 	s.backToMedia(w, r)
+}
+
+// mediaDownload streams one item's original bytes as an attachment. The
+// public URL cannot do this on its own: served from a bucket it is
+// cross-origin, where the download attribute is ignored and the browser
+// shows the file rather than saving it, and a private bucket is not
+// reachable by the browser at all. Coming through here also puts the
+// download behind the same permission gate as the rest of the library.
+func (s *server) mediaDownload(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.mediaIDFromURL(w, r)
+	if !ok {
+		return
+	}
+	md, err := s.deps.Media.GetByID(r.Context(), id, s.deps.DefaultLocale)
+	if errors.Is(err, media.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+
+	body, contentType, err := s.deps.Media.OpenOriginal(r.Context(), md)
+	if errors.Is(err, media.ErrObjectNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	defer body.Close()
+
+	if contentType == "" {
+		contentType = md.Mime
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	// Saved, not shown — which is the whole point of the route, and what
+	// keeps an SVG or an HTML-ish document from rendering on this origin.
+	w.Header().Set("Content-Disposition", attachmentDisposition(md.Filename))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Bytes from a private bucket behind a session: not for shared caches.
+	w.Header().Set("Cache-Control", "private, no-store")
+	// No Content-Length: the stored size is the upload's, and a header that
+	// disagreed with the body by even a byte would truncate the download.
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := io.Copy(w, body); err != nil {
+		s.deps.Logger.Debug("cms admin: media download interrupted", "id", md.ID, "err", err)
+	}
+}
+
+// attachmentDisposition builds a Content-Disposition naming the saved
+// file. Names are user-supplied, so it carries both forms: a quoted ASCII
+// fallback with anything else flattened to "_", and the RFC 5987 UTF-8
+// parameter every current browser prefers.
+func attachmentDisposition(filename string) string {
+	// sanitizeFilename keeps the last path element, and names an unnamed
+	// upload "upload" — the same name it was stored under.
+	name := sanitizeFilename(filename)
+	ascii := make([]rune, 0, len(name))
+	for _, r := range name {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' {
+			r = '_'
+		}
+		ascii = append(ascii, r)
+	}
+	return fmt.Sprintf("attachment; filename=\"%s\"; filename*=UTF-8''%s",
+		string(ascii), url.PathEscape(name))
 }
 
 func (s *server) mediaDelete(w http.ResponseWriter, r *http.Request) {

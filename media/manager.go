@@ -602,6 +602,20 @@ func (m *Manager) objectKeys(md *Media) []string {
 	return keys
 }
 
+// OpenOriginal streams the object md was uploaded as — the untouched
+// original, never a rendition — with the content type the store holds it
+// under. The caller closes the body. It is how the admin serves a
+// download: the public URL cannot, being either cross-origin (where a
+// browser shows the file instead of saving it) or, on a private bucket,
+// not reachable by the browser at all.
+func (m *Manager) OpenOriginal(ctx context.Context, md *Media) (io.ReadCloser, string, error) {
+	key := m.abs(md.StoreKey)
+	if md.Kind != KindFile {
+		key = m.abs(md.StoreKey + "/original" + md.Ext)
+	}
+	return m.objects.Get(ctx, key)
+}
+
 // URL returns the public URL of one rendition: "original" or any rung of
 // the ladder ("web", "card", "thumb"). Files have a single rendition,
 // returned for any name. Videos have "original" (the video itself; also
