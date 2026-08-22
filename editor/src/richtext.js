@@ -8,6 +8,7 @@ import { markDirty, markSectionsDirty, htmlRegions } from "./editing.js";
 import { openPicker } from "./media.js";
 import { openDialog } from "./dialogs.js";
 import { runWithUndo } from "./undo.js";
+import { hideChrome } from "./buttons.js";
 
 var tinyLoading = null;
 
@@ -447,6 +448,17 @@ export function initInlineEditor(el, onDirty, register) {
             ed.on("input change undo redo SetContent", function () {
                 if (ed.isDirty()) onDirty();
             });
+            // Undo, redo and any wholesale content replacement swap the
+            // elements out for new ones, so every floating toolbar is
+            // left anchored to a node that is no longer in the page —
+            // and the column resize handles are left drawn over content
+            // that has moved out from under them. Put the chrome away
+            // and let the next click raise it against what is really
+            // there. (Before the handles existed this was invisible: a
+            // stale pill only misbehaved if you pressed something on
+            // it. A handle sitting on a boundary that no longer exists
+            // is an invitation.)
+            ed.on("undo redo SetContent", function () { hideChrome(); });
         },
     };
     // The dropdown replaces TinyMCE's default menu: a built-in Headings

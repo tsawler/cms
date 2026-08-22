@@ -202,6 +202,10 @@ export function initShell() {
         // column. It rides alongside the block chrome above instead of
         // replacing it, because a row and a column in it are two things
         // to edit and an editor may well want either.
+        // The column resize handles, one per gutter in the active row.
+        // They are built and placed by colresize.js; this is only
+        // somewhere in the shadow root for them to hang from.
+        '<div id="col-handles"></div>' +
         '<div class="btnui" id="col-ui">' +
         '<button id="col-back" title="Move this column left">' + ICONS.chevL + "</button>" +
         '<button id="col-on" title="Move this column right">' + ICONS.chevR + "</button>" +

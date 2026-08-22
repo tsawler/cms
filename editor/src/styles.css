@@ -123,6 +123,28 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 #col-ui button{padding:4px 6px}
 #col-ui button svg{width:13px;height:13px}
 
+/* Chrome that has to get out of the way of a drag without forgetting
+   what it was attached to. Nothing repositions the pills mid-gesture,
+   so left visible they would sit stale over a row that is moving. */
+.btnui.dim{opacity:0;pointer-events:none}
+
+/* ---- column resize handles ----
+   One per gutter in the active row, drawn on the boundary between two
+   columns. The hit area is wider than the line and wider than the
+   gutter it sits in: gap-6 is 24px, which is under any touch target
+   worth the name, so the handle overhangs into both columns while the
+   line it draws stays where the boundary actually is. Below the pills
+   in z-order (they are 2147483000) and below the rail, since it is
+   drawn over page content rather than over the chrome.
+   touch-action is what stops a touch drag scrolling the page instead. */
+#col-handles .colhandle{position:fixed;z-index:2147482998;width:24px;
+margin-left:-12px;cursor:col-resize;display:flex;align-items:center;
+justify-content:center;touch-action:none}
+#col-handles .colhandle[hidden]{display:none}
+.colhandle::before{content:"";width:2px;height:100%;border-radius:1px;
+background:rgba(37,99,235,.35);transition:background .12s,width .12s}
+.colhandle:hover::before,.colhandle.on::before{width:4px;background:#2563eb}
+
 /* ---- tool rail (left edge, edit mode only) ---- */
 .rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
 background:#1c2128;display:none;flex-direction:column;align-items:center;

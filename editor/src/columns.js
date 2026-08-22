@@ -239,6 +239,9 @@ export function columnTarget(block, target) {
         mode: "cell",
         row: row,
         cell: cell,
+        // Every cell, not just the one clicked: the resize handles are
+        // drawn on the boundaries between all of them.
+        cells: cells,
         index: at,
         count: cells.length,
         canAdd: cells.length < MAX_COLS,
@@ -422,6 +425,32 @@ export function resizeColumn(info, delta) {
     var prefix = widest(info.row, GRID_RE).prefix;
     setSpan(cells[at], prefix, mine);
     setSpan(cells[other], prefix, theirs);
+}
+
+// toSpanned puts a row into the twelve-track form and reports what a
+// drag needs to know about it: the cells, the spans they now carry, and
+// the breakpoint prefix to write new ones at. Null for a row whose
+// track count does not divide twelve — the same rows columnTarget flags
+// canResize: false, so the handles appear exactly where the narrower
+// and wider buttons do.
+//
+// The prefix is read before the conversion because that is the only
+// value in play that the conversion could touch; setTracks preserves
+// it, but reading first means the two can never disagree.
+export function toSpanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var spans = spanned(row);
+    if (!spans) return null;
+    return { cells: cellsOf(row), spans: spans, prefix: cur.prefix };
+}
+
+// setPair writes the two spans either side of one boundary. Callers are
+// expected to keep the total the same — that invariant is what keeps the
+// row exactly full, and it is the same one resizeColumn steps within.
+export function setPair(prefix, a, an, b, bn) {
+    setSpan(a, prefix, an);
+    setSpan(b, prefix, bn);
 }
 
 // moveColumn swaps a column with its neighbour. Widths travel with the
