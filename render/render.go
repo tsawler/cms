@@ -1456,7 +1456,8 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		out = insertAfterBodyTag(out, bar.HTML)
 	}
 	if edit != nil {
-		out = r.injectEditorScript(out, edit, filledImageRegions(byRegion), noticeText)
+		out = r.injectEditorScript(out, edit, filledImageRegions(byRegion), noticeText,
+			in.Site.EditorTheme)
 	}
 	_, err = w.Write(out)
 	return err
@@ -1581,10 +1582,17 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 // injectEditorScript inserts the in-place editor's script tag before the
 // closing </body> tag (or at the end when there isn't one).
 func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages []string,
-	noticeText string) []byte {
+	noticeText, editorTheme string) []byte {
 	mediaFlag := "0"
 	if edit.MediaEnabled {
 		mediaFlag = "1"
+	}
+	// The editor's chrome colours. Anything but the light scheme is the
+	// dark one, so an unset — or a value from a newer build than this
+	// script — lands on the chrome the editor has always had.
+	theme := content.EditorThemeDark
+	if editorTheme == content.EditorThemeLight {
+		theme = content.EditorThemeLight
 	}
 	unpubFlag := "0"
 	if edit.HasUnpublished {
@@ -1687,6 +1695,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages 
 		// notice written in it would be the editor telling a small lie
 		// — and one an editor could easily type straight over.
 		` data-notice="` + html.EscapeString(noticeText) + `"` +
+		` data-editor-theme="` + theme + `"` +
 		` data-is-admin="` + adminFlag + `"` +
 		` data-is-superadmin="` + superFlag + `"` +
 		` data-can-pages="` + canPagesFlag + `"` +

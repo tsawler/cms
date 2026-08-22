@@ -85,6 +85,11 @@
     state.filledSlots = filledSlotMap();
   }
   var state = {
+    // The editor's own chrome: "dark" (the default) or "light". A site
+    // whose design is dark needs the light one — dark chrome over a
+    // dark page is chrome you have to hunt for. Mutable: the site
+    // settings dialog switches it without a reload.
+    editorTheme: cfg.editorTheme === "light" ? "light" : "dark",
     pageStatus: cfg.status || "draft",
     visibility: cfg.visibility || "public",
     // True when a published page's saved draft differs from what's live.
@@ -3542,14 +3547,18 @@
     });
   }
   function initInlineEditor(el, onDirty, register) {
+    var light = state.editorTheme === "light";
     var opts = {
       target: el,
       inline: true,
       menubar: false,
-      // Dark chrome, matching the section toolbars and the shell's
-      // own UI. Content styles are unaffected: the dark skin's
-      // content.inline.css is identical to the light one's.
-      skin: "oxide-dark",
+      // Chrome to match the rest of the editor's, dark or light as
+      // the site settings say. Content styles are unaffected either
+      // way: oxide-dark's content.inline.css is identical to oxide's.
+      // The skin is fixed when the instance is built, so switching
+      // schemes without a reload means rebuilding them — see
+      // settings.js.
+      skin: light ? "oxide" : "oxide-dark",
       // In inline mode the toolbar floats docked to the region
       // as soon as it gains focus — a click is enough, no text
       // selection needed.
@@ -3626,7 +3635,7 @@
             if (css.indexOf("background-color") === -1) {
               var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
               if (m) {
-                css += "color:oklch(from " + m[1] + " calc(max(l, 0.8)) c h);";
+                css += "color:oklch(from " + m[1] + " " + (light ? "calc(min(l, 0.55))" : "calc(max(l, 0.8))") + " c h);";
               }
               css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
             }
@@ -3792,6 +3801,11 @@
   var MENU = "Menu";
   var NOTICE = "Notice bar";
   var SEARCH = "Search";
+  var EDITOR = "Editor";
+  var EDITOR_THEMES = [
+    { key: "dark", label: "Dark \u2014 pale tools, for a light-coloured site" },
+    { key: "light", label: "Light \u2014 dark tools, for a dark-coloured site" }
+  ];
   var NOTICE_STYLES = [
     { key: "dark", label: "Dark" },
     { key: "accent", label: "Accent (blue)" },
@@ -3883,6 +3897,13 @@
     if (!html) return true;
     if (html.indexOf("<img") !== -1) return false;
     return !html.replace(/<[^>]*>/g, "").replace(/&nbsp;|&#160;|&#xa0;/g, " ").trim();
+  }
+  function applyEditorTheme(theme) {
+    setChromeTheme(theme);
+    if (!state.editing || !window.tinymce) return;
+    removeRichEditors();
+    initRichEditors();
+    injectSectionUI();
   }
   function noticeCloseButton() {
     var b = document.createElement("button");
@@ -4043,6 +4064,21 @@
         var dismiss = v.noticeDismissible === "1" ? " Visitors can close it, and it stays closed for them until you change the wording \u2014 a new notice shows again." : " There is no close button: the bar stays until you switch it off here.";
         return "The wording is content, not a setting: it is saved as a draft here and goes live with the next Publish, in the language you are editing. A bar with nothing written in it shows to nobody. You can also write it in the bar on the page itself \u2014 it is a shared region like the footer." + dismiss;
       } });
+      fields.push({
+        id: "editorTheme",
+        label: "Colour of the editing tools",
+        type: "select",
+        value: s.editorTheme,
+        tab: EDITOR,
+        span: true,
+        options: EDITOR_THEMES.map(function(t) {
+          return { value: t.key, label: t.label };
+        })
+      });
+      fields.push({ type: "note", span: true, tab: EDITOR, text: function(v) {
+        var which = v.editorTheme === "light" ? "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn pale, with dark text." : "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn dark, with pale text.";
+        return which + " Pick whichever stands out against this site's own design \u2014 the tools disappear when they are the same shade as the page under them. It changes nothing a visitor sees, and it applies to everyone who edits here.";
+      } });
       if (isSuperadmin) {
         fields.push({
           id: "mode",
@@ -4099,7 +4135,7 @@
           return "Served at /robots.txt" + sitemapLine + ". Crawlers may cache it for a day or so before they notice a change.";
         } });
       }
-      var tabs = [BRAND, MENU, NOTICE];
+      var tabs = [BRAND, MENU, NOTICE, EDITOR];
       if (isSuperadmin) tabs.push(SEARCH);
       openDialog({
         message: "Site settings",
@@ -4128,7 +4164,8 @@
           sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
           noticeBar: values.noticeBar === "1",
           noticeStyle: values.noticeStyle,
-          noticeDismissible: values.noticeDismissible === "1"
+          noticeDismissible: values.noticeDismissible === "1",
+          editorTheme: values.editorTheme
         };
         var typed = sanitizeRichHTML(values.noticeText || "");
         var changed = typed !== noticeRich;
@@ -4143,6 +4180,7 @@
         }).then(function() {
           applySettings(next);
           retitle(s.siteName, next.siteName);
+          if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
           if (!changed) {
             flash("Site settings saved.");
             return;
@@ -6606,6 +6644,59 @@
  * and these rules can't leak out. */
 
 :host{all:initial}
+
+/* ---- chrome palette ----
+   The editor's dark surfaces \u2014 the bottom bar, the tool rail, the
+   floating pills, the overflow menu \u2014 as custom properties, so the
+   light scheme is a swap of this block rather than a second copy of
+   every rule. Panels and dialogs are not in here: they are white in
+   both schemes, being documents rather than chrome.
+
+   \`all:initial\` above does not touch custom properties, so these
+   survive it. The light values are the same surfaces read the other
+   way up: a white face, ink-coloured text, and a hairline ring that is
+   invisible in the dark scheme (an inset shadow, so switching it on
+   costs no layout).
+
+   The site settings dialog picks the scheme; a site with a dark design
+   of its own wants the light one, because dark chrome over a dark page
+   is chrome you have to hunt for. ---- */
+:host{
+--cms-chrome-bg:#1c2128;      /* the pill/rail/toolbar face */
+--cms-chrome-hi:#2a3140;      /* that face, raised: hover on a whole pill */
+--cms-chrome-menu:#242a33;    /* the overflow menu, a step off the bar */
+--cms-chrome-fg:#fff;
+--cms-chrome-line:rgba(255,255,255,.28);  /* borders drawn on the face */
+--cms-chrome-line-2:rgba(255,255,255,.4); /* the same, asking to be noticed */
+--cms-chrome-ring:transparent;            /* hairline the light face needs */
+--cms-wash-1:rgba(255,255,255,.1);   /* hover on a bar button, a menu row */
+--cms-wash-2:rgba(255,255,255,.14);  /* hover on the rail; the status chip */
+--cms-wash-3:rgba(255,255,255,.18);  /* hover on an icon button */
+--cms-wash-4:rgba(255,255,255,.2);   /* a control that is currently on */
+--cms-chrome-dngr:#fca5a5;                 /* delete/discard actions */
+--cms-chrome-dngr-wash:rgba(252,165,165,.2);
+--cms-chrome-shadow:0 8px 24px rgba(0,0,0,.35);
+--cms-chrome-shadow-sm:0 4px 12px rgba(0,0,0,.35);
+--cms-chrome-shadow-rail:2px 0 12px rgba(0,0,0,.25);
+}
+:host(.light){
+--cms-chrome-bg:#fff;
+--cms-chrome-hi:#f1f3f6;
+--cms-chrome-menu:#fff;
+--cms-chrome-fg:#1c2128;
+--cms-chrome-line:#d9dce1;
+--cms-chrome-line-2:#98a2b3;
+--cms-chrome-ring:#dfe3e8;
+--cms-wash-1:rgba(28,33,40,.06);
+--cms-wash-2:rgba(28,33,40,.08);
+--cms-wash-3:rgba(28,33,40,.1);
+--cms-wash-4:rgba(47,95,224,.14);
+--cms-chrome-dngr:#c0392b;
+--cms-chrome-dngr-wash:rgba(192,57,43,.1);
+--cms-chrome-shadow:0 8px 24px rgba(15,18,25,.22);
+--cms-chrome-shadow-sm:0 4px 12px rgba(15,18,25,.2);
+--cms-chrome-shadow-rail:2px 0 12px rgba(15,18,25,.14);
+}
 *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 /* Author display rules (inline-flex buttons etc.) would otherwise
    beat the UA's [hidden]{display:none}. */
@@ -6613,36 +6704,45 @@
 
 /* ---- bottom pill bar (dark) ---- */
 .bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483000;
-display:flex;align-items:center;gap:8px;background:#1c2128;color:#fff;border-radius:999px;
-padding:8px 14px;font-size:13px;line-height:1;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap;
+display:flex;align-items:center;gap:8px;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);
+border-radius:999px;
+padding:8px 14px;font-size:13px;line-height:1;white-space:nowrap;
+box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);
 transition:transform .25s ease,opacity .25s ease}
 .bar.min{transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none}
 .fab{position:fixed;bottom:20px;left:50%;z-index:2147483000;width:48px;height:48px;
-border-radius:50%;background:#1c2128;color:#fff;border:none;cursor:pointer;
-box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:0;
+border-radius:50%;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);border:none;cursor:pointer;
+box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);
+display:flex;align-items:center;justify-content:center;padding:0;
 transform:translateX(-50%) scale(.25);opacity:0;pointer-events:none;
 transition:transform .25s ease,opacity .25s ease}
 .fab.on{transform:translateX(-50%) scale(1);opacity:1;pointer-events:auto}
-.fab:hover{background:#2a3140}
+.fab:hover{background:var(--cms-chrome-hi)}
 .fab svg{width:20px;height:20px;fill:currentColor}
-.chip{padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;text-transform:capitalize}
-.chip.published{background:#1e7e4e}
-.chip.changes{background:#b45309;text-transform:none}
+.chip{padding:3px 10px;border-radius:999px;background:var(--cms-wash-2);font-size:12px;text-transform:capitalize}
+/* The two coloured chips carry their own meaning, so they keep their
+   colours in both schemes \u2014 and with them their own white text, which
+   the light bar's ink-coloured default would not survive. */
+.chip.published{background:#1e7e4e;color:#fff}
+.chip.changes{background:#b45309;color:#fff;text-transform:none}
 /* ---- toast: status and confirmation messages, floated above the bar
    so they're visible even when the bar is busy or minimized ---- */
 .toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(8px);
-z-index:2147483007;background:#1c2128;color:#fff;border-radius:10px;padding:10px 16px;
+z-index:2147483007;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);border-radius:10px;
+padding:10px 16px;
 font-size:13px;line-height:1.4;max-width:min(28em,90vw);text-align:center;
-box-shadow:0 8px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;visibility:hidden;
+box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);
+opacity:0;pointer-events:none;visibility:hidden;
 transition:transform .2s ease,opacity .2s ease,visibility .2s}
 .toast.on{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
-.bar button{font:inherit;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.28);
+.bar button{font:inherit;color:var(--cms-chrome-fg);background:transparent;border:1px solid var(--cms-chrome-line);
 border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .bar button svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}
 .bar .ic{display:inline-flex}
-.bar button:hover{background:rgba(255,255,255,.1)}
+.bar button:hover{background:var(--cms-wash-1)}
 .bar button:disabled{opacity:.4;cursor:default}
-.bar button.primary{background:#2f5fe0;border-color:#2f5fe0}
+/* Publish stays the same blue in both schemes, white text and all. */
+.bar button.primary{background:#2f5fe0;border-color:#2f5fe0;color:#fff}
 .bar button.primary:hover{background:#2149b8}
 .bar button.quiet{border-color:transparent;opacity:.7;padding:5px 8px}
 /* Amber ring on Save while there are unsaved changes. */
@@ -6652,14 +6752,15 @@ border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;align-it
 .more{position:relative;display:inline-flex}
 #more{font-size:16px;padding:4px 10px;line-height:1}
 .menu{position:absolute;bottom:calc(100% + 12px);right:0;display:none;flex-direction:column;
-background:#242a33;border-radius:12px;padding:6px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+background:var(--cms-chrome-menu);border-radius:12px;padding:6px;min-width:190px;
+box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring)}
 .menu.on{display:flex}
-.menu button,.menu a{font:inherit;font-size:13px;color:#fff;background:none;border:none;border-radius:8px;
+.menu button,.menu a{font:inherit;font-size:13px;color:var(--cms-chrome-fg);background:none;border:none;border-radius:8px;
 padding:8px 12px;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
-.menu button:hover,.menu a:hover{background:rgba(255,255,255,.1)}
-.menu button.dngr{color:#fca5a5}
-.menu button.dngr:hover{background:rgba(252,165,165,.15)}
-.menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}
+.menu button:hover,.menu a:hover{background:var(--cms-wash-1)}
+.menu button.dngr{color:var(--cms-chrome-dngr)}
+.menu button.dngr:hover{background:var(--cms-chrome-dngr-wash)}
+.menu hr{border:none;border-top:1px solid var(--cms-wash-2);margin:4px 6px}
 
 /* ---- page CSS & JS panel (wide, admin-only) ---- */
 .code-overlay{position:fixed;inset:0;background:rgba(15,18,25,.5);z-index:2147482998;display:none}
@@ -6700,22 +6801,22 @@ overflow:auto}
 .cfoot .derr{flex:1;font-size:12px;color:#c0392b;font-weight:600}
 
 /* ---- floating button-editor chrome (gear/trash by a clicked button) ---- */
-.btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:#1c2128;
-border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 6px;
-box-shadow:0 4px 12px rgba(0,0,0,.35)}
+.btnui{position:fixed;z-index:2147483000;display:none;gap:2px;background:var(--cms-chrome-bg);
+border:1px solid var(--cms-chrome-line);border-radius:999px;padding:4px 6px;
+box-shadow:var(--cms-chrome-shadow-sm)}
 .btnui.on{display:flex}
-.btnui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
+.btnui button{font:15px/1 system-ui,sans-serif;color:var(--cms-chrome-fg);background:transparent;border:none;
 border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
 /* The display above is an author rule, so it outranks the browser's own
    [hidden]{display:none} and a hidden control would show regardless.
    Slot chrome hides its trash can this way when there is no chosen
    picture to remove. */
 .btnui button[hidden]{display:none}
-.btnui button:hover{background:rgba(255,255,255,.18)}
+.btnui button:hover{background:var(--cms-wash-3)}
 .btnui button svg{display:block;width:15px;height:15px;fill:currentColor}
-#btn-del,#snip-del,#img-del,#vid-del,#slot-clear,#col-del{color:#fca5a5}
+#btn-del,#snip-del,#img-del,#vid-del,#slot-clear,#col-del{color:var(--cms-chrome-dngr)}
 #btn-del:hover,#snip-del:hover,#img-del:hover,#vid-del:hover,
-#slot-clear:hover,#col-del:hover{background:rgba(252,165,165,.2)}
+#slot-clear:hover,#col-del:hover{background:var(--cms-chrome-dngr-wash)}
 #snip-move{cursor:grab;font-size:13px;letter-spacing:1px}
 /* The column tool is drawn on the row's top border (placeColUI centres
    it there), so it covers nothing and can stay legible. Smaller and a
@@ -6750,15 +6851,16 @@ background:rgba(37,99,235,.35);transition:background .12s,width .12s}
 
 /* ---- tool rail (left edge, edit mode only) ---- */
 .rail{position:fixed;top:0;left:0;bottom:0;width:56px;z-index:2147482999;
-background:#1c2128;display:none;flex-direction:column;align-items:center;
-padding-top:14px;gap:6px;box-shadow:2px 0 12px rgba(0,0,0,.25)}
+background:var(--cms-chrome-bg);display:none;flex-direction:column;align-items:center;
+padding-top:14px;gap:6px;
+box-shadow:var(--cms-chrome-shadow-rail),inset -1px 0 0 var(--cms-chrome-ring)}
 .rail.on{display:flex}
 .rail button{width:46px;height:46px;border-radius:10px;border:none;background:transparent;
-color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;
+color:var(--cms-chrome-fg);cursor:pointer;display:flex;flex-direction:column;align-items:center;
 justify-content:center;gap:3px;font-size:17px;line-height:1;padding:0}
 .rail button span{font-size:9px;opacity:.75;letter-spacing:.02em}
-.rail button:hover:not(:disabled){background:rgba(255,255,255,.14)}
-.rail button.on{background:rgba(255,255,255,.2)}
+.rail button:hover:not(:disabled){background:var(--cms-wash-2)}
+.rail button.on{background:var(--cms-wash-4)}
 .rail button:disabled{opacity:.35;cursor:default}
 
 /* ---- media modal (light, centered) ---- */
@@ -7016,14 +7118,16 @@ border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px}
 .dlg button.ok.danger{background:#c0392b;border-color:#c0392b}
 .dlg button.ok.danger:hover{background:#a03024}
 .post-pill{position:fixed;top:16px;right:16px;z-index:2147482999;display:flex;align-items:center;gap:7px;
-background:#1c2128;color:#fff;border:none;border-radius:999px;padding:9px 15px;font-size:13px;
-line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.3)}
-.post-pill:hover{background:#2b323d}
+background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);border:none;border-radius:999px;
+padding:9px 15px;font-size:13px;
+line-height:1;cursor:pointer;
+box-shadow:var(--cms-chrome-shadow-sm),inset 0 0 0 1px var(--cms-chrome-ring)}
+.post-pill:hover{background:var(--cms-chrome-hi)}
 .post-pill[hidden]{display:none}
 .locs{display:flex;gap:2px;align-items:center}
 .locs .loc{font-size:11px;letter-spacing:.04em;padding:4px 7px;border-radius:999px;
 border:1px solid transparent;opacity:.6}
-.locs .loc.on{border-color:rgba(255,255,255,.4);opacity:1;cursor:default}
+.locs .loc.on{border-color:var(--cms-chrome-line-2);opacity:1;cursor:default}
 .locs .loc:hover{opacity:1}
 `;
 
@@ -7032,6 +7136,46 @@ border:1px solid transparent;opacity:.6}
  * by shell.js and injected into <head> \u2014 these rules style the host
  * page's own content (regions, sections, snippets), which the shadow
  * root can't reach. */
+
+/* ---- chrome palette ----
+   The light-DOM half of the tokens styles.css defines for the shadow
+   root: same names, same two schemes, declared again because a shadow
+   root's custom properties do not reach out into the page. What lives
+   out here is the chrome that has to sit in the host's own markup \u2014
+   the section pills, the wrench menu beside the site nav \u2014 plus the
+   strip TinyMCE renders its toolbar into.
+
+   shell.js puts .cms-chrome-light on <body> for the light scheme. ---- */
+:root{
+--cms-chrome-bg:#1c2128;
+--cms-chrome-hi:#2a3140;
+--cms-chrome-menu:#242a33;
+--cms-chrome-fg:#fff;
+--cms-chrome-line:rgba(255,255,255,.28);
+--cms-chrome-ring:transparent;
+--cms-wash-1:rgba(255,255,255,.1);
+--cms-wash-2:rgba(255,255,255,.14);
+--cms-wash-3:rgba(255,255,255,.18);
+--cms-chrome-dngr:#fca5a5;
+--cms-chrome-dngr-wash:rgba(252,165,165,.2);
+--cms-chrome-shadow:0 8px 24px rgba(0,0,0,.4);
+--cms-chrome-shadow-sm:0 4px 12px rgba(0,0,0,.35);
+}
+body.cms-chrome-light{
+--cms-chrome-bg:#fff;
+--cms-chrome-hi:#f1f3f6;
+--cms-chrome-menu:#fff;
+--cms-chrome-fg:#1c2128;
+--cms-chrome-line:#d9dce1;
+--cms-chrome-ring:#dfe3e8;
+--cms-wash-1:rgba(28,33,40,.06);
+--cms-wash-2:rgba(28,33,40,.08);
+--cms-wash-3:rgba(28,33,40,.1);
+--cms-chrome-dngr:#c0392b;
+--cms-chrome-dngr-wash:rgba(192,57,43,.1);
+--cms-chrome-shadow:0 8px 24px rgba(15,18,25,.22);
+--cms-chrome-shadow-sm:0 4px 12px rgba(15,18,25,.2);
+}
 
 /* The tool rail is fixed to the left edge; push the page content
    right so the rail sits beside it instead of covering it. The
@@ -7077,16 +7221,16 @@ body.cms-editing > [data-cms-notice]:first-child{margin-top:76px;transition:marg
  * stays discoverable, and still works on touch where hover needs a tap. */
 .cms-sec-ui{position:absolute;top:0;right:12px;transform:translateY(-50%);
 z-index:2147482996;display:flex;gap:2px;
-background:#1c2128;border:1px solid rgba(255,255,255,.28);border-radius:999px;
-padding:4px 6px;box-shadow:0 4px 12px rgba(0,0,0,.35);
+background:var(--cms-chrome-bg);border:1px solid var(--cms-chrome-line);border-radius:999px;
+padding:4px 6px;box-shadow:var(--cms-chrome-shadow-sm);
 opacity:.25;transition:opacity .15s ease}
 .cms-editing [data-cms-section]:hover .cms-sec-ui,.cms-sec-ui:hover{opacity:1}
-.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:#fff;background:transparent;border:none;
-border-radius:999px;padding:6px 9px;cursor:pointer}
+.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:var(--cms-chrome-fg);background:transparent;
+border:none;border-radius:999px;padding:6px 9px;cursor:pointer}
 .cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}
-.cms-sec-ui button:hover{background:rgba(255,255,255,.18)}
-.cms-sec-ui button[data-secact='del']{color:#fca5a5}
-.cms-sec-ui button[data-secact='del']:hover{background:rgba(252,165,165,.2)}
+.cms-sec-ui button:hover{background:var(--cms-wash-3)}
+.cms-sec-ui button[data-secact='del']{color:var(--cms-chrome-dngr)}
+.cms-sec-ui button[data-secact='del']:hover{background:var(--cms-chrome-dngr-wash)}
 /* Hidden when the area it adds to is full; the host page's own reset
    must not be able to bring it back. */
 .cms-add-section[hidden],.cms-sec-ui button[hidden]{display:none!important}
@@ -7125,21 +7269,22 @@ outline-offset:-1px;background-color:rgba(47,95,224,.05)}
 #cms-admin-tools{position:relative;display:inline-flex;line-height:0}
 #cms-admin-tools.cms-fixed{position:fixed;top:12px;left:12px;z-index:2147482996}
 #cms-admin-tools-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
-padding:0;border:none;border-radius:50%;background:#1c2128;color:#fff;cursor:pointer;
-box-shadow:0 2px 8px rgba(0,0,0,.25)}
-#cms-admin-tools-btn:hover{background:#2a3140}
+padding:0;border:none;border-radius:50%;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);
+cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25),inset 0 0 0 1px var(--cms-chrome-ring)}
+#cms-admin-tools-btn:hover{background:var(--cms-chrome-hi)}
 #cms-admin-tools-btn svg{width:14px;height:14px;fill:currentColor}
 #cms-admin-tools .cms-admin-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:2147482997;
-display:none;flex-direction:column;background:#242a33;border-radius:12px;padding:6px;
-min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,.4);text-align:left}
+display:none;flex-direction:column;background:var(--cms-chrome-menu);border-radius:12px;padding:6px;
+min-width:170px;box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);
+text-align:left}
 #cms-admin-tools.cms-open .cms-admin-menu{display:flex}
 #cms-admin-tools.cms-align-right .cms-admin-menu{left:auto;right:0}
 #cms-admin-tools .cms-admin-menu button,#cms-admin-tools .cms-admin-menu a{
-font:13px/1.4 system-ui,sans-serif;color:#fff;background:none;border:none;border-radius:8px;
+font:13px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:none;border:none;border-radius:8px;
 padding:8px 12px;margin:0;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
 #cms-admin-tools .cms-admin-menu button:hover,#cms-admin-tools .cms-admin-menu a:hover{
-background:rgba(255,255,255,.1);color:#fff}
-#cms-admin-tools .cms-admin-menu hr{border:none;border-top:1px solid rgba(255,255,255,.12);margin:4px 6px}
+background:var(--cms-wash-1);color:var(--cms-chrome-fg)}
+#cms-admin-tools .cms-admin-menu hr{border:none;border-top:1px solid var(--cms-wash-2);margin:4px 6px}
 
 /* Site menus ({{cmsNav}}): while editing, clicking an item (long-press
  * on touch) opens its settings and drag rearranges; "\uFF0B" chips add
@@ -7151,8 +7296,10 @@ border-radius:2px;position:relative}
  * flashing on every pass-over, and it gets out of the way mid-drag. */
 .cms-editing nav[data-cms-menu]::after{content:'Click a menu item to edit it \u2014 drag to rearrange';
 position:absolute;top:calc(100% + 10px);left:0;z-index:2147482995;
-font:11px/1.4 system-ui,sans-serif;color:#fff;background:#1c2128;padding:5px 10px;
-border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.25);white-space:nowrap;
+font:11px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:var(--cms-chrome-bg);
+padding:5px 10px;
+border-radius:6px;box-shadow:var(--cms-chrome-shadow-sm),inset 0 0 0 1px var(--cms-chrome-ring);
+white-space:nowrap;
 pointer-events:none;opacity:0;transition:opacity .15s ease .4s}
 .cms-editing nav[data-cms-menu]:hover::after{opacity:1}
 body.cms-nav-dragging nav[data-cms-menu]::after{display:none}
@@ -7267,14 +7414,22 @@ body.cms-editing [data-cms-fallback] {
     shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div id="col-handles"></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.pencil + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
+    host.classList.toggle("light", state.editorTheme === "light");
     $("admin").href = adminPath + "/";
     updateChip();
+  }
+  function setChromeTheme(theme) {
+    state.editorTheme = theme === "light" ? "light" : "dark";
+    var light = state.editorTheme === "light";
+    if (host) host.classList.toggle("light", light);
+    document.body.classList.toggle("cms-chrome-light", light);
   }
   function initLightDom() {
     var mceBar = document.createElement("div");
     mceBar.id = "cms-mce-toolbar";
     mceBar.style.cssText = "position:fixed;top:12px;left:0;right:0;display:flex;justify-content:center;z-index:2147483000;pointer-events:none;";
     document.body.appendChild(mceBar);
+    document.body.classList.toggle("cms-chrome-light", state.editorTheme === "light");
     var lightCss = document.createElement("style");
     lightCss.textContent = light_default;
     document.head.appendChild(lightCss);

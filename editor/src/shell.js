@@ -8,7 +8,7 @@
  * editing-outline styles) plus the bar's minimize/restore behavior.
  * ------------------------------------------------------------------ */
 
-import { adminPath } from "./state.js";
+import { state, adminPath } from "./state.js";
 import { updateChip } from "./saving.js";
 import { setEditing, hasUnsaved, updateBarButtons } from "./editing.js";
 import { closePicker } from "./media.js";
@@ -264,9 +264,29 @@ export function initShell() {
         '<button id="dlg-ok" class="ok">OK</button>' +
         "</div></div>";
     document.documentElement.appendChild(host);
+    host.classList.toggle("light", state.editorTheme === "light");
 
     $("admin").href = adminPath + "/";
     updateChip();
+}
+
+/* setChromeTheme repaints the editor's own chrome light or dark.
+ *
+ * Two classes, because the chrome lives in two places: the shadow root
+ * holds the bar, rail, panels and floating pills, and the light DOM
+ * holds the section pills and TinyMCE's toolbar, which cannot be
+ * reached from inside a shadow root. Each carries a palette of custom
+ * properties that the theme class swaps wholesale.
+ *
+ * TinyMCE's own skin is not repainted from here — it is chosen when an
+ * editor is created — so a live switch has to rebuild the instances;
+ * see settings.js.
+ */
+export function setChromeTheme(theme) {
+    state.editorTheme = theme === "light" ? "light" : "dark";
+    var light = state.editorTheme === "light";
+    if (host) host.classList.toggle("light", light);
+    document.body.classList.toggle("cms-chrome-light", light);
 }
 
 /* Fixed strip TinyMCE renders its toolbar into (light DOM — TinyMCE
@@ -287,6 +307,10 @@ export function initLightDom() {
     // Must live inside <body>: TinyMCE resolves fixed_toolbar_container
     // by searching the body only.
     document.body.appendChild(mceBar);
+
+    // The light-DOM half of the chrome palette (section pills, the
+    // toolbar strip). The shadow half is set in initShell.
+    document.body.classList.toggle("cms-chrome-light", state.editorTheme === "light");
 
     /* Light-DOM styles for region outlines while editing. */
     var lightCss = document.createElement("style");

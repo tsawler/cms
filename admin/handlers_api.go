@@ -503,6 +503,11 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = content.ModeProduction
 	}
+	// Same for the editor's colour scheme: stored empty, shown as dark.
+	theme := site.EditorTheme
+	if theme == "" {
+		theme = content.EditorThemeDark
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"menuAlign":  site.MenuAlign,
 		"siteName":   site.SiteName,
@@ -528,6 +533,10 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		"noticeStyle":       render.ValidNoticeStyle(site.NoticeStyle),
 		"noticeDismissible": site.NoticeDismissible,
 		"noticeStyles":      render.NoticeStyles,
+		// The editor's own chrome, dark or light. Not about the site's
+		// public face at all — it is what the people editing it look at
+		// — but it is stored and saved with everything else here.
+		"editorTheme": theme,
 	})
 }
 
@@ -549,7 +558,8 @@ const maxRobotsLen = 10_000
 // same carry-through rule as the code fields.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
 // "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode", "robotsTxt",
-// "sitemap", "noticeBar", "noticeStyle", "noticeDismissible"}
+// "sitemap", "noticeBar", "noticeStyle", "noticeDismissible",
+// "editorTheme"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
@@ -571,6 +581,10 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		NoticeBar         *bool   `json:"noticeBar"`
 		NoticeStyle       *string `json:"noticeStyle"`
 		NoticeDismissible *bool   `json:"noticeDismissible"`
+		// A pointer for the same reason the notice fields are: a body
+		// that never mentions the editor theme must not reset it to the
+		// dark default.
+		EditorTheme *string `json:"editorTheme"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegionsBody))
 	if err := dec.Decode(&body); err != nil {
@@ -658,6 +672,16 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if body.NoticeDismissible != nil {
 		noticeDismiss = *body.NoticeDismissible
 	}
+	// The editor's chrome is nobody's privilege: it is the tools the
+	// person editing has to see, and changing it publishes nothing.
+	editorTheme := current.EditorTheme
+	if body.EditorTheme != nil {
+		if !content.ValidEditorTheme(*body.EditorTheme) {
+			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "Unknown editor theme."))
+			return
+		}
+		editorTheme = *body.EditorTheme
+	}
 	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
 		return
@@ -685,6 +709,8 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		NoticeBar:         noticeBar,
 		NoticeStyle:       noticeStyle,
 		NoticeDismissible: noticeDismiss,
+
+		EditorTheme: editorTheme,
 	}); err != nil {
 		s.deps.Logger.Error("cms admin: api saving site settings", "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving the site settings failed — try again."))
