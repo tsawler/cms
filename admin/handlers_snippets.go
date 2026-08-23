@@ -125,6 +125,11 @@ func (s *server) parseSnippetForm(r *http.Request) (*snippets.Snippet, map[strin
 				sn.Settings["padding"] = p.Key
 			}
 		}
+		if list := s.deps.SectionStyles.Sizes; len(list) > 0 {
+			if sz := s.deps.SectionStyles.Size(r.PostFormValue("set_size")); sz.Key != list[0].Key {
+				sn.Settings["size"] = sz.Key
+			}
+		}
 	}
 	return sn, errs
 }

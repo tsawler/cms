@@ -24,15 +24,15 @@
  * CMS README. The generated content stylesheet also covers these once
  * content uses them; listing them here keeps the editor styled even
  * before first save. */
-@source inline("grid gap-6 sm:grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 sm:grid-cols-4 sm:grid-cols-12 sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6 sm:col-span-7 sm:col-span-8 sm:col-span-9 sm:col-span-10 sm:col-span-11 sm:col-span-12 columns-1 columns-2 columns-3 gap-8 text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-3xl rounded-full aspect-video border border-b border-b-2 border-slate-200 border-slate-300 p-1 p-2 p-4 align-top font-semibold w-auto odd:bg-slate-50 overflow-x-auto object-cover");
+@source inline("grid gap-6 sm:grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 sm:grid-cols-4 sm:grid-cols-12 sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6 sm:col-span-7 sm:col-span-8 sm:col-span-9 sm:col-span-10 sm:col-span-11 sm:col-span-12 columns-1 columns-2 columns-3 gap-8 text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-xl sm:text-2xl text-2xl sm:text-3xl sm:text-4xl text-3xl sm:text-5xl text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-3xl rounded-full aspect-video border border-b border-b-2 border-slate-200 border-slate-300 p-1 p-2 p-4 align-top font-semibold w-auto odd:bg-slate-50 overflow-x-auto object-cover");
 
 /* The section settings behind the ⚙ on a section: background, content
- * width, vertical spacing, corners. These are chosen in a dialog and
- * stored as settings rather than as markup, so no content scan can see
- * them — without this list, picking "Wide" or "Tight" changes the class
- * on the element and nothing moves. Keep it in step with
- * cms.SectionStyles if you configure your own. */
-@source inline("bg-slate-50 bg-slate-900 bg-blue-700 prose prose-slate prose-invert mx-auto max-w-3xl max-w-5xl max-w-none px-6 py-12 py-20 py-6 py-3 py-0 rounded-lg rounded-2xl rounded-3xl");
+ * width, vertical spacing, text size, corners. These are chosen in a
+ * dialog and stored as settings rather than as markup, so no content
+ * scan can see them — without this list, picking "Wide" or "Tight"
+ * changes the class on the element and nothing moves. Keep it in step
+ * with cms.SectionStyles if you configure your own. */
+@source inline("bg-slate-50 bg-slate-900 bg-blue-700 prose prose-slate prose-invert mx-auto max-w-3xl max-w-5xl max-w-none px-6 py-12 py-20 py-6 py-3 py-0 prose-sm prose-lg prose-xl rounded-lg rounded-2xl rounded-3xl");
 
 /* Theme classes an editor could apply — keeps them compiled even before
  * any content uses them. Add to this list when you add EditorStyles. */

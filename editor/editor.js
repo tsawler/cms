@@ -493,6 +493,10 @@
     var list = sectionStyles.paddings || [];
     return list.length ? sbOpt(list, key) : { key: "", class: "" };
   }
+  function sizeOption(key) {
+    var list = sectionStyles.sizes || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
+  }
   function isDarkColor(c) {
     var r, g, b;
     var m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || "");
@@ -774,6 +778,18 @@
             })
           });
         }
+        if ((sectionStyles.sizes || []).length) {
+          setFields.push({
+            id: "size",
+            label: "Text size",
+            type: "select",
+            tab: "Layout",
+            value: wrapper.dataset.cmsSize || "",
+            options: sectionStyles.sizes.map(function(o) {
+              return { value: o.key, label: o.label };
+            })
+          });
+        }
         setFields.push(
           {
             id: "bg",
@@ -901,6 +917,7 @@
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
     var pad = paddingOption(s.padding);
+    var size = sizeOption(s.size);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     var position = image ? bgPosition(s) : CENTERED;
@@ -910,6 +927,7 @@
     wrapper.dataset.cmsWidth = w.key;
     wrapper.dataset.cmsCorners = corner.key;
     wrapper.dataset.cmsPadding = pad.key;
+    wrapper.dataset.cmsSize = size.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
@@ -929,7 +947,7 @@
     var mce = (contentEl.className || "").split(/\s+/).filter(function(c) {
       return c.indexOf("mce-") === 0;
     });
-    contentEl.className = [w.class, bg.contentClass, pad.class, mce.join(" ")].filter(Boolean).join(" ");
+    contentEl.className = [w.class, bg.contentClass, pad.class, size.class, mce.join(" ")].filter(Boolean).join(" ");
   }
   function reapplySectionClasses() {
     document.querySelectorAll("[data-cms-section]").forEach(function(wrapper) {
@@ -938,6 +956,7 @@
         width: wrapper.dataset.cmsWidth,
         corners: wrapper.dataset.cmsCorners,
         padding: wrapper.dataset.cmsPadding,
+        size: wrapper.dataset.cmsSize,
         height: wrapper.dataset.cmsHeight,
         valign: wrapper.dataset.cmsValign,
         bgcolor: wrapper.dataset.cmsBgcolor,
@@ -3429,6 +3448,62 @@
     });
   }
   var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
+  var TEXT_SIZES = [
+    { value: "text-sm", label: "Small" },
+    { value: "", label: "Normal" },
+    { value: "text-lg", label: "Large" },
+    { value: "text-xl sm:text-2xl", label: "XL" },
+    { value: "text-2xl sm:text-3xl", label: "2XL" },
+    { value: "text-2xl sm:text-4xl", label: "3XL" },
+    { value: "text-3xl sm:text-5xl", label: "Display" }
+  ];
+  var TEXT_SIZE_TOKENS = [
+    "text-sm",
+    "text-base",
+    "text-lg",
+    "text-xl",
+    "text-2xl",
+    "text-3xl",
+    "text-4xl",
+    "text-5xl",
+    "sm:text-2xl",
+    "sm:text-3xl",
+    "sm:text-4xl",
+    "sm:text-5xl"
+  ];
+  var TEXT_SIZE_BLOCKS = "p,h1,h2,h3,h4,h5,h6,li,blockquote,div";
+  function textSizeTargets(ed) {
+    var blocks = ed.selection.getSelectedBlocks() || [];
+    return blocks.filter(function(b) {
+      return b.matches && b.matches(TEXT_SIZE_BLOCKS);
+    });
+  }
+  function currentTextSize(ed) {
+    var el = textSizeTargets(ed)[0];
+    if (!el) return "";
+    var have = (el.getAttribute("class") || "").split(/\s+/);
+    for (var i = TEXT_SIZES.length - 1; i >= 0; i--) {
+      var v = TEXT_SIZES[i].value;
+      if (!v) continue;
+      var parts = v.split(" ");
+      var all = parts.every(function(c) {
+        return have.indexOf(c) !== -1;
+      });
+      if (all) return v;
+    }
+    return "";
+  }
+  function applyTextSize(ed, value) {
+    textSizeTargets(ed).forEach(function(el) {
+      TEXT_SIZE_TOKENS.forEach(function(c) {
+        el.classList.remove(c);
+      });
+      if (value) value.split(" ").forEach(function(c) {
+        el.classList.add(c);
+      });
+      if (!el.getAttribute("class")) el.removeAttribute("class");
+    });
+  }
   var TBL_LINES = {
     rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
     grid: { th: "border border-slate-300", td: "border border-slate-200" },
@@ -3562,7 +3637,7 @@
       // In inline mode the toolbar floats docked to the region
       // as soon as it gains focus — a click is enough, no text
       // selection needed.
-      toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
+      toolbar: "styles cmstextsize | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
       fixed_toolbar_container: "#cms-mce-toolbar",
       plugins: "lists link autolink table",
       // Tables are structural only: no properties dialogs, no
@@ -3661,6 +3736,26 @@
               n.attr("class", cls || null);
             }
           });
+        });
+        ed.ui.registry.addMenuButton("cmstextsize", {
+          text: "Size",
+          tooltip: "Text size",
+          fetch: function(callback) {
+            var cur = currentTextSize(ed);
+            callback(TEXT_SIZES.map(function(sz) {
+              return {
+                type: "togglemenuitem",
+                text: sz.label,
+                active: sz.value === cur,
+                onAction: function() {
+                  runWithUndo(ed, function() {
+                    applyTextSize(ed, sz.value);
+                  });
+                  onDirty();
+                }
+              };
+            }));
+          }
         });
         if (mediaEnabled) {
           ed.ui.registry.addButton("cmsimage", {
@@ -6417,6 +6512,7 @@
         width: wrapper.dataset.cmsWidth || "",
         corners: wrapper.dataset.cmsCorners || "",
         padding: wrapper.dataset.cmsPadding || "",
+        size: wrapper.dataset.cmsSize || "",
         height: wrapper.dataset.cmsHeight || "",
         valign: wrapper.dataset.cmsValign || "",
         bgcolor: wrapper.dataset.cmsBgcolor || "",

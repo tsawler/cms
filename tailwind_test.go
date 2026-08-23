@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"testing/fstest"
+
+	"github.com/tsawler/cms/render"
 )
 
 func TestClassTokens(t *testing.T) {
@@ -158,5 +160,46 @@ func TestValidateTailwindConfig(t *testing.T) {
 	if err := validateTailwindConfig(&TailwindConfig{
 		Command: []string{"tw", "-o", "{output}", "--content", "{content}"}}); err != nil {
 		t.Errorf("valid config rejected: %v", err)
+	}
+}
+
+// TestSectionStyleAxesCoversEveryAxis is a drift guard on the generated
+// stylesheet's corpus. Section settings are stored as keys and resolved to
+// classes at render time, so no scan of stored content can ever see them —
+// the corpus is the only thing that compiles them. An axis added to
+// SectionStyles but left out of sectionStyleAxes produces a settings
+// dropdown whose every choice applies a class nothing has styled, which is
+// invisible until someone picks one on a real page.
+func TestSectionStyleAxesCoversEveryAxis(t *testing.T) {
+	// Fill every []SectionOption field with a marker class, so a
+	// forgotten axis is a marker that never comes back.
+	ss := &render.SectionStyles{}
+	v := reflect.ValueOf(ss).Elem()
+	typ := v.Type()
+	want := map[string]string{}
+	optSlice := reflect.TypeOf([]render.SectionOption{})
+	for i := 0; i < typ.NumField(); i++ {
+		if typ.Field(i).Type != optSlice {
+			continue
+		}
+		marker := "axis-" + typ.Field(i).Name
+		want[marker] = typ.Field(i).Name
+		v.Field(i).Set(reflect.ValueOf([]render.SectionOption{{Key: "k", Class: marker}}))
+	}
+	if len(want) == 0 {
+		t.Fatal("no []SectionOption fields found on SectionStyles — this test is not testing anything")
+	}
+
+	got := map[string]bool{}
+	for _, list := range sectionStyleAxes(ss) {
+		for _, o := range list {
+			got[o.Class] = true
+		}
+	}
+	for marker, field := range want {
+		if !got[marker] {
+			t.Errorf("SectionStyles.%s is not folded into the content stylesheet's corpus — "+
+				"add it to sectionStyleAxes, or its classes compile nowhere", field)
+		}
 	}
 }

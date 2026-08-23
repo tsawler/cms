@@ -540,6 +540,14 @@ func New(cfg Config) (*CMS, error) {
 	// preset, and appending a default py-12 to those would fight the
 	// spacing the host already chose. A host with its own SectionStyles
 	// opts in by declaring Paddings and taking the py-* out of Widths.
+	//
+	// Sizes is not backfilled either, for a different reason: its
+	// default options are Tailwind Typography modifiers, and they style
+	// nothing unless the width presets put prose on the same element.
+	// The defaults do; a host's own widths may not, and handing that
+	// host the axis anyway ships a dropdown where every choice looks
+	// applied and no text moves. Declaring Sizes is how a host says its
+	// container is one the classes can reach.
 	// Host template funcs: reject reserved names here rather than at the
 	// first render, and refuse RequestFuncs on its own — templates parse
 	// against TemplateFuncs, so a name declared only per request is one

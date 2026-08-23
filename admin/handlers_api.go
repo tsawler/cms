@@ -758,6 +758,7 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 			Width   string `json:"width"`
 			Corners string `json:"corners"`
 			Padding string `json:"padding"`
+			Size    string `json:"size"`
 			Height  string `json:"height"`
 			VAlign  string `json:"valign"`
 			BGColor string `json:"bgcolor"`
@@ -816,6 +817,12 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		if list := s.deps.SectionStyles.Paddings; len(list) > 0 {
 			if p := s.deps.SectionStyles.Padding(sec.Padding); p.Key != list[0].Key {
 				settings["padding"] = p.Key
+			}
+		}
+		// Text size, on the same terms.
+		if list := s.deps.SectionStyles.Sizes; len(list) > 0 {
+			if sz := s.deps.SectionStyles.Size(sec.Size); sz.Key != list[0].Key {
+				settings["size"] = sz.Key
 			}
 		}
 		// Custom backgrounds and height are free-form values; invalid

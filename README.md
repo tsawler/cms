@@ -320,8 +320,12 @@ With no configuration, the menu ships a Tailwind-flavored default set
 Editor content lives in the database, and production Tailwind only
 generates CSS for classes it finds while scanning your **source files** —
 so every class the menu can apply must be safelisted, or applied styles
-will silently not render in production. The toolbar's alignment buttons
-also apply utility classes — `text-left/center/right` on blocks, and
+will silently not render in production. The toolbar's **Size** menu
+applies one preset to the block the cursor is in — `text-sm`, `text-lg`,
+`text-xl sm:text-2xl`, `text-2xl sm:text-3xl`, `text-2xl sm:text-4xl`, or
+`text-3xl sm:text-5xl`, with "Normal" clearing them; both halves of a responsive pair have to compile, or the size is
+right on a phone and wrong on a laptop. The alignment buttons apply
+utility classes too — `text-left/center/right` on blocks, and
 `float-left mr-6`, `block mx-auto`, or `float-right ml-6` on images — as
 does the image gear's display-width and roundness settings (`w-full`,
 `w-2/3`, `w-1/2`, `w-1/3`, `h-auto`, `rounded-lg`, `rounded-2xl`,
@@ -345,6 +349,8 @@ safelist: [
     "text-slate-500", "text-red-600", "text-emerald-600",
     "text-blue-600", "text-white", "bg-yellow-200", "font-serif",
     "font-mono", "text-lg", "text-slate-600", "text-sm",
+    "text-xl", "sm:text-2xl", "text-2xl", "sm:text-3xl",
+    "sm:text-4xl", "text-3xl", "sm:text-5xl",
     "text-left", "text-center", "text-right",
     "float-left", "float-right", "mr-6", "ml-6", "block", "mx-auto",
     "w-full", "w-2/3", "w-1/2", "w-1/3", "h-auto",
@@ -357,7 +363,7 @@ safelist: [
 
 ```css
 /* Tailwind v4: in your main CSS file */
-@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video object-cover");
+@source inline("text-slate-500 text-red-600 text-emerald-600 text-blue-600 text-white bg-yellow-200 font-serif font-mono text-lg text-slate-600 text-sm text-xl sm:text-2xl text-2xl sm:text-3xl sm:text-4xl text-3xl sm:text-5xl text-left text-center text-right float-left float-right mr-6 ml-6 block mx-auto w-full w-2/3 w-1/2 w-1/3 h-auto rounded-lg rounded-2xl rounded-full aspect-video object-cover");
 ```
 
 (The example site shows the full production pattern with the Tailwind v4
@@ -925,6 +931,10 @@ SectionStyles: &cms.SectionStyles{
         {Key: "normal", Label: "Normal", Class: "prose mx-auto max-w-3xl px-6 py-12"},
         {Key: "full", Label: "Full width", Class: "prose max-w-none px-6 py-12"},
     },
+    Sizes: []cms.SectionOption{
+        {Key: "normal", Label: "Normal", Class: ""},
+        {Key: "large", Label: "Large", Class: "prose-lg"},
+    },
     Corners: []cms.SectionOption{
         {Key: "none", Label: "None (square)", Class: ""},
         {Key: "soft", Label: "Soft", Class: "rounded-2xl"},
@@ -975,6 +985,47 @@ axis does not appear. It is not backfilled the way `Corners` is, because
 a default `py-12` appended to width classes that already carry their own
 spacing would fight it.
 
+### Text size
+
+`Sizes` is how editors change font size — one setting per section that
+scales that section's whole type scale, headings and body and their
+leading together. It is configured by default — Normal / Large / Extra
+large / Small → nothing / `prose-lg` / `prose-xl` / `prose-sm`:
+
+```go
+Sizes: []cms.SectionOption{
+    {Key: "normal", Label: "Normal", Class: ""},
+    {Key: "large",  Label: "Large",  Class: "prose-lg"},
+},
+```
+
+This is deliberately the *only* font-size control the editor offers, and
+the scope is the reason. Font size is the one setting where per-element
+freedom reliably produces worse pages than no control at all: a
+paragraph bumped two steps beside headings your theme sized does not read
+as emphasis, it reads as broken. Scaling the container keeps the ratios
+your theme chose, so the worst an editor can do is a section that is
+bigger or smaller — never one that is internally inconsistent. (A
+per-element step is still available where it belongs: as a named entry
+in the Styles menu, like the default "Lead paragraph" and "Small print".)
+
+Two things to know if you replace the list:
+
+- The default classes are [Tailwind
+  Typography](https://github.com/tailwindlabs/tailwindcss-typography)
+  size modifiers, and they go on the **content container** — the element
+  the width presets put `prose` on. A `prose-lg` with no `prose` beside
+  it styles nothing, which is why `Sizes` is not backfilled the way
+  `Corners` is: a host whose own `Widths` don't carry `prose` would get a
+  dropdown where every choice looks applied and no text moves. Declaring
+  `Sizes` is how you say your container is one the classes can reach. If
+  it isn't a prose container, use container-level `text-*` classes here
+  instead.
+- **The first option must contribute no class.** Content saved before the
+  axis existed resolves to it, and unlike spacing there is no size that
+  old markup was implicitly carrying — anything else moves every
+  published section the moment the axis appears.
+
 Safelist the default section classes along with the rest:
 
 ```js
@@ -982,6 +1033,7 @@ safelist: [
     "bg-slate-50", "bg-slate-900", "bg-blue-700", "prose", "prose-slate",
     "prose-invert", "mx-auto", "max-w-3xl", "max-w-5xl", "max-w-none",
     "px-6", "py-12", "py-20", "py-6", "py-3", "py-0",
+    "prose-sm", "prose-lg", "prose-xl",
     "rounded-lg", "rounded-2xl", "rounded-3xl",
 ],
 ```

@@ -706,6 +706,33 @@ type SectionStyles struct {
 	// saved before the axis existed — make it match whatever padding the
 	// width presets used to carry, and nothing shifts.
 	Paddings []SectionOption `json:"paddings"`
+
+	// Sizes is the section's text size, as its own axis: one setting
+	// that scales the whole section's typography — headings, body,
+	// lists, and their leading together — rather than a size picker on
+	// every element.
+	//
+	// That framing is the point. Font size is the one control where
+	// per-element freedom reliably produces worse pages than no control
+	// at all: a paragraph bumped two steps beside headings the theme
+	// set does not read as emphasis, it reads as broken. Scaling the
+	// container keeps the ratios the theme chose and moves everything
+	// with them, so the worst an editor can do is a section that is
+	// bigger or smaller — never one that is internally inconsistent.
+	//
+	// The default classes are Tailwind Typography's size modifiers,
+	// which is why they go on the content container: it is the element
+	// the width presets already put prose on, and a modifier with no
+	// prose beside it styles nothing. A host whose widths don't carry
+	// prose wants its own list here — container-level text-* classes,
+	// or nothing.
+	//
+	// Optional, and the first entry is the default that content saved
+	// before the axis existed resolves to, so it must contribute no
+	// class: unlike spacing, there is no size the old markup was
+	// implicitly carrying, and anything else moves every published
+	// section the moment the axis appears.
+	Sizes []SectionOption `json:"sizes"`
 }
 
 // joinClasses joins non-empty class strings with single spaces, so an
@@ -750,6 +777,12 @@ func (ss *SectionStyles) Corner(key string) SectionOption { return pickOption(ss
 // renders exactly as it did before it existed.
 func (ss *SectionStyles) Padding(key string) SectionOption { return pickOption(ss.Paddings, key) }
 
+// Size resolves a stored text-size key, falling back to the first
+// option. A nil Sizes list resolves to a zero option, which contributes
+// no class — so a host that never configured the axis renders exactly as
+// it did before it existed.
+func (ss *SectionStyles) Size(key string) SectionOption { return pickOption(ss.Sizes, key) }
+
 // DefaultSectionStyles is the Tailwind-first default set of section
 // settings. The classes need safelisting like editor styles do.
 //
@@ -782,6 +815,16 @@ func DefaultSectionStyles() *SectionStyles {
 			{Key: "snug", Label: "Snug", Class: "py-6"},
 			{Key: "tight", Label: "Tight", Class: "py-3"},
 			{Key: "none", Label: "None", Class: "py-0"},
+		},
+		// Typography's size modifiers, which need the prose the widths
+		// above carry. "Normal" is the plugin's own base and so applies
+		// nothing at all — which is also what makes the axis safe to
+		// turn on for content that predates it.
+		Sizes: []SectionOption{
+			{Key: "normal", Label: "Normal", Class: ""},
+			{Key: "large", Label: "Large", Class: "prose-lg"},
+			{Key: "xl", Label: "Extra large", Class: "prose-xl"},
+			{Key: "small", Label: "Small", Class: "prose-sm"},
 		},
 		Corners: []SectionOption{
 			{Key: "none", Label: "None (square)", Class: ""},
@@ -891,11 +934,12 @@ func ValidBackgroundPosition(s string) string {
 // content stylesheet's corpus so a fresh install is covered, and the
 // docs' safelists are checked against it so the two cannot drift.
 //
-// Keep it in step with the editor script: today its entries are the
-// column tool's (editor/src/columns.js), which reshapes a block into a
-// row of columns and rewrites the track count and spans as columns are
-// added, removed, and resized. Widening what that tool offers means
-// widening this.
+// Keep it in step with the editor script: its entries are the column
+// tool's (editor/src/columns.js), which reshapes a block into a row of
+// columns and rewrites the track count and spans as columns are added,
+// removed, and resized, and the toolbar's text-size ladder
+// (editor/src/richtext.js). Widening what either offers means widening
+// this.
 //
 // The counts here are the sm: forms, which is what every stock snippet
 // uses. A host whose own snippets set their tracks at another breakpoint
@@ -922,6 +966,18 @@ func EditorAppliedClasses() []string {
 		// carries them, and it has to go on compiling.
 		"columns-1", "columns-2", "columns-3", "gap-8",
 	}
+	// The toolbar's Size menu, which writes one preset onto the block
+	// the cursor is in. Every step above the base is a responsive pair,
+	// so both halves have to compile or the setting is right on a phone
+	// and wrong on a laptop — or the reverse.
+	classes = append(classes,
+		"text-sm",                // Small
+		"text-lg",                // Large
+		"text-xl", "sm:text-2xl", // XL
+		"text-2xl", "sm:text-3xl", // 2XL
+		"sm:text-4xl",             // 3XL (text-2xl below sm, as above)
+		"text-3xl", "sm:text-5xl", // Display
+	)
 	for n := 1; n <= 12; n++ {
 		classes = append(classes, "sm:col-span-"+strconv.Itoa(n))
 	}
@@ -1495,6 +1551,7 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	w := r.sections.Width(b.Settings["width"])
 	corner := r.sections.Corner(b.Settings["corners"])
 	pad := r.sections.Padding(b.Settings["padding"])
+	size := r.sections.Size(b.Settings["size"])
 	bgColor := ValidBackgroundColor(b.Settings["bgcolor"])
 	bgImage := ValidBackgroundURL(b.Settings["bgimage"])
 	bgPos := ValidBackgroundPosition(b.Settings["bgposition"])
@@ -1514,6 +1571,9 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 		}
 		if pad.Key != "" {
 			sb.WriteString(` data-cms-padding="` + html.EscapeString(pad.Key) + `"`)
+		}
+		if size.Key != "" {
+			sb.WriteString(` data-cms-size="` + html.EscapeString(size.Key) + `"`)
 		}
 		if height != "" {
 			sb.WriteString(` data-cms-height="`)
@@ -1568,9 +1628,11 @@ func (r *Renderer) sectionHTML(b content.Block, edit bool) string {
 	// Padding last, so a host moving its py-* out of the width presets
 	// gets the spacing option winning on source order rather than having
 	// to think about which class Tailwind emits first. Joined rather
-	// than concatenated because any of the three may be empty, and
-	// concatenation leaves the gaps behind in the attribute.
-	if inner := joinClasses(w.Class, bg.ContentClass, pad.Class); inner != "" {
+	// than concatenated because any of these may be empty, and
+	// concatenation leaves the gaps behind in the attribute. The size
+	// modifier rides on the same element as the width preset's prose,
+	// which is the only place Typography will read it.
+	if inner := joinClasses(w.Class, bg.ContentClass, pad.Class, size.Class); inner != "" {
 		sb.WriteString(` class="` + html.EscapeString(inner) + `"`)
 	}
 	sb.WriteString(">")

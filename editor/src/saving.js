@@ -111,6 +111,7 @@ function collectSections(region) {
         out.push({ bg: wrapper.dataset.cmsBg || "", width: wrapper.dataset.cmsWidth || "",
             corners: wrapper.dataset.cmsCorners || "",
             padding: wrapper.dataset.cmsPadding || "",
+            size: wrapper.dataset.cmsSize || "",
             height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
             bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
             bgposition: wrapper.dataset.cmsBgposition || "",
