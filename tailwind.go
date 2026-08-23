@@ -131,6 +131,21 @@ func validateTailwindConfig(tc *TailwindConfig) error {
 	return nil
 }
 
+// sectionStyleAxes is every curated option list a SectionStyles carries.
+// It exists so the content stylesheet's corpus cannot fall behind the
+// struct: a host that configures vertical spacing or text size must not
+// have to hand-safelist the classes its own settings dialog offers, and
+// an axis added to SectionStyles but forgotten here fails a test rather
+// than a page.
+//
+// Sizes is the axis that shows why this matters. The generated
+// stylesheet is linked *after* the site's own, so a prose-lg missing
+// from the corpus does not merely fail to appear — the plain .prose this
+// file does carry outranks it, and the setting reads as ignored.
+func sectionStyleAxes(ss *render.SectionStyles) [][]render.SectionOption {
+	return [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners, ss.Paddings, ss.Sizes}
+}
+
 // tailwindArgv resolves the {content} and {output} placeholders.
 func tailwindArgv(command []string, contentPath, outputPath string) []string {
 	argv := make([]string, len(command))
@@ -220,10 +235,7 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 		addList(cls)
 	}
 	if ss := c.cfg.SectionStyles; ss != nil {
-		// Every curated axis, Paddings included: a host that configures
-		// vertical spacing must not have to hand-safelist the classes
-		// its own settings dialog offers.
-		for _, list := range [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners, ss.Paddings} {
+		for _, list := range sectionStyleAxes(ss) {
 			for _, o := range list {
 				addList(o.Class)
 				addList(o.ContentClass)

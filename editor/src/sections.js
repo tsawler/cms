@@ -69,6 +69,13 @@ function paddingOption(key) {
     return list.length ? sbOpt(list, key) : { key: "", class: "" };
 }
 
+// sizeOption resolves the text-size setting, or a no-op option when the
+// host ships no size choices.
+function sizeOption(key) {
+    var list = sectionStyles.sizes || [];
+    return list.length ? sbOpt(list, key) : { key: "", class: "" };
+}
+
 function isDarkColor(c) {
     var r, g, b;
     var m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || "");
@@ -361,6 +368,15 @@ export function initSections() {
                     value: wrapper.dataset.cmsPadding || "",
                     options: sectionStyles.paddings.map(function (o) { return { value: o.key, label: o.label }; }) });
             }
+            // Text size for the whole section, which is the only size
+            // control the editor offers: it scales headings and body
+            // together, so the section stays proportioned however it is
+            // set. Per-element sizing is deliberately not here.
+            if ((sectionStyles.sizes || []).length) {
+                setFields.push({ id: "size", label: "Text size", type: "select", tab: "Layout",
+                    value: wrapper.dataset.cmsSize || "",
+                    options: sectionStyles.sizes.map(function (o) { return { value: o.key, label: o.label }; }) });
+            }
             setFields.push(
                 { id: "bg", label: "Background style", type: "select", tab: "Background",
                     value: wrapper.dataset.cmsBg || "",
@@ -492,6 +508,7 @@ function applySectionSettings(wrapper, s) {
     var w = sbOpt(sectionStyles.widths, s.width);
     var corner = cornerOption(s.corners);
     var pad = paddingOption(s.padding);
+    var size = sizeOption(s.size);
     var color = /^#[0-9a-fA-F]{6}$/.test(s.bgcolor || "") ? s.bgcolor : "";
     var image = s.bgimage || "";
     // An anchor without an image has nothing to anchor, and centered is
@@ -507,6 +524,7 @@ function applySectionSettings(wrapper, s) {
     wrapper.dataset.cmsWidth = w.key;
     wrapper.dataset.cmsCorners = corner.key;
     wrapper.dataset.cmsPadding = pad.key;
+    wrapper.dataset.cmsSize = size.key;
     wrapper.dataset.cmsHeight = height;
     wrapper.dataset.cmsValign = valign;
     wrapper.dataset.cmsBgcolor = color;
@@ -530,8 +548,9 @@ function applySectionSettings(wrapper, s) {
         return c.indexOf("mce-") === 0;
     });
     // Padding after the width class, so a host that moved its py-* out
-    // of the width presets has the spacing win on source order.
-    contentEl.className = [w.class, bg.contentClass, pad.class, mce.join(" ")]
+    // of the width presets has the spacing win on source order. The size
+    // modifier goes on this element too — it is the one carrying prose.
+    contentEl.className = [w.class, bg.contentClass, pad.class, size.class, mce.join(" ")]
         .filter(Boolean).join(" ");
 }
 
@@ -547,6 +566,7 @@ export function reapplySectionClasses() {
             width: wrapper.dataset.cmsWidth,
             corners: wrapper.dataset.cmsCorners,
             padding: wrapper.dataset.cmsPadding,
+            size: wrapper.dataset.cmsSize,
             height: wrapper.dataset.cmsHeight,
             valign: wrapper.dataset.cmsValign,
             bgcolor: wrapper.dataset.cmsBgcolor,

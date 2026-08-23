@@ -44,6 +44,115 @@ function uploadImage(blobInfo) {
 // selection is not an image (mirrors TinyMCE's default list, minus img).
 var alignBlocks = "p,h1,h2,h3,h4,h5,h6,td,th,div,ul,ol,li,blockquote,figure";
 
+/* ---- text size ---------------------------------------------------
+ * The toolbar's size control. It writes utility classes onto the block
+ * the cursor is in, and three decisions in this list are the whole
+ * reason it is safe to hand an editor:
+ *
+ * It is a short ladder of named steps, not Tailwind's full text-xs…
+ * text-9xl scale. Thirteen absolute steps per element is how a page
+ * stops looking designed; a handful of relative ones keep the choice
+ * inside the range the theme can absorb. Nothing above text-5xl is
+ * offered, because a 128px headline is a decision for a comp, not a
+ * menu.
+ *
+ * The steps are spaced by ratio rather than by Tailwind's index, so no
+ * two neighbours are far enough apart for the menu to feel like it
+ * skipped one. From sm up: 14, 16, 18, 24, 30, 36, 48 — no jump wider
+ * than a third. Picking Tailwind's own consecutive names instead would
+ * put an unusable crowd at the bottom (14, 16, 18, 20) and a 2x chasm
+ * at the top.
+ *
+ * The labels are the clothing ladder rather than comparatives, because
+ * English runs out: Large/Larger/Largest cannot take a fourth step, and
+ * a reader should never have to work out which of two adjectives is
+ * bigger. They deliberately do NOT line up with the Tailwind names in
+ * the values beside them — "XL" is text-xl only below sm — since a
+ * label naming its own implementation would be a promise this ladder
+ * cannot keep at two breakpoints. Labels are not stored either way;
+ * content carries the classes, so renaming a step is free.
+ *
+ * Ordered small to large, with Normal in its true place rather than
+ * first: the menu ticks whichever step is current, so the way back to
+ * the base size is no harder to find, and a ladder that runs in one
+ * direction is easier to aim at than one that restarts.
+ *
+ * Every step above the base is a responsive *pair*. A bare text-5xl is
+ * 60px on a phone too, so the unit an editor picks is already
+ * "text-3xl on mobile, text-5xl from sm up" — the overflow they would
+ * otherwise only discover on someone else's screen cannot be expressed.
+ *
+ * Two of the upper steps share a size below sm (2XL and 3XL are both
+ * 24px on a phone). That is the pairing working, not a mistake: the
+ * range a phone can carry is shorter than the range this ladder covers,
+ * so the top of it converges. Display stays alone at the top on both.
+ *
+ * And it applies to the block, never to an inline run. Changing size
+ * mid-paragraph re-leads only the line boxes the span touches, which
+ * gives one paragraph two different line heights; the Styles menu's
+ * "Lead paragraph" and "Small print" remain the way to size a phrase.
+ *
+ * Every class here must be compiled: they live in the database, so they
+ * are declared in render.EditorAppliedClasses (Go) and safelisted in the
+ * docs, and a test keeps the two in step. */
+
+var TEXT_SIZES = [
+    { value: "text-sm", label: "Small" },
+    { value: "", label: "Normal" },
+    { value: "text-lg", label: "Large" },
+    { value: "text-xl sm:text-2xl", label: "XL" },
+    { value: "text-2xl sm:text-3xl", label: "2XL" },
+    { value: "text-2xl sm:text-4xl", label: "3XL" },
+    { value: "text-3xl sm:text-5xl", label: "Display" },
+];
+
+// Every token the control owns — the tokens of the presets above plus
+// any it has ever written. Changing the ladder must not strand a class
+// on saved content that nothing can then clear.
+var TEXT_SIZE_TOKENS = ["text-sm", "text-base", "text-lg", "text-xl",
+    "text-2xl", "text-3xl", "text-4xl", "text-5xl",
+    "sm:text-2xl", "sm:text-3xl", "sm:text-4xl", "sm:text-5xl"];
+
+// textSizeBlocks are the blocks the control acts on: whatever the
+// selection covers, minus the ones where a size class would be a
+// surprise (a table cell takes its size from the table's own settings,
+// and a figure is a wrapper around media).
+var TEXT_SIZE_BLOCKS = "p,h1,h2,h3,h4,h5,h6,li,blockquote,div";
+
+function textSizeTargets(ed) {
+    var blocks = ed.selection.getSelectedBlocks() || [];
+    return blocks.filter(function (b) { return b.matches && b.matches(TEXT_SIZE_BLOCKS); });
+}
+
+// currentTextSize reports the preset the selection is already at, or ""
+// for the base size. A mixed selection reports the first block's value —
+// the menu shows a tick, and picking anything makes the whole selection
+// agree.
+function currentTextSize(ed) {
+    var el = textSizeTargets(ed)[0];
+    if (!el) return "";
+    var have = (el.getAttribute("class") || "").split(/\s+/);
+    for (var i = TEXT_SIZES.length - 1; i >= 0; i--) {
+        var v = TEXT_SIZES[i].value;
+        if (!v) continue;
+        var parts = v.split(" ");
+        var all = parts.every(function (c) { return have.indexOf(c) !== -1; });
+        if (all) return v;
+    }
+    return "";
+}
+
+function applyTextSize(ed, value) {
+    textSizeTargets(ed).forEach(function (el) {
+        TEXT_SIZE_TOKENS.forEach(function (c) { el.classList.remove(c); });
+        if (value) value.split(" ").forEach(function (c) { el.classList.add(c); });
+        // classList.remove leaves class="" behind on a block whose only
+        // classes were ours, and an empty attribute is noise in the
+        // saved HTML.
+        if (!el.getAttribute("class")) el.removeAttribute("class");
+    });
+}
+
 /* ---- tables ------------------------------------------------------
  * Editor-inserted tables are styled with utility classes, like the
  * alignment buttons: content carries classes, the host's CSS stays in
@@ -201,7 +310,7 @@ export function initInlineEditor(el, onDirty, register) {
         // In inline mode the toolbar floats docked to the region
         // as soon as it gains focus — a click is enough, no text
         // selection needed.
-        toolbar: "styles | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" +
+        toolbar: "styles cmstextsize | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" +
             (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
         fixed_toolbar_container: "#cms-mce-toolbar",
         plugins: "lists link autolink table",
@@ -325,6 +434,28 @@ export function initInlineEditor(el, onDirty, register) {
                         n.attr("class", cls || null);
                     }
                 });
+            });
+            // Text size for the block under the cursor. A text label
+            // rather than an icon: it sits beside the Styles dropdown,
+            // which is also a labelled menu, and the icon pack has
+            // nothing that reads as "size".
+            ed.ui.registry.addMenuButton("cmstextsize", {
+                text: "Size",
+                tooltip: "Text size",
+                fetch: function (callback) {
+                    var cur = currentTextSize(ed);
+                    callback(TEXT_SIZES.map(function (sz) {
+                        return {
+                            type: "togglemenuitem",
+                            text: sz.label,
+                            active: sz.value === cur,
+                            onAction: function () {
+                                runWithUndo(ed, function () { applyTextSize(ed, sz.value); });
+                                onDirty();
+                            },
+                        };
+                    }));
+                },
             });
             // Both media buttons skip TinyMCE's URL dialogs and go
             // straight to the CMS media picker (library + upload).

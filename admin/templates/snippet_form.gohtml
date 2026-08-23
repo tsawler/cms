@@ -45,6 +45,16 @@
                 {{end}}
             </select>
         </div>
+        {{if .SectionStyles.Sizes}}
+        <div class="cms-field">
+            <label for="set_size">{{.T "Text size"}}</label>
+            <select id="set_size" name="set_size">
+                {{range .SectionStyles.Sizes}}
+                <option value="{{.Key}}" {{if eq .Key (index $set "size")}}selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+        </div>
+        {{end}}
         {{if .SectionStyles.Corners}}
         <div class="cms-field">
             <label for="set_corners">{{.T "Rounded corners"}}</label>
@@ -64,6 +74,16 @@
                 <option value="100" {{if eq (index $set "height") "100"}}selected{{end}}>{{.T "Full screen"}}</option>
             </select>
         </div>
+        {{if .SectionStyles.Paddings}}
+        <div class="cms-field">
+            <label for="set_padding">{{.T "Vertical spacing"}}</label>
+            <select id="set_padding" name="set_padding">
+                {{range .SectionStyles.Paddings}}
+                <option value="{{.Key}}" {{if eq .Key (index $set "padding")}}selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+        </div>
+        {{end}}
         <div class="cms-field">
             <label for="set_valign">{{.T "Vertical alignment"}}</label>
             <select id="set_valign" name="set_valign">
