@@ -110,7 +110,7 @@ export function initAdminTools() {
     // Site-wide code is written raw into every page, so the editor is
     // admin-only — matching the server, which ignores these fields in
     // a settings save from anyone else.
-    if (isAdmin) menu.appendChild(item(tools, "Site CSS & JS", openSiteCode));
+    if (isAdmin) menu.appendChild(item(tools, "Site code", openSiteCode));
     var admin = document.createElement("a");
     admin.href = adminPath + "/";
     admin.textContent = "Admin panel";

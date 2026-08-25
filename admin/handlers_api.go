@@ -516,6 +516,7 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		"loginInNav": site.LoginInNav,
 		"siteCss":    site.SiteCSS,
 		"siteJs":     site.SiteJS,
+		"siteMeta":   site.SiteMeta,
 		// Everyone who can open the dialog is told the mode — the switch
 		// itself is superadmin-only, but a save has to carry the stored
 		// value back, and an editor seeing "Development" explains why the
@@ -540,8 +541,8 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// maxSiteCodeLen caps site-wide CSS and JS each, so a paste can't bloat
-// every rendered page unboundedly.
+// maxSiteCodeLen caps site-wide CSS, JS, and head markup each, so a
+// paste can't bloat every rendered page unboundedly.
 const maxSiteCodeLen = 100_000
 
 // maxRobotsLen caps the stored robots.txt. Real ones are a few lines;
@@ -557,9 +558,9 @@ const maxRobotsLen = 10_000
 // mode, the site's robots.txt, and the sitemap switch are held to the
 // same carry-through rule as the code fields.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "faviconUrl", "loginInNav", "siteCss", "siteJs", "mode", "robotsTxt",
-// "sitemap", "noticeBar", "noticeStyle", "noticeDismissible",
-// "editorTheme"}
+// "faviconUrl", "loginInNav", "siteCss", "siteJs", "siteMeta", "mode",
+// "robotsTxt", "sitemap", "noticeBar", "noticeStyle",
+// "noticeDismissible", "editorTheme"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MenuAlign  string `json:"menuAlign"`
@@ -569,13 +570,18 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LoginInNav bool   `json:"loginInNav"`
 		SiteCSS    string `json:"siteCss"`
 		SiteJS     string `json:"siteJs"`
+		// A pointer, unlike its two neighbours: the site settings dialog
+		// PUTs a body that echoes the CSS and JS back but has never heard
+		// of the meta tags, and a plain string missing from it would read
+		// as "" and wipe a site's verification tags on an unrelated save.
+		SiteMeta *string `json:"siteMeta"`
 		// Pointers: absent and empty mean different things here — see
 		// the carry-through comment below.
 		Mode      *string `json:"mode"`
 		RobotsTxt *string `json:"robotsTxt"`
 		Sitemap   *bool   `json:"sitemap"`
-		// Pointers for the same reason, and a sharper one: the Site CSS
-		// & JS panel PUTs the settings it knows about, and a plain bool
+		// Pointers for the same reason, and a sharper one: the Site code
+		// panel PUTs the settings it knows about, and a plain bool
 		// missing from that body would read as false and switch off a
 		// notice bar the site is relying on.
 		NoticeBar         *bool   `json:"noticeBar"`
@@ -612,8 +618,9 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The favicon needs to be an uploaded image or a web address."))
 		return
 	}
-	// Four fields here are not everyone's to change: site-wide CSS/JS is
-	// injected raw, so it stays admin-only just like per-page code, and
+	// Five fields here are not everyone's to change: the site-wide
+	// CSS/JS and head markup are injected raw, so they stay admin-only
+	// just like per-page code, and
 	// the mode, the robots.txt, and the sitemap switch all decide how the
 	// site meets search engines, which is a superadmin's call. Anyone may
 	// still change the rest — their request carries the stored values
@@ -623,8 +630,8 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	// save.
 	//
 	// The superadmin fields carry through when they are merely absent
-	// from the body, too, which is why they are pointers: the Site CSS &
-	// JS panel PUTs the settings without them, and a missing mode read as
+	// from the body, too, which is why they are pointers: the Site code
+	// panel PUTs the settings without them, and a missing mode read as
 	// "" would mean production — silently pulling a development site into
 	// search on an unrelated save.
 	current, err := s.deps.Content.SiteSettings(r.Context())
@@ -639,6 +646,10 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	css, js := current.SiteCSS, current.SiteJS
 	if isAdmin {
 		css, js = body.SiteCSS, body.SiteJS
+	}
+	meta := current.SiteMeta
+	if isAdmin && body.SiteMeta != nil {
+		meta = *body.SiteMeta
 	}
 	mode, robots, sitemap := current.Mode, current.RobotsTxt, current.Sitemap
 	if isSuper {
@@ -682,7 +693,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		editorTheme = *body.EditorTheme
 	}
-	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen) {
+	if isAdmin && (len(css) > maxSiteCodeLen || len(js) > maxSiteCodeLen || len(meta) > maxSiteCodeLen) {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "The site-wide code is too long."))
 		return
 	}
@@ -702,6 +713,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LoginInNav: body.LoginInNav,
 		SiteCSS:    css,
 		SiteJS:     js,
+		SiteMeta:   meta,
 		Mode:       mode,
 		RobotsTxt:  robots,
 		Sitemap:    sitemap,

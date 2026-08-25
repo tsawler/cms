@@ -39,7 +39,7 @@ func TestAPISettingsEditorTheme(t *testing.T) {
 			t.Fatalf("stored theme = %q, want light", got)
 		}
 
-		// The Site CSS & JS panel PUTs the settings it knows about and
+		// The Site code panel PUTs the settings it knows about and
 		// nothing else. A body that never mentions the theme must leave
 		// it alone rather than dropping the site back to dark chrome as
 		// a side effect of saving a stylesheet.

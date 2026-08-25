@@ -25,6 +25,13 @@ type SiteSettings struct {
 	// admin-only, like per-page code.
 	SiteCSS string
 	SiteJS  string
+	// SiteMeta is written raw into the <head> of every public page,
+	// ahead of everything else the CMS emits: the verification tags a
+	// search console or an analytics service asks to be pasted in, and
+	// any other site-wide <meta> or <link> the host template does not
+	// already carry. Admin-only for the same reason SiteCSS is — it is
+	// markup nobody sanitizes.
+	SiteMeta string
 	// Mode is ModeDevelopment or ModeProduction (or "", read as
 	// production). Development asks search engines to leave the site
 	// alone; see Development. Changing it is superadmin-only.
@@ -118,6 +125,7 @@ const (
 	settingLoginInNav = "login_in_nav"
 	settingSiteCSS    = "site_css"
 	settingSiteJS     = "site_js"
+	settingSiteMeta   = "site_meta"
 	settingSiteMode   = "site_mode"
 	settingRobotsTxt  = "robots_txt"
 	settingSitemap    = "sitemap"
@@ -161,6 +169,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.SiteCSS = v
 		case settingSiteJS:
 			out.SiteJS = v
+		case settingSiteMeta:
+			out.SiteMeta = v
 		case settingSiteMode:
 			out.Mode = v
 		case settingRobotsTxt:
@@ -210,6 +220,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingLoginInNav: loginInNav,
 		settingSiteCSS:    in.SiteCSS,
 		settingSiteJS:     in.SiteJS,
+		settingSiteMeta:   in.SiteMeta,
 		settingSiteMode:   in.Mode,
 		settingRobotsTxt:  in.RobotsTxt,
 		settingSitemap:    sitemap,

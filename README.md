@@ -814,8 +814,8 @@ Two things worth knowing:
 - Deleting a library entry leaves placeholders that name it rendering as
   nothing; recreating the key brings them back.
 - For code that belongs to a *page* rather than to a spot in it, the
-  wrench menu's **Page CSS & JS** and **Site CSS & JS** panels are still
-  the right tool — they inject into `<head>` and before `</body>`.
+  bar's **Page CSS & JS** and the wrench menu's **Site code** panels are
+  still the right tool — they inject into `<head>` and before `</body>`.
 
 ## Sections
 

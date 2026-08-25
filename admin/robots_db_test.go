@@ -152,7 +152,7 @@ func TestAPISettingsRobotsTxtTooLong(t *testing.T) {
 	})
 }
 
-// The Site CSS & JS panel PUTs the settings without the superadmin
+// The Site code panel PUTs the settings without the superadmin
 // fields. An absent field carries the stored value through — a missing
 // mode read as "" would mean production, quietly making a site that is
 // still being built findable.

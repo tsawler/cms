@@ -161,6 +161,9 @@ export function initShell() {
         '<div class="ctabs">' +
         '<button id="code-tab-css" class="on">CSS</button>' +
         '<button id="code-tab-js">JavaScript</button>' +
+        // Site scope only — a page has no head markup of its own, so
+        // pagecode.js hides this one for the page panel.
+        '<button id="code-tab-meta" hidden>Meta tags</button>' +
         "</div>" +
         '<button id="code-close" title="Close" aria-label="Close">×</button></div>' +
         '<div class="cbody">' +

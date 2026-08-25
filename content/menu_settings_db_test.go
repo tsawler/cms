@@ -159,6 +159,7 @@ func TestSiteSettingsRoundTrip(t *testing.T) {
 			LoginInNav: true,
 			SiteCSS:    "body{margin:0}",
 			SiteJS:     "console.log('hi')",
+			SiteMeta:   `<meta name="google-site-verification" content="abc123">`,
 			// The notice bar's switch and look. Its words are not here:
 			// they are a shared region, stored with the rest of the
 			// site's content.

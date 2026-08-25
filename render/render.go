@@ -2102,6 +2102,13 @@ func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template
 	if in.Site.Development() {
 		sb.WriteString(`<meta name="robots" content="noindex, nofollow" data-cms-robots>` + "\n")
 	}
+	// The site-wide head markup, first of everything the CMS emits: a
+	// verification tag is worth nothing if a crawler gives up before
+	// reaching it. Written raw, like the site CSS below and for the same
+	// reason — it is whole tags an admin typed, not a value to escape.
+	if m := strings.TrimSpace(in.Site.SiteMeta); m != "" {
+		sb.WriteString(m + "\n")
+	}
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
 	// The notice bar's styling, only where a bar can appear: on a page
 	// actually carrying one, and on any edit render — an editor can
