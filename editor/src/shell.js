@@ -220,13 +220,26 @@ export function initShell() {
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
         '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +
         "</div>" +
-        // Template image slots ({{cmsImage}}), whose chrome is a pencil
-        // rather than a gear: everything a gear would offer — size,
-        // link, caption — belongs to the template here, so the only
-        // choice left is which picture. The trash can shows only for a
-        // slot that actually holds one.
+        // Template image slots ({{cmsImage}}). A gear, like every other
+        // "settings for the thing you just clicked" control here — the
+        // image gear above, the video one below, the section one in
+        // buttons.js.
+        //
+        // It used to be a pencil, on the reasoning that a slot offers
+        // less than the image gear does: the size, the link and the
+        // caption all belong to the template, so the only choice left is
+        // which picture. True, and the wrong thing to spend the icon on.
+        // What an editor has to work out first is that the toolbar
+        // belongs to the picture under it at all, and every other
+        // toolbar teaches them a gear means exactly that. Worse, the
+        // pencil is already the Edit button's own glyph, so the one
+        // control that opens the media library wore the icon for
+        // entering edit mode. How much sits behind the gear is what the
+        // panel is for; the tooltip still says "Choose a picture".
+        //
+        // The trash can shows only for a slot that actually holds one.
         '<div class="btnui" id="slot-ui">' +
-        '<button id="slot-pick" title="Choose a picture">' + ICONS.pencil + "</button>" +
+        '<button id="slot-pick" title="Choose a picture">' + ICONS.gear + "</button>" +
         '<button id="slot-clear" title="Remove this picture">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="btnui" id="vid-ui">' +
