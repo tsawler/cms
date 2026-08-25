@@ -190,8 +190,9 @@ function highlightAttrs(s) {
 }
 
 // highlightSource colors comments, tag names, attributes, and values.
-// Cosmetic only, same contract as the CSS/JS panel's highlighter.
-function highlightSource(src) {
+// Cosmetic only, same contract as the CSS/JS panel's highlighter — which
+// borrows this one for its markup tab rather than growing a third.
+export function highlightSource(src) {
     var out = "";
     var last = 0;
     var m;

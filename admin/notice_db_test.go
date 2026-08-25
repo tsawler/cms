@@ -42,7 +42,7 @@ func TestAPISettingsNoticeBar(t *testing.T) {
 			t.Fatalf("stored notice = (%v, %q, %v), want (true, alert, true)", on, style, dismiss)
 		}
 
-		// The Site CSS & JS panel PUTs the settings it knows about and
+		// The Site code panel PUTs the settings it knows about and
 		// nothing else. A save from there must leave the bar exactly as
 		// it was: a missing boolean read as false would take a holiday
 		// closure off every page of the site, silently, as a side effect
