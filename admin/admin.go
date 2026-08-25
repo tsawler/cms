@@ -117,6 +117,19 @@ type Deps struct {
 	// want; the CMS supplies its own cached reader.
 	SiteDevelopment func(context.Context) bool
 
+	// SiteLocked reports whether the site is closed to everyone but
+	// superadmins (content.SiteSettings.Locked). Two things depend on
+	// it: the sidebar stamps every admin page so nobody forgets the site
+	// is down, and login and the session check refuse anyone who is not
+	// a superadmin — a locked site that still let its editors in would
+	// be hiding the site from the public alone, which is not what the
+	// switch says. Nil reads as never locked, which is what tests and
+	// direct package use want; the CMS supplies its own cached reader.
+	//
+	// Enforcing it on the public site is a separate door, and the
+	// host's to mount: see (*cms.CMS).Lockdown.
+	SiteLocked func(context.Context) bool
+
 	// ContentChanged, when set, is called (without waiting) after any
 	// mutation that can change which CSS classes stored content uses:
 	// region/section saves, publish/discard, page create/delete, and
@@ -568,6 +581,11 @@ type templateData struct {
 	// development mode and so is being kept out of search engines.
 	SiteDevelopment bool
 
+	// SiteLocked stamps the sidebar when the site is closed to everyone
+	// but superadmins. Louder than the development badge, because this
+	// one means the public is being turned away right now.
+	SiteLocked bool
+
 	// Dashboard page only: the host sections' cards and the public
 	// site's seven-day traffic chart. Filled by the dashboard handler
 	// alone, so their queries run nowhere else.
@@ -690,6 +708,11 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		}
 	}
 	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.User, r.URL.Path)
+	// Outside the block below, unlike the development stamp: the login
+	// page has no user and is exactly where this has to show — someone
+	// standing at a door that will not open for them should be told so
+	// before they type, not after.
+	td.SiteLocked = s.siteLocked(r.Context())
 	if td.User != nil {
 		td.NavCounts = s.navCounts(r, td.User)
 		s.fillNavCounts(r.Context(), td.NavSections)

@@ -74,6 +74,17 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.throttle.Reset(throttleKey)
+
+	// The password was right and the site is shut. Refused here, before
+	// the two-factor branch below: an account that cannot sign in should
+	// not be walked through a code challenge first, only to be turned
+	// away once it has been redeemed. completeLogin checks again, for
+	// the challenge that was already pending when the lock was thrown.
+	if !u.Role.IsSuperadmin() && s.siteLocked(r.Context()) {
+		s.renderLocked(w, r)
+		return
+	}
+
 	// A fresh session token on privilege change prevents session fixation.
 	if err := s.deps.Sessions.RenewToken(r.Context()); err != nil {
 		s.serverError(w, err)
@@ -97,6 +108,15 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 // completeLogin grants the session: the shared tail of the plain login
 // and the two-factor challenge.
 func (s *server) completeLogin(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {
+	// The backstop for the check in login above: this is where both
+	// login paths meet, so a two-factor challenge that was pending when
+	// the site closed is refused here even though nothing refused it on
+	// the way in. The password was right; the session is still not
+	// granted.
+	if !u.Role.IsSuperadmin() && s.siteLocked(r.Context()) {
+		s.renderLocked(w, r)
+		return
+	}
 	s.deps.Sessions.Put(r.Context(), sessionKeyUserID, u.ID)
 	if remember {
 		// Persistent cookie (survives browser restarts) with the

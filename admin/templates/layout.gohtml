@@ -28,6 +28,13 @@
     <p class="cms-site-mode"><span class="cms-badge cms-badge-draft"
         title="{{.T "Search engines are asked to skip this site. A superadmin switches it to production in the site settings dialog."}}">{{.T "Development"}}</span></p>
     {{end}}
+    {{- /* Louder than the badge above, and for a louder state: while
+           this shows, every visitor is being turned away. The one thing
+           nobody must be able to leave switched on by accident. */}}
+    {{if .SiteLocked}}
+    <p class="cms-site-mode"><span class="cms-badge cms-badge-off"
+        title="{{.T "The public site is closed — everyone but superadmins is turned away. A superadmin reopens it in the site settings dialog."}}">{{.T "Site closed"}}</span></p>
+    {{end}}
     <p class="cms-contents-label">{{.T "Contents"}}</p>
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">

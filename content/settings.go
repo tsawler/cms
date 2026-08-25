@@ -49,6 +49,24 @@ type SiteSettings struct {
 	// development serves none regardless: it has nothing it wants found.
 	// Switching it is superadmin-only, like Mode.
 	Sitemap bool
+	// Locked closes the site to everyone but superadmins: every public
+	// address answers 503 while it is on, and only the login page, the
+	// admin behind it, and whatever the host named exempt stay
+	// reachable. It is the switch for the
+	// hours a site has to be off — a botched import, a price list that
+	// went out wrong, a rebuild mid-flight — where the alternative is
+	// stopping the container and losing the admin with it.
+	//
+	// Unlike Mode this is access control, not a request to crawlers:
+	// nothing is served to anyone who is not signed in as a superadmin.
+	// It is deliberately separate from Mode, because the two answer
+	// different questions — a site can be live and findable and still
+	// need to be shut for an afternoon, and coming back must not mean
+	// remembering to switch indexing on again.
+	//
+	// Enforcement is the host's to mount: see (*cms.CMS).Lockdown.
+	// Switching it is superadmin-only, like Mode.
+	Locked bool
 	// NoticeBar shows the site-wide notice bar — a thin strip above
 	// everything else on every page, for the message the whole site has
 	// to carry at once: a holiday closure, a delivery delay, a service
@@ -129,6 +147,7 @@ const (
 	settingSiteMode   = "site_mode"
 	settingRobotsTxt  = "robots_txt"
 	settingSitemap    = "sitemap"
+	settingSiteLocked = "site_locked"
 
 	settingNoticeBar         = "notice_bar"
 	settingNoticeStyle       = "notice_style"
@@ -177,6 +196,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.RobotsTxt = v
 		case settingSitemap:
 			out.Sitemap = v == "1"
+		case settingSiteLocked:
+			out.Locked = v == "1"
 		case settingNoticeBar:
 			out.NoticeBar = v == "1"
 		case settingNoticeStyle:
@@ -198,12 +219,15 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	loginInNav, sitemap := "", ""
+	loginInNav, sitemap, locked := "", "", ""
 	if in.LoginInNav {
 		loginInNav = "1"
 	}
 	if in.Sitemap {
 		sitemap = "1"
+	}
+	if in.Locked {
+		locked = "1"
 	}
 	noticeBar, noticeDismissible := "", ""
 	if in.NoticeBar {
@@ -224,6 +248,7 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		settingSiteMode:   in.Mode,
 		settingRobotsTxt:  in.RobotsTxt,
 		settingSitemap:    sitemap,
+		settingSiteLocked: locked,
 
 		settingNoticeBar:         noticeBar,
 		settingNoticeStyle:       in.NoticeStyle,
@@ -261,6 +286,19 @@ func (s *Store) SetSitemap(ctx context.Context, on bool) error {
 		v = "1"
 	}
 	return s.setSetting(ctx, settingSitemap, v)
+}
+
+// SetSiteLocked closes or opens the site on its own, leaving every other
+// setting alone. It exists for the same reason SetSiteMode does, and for
+// one more: a site locked by mistake has to be openable from a shell —
+// one UPDATE against cms_settings, or a call to this — without a working
+// admin to click through.
+func (s *Store) SetSiteLocked(ctx context.Context, on bool) error {
+	v := ""
+	if on {
+		v = "1"
+	}
+	return s.setSetting(ctx, settingSiteLocked, v)
 }
 
 // setSetting upserts one key, leaving every other setting alone.

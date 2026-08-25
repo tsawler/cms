@@ -58,15 +58,63 @@ func (s *server) currentUser(r *http.Request) *auth.User {
 	return u
 }
 
-// requireUser redirects to the login page when no active user is logged in.
+// siteLocked reports whether the site is closed to everyone but
+// superadmins. Nil Deps.SiteLocked reads as open, so a host that never
+// set it — and every test that builds a server by hand — behaves exactly
+// as it did before the switch existed.
+func (s *server) siteLocked(ctx context.Context) bool {
+	return s.deps.SiteLocked != nil && s.deps.SiteLocked(ctx)
+}
+
+// lockedOut reports whether the site lock bars this user from the admin.
+// Superadmins are who the lock is for, so they pass; everyone else is
+// turned away, the same answer the public site gives them.
+//
+// The exception is a masquerading session. Only a superadmin can start
+// one, and while it runs the session reads as the target user — an
+// editor, usually — so without this a superadmin who locked the site
+// mid-masquerade could not reach the button that ends it. They keep the
+// admin until they exit; the public site refuses them like the user they
+// are wearing (see cms.Lockdown).
+func (s *server) lockedOut(r *http.Request, u *auth.User) bool {
+	if u == nil || u.Role.IsSuperadmin() || !s.siteLocked(r.Context()) {
+		return false
+	}
+	return s.deps.Sessions.GetInt64(r.Context(), sessionKeyMasqueradeFrom) == 0
+}
+
+// requireUser redirects to the login page when no active user is logged in,
+// and turns away everyone but superadmins while the site is locked.
 func (s *server) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.currentUser(r) == nil {
+		u := s.currentUser(r)
+		if u == nil {
 			http.Redirect(w, r, s.deps.AdminPath+"/login", http.StatusSeeOther)
+			return
+		}
+		// A session that predates the lock — an editor who was already
+		// working when it was thrown — stops here, at the first request
+		// after it. The session itself is left alone: the site opening
+		// again should not mean everybody logging back in.
+		if s.lockedOut(r, u) {
+			s.renderLocked(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// renderLocked answers a signed-in non-superadmin while the site is
+// locked. 503 rather than 403: nothing is wrong with their account and
+// nothing about their permissions has changed — the site is shut, and it
+// will open again.
+func (s *server) renderLocked(w http.ResponseWriter, r *http.Request) {
+	data := s.newTemplateData(r)
+	// No nav: the session is real, but every link it would draw leads
+	// somewhere this user is about to be refused again.
+	data.User = nil
+	data.Error = s.tr(r, "This account cannot be used while the site is closed.")
+	s.render(w, http.StatusServiceUnavailable, "login", data)
 }
 
 // requireAdmin responds 403 unless the logged-in user has the admin role.
