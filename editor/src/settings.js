@@ -9,7 +9,7 @@
 import { state, cfg, pageId, notice, adminPath, mediaEnabled, canPages, isSuperadmin } from "./state.js";
 import { api, setMsg, flash } from "./util.js";
 import { $, setChromeTheme } from "./shell.js";
-import { openDialog, sanitizeRichHTML } from "./dialogs.js";
+import { openDialog, sanitizeRichHTML, cmsConfirm } from "./dialogs.js";
 import { initRichEditors, removeRichEditors } from "./richtext.js";
 import { injectSectionUI } from "./sections.js";
 import { markDirty, hasUnsaved, updateBarButtons } from "./editing.js";
@@ -20,7 +20,7 @@ var ALIGNS = ["left", "center", "right"];
 // The settings dialog's tabs. Named where they are used as well as
 // listed, so a field cannot drift onto a tab that no longer exists.
 var BRAND = "Brand", MENU = "Menu", NOTICE = "Notice bar", SEARCH = "Search",
-    EDITOR = "Editor";
+    EDITOR = "Editor", ACCESS = "Access";
 
 // The editor's two colour schemes, matching content.EditorTheme*.
 var EDITOR_THEMES = [
@@ -484,12 +484,32 @@ export function openSiteSettings() {
                 return "Served at /robots.txt" + sitemapLine +
                     ". Crawlers may cache it for a day or so before they notice a change.";
             } });
+            // Closing the site. Its own tab rather than a line under
+            // the search settings: this one is not about who finds the
+            // site, it is about whether the site answers at all, and
+            // burying it beside robots.txt would read as a milder thing
+            // than it is.
+            fields.push({ id: "locked", label: "Close the site to everyone but superadmins",
+                type: "check", value: s.locked, tab: ACCESS, span: true });
+            fields.push({ type: "note", span: true, tab: ACCESS, text: function (v) {
+                if (v.locked !== "1") {
+                    return "The site is open. Closing it turns every visitor away with a " +
+                        "\u201ctemporarily unavailable\u201d page \u2014 pages, forms, and " +
+                        "everything else \u2014 while you and other superadmins keep browsing " +
+                        "it as normal. For the afternoon a site has to be off: a bad import, a " +
+                        "price list that went out wrong, a rebuild mid-flight.";
+                }
+                return "The site is closed. Only superadmins see it; everyone else gets a " +
+                    "\u201ctemporarily unavailable\u201d page, and admins and editors cannot " +
+                    "sign in while it lasts. Search engines are told this is temporary and keep " +
+                    "the pages they have \u2014 for a few days, not indefinitely.";
+            } });
         }
         // Search is superadmin-only, and a tab with nothing behind it
         // would be a dead end — so the bar is built from what this user
         // can actually see.
         var tabs = [BRAND, MENU, NOTICE, EDITOR];
-        if (isSuperadmin) tabs.push(SEARCH);
+        if (isSuperadmin) tabs.push(SEARCH, ACCESS);
         openDialog({
             message: "Site settings",
             okLabel: "Save",
@@ -498,88 +518,109 @@ export function openSiteSettings() {
             fields: fields,
         }).then(function (values) {
             if (!values) return;
-            // The logo and favicon fields are absent when media is
-            // disabled; keep the stored URLs rather than wiping them.
-            var next = {
-                menuAlign: values.menuAlign,
-                siteName: values.siteName.trim(),
-                logoUrl: values.logo !== undefined ? values.logo : (s.logoUrl || ""),
-                faviconUrl: values.favicon !== undefined ? values.favicon : (s.faviconUrl || ""),
-                loginInNav: values.loginInNav === "1",
-                // Site-wide CSS/JS has its own editor (wrench → Site
-                // CSS & JS); carry the stored values through so this
-                // save doesn't wipe them. The mode and robots.txt fields
-                // are absent for everyone but superadmins, and carry
-                // through the same way — the server ignores them from
-                // anyone else in any case.
-                siteCss: s.siteCss || "",
-                siteJs: s.siteJs || "",
-                mode: values.mode !== undefined ? values.mode : (s.mode || ""),
-                robotsTxt: values.robotsTxt !== undefined ? values.robotsTxt : (s.robotsTxt || ""),
-                sitemap: values.sitemap !== undefined ? values.sitemap === "1" : !!s.sitemap,
-                noticeBar: values.noticeBar === "1",
-                noticeStyle: values.noticeStyle,
-                noticeDismissible: values.noticeDismissible === "1",
-                editorTheme: values.editorTheme,
-            };
-            // The wording is content, so it does not ride the settings
-            // PUT: it goes to the regions endpoint as the shared region
-            // it is, and lands as a draft that Publish makes live. Only
-            // when it actually changed — leaving it alone is what keeps
-            // a notice that carries a link or bold text from being
-            // flattened by a visit to this dialog.
-            // Compare what the field holds with what it was given,
-            // both sanitized, so a save that did not touch the wording
-            // writes nothing — which is what keeps a visit to this
-            // dialog from rewriting a notice it merely displayed.
-            var typed = sanitizeRichHTML(values.noticeText || "");
-            var changed = typed !== noticeRich;
-            var nextNotice = changed ? richToNotice(typed) : notice.html;
-            if (changed) {
-                // Before applySettings, so a bar being switched on in
-                // this same save is inserted carrying these words
-                // rather than the placeholder.
-                notice.html = nextNotice;
-            }
-            api("/settings", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(next),
-            }).then(function () {
-                applySettings(next);
-                retitle(s.siteName, next.siteName);
-                // Only when it actually changed: the rebuild it costs is
-                // cheap but not free, and there is no reason to pay it
-                // on a save that came here for the site name.
-                if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
-                if (!changed) {
-                    flash("Site settings saved.");
-                    return;
-                }
-                // Again, after applySettings: switching the bar off in
-                // this same save stashes the words it found in the page,
-                // which are the ones being replaced.
-                notice.html = nextNotice;
-                writeNotice(nextNotice);
-                return api("/pages/" + pageId + "/regions", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        locale: cfg.locale,
-                        regions: { "site:notice": nextNotice },
-                    }),
-                }).then(function () {
-                    // The region is now the server's, so it is no longer
-                    // an unsaved edit — but it is an unpublished one,
-                    // and the chip has to say so.
-                    delete state.dirty["site:notice"];
-                    if (!hasUnsaved()) $("save").disabled = true;
-                    if (state.pageStatus === "published") state.hasUnpublished = true;
-                    updateChip();
-                    updateBarButtons();
-                    flash("Saved — publish to put the notice live");
+            // Closing the site turns every visitor away, so it is
+            // asked twice: the checkbox here, then this. Reopening
+            // is not — an extra click between a shut site and an
+            // open one is the wrong place to be careful.
+            if (values.locked === "1" && !s.locked) {
+                return cmsConfirm(
+                    "Close the site to everyone but superadmins? Every page answers “temporarily " +
+                    "unavailable” until you reopen it here — visitors, forms, and search engines " +
+                    "alike. You and other superadmins keep browsing it as normal.",
+                    "Close the site", true).then(function (ok) {
+                    if (ok) commit();
                 });
-            }).catch(function (err) { setMsg(err.message); });
+            }
+            commit();
+
+            // The save itself, once it is settled that it is happening.
+            // A function declaration, so the gate above can call it
+            // before it is written out.
+            function commit() {
+                // The logo and favicon fields are absent when media is
+                // disabled; keep the stored URLs rather than wiping them.
+                var next = {
+                    menuAlign: values.menuAlign,
+                    siteName: values.siteName.trim(),
+                    logoUrl: values.logo !== undefined ? values.logo : (s.logoUrl || ""),
+                    faviconUrl: values.favicon !== undefined ? values.favicon : (s.faviconUrl || ""),
+                    loginInNav: values.loginInNav === "1",
+                    // Site-wide CSS/JS has its own editor (wrench → Site
+                    // CSS & JS); carry the stored values through so this
+                    // save doesn't wipe them. The mode and robots.txt fields
+                    // are absent for everyone but superadmins, and carry
+                    // through the same way — the server ignores them from
+                    // anyone else in any case.
+                    siteCss: s.siteCss || "",
+                    siteJs: s.siteJs || "",
+                    mode: values.mode !== undefined ? values.mode : (s.mode || ""),
+                    robotsTxt: values.robotsTxt !== undefined ? values.robotsTxt : (s.robotsTxt || ""),
+                    sitemap: values.sitemap !== undefined ? values.sitemap === "1" : !!s.sitemap,
+                    locked: values.locked !== undefined ? values.locked === "1" : !!s.locked,
+                    noticeBar: values.noticeBar === "1",
+                    noticeStyle: values.noticeStyle,
+                    noticeDismissible: values.noticeDismissible === "1",
+                    editorTheme: values.editorTheme,
+                };
+                // The wording is content, so it does not ride the settings
+                // PUT: it goes to the regions endpoint as the shared region
+                // it is, and lands as a draft that Publish makes live. Only
+                // when it actually changed — leaving it alone is what keeps
+                // a notice that carries a link or bold text from being
+                // flattened by a visit to this dialog.
+                // Compare what the field holds with what it was given,
+                // both sanitized, so a save that did not touch the wording
+                // writes nothing — which is what keeps a visit to this
+                // dialog from rewriting a notice it merely displayed.
+                var typed = sanitizeRichHTML(values.noticeText || "");
+                var changed = typed !== noticeRich;
+                var nextNotice = changed ? richToNotice(typed) : notice.html;
+                if (changed) {
+                    // Before applySettings, so a bar being switched on in
+                    // this same save is inserted carrying these words
+                    // rather than the placeholder.
+                    notice.html = nextNotice;
+                }
+                api("/settings", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(next),
+                }).then(function () {
+                    applySettings(next);
+                    retitle(s.siteName, next.siteName);
+                    // Only when it actually changed: the rebuild it costs is
+                    // cheap but not free, and there is no reason to pay it
+                    // on a save that came here for the site name.
+                    if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
+                    if (!changed) {
+                        flash("Site settings saved.");
+                        return;
+                    }
+                    // Again, after applySettings: switching the bar off in
+                    // this same save stashes the words it found in the page,
+                    // which are the ones being replaced.
+                    notice.html = nextNotice;
+                    writeNotice(nextNotice);
+                    return api("/pages/" + pageId + "/regions", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            locale: cfg.locale,
+                            regions: { "site:notice": nextNotice },
+                        }),
+                    }).then(function () {
+                        // The region is now the server's, so it is no longer
+                        // an unsaved edit — but it is an unpublished one,
+                        // and the chip has to say so.
+                        delete state.dirty["site:notice"];
+                        if (!hasUnsaved()) $("save").disabled = true;
+                        if (state.pageStatus === "published") state.hasUnpublished = true;
+                        updateChip();
+                        updateBarButtons();
+                        flash("Saved — publish to put the notice live");
+                    });
+                }).catch(function (err) { setMsg(err.message); });
+            }
         });
     }).catch(function (err) { setMsg(err.message); });
 }

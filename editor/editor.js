@@ -3897,6 +3897,7 @@
   var NOTICE = "Notice bar";
   var SEARCH = "Search";
   var EDITOR = "Editor";
+  var ACCESS = "Access";
   var EDITOR_THEMES = [
     { key: "dark", label: "Dark \u2014 pale tools, for a light-coloured site" },
     { key: "light", label: "Light \u2014 dark tools, for a dark-coloured site" }
@@ -4229,9 +4230,23 @@
           }
           return "Served at /robots.txt" + sitemapLine + ". Crawlers may cache it for a day or so before they notice a change.";
         } });
+        fields.push({
+          id: "locked",
+          label: "Close the site to everyone but superadmins",
+          type: "check",
+          value: s.locked,
+          tab: ACCESS,
+          span: true
+        });
+        fields.push({ type: "note", span: true, tab: ACCESS, text: function(v) {
+          if (v.locked !== "1") {
+            return "The site is open. Closing it turns every visitor away with a \u201Ctemporarily unavailable\u201D page \u2014 pages, forms, and everything else \u2014 while you and other superadmins keep browsing it as normal. For the afternoon a site has to be off: a bad import, a price list that went out wrong, a rebuild mid-flight.";
+          }
+          return "The site is closed. Only superadmins see it; everyone else gets a \u201Ctemporarily unavailable\u201D page, and admins and editors cannot sign in while it lasts. Search engines are told this is temporary and keep the pages they have \u2014 for a few days, not indefinitely.";
+        } });
       }
       var tabs = [BRAND, MENU, NOTICE, EDITOR];
-      if (isSuperadmin) tabs.push(SEARCH);
+      if (isSuperadmin) tabs.push(SEARCH, ACCESS);
       openDialog({
         message: "Site settings",
         okLabel: "Save",
@@ -4240,66 +4255,79 @@
         fields
       }).then(function(values) {
         if (!values) return;
-        var next = {
-          menuAlign: values.menuAlign,
-          siteName: values.siteName.trim(),
-          logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
-          faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
-          loginInNav: values.loginInNav === "1",
-          // Site-wide CSS/JS has its own editor (wrench → Site
-          // CSS & JS); carry the stored values through so this
-          // save doesn't wipe them. The mode and robots.txt fields
-          // are absent for everyone but superadmins, and carry
-          // through the same way — the server ignores them from
-          // anyone else in any case.
-          siteCss: s.siteCss || "",
-          siteJs: s.siteJs || "",
-          mode: values.mode !== void 0 ? values.mode : s.mode || "",
-          robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : s.robotsTxt || "",
-          sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
-          noticeBar: values.noticeBar === "1",
-          noticeStyle: values.noticeStyle,
-          noticeDismissible: values.noticeDismissible === "1",
-          editorTheme: values.editorTheme
-        };
-        var typed = sanitizeRichHTML(values.noticeText || "");
-        var changed = typed !== noticeRich;
-        var nextNotice = changed ? richToNotice(typed) : notice.html;
-        if (changed) {
-          notice.html = nextNotice;
-        }
-        api("/settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(next)
-        }).then(function() {
-          applySettings(next);
-          retitle(s.siteName, next.siteName);
-          if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
-          if (!changed) {
-            flash("Site settings saved.");
-            return;
-          }
-          notice.html = nextNotice;
-          writeNotice(nextNotice);
-          return api("/pages/" + pageId + "/regions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              locale: cfg.locale,
-              regions: { "site:notice": nextNotice }
-            })
-          }).then(function() {
-            delete state.dirty["site:notice"];
-            if (!hasUnsaved()) $("save").disabled = true;
-            if (state.pageStatus === "published") state.hasUnpublished = true;
-            updateChip();
-            updateBarButtons();
-            flash("Saved \u2014 publish to put the notice live");
+        if (values.locked === "1" && !s.locked) {
+          return cmsConfirm(
+            "Close the site to everyone but superadmins? Every page answers \u201Ctemporarily unavailable\u201D until you reopen it here \u2014 visitors, forms, and search engines alike. You and other superadmins keep browsing it as normal.",
+            "Close the site",
+            true
+          ).then(function(ok) {
+            if (ok) commit();
           });
-        }).catch(function(err) {
-          setMsg(err.message);
-        });
+        }
+        commit();
+        function commit() {
+          var next = {
+            menuAlign: values.menuAlign,
+            siteName: values.siteName.trim(),
+            logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
+            faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
+            loginInNav: values.loginInNav === "1",
+            // Site-wide CSS/JS has its own editor (wrench → Site
+            // CSS & JS); carry the stored values through so this
+            // save doesn't wipe them. The mode and robots.txt fields
+            // are absent for everyone but superadmins, and carry
+            // through the same way — the server ignores them from
+            // anyone else in any case.
+            siteCss: s.siteCss || "",
+            siteJs: s.siteJs || "",
+            mode: values.mode !== void 0 ? values.mode : s.mode || "",
+            robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : s.robotsTxt || "",
+            sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
+            locked: values.locked !== void 0 ? values.locked === "1" : !!s.locked,
+            noticeBar: values.noticeBar === "1",
+            noticeStyle: values.noticeStyle,
+            noticeDismissible: values.noticeDismissible === "1",
+            editorTheme: values.editorTheme
+          };
+          var typed = sanitizeRichHTML(values.noticeText || "");
+          var changed = typed !== noticeRich;
+          var nextNotice = changed ? richToNotice(typed) : notice.html;
+          if (changed) {
+            notice.html = nextNotice;
+          }
+          api("/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(next)
+          }).then(function() {
+            applySettings(next);
+            retitle(s.siteName, next.siteName);
+            if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
+            if (!changed) {
+              flash("Site settings saved.");
+              return;
+            }
+            notice.html = nextNotice;
+            writeNotice(nextNotice);
+            return api("/pages/" + pageId + "/regions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                locale: cfg.locale,
+                regions: { "site:notice": nextNotice }
+              })
+            }).then(function() {
+              delete state.dirty["site:notice"];
+              if (!hasUnsaved()) $("save").disabled = true;
+              if (state.pageStatus === "published") state.hasUnpublished = true;
+              updateChip();
+              updateBarButtons();
+              flash("Saved \u2014 publish to put the notice live");
+            });
+          }).catch(function(err) {
+            setMsg(err.message);
+          });
+        }
       });
     }).catch(function(err) {
       setMsg(err.message);

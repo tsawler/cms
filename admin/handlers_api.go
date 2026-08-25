@@ -527,6 +527,11 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		// are visible to the whole internet in any case.
 		"robotsTxt": site.RobotsTxt,
 		"sitemap":   site.Sitemap,
+		// And the lock, for the same reason: throwing it is
+		// superadmin-only, but every save carries it back, and an editor
+		// is better off seeing that the site is shut than wondering why
+		// their work is not showing up.
+		"locked": site.Locked,
 		// The notice bar's switch and look. Its words are not settings —
 		// they are the shared region render.NoticeRegion, edited in the
 		// bar itself like any other shared content.
@@ -556,10 +561,13 @@ const maxRobotsLen = 10_000
 // editor's request keeps whatever is already stored.
 // Whether the site is findable at all is a superadmin's call, so the
 // mode, the site's robots.txt, and the sitemap switch are held to the
-// same carry-through rule as the code fields.
+// same carry-through rule as the code fields. So is the lock that closes
+// the site to everyone but superadmins — most of all that one, since a
+// save from anyone else must never be able to shut the site or reopen
+// it.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
 // "faviconUrl", "loginInNav", "siteCss", "siteJs", "siteMeta", "mode",
-// "robotsTxt", "sitemap", "noticeBar", "noticeStyle",
+// "robotsTxt", "sitemap", "locked", "noticeBar", "noticeStyle",
 // "noticeDismissible", "editorTheme"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -580,6 +588,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		Mode      *string `json:"mode"`
 		RobotsTxt *string `json:"robotsTxt"`
 		Sitemap   *bool   `json:"sitemap"`
+		Locked    *bool   `json:"locked"`
 		// Pointers for the same reason, and a sharper one: the Site code
 		// panel PUTs the settings it knows about, and a plain bool
 		// missing from that body would read as false and switch off a
@@ -651,10 +660,16 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if isAdmin && body.SiteMeta != nil {
 		meta = *body.SiteMeta
 	}
-	mode, robots, sitemap := current.Mode, current.RobotsTxt, current.Sitemap
+	mode, robots, sitemap, locked := current.Mode, current.RobotsTxt, current.Sitemap, current.Locked
 	if isSuper {
 		if body.Mode != nil {
 			mode = *body.Mode
+		}
+		// Closing the site is the heaviest switch in this dialog, so it
+		// is held where the mode is: a superadmin's, and nobody else's
+		// save can move it.
+		if body.Locked != nil {
+			locked = *body.Locked
 		}
 		if body.RobotsTxt != nil {
 			// CRLF in, LF out: the field is a browser textarea, which
@@ -717,6 +732,7 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		Mode:       mode,
 		RobotsTxt:  robots,
 		Sitemap:    sitemap,
+		Locked:     locked,
 
 		NoticeBar:         noticeBar,
 		NoticeStyle:       noticeStyle,

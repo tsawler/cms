@@ -1711,6 +1711,104 @@ Past 50,000 URLs — pages × locales — the extra pages are left out and a
 warning is logged. Splitting into a sitemap index is the fix, and does
 not exist yet.
 
+## Closing the site: the lock
+
+Development mode asks crawlers to stay away. The **lock** turns everyone
+away — it is the switch for the afternoon a site has to be *off*: a bad
+import, a price list that went out wrong, a rebuild mid-flight.
+
+While it is on:
+
+- every public address answers `503 Service Unavailable` with a
+  `Retry-After` and `X-Robots-Tag: noindex, nofollow`;
+- the admin and its login page stay reachable, and admit **superadmins
+  only** — an admin or editor with the right password is refused, and a
+  session already signed in stops at its next request. The login form
+  says so above itself, before anyone types: an account that works
+  perfectly well is about to be turned away, and finding that out after
+  submitting a password reads as a broken login rather than a closed
+  site;
+- superadmins browse the public site exactly as normal, so the thing
+  being fixed can be looked at while it is closed.
+
+It is superadmin-only, in the site settings dialog under **Access**, and
+it asks to confirm before closing (never before reopening).
+
+`503` is deliberate. A closed site is not a gone one: search engines
+treat a `503` as temporary and keep the pages they have, for a few days
+at least. A `404`, or a `200` on a "we're closed" page, is how a site
+comes back from an afternoon's maintenance with its rankings gone.
+
+### Mounting it
+
+The setting does nothing until the host wraps its router. The lock has
+to sit in front of the host's own routes — an app's API, feeds, and form
+posts are not the CMS's to refuse — so mounting it is one line, and
+outermost:
+
+```go
+func (a *app) routes() http.Handler {
+	r := chi.NewRouter()
+	// ... the app's routes, with the CMS mounted at "/" ...
+	return a.logging(a.cms.Lockdown(r, "/healthz"))
+}
+```
+
+Outermost, because a refused request should cost nothing underneath it —
+no visitor session, no rate-limit bookkeeping, no query for a page nobody
+is going to see. While the site is open the wrapper is one cached boolean
+and a call through; only a closed site pays for the session lookup.
+
+**The exempt list is the important argument.** Each entry matches the
+request path exactly, or as a prefix when it ends in `/`. Two kinds of
+address belong there:
+
+- **Endpoints that are not browsers.** A container health check
+  answering `503` is an orchestrator killing the site while you are
+  fixing it. `/healthz` is nearly always the first entry.
+- **Feeds a partner pulls on their own schedule** — a merchant catalog,
+  a listings importer — where an afternoon of `503`s means listings
+  dropped at the far end and days of re-import to get them back.
+
+Everything on that list is served to the public, in full, while the rest
+of the site is shut. That is the trade: name the addresses that must keep
+answering, and know each one is a window into a closed site.
+
+The admin path is never refused, exempt list or not — it is where the
+lock is lifted, and locking yourself out of it would be the one mistake
+this feature must not allow.
+
+### The way back in
+
+If the admin is unreachable for some *other* reason — a lost superadmin
+password, a broken login — the lock can be forced from the environment:
+
+```
+CMS_SITE_LOCKED=false
+```
+
+`Config.LockOverride` behind it, and it wins over the stored setting in
+both directions: `false` reopens a locked site, `true` brings one up
+closed. It does not change what is stored, so removing the variable
+returns the site to whatever the admin last saved. The stored value can
+also be flipped directly — it is one row:
+
+```sql
+UPDATE cms_settings SET value = '' WHERE key = 'site_locked';
+```
+
+A locked site stamps a red **Site closed** badge under the admin's brand
+on every page, for the same reason development mode stamps its own: the
+failure this invites is nobody remembering the switch is on.
+
+### The page visitors see
+
+By default the CMS serves a small built-in notice that depends on none of
+the site's templates, stylesheets, or media — because any of those may be
+exactly what is broken. To brand it, set `Config.LockedHandler` to a
+handler of your own; the status and headers are already set when it is
+called, so write the body and leave the status alone.
+
 ## Host data in CMS pages
 
 Some of a page isn't content. A dealership's "fresh on the lot" strip, a
@@ -2342,6 +2440,7 @@ a startup error rather than a silent fallback.
 | `CMS_SESSION_REDIS_PASSWORD` | unset (no auth) | Password for that Redis server. |
 | `CMS_SESSION_REDIS_DB` | `0` | Redis logical database number. An invalid or negative value is a startup error. |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
+| `CMS_SITE_LOCKED` | unset (the stored switch decides) | Forces the [site lock](#closing-the-site-the-lock) on or off whatever the admin has saved. `false` reopens a site locked by someone who then lost the way in; `true` brings one up closed. It overrides the stored setting without changing it, so removing the variable hands the switch back to the admin. A non-boolean value is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | How many posts a paginated `{{cmsFeed}}` listing shows per page. An invalid or non-positive value is a startup error. A template can override it per listing with `{{cmsFeed "blog" 6}}`. |
 | `CMS_ADMIN_PER_PAGE` | `25` | How many rows a paginated admin list shows per page (Blog & News, and Pages). Separate from `CMS_POSTS_PER_PAGE`: an editor's table wants more rows than a public listing. An invalid or non-positive value is a startup error. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |

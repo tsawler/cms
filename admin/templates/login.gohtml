@@ -21,6 +21,15 @@ window.CAP_SCRIPT_NONCE = {{.Captcha.Nonce}};
 {{end}}
 <div class="cms-login-card">
     <h1>{{.T "Log in"}}</h1>
+    {{- /* The site is shut. Said here, above the form, rather than only
+           in the answer to a submitted password: an editor whose account
+           works perfectly well is about to be turned away, and finding
+           that out after typing reads as a broken login rather than a
+           closed site. The form is left alone — superadmins sign in
+           through it, and this is the page they do it on. */}}
+    {{if .SiteLocked}}
+    <p class="cms-locked-notice">{{.T "The site is closed for maintenance. Only superadministrators can sign in while it is."}}</p>
+    {{end}}
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
     <form method="post" action="{{.AdminPath}}/login" novalidate{{if and .Captcha (not .Captcha.Visible)}} data-cap-endpoint="{{.Captcha.Endpoint}}"{{end}}>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

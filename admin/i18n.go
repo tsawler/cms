@@ -156,6 +156,11 @@ var frStrings = map[string]string{
 	// The sidebar's development stamp and what it means.
 	"Development": "Développement",
 	"Search engines are asked to skip this site. A superadmin switches it to production in the site settings dialog.": "Les moteurs de recherche sont priés d'ignorer ce site. Un superadmin le passe en production dans la fenêtre des réglages du site.",
+	// The sidebar's closed-site stamp, and what a locked-out user is told.
+	"Site closed": "Site fermé",
+	"The public site is closed — everyone but superadmins is turned away. A superadmin reopens it in the site settings dialog.": "Le site public est fermé — tout le monde sauf les superadmins est refusé. Un superadmin le rouvre dans la fenêtre des réglages du site.",
+	"The site is closed for maintenance. Only superadministrators can sign in while it is.":                                     "Le site est fermé pour entretien. Seuls les superadministrateurs peuvent s'y connecter entre-temps.",
+	"This account cannot be used while the site is closed.":                                                                     "Ce compte ne peut pas être utilisé pendant que le site est fermé.",
 
 	// Dashboard traffic chart. The three-letter weekday keys are what
 	// time.Weekday's English names shorten to; the chart looks its

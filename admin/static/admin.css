@@ -444,6 +444,19 @@ td.cms-slug { color: var(--cms-muted); }
     margin-bottom: 1rem;
     font-size: .92rem;
 }
+/* The login page while the site is closed: a state, not an error, so
+   brass like the masquerade banner and the draft stamp rather than the
+   red of .cms-alert — which the same page uses for "that password was
+   wrong", and the two must not read as one thing. */
+.cms-locked-notice {
+    background: var(--cms-brass-tint);
+    border: 1px solid var(--cms-brass-line);
+    color: var(--cms-brass);
+    border-radius: var(--cms-radius);
+    padding: .6rem .9rem;
+    margin: 0 0 1rem;
+    font-size: .92rem;
+}
 .cms-flash {
     background: var(--cms-spruce-tint);
     border: 1px solid var(--cms-spruce-line);

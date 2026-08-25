@@ -32,6 +32,10 @@ import (
 //   - CMS_ADMIN_PER_PAGE → AdminPerPage, how many rows a paginated admin
 //     list shows on one page. Separate from CMS_POSTS_PER_PAGE, which
 //     sizes the public listing.
+//   - CMS_SITE_LOCKED (true/false) → LockOverride, forcing the site lock
+//     on or off whatever the admin has stored. Unset leaves the stored
+//     switch alone; CMS_SITE_LOCKED=false is the way to reopen a site
+//     without a working admin to click through.
 //   - CMS_MEDIA_WEBP_QUALITY → MediaWebPQuality.
 //   - CMS_MEDIA_MAX_VIDEO_MB → MediaMaxVideoMB.
 //   - CMS_MEDIA_ADOPT (when-empty | off | reconcile) → MediaAdopt, which
@@ -101,6 +105,19 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("cms: CMS_REMEMBER_DAYS %q is not a positive number of days", v)
 		}
 		cfg.RememberFor = time.Duration(d) * 24 * time.Hour
+	}
+
+	// The site lock, forced from configuration. Unset is the normal
+	// case and leaves the switch to the admin; set, it wins over what is
+	// stored, in both directions — which is what makes CMS_SITE_LOCKED=0
+	// the way back into a site somebody locked and then lost the
+	// password for.
+	if v := os.Getenv("CMS_SITE_LOCKED"); v != "" {
+		locked, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("cms: CMS_SITE_LOCKED %q is not a true/false value", v)
+		}
+		cfg.LockOverride = &locked
 	}
 
 	if v := os.Getenv("CMS_POSTS_PER_PAGE"); v != "" {

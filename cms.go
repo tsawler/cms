@@ -172,6 +172,29 @@ type Config struct {
 	// A value with no scheme is assumed to be https.
 	SiteURL string
 
+	// LockOverride forces the site lock on or off from configuration,
+	// ignoring the stored setting — the escape hatch for a site locked
+	// by mistake, or one that has to come up closed. nil, the default,
+	// leaves the switch where the admin left it.
+	//
+	// Set it from the environment with CMS_SITE_LOCKED; see
+	// ConfigFromEnv. A false override is the one to reach for in an
+	// emergency: it opens the site without a working admin to click
+	// through, and clears itself the moment the variable comes back out.
+	// Note that the override does not change what is stored, so a site
+	// unlocked this way closes again when the variable is removed.
+	LockOverride *bool
+
+	// LockedHandler answers requests refused by Lockdown — the page a
+	// visitor sees while the site is closed. nil, the default, serves a
+	// plain built-in notice.
+	//
+	// Whatever it writes, Lockdown has already set the status to 503 and
+	// the headers that go with it; a handler that writes its own status
+	// overrides that, which is almost always a mistake — a closed site
+	// answering 200 is a closed site being indexed.
+	LockedHandler http.Handler
+
 	// SessionLifetime is how long a login session lasts. Defaults to 24h.
 	SessionLifetime time.Duration
 
@@ -665,6 +688,11 @@ func New(cfg Config) (*CMS, error) {
 		// responses from, so the sidebar and the site cannot disagree
 		// about which mode the site is in.
 		SiteDevelopment: c.developmentMode,
+		// Likewise the lock: the sidebar says so on every page, and the
+		// login and session checks refuse everyone but superadmins while
+		// it is on. Same cached reading, so the admin and the door
+		// cannot disagree about whether the site is open.
+		SiteLocked:      c.SiteLocked,
 		Sessions:        sessions,
 		Users:           users,
 		Content:         contentStore,
@@ -1107,6 +1135,7 @@ type siteFacts struct {
 	dev     bool   // the site is in development; keep it out of indexes
 	robots  string // the stored /robots.txt, "" for none
 	sitemap bool   // serve a generated /sitemap.xml
+	locked  bool   // the site is closed to everyone but superadmins
 }
 
 // siteFlags reports the site facts from a briefly-cached copy of the
@@ -1138,7 +1167,7 @@ func (c *CMS) siteFlags(ctx context.Context) siteFacts {
 		}
 		return got
 	}
-	got = siteFacts{dev: site.Development(), robots: site.RobotsTxt, sitemap: site.Sitemap}
+	got = siteFacts{dev: site.Development(), robots: site.RobotsTxt, sitemap: site.Sitemap, locked: site.Locked}
 	c.siteMu.Lock()
 	c.siteVal, c.siteAt = got, time.Now()
 	c.siteMu.Unlock()
@@ -1149,6 +1178,25 @@ func (c *CMS) siteFlags(ctx context.Context) siteFacts {
 // the renderer is handed to decide the robots <meta> tag.
 func (c *CMS) developmentMode(ctx context.Context) bool {
 	return c.siteFlags(ctx).dev
+}
+
+// SiteLocked reports whether the site is closed to everyone but
+// superadmins — the stored setting, unless Config.LockOverride is set,
+// in which case that wins and the stored value is never consulted.
+//
+// Hosts rarely need to call this: Lockdown is what enforces it, and the
+// admin is told through its own Deps. It is exported for the host that
+// wants to say so somewhere of its own — a status endpoint, a startup
+// log line, a banner in a section page.
+//
+// Like every other reading of the site settings it comes from the
+// briefly-cached copy, so a switch takes up to siteModeCacheTTL to reach
+// every instance.
+func (c *CMS) SiteLocked(ctx context.Context) bool {
+	if c.cfg.LockOverride != nil {
+		return *c.cfg.LockOverride
+	}
+	return c.siteFlags(ctx).locked
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
