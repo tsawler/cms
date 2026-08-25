@@ -651,7 +651,19 @@ function showSlotUI(img) {
     // when it is too small to hold the toolbar inside it.
     var top = r.top + 8;
     if (r.height < 56 || r.width < ui.offsetWidth + 16) top = r.top - 44;
-    if (top < 64) top = r.bottom + 6;
+    // Either of those can land under the editor's own top bar, and a
+    // slot whose top edge is off the top of the window — which is what a
+    // full-bleed hero or page banner is, the moment the page is scrolled
+    // at all — puts it there every time.
+    //
+    // Dropping to just below the slot is the right answer only for a
+    // short one. A hero is most of the viewport tall, so below it was
+    // off the bottom of the window: clicking the picture appeared to do
+    // nothing, and the only control for changing it was somewhere you
+    // had to scroll to find. Pin the toolbar under the bar instead while
+    // the slot is still underneath it there, and keep the old fallback
+    // for a slot too short to hold it.
+    if (top < 64) top = r.bottom > 64 + 44 ? 64 : r.bottom + 6;
     ui.style.top = top + "px";
     ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
 }
