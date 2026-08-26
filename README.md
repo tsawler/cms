@@ -796,6 +796,24 @@ keyboard-operable and announced as a disclosure without any ARIA, the
 browser's in-page search finds text inside a closed one, and it prints
 open.
 
+**Editing them is a small toolbar.** Click a question while editing and a
+pill appears on its top edge with the four verbs a list has: move it up,
+move it down, add one below it, delete it. A new question is a copy of
+the one it was added after with its words replaced by placeholders, so it
+inherits whatever classes that markup carries and a site that has
+restyled its accordions gets restyled new questions for free.
+
+The tool works on any `<details class="cms-faq">`, whether it came from a
+snippet or from content that already had one — it does not require the
+`cms-snippet` wrapper the block chrome hangs from.
+
+"Up" and "down" move a question within its own run: consecutive
+`.cms-faq` siblings, so a page with two accordions under two headings has
+two independent lists, and the buttons disappear at each end rather than
+carrying a question across the gap. Deleting asks first only when the
+question has been written in; one still showing its placeholder goes
+without a prompt.
+
 `{{cmsHead}}` ships the functional minimum — a pointer cursor, a rotating
 caret in place of the browser's three different default markers, a
 keyboard focus ring, and a reset for the top margin Typography would

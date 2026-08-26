@@ -22,6 +22,10 @@ import {
     columnTarget, addColumn, duplicateColumn, confirmRemove, removeColumn,
     resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
 } from "./columns.js";
+import {
+    faqTarget, addQuestion, moveQuestion,
+    confirmRemove as confirmRemoveQuestion, removeQuestion,
+} from "./faq.js";
 import { copyOf } from "./clone.js";
 import { initColResize, showHandles, hideHandles, placeHandles } from "./colresize.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
@@ -441,6 +445,77 @@ function runColumnEdit(edit) {
     afterColumnEdit(container, now, target);
 }
 
+/* Question chrome. A block holding a run of disclosures gets a small
+ * toolbar anchored to the one that was clicked, with the four verbs a
+ * list has: move it up, move it down, add one below it, delete it.
+ *
+ * It rides alongside the block chrome and the column tool for the same
+ * reason those ride alongside each other — a block, a column in it and a
+ * question in it are three things to edit, and which one someone wants is
+ * answered by which control they reach for rather than by a mode. */
+var activeFaq = null;
+
+// placeFaqUI sits the pill on the question's own top edge, right-aligned.
+//
+// Right rather than centred, which is what the column tool does: columns
+// sit side by side so centring says "this one", while questions are
+// stacked full-width and the only ambiguity is vertical. Right-aligned
+// also keeps it clear of the block chrome, which is drawn on the left.
+function placeFaqUI() {
+    if (!activeFaq) return;
+    var ui = $("faq-ui");
+    var box = ui.getBoundingClientRect();
+    var r = activeFaq.item.getBoundingClientRect();
+    var top = r.top - box.height / 2;
+    if (top < 64) top = 64; // never slide under TinyMCE's toolbar
+    var left = r.right - box.width;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+}
+
+function showFaqUI(block, target) {
+    var info = faqTarget(block, target);
+    if (!info) {
+        hideFaqUI();
+        return;
+    }
+    activeFaq = info;
+    // Hidden rather than disabled at the ends of the run: a control that
+    // cannot do anything is better absent than present and inert, and the
+    // pill is small enough that its width changing is not a distraction.
+    $("faq-up").hidden = !info.canMoveUp;
+    $("faq-down").hidden = !info.canMoveDown;
+    $("faq-ui").classList.add("on");
+    placeFaqUI();
+}
+
+export function hideFaqUI() {
+    activeFaq = null;
+    $("faq-ui").classList.remove("on");
+}
+
+// runFaqEdit is runColumnEdit's shape for questions: make the change
+// inside the owning editor's undo transaction, mark the region dirty, and
+// re-anchor the chrome on whatever is there afterwards.
+function runFaqEdit(edit) {
+    if (!activeFaq) return;
+    var info = activeFaq;
+    var block = activeSnip;
+    var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(info.item);
+    var next = info.item;
+    runWithUndo(ed, function () {
+        var out = edit(info);
+        if (out !== undefined) next = out;
+    });
+    if (container) markContainerDirty(container);
+    if (!next || !next.isConnected) {
+        hideFaqUI();
+        return;
+    }
+    showFaqUI(block, next);
+}
+
 /* Embedded images get a gear (alt text, caption, link, rendition, and
  * style presets) and a trash can, anchored to the image's top-right
  * corner like the section toolbar. */
@@ -681,6 +756,9 @@ export function hideChrome(except) {
     // Column chrome belongs to the block chrome: it is raised by the same
     // click and never outlives it.
     if (except !== "snip") { hideSnipUI(); hideColUI(); }
+    // Not tied to "snip": a question can live outside a block, so its
+    // chrome is raised and hidden by the click handler on its own terms.
+    if (except !== "faq") hideFaqUI();
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -966,6 +1044,17 @@ export function initButtons() {
             snip = t.closest(".cms-snippet");
             if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
         }
+        // A question is looked for independently of the block chrome,
+        // because it is not always inside one. Content converted from
+        // the old site has its accordions sitting directly in a section,
+        // with no .cms-snippet wrapper — and a tool that only appeared on
+        // snippet-wrapped markup would be missing on exactly the pages
+        // that have the most questions.
+        var faq = null;
+        if (!btn && !slot && !img && !vid && t.closest) {
+            faq = t.closest(".cms-faq");
+            if (faq && !faq.closest("[data-cms-region],[data-cms-sections]")) faq = null;
+        }
         if (btn) {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
@@ -997,6 +1086,12 @@ export function initButtons() {
         } else {
             hideChrome();
         }
+        // Raised or hidden on every click, after whatever else the click
+        // did: the question tool rides alongside the block chrome rather
+        // than instead of it, and is the one piece of chrome that does
+        // not need a block to hang from.
+        if (faq) showFaqUI(faq.parentElement || faq, t);
+        else hideFaqUI();
     }, true);
 
     // Keep the chrome glued to its element through scrolls and resizes.
@@ -1004,6 +1099,7 @@ export function initButtons() {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
+        if (activeFaq) placeFaqUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1012,6 +1108,7 @@ export function initButtons() {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
+        if (activeFaq) placeFaqUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1352,6 +1449,36 @@ export function initButtons() {
             var now = block;
             runWithUndo(ed, function () { now = removeColumn(info, block); });
             afterColumnEdit(container, now, near);
+        });
+    });
+
+    $("faq-up").addEventListener("click", function () {
+        runFaqEdit(function (info) { moveQuestion(info, -1); return info.item; });
+    });
+    $("faq-down").addEventListener("click", function () {
+        runFaqEdit(function (info) { moveQuestion(info, 1); return info.item; });
+    });
+    $("faq-add").addEventListener("click", function () {
+        // Anchored on the new question rather than the one it was added
+        // after: it holds the placeholder, so it is the one about to be
+        // written in — the same choice the column tool makes on split.
+        runFaqEdit(function (info) { return addQuestion(info); });
+    });
+    $("faq-del").addEventListener("click", function () {
+        if (!activeFaq) return;
+        var info = activeFaq;
+        var block = activeSnip;
+        // Noted while the question is still in the document: afterwards
+        // it has no siblings left to find a neighbour by.
+        var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+        confirmRemoveQuestion(info).then(function (yes) {
+            if (!yes) return;
+            var ed = findOwningEditor(info.item);
+            var near = null;
+            runWithUndo(ed, function () { near = removeQuestion(info); });
+            if (container) markContainerDirty(container);
+            if (near && near.isConnected) showFaqUI(block, near);
+            else hideFaqUI();
         });
     });
 
