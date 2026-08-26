@@ -814,6 +814,18 @@ carrying a question across the gap. Deleting asks first only when the
 question has been written in; one still showing its placeholder goes
 without a prompt.
 
+**Answers are open while editing.** A `<summary>` inside an editable
+region does not toggle when clicked — the click places the caret, which
+is what editing the question needs — so a closed answer would otherwise
+have no way of being opened and no way of being written in. Edit mode
+shows every answer instead, dimmed and with the caret still pointing
+right so a question goes on reading as closed. Both the question and the
+answer are ordinary rich text: click and type.
+
+Nothing is written to the document to achieve that. There is no `open`
+attribute to strip at save time, and what is stored is exactly what was
+there — an accordion that ships expanded is not an accordion.
+
 `{{cmsHead}}` ships the functional minimum — a pointer cursor, a rotating
 caret in place of the browser's three different default markers, a
 keyboard focus ring, and a reset for the top margin Typography would
