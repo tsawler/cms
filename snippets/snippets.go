@@ -54,6 +54,24 @@ var ErrNotFound = errors.New("snippets: not found")
 // turns a click on it into a chooser (media library or YouTube/Vimeo
 // link) and replaces the slot with a <video> player or a bounded <iframe>
 // embed — both shapes the editor sanitizer keeps.
+// faqItemHTML is one question and its answer.
+//
+// <details> rather than a scripted accordion, and the reasons are all
+// things a script would have to reimplement: it opens and closes with no
+// JavaScript at all, it is keyboard-operable and announced as a
+// disclosure by screen readers without any ARIA, it is findable by the
+// browser's own in-page search even while closed, and it prints open.
+//
+// The cms-faq class carries no appearance of its own beyond the
+// functional minimum in faqCSS — hosts style it, the way they style the
+// nav. Deliberately not `open`: a page of questions that all start
+// expanded is a page of answers, which is what the accordion was there
+// to avoid.
+const faqItemHTML = `<details class="cms-faq">
+<summary>A question people ask?</summary>
+<div class="cms-faq-body"><p>A short, direct answer.</p></div>
+</details>`
+
 const videoSlotHTML = `<div class="cms-video-slot not-prose flex aspect-video w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50" data-cms-video-slot=""><p class="font-semibold text-slate-500">&#127916; Click to add a video</p></div>`
 
 // DefaultSnippets is the Tailwind-first default library, used when the
@@ -112,6 +130,11 @@ func DefaultSnippets() []Snippet {
 		// Invisible on the live site; in edit mode the editor script makes
 		// it visible and click-to-adjust (see editor.js and the height
 		// allowance in the sanitizer policy).
+		// One question, insertable on its own — which is what makes an
+		// accordion growable: an editor puts the caret at the end of the
+		// last answer and inserts another. The section preset below is
+		// the same markup with a heading and three of these.
+		{Name: "Question & answer", Group: "Basic", HTML: `<div class="cms-snippet">` + faqItemHTML + `</div>`},
 		{Name: "Flexible space", Group: "Basic", HTML: `<div class="cms-spacer" data-height="48px" style="height: 48px"></div>`},
 	}
 }
@@ -159,19 +182,21 @@ func DefaultSectionPresets() []Snippet {
 <figcaption class="mt-3 text-sm font-semibold text-slate-500">&mdash; Another happy customer</figcaption>
 </figure>
 </div>`},
-		// Plain prose headings and paragraphs — Typography styles them,
-		// so the FAQ adapts to any background. The width key is the
-		// default anyway, but a preset needs at least one setting or the
-		// API's omitempty would demote it to a plain snippet.
+		// Collapsible questions rather than a run of headings and
+		// paragraphs. A page of twenty answers is a wall of text; a page
+		// of twenty questions is a list someone can scan. Add more with
+		// the "Question & answer" snippet above — the markup is the same,
+		// so a hand-added item and one from this preset look alike.
+		//
+		// The width key is the default anyway, but a preset needs at
+		// least one setting or the API's omitempty would demote it to a
+		// plain snippet.
 		{Name: "FAQ", Group: "Basic", Settings: map[string]string{"width": "normal"},
 			HTML: `<div class="cms-snippet">
 <h2>Frequently asked questions</h2>
-<h3>The first question people ask?</h3>
-<p>A short, direct answer.</p>
-<h3>The second question people ask?</h3>
-<p>Another short, direct answer.</p>
-<h3>The third question people ask?</h3>
-<p>One more short, direct answer.</p>
+` + faqItemHTML + `
+` + faqItemHTML + `
+` + faqItemHTML + `
 </div>`},
 		// Movie sections: a full-width player, and both split layouts.
 		// The slot picks up a library video or a YouTube/Vimeo embed when

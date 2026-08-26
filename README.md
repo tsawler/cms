@@ -772,6 +772,51 @@ safelist: [
 Deleting a snippet never changes pages that already inserted it — inserted
 snippets are ordinary page content.
 
+### Questions and answers
+
+Two of the stock snippets build collapsible questions: the **FAQ**
+section preset, which starts with a heading and three of them, and
+**Question & answer**, which inserts one more. They are the same markup,
+so an accordion grows by putting the caret after the last answer and
+inserting another — and a hand-added question is indistinguishable from
+the three the section came with.
+
+Each one is a `<details>`:
+
+```html
+<details class="cms-faq">
+  <summary>A question people ask?</summary>
+  <div class="cms-faq-body"><p>A short, direct answer.</p></div>
+</details>
+```
+
+No JavaScript is involved, which is the reason for the element rather
+than a scripted panel: it opens and closes on its own, it is
+keyboard-operable and announced as a disclosure without any ARIA, the
+browser's in-page search finds text inside a closed one, and it prints
+open.
+
+`{{cmsHead}}` ships the functional minimum — a pointer cursor, a rotating
+caret in place of the browser's three different default markers, a
+keyboard focus ring, and a reset for the top margin Typography would
+otherwise put between a question and its answer. Everything else is
+yours, addressed through the two classes:
+
+```css
+.cms-faq          { border-bottom: 1px solid #e2e8f0; }
+.cms-faq > summary{ padding: .75rem 0; font-weight: 600; }
+.cms-faq-body     { padding-bottom: 1rem; }
+```
+
+Every injected rule is wrapped in `:where()`, so it carries no
+specificity and a plain class selector of yours wins — which matters
+because `{{cmsHead}}` is emitted *after* your stylesheet, and an
+unwrapped rule would otherwise beat an equally specific one of yours on
+source order alone.
+
+Nothing here needs safelisting: the classes are the CMS's own and its
+stylesheet defines them.
+
 ## Custom code blocks
 
 Some blocks are not content: an availability calendar, a pricing
