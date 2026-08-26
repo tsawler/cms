@@ -66,6 +66,36 @@ body.cms-editing > [data-cms-notice]:first-child{margin-top:76px;transition:marg
 .cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
 .cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
 .cms-editing [data-cms-region]:empty::before{content:'Click to edit…';opacity:.4}
+/* Every answer is showing while editing, whether its question is open or
+   not.
+
+   Without this they are unreachable. A <summary> inside a contenteditable
+   does not toggle when clicked — the click places the caret instead, which
+   is the right behaviour for editing the question and leaves the answer
+   permanently hidden. Opening each one to write in it would also mean
+   deciding what to do with the `open` attribute at save time, since an
+   accordion that ships expanded is not an accordion.
+
+   So nothing is written to the document: the answers are revealed for as
+   long as edit mode lasts and hidden again the moment it ends, and what
+   gets saved is exactly what was there. !important because the rule it
+   overrides is the user agent's own.
+
+   Two rules, because browsers hide a closed disclosure two different
+   ways. The older one sets display:none on the content, which the first
+   rule overrides. Current Chrome instead gives it content-visibility:
+   hidden, which reserves the space and skips the painting — so the first
+   rule alone produces a gap under every question with nothing in it,
+   which is exactly what it looked like. ::details-content is the handle
+   for that, and is what actually reveals the words.
+
+   Dimmed slightly, and the caret left pointing right, so a question still
+   reads as closed while its answer is showing: otherwise every question
+   looks open and the marker says nothing about what a visitor will see. */
+.cms-editing .cms-faq:not([open]) > *:not(summary){display:block !important;opacity:.72}
+.cms-editing .cms-faq:not([open])::details-content{content-visibility:visible;block-size:auto}
+.cms-editing .cms-faq:not([open]) > summary::before{transform:rotate(-45deg)}
+
 /* The page title reads as editable the same way a text region does. It
    is inline inside the host's heading, so the outline hugs the words. */
 .cms-editing [data-cms-title]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
