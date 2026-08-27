@@ -3805,6 +3805,11 @@
       });
     });
   }
+  function pasteHostSnippet(ed) {
+    var block = ed.dom.getParent(ed.selection.getNode(), ed.dom.isBlock);
+    if (!block || !ed.dom.hasClass(block, "cms-snippet")) return null;
+    return block.parentNode === ed.getBody() ? block : null;
+  }
   function initInlineEditor(el, onDirty, register) {
     var light = state.editorTheme === "light";
     var opts = {
@@ -3882,6 +3887,14 @@
         ed.on("focus", function() {
           state.lastEditor = ed;
           state.lastEditorDirty = onDirty;
+        });
+        ed.on("PastePostProcess", function(e) {
+          if (!pasteHostSnippet(ed)) return;
+          for (var n = e.node.firstChild; n; n = n.nextSibling) {
+            if (n.nodeType === 1 && ed.dom.isBlock(n)) {
+              ed.dom.addClass(n, "cms-snippet");
+            }
+          }
         });
         ed.on("PreInit", function() {
           var getCssText = ed.formatter.getCssText;
