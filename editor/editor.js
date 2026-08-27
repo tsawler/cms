@@ -1156,6 +1156,312 @@
     });
   }
 
+  // ../src/clone.js
+  var MARKS = ["cms-col-active"];
+  function copyOf(el) {
+    var clone = el.cloneNode(true);
+    var all = [clone];
+    clone.querySelectorAll("*").forEach(function(n) {
+      all.push(n);
+    });
+    all.forEach(function(n) {
+      for (var i = n.attributes.length - 1; i >= 0; i--) {
+        if (n.attributes[i].name.indexOf("data-mce-") === 0) {
+          n.removeAttribute(n.attributes[i].name);
+        }
+      }
+      MARKS.forEach(function(m) {
+        n.classList.remove(m);
+      });
+      if (n.hasAttribute("class") && !n.getAttribute("class")) {
+        n.removeAttribute("class");
+      }
+    });
+    return clone;
+  }
+
+  // ../src/columns.js
+  var TRACKS = 12;
+  var EVEN_MAX = 4;
+  var MAX_COLS = 6;
+  var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
+  var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
+  var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
+  function readAll(el, re) {
+    var out = [];
+    var cls = el && el.getAttribute ? el.getAttribute("class") || "" : "";
+    var m;
+    re.lastIndex = 0;
+    while ((m = re.exec(cls)) !== null) {
+      out.push({ prefix: m[1], count: parseInt(m[2], 10) });
+      re.lastIndex = m.index + m[0].length - 1;
+    }
+    return out;
+  }
+  function widest(el, re) {
+    var all = readAll(el, re);
+    if (!all.length) return null;
+    return all.reduce(function(a, b) {
+      return b.count > a.count ? b : a;
+    });
+  }
+  function setTracks(el, n) {
+    var cur = widest(el, GRID_RE);
+    if (!cur) return;
+    var target = cur.prefix + "grid-cols-" + cur.count;
+    var next = cur.prefix + "grid-cols-" + n;
+    el.className = el.className.split(/\s+/).map(function(c) {
+      return c === target ? next : c;
+    }).join(" ");
+  }
+  function setSpan(cell, prefix, n) {
+    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function(c) {
+      return c !== "" && !SPAN_ONE.test(c);
+    });
+    if (n) kept.push(prefix + "col-span-" + n);
+    var cls = kept.join(" ");
+    if (cls) cell.setAttribute("class", cls);
+    else cell.removeAttribute("class");
+  }
+  function evenSpans(k) {
+    var base = Math.floor(TRACKS / k);
+    var rem = TRACKS % k;
+    var out = [];
+    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
+    return out;
+  }
+  function cellsOf(row) {
+    return Array.prototype.slice.call(row.children).filter(function(el) {
+      return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
+    });
+  }
+  function rowIn(block) {
+    if (!block) return null;
+    if (widest(block, GRID_RE)) return block;
+    var inner = block.querySelectorAll('[class*="grid-cols-"]');
+    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
+  }
+  function cellFor(el) {
+    var block = el.parentElement && el.parentElement.closest(".cms-snippet");
+    var row = block && rowIn(block);
+    if (!row) return null;
+    var cells = cellsOf(row);
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] !== el && cells[i].contains(el)) return cells[i];
+    }
+    return null;
+  }
+  var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
+  function canSplit(block) {
+    if (!block || !hasContent(block)) return false;
+    return !block.querySelector(SPLIT_HOSTILE);
+  }
+  function hasContent(block) {
+    if (!block) return false;
+    if ((block.textContent || "").trim()) return true;
+    return !!block.querySelector("img, video, iframe,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
+  }
+  function canPair(block) {
+    if (!block || block.matches("[data-cms-code]")) return false;
+    return hasContent(block);
+  }
+  function columnTarget(block, target) {
+    var row = rowIn(block);
+    if (!row) {
+      var split = canSplit(block);
+      var pair = canPair(block);
+      if (!split && !pair) return null;
+      return { mode: "split", block, canSplit: split, canPair: pair };
+    }
+    var cells = cellsOf(row);
+    if (!cells.length) return null;
+    var cell = null;
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] === target || cells[i].contains(target)) {
+        cell = cells[i];
+        break;
+      }
+    }
+    if (!cell) return null;
+    var at = cells.indexOf(cell);
+    var tracks = widest(row, GRID_RE).count;
+    return {
+      mode: "cell",
+      row,
+      cell,
+      // Every cell, not just the one clicked: the resize handles are
+      // drawn on the boundaries between all of them.
+      cells,
+      index: at,
+      count: cells.length,
+      canAdd: cells.length < MAX_COLS,
+      // Resizing needs the spanned form, and reaching it exactly needs
+      // a track count twelve divides by.
+      canResize: cells.length > 1 && TRACKS % tracks === 0,
+      canMoveBack: at > 0,
+      canMoveOn: at < cells.length - 1
+    };
+  }
+  function spanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var factor = TRACKS / cur.count;
+    if (factor !== Math.floor(factor)) return null;
+    var cells = cellsOf(row);
+    var spans = cells.map(function(c) {
+      var s = widest(c, SPAN_RE);
+      return (s ? s.count : 1) * factor;
+    });
+    var total = spans.reduce(function(a, b) {
+      return a + b;
+    }, 0);
+    if (total !== TRACKS) spans = evenSpans(cells.length);
+    setTracks(row, TRACKS);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
+    return spans;
+  }
+  function fixLayout(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return;
+    var cells = cellsOf(row);
+    if (!cells.length) return;
+    if (cells.length <= EVEN_MAX) {
+      setTracks(row, cells.length);
+      cells.forEach(function(c) {
+        setSpan(c, cur.prefix, 0);
+      });
+      return;
+    }
+    setTracks(row, TRACKS);
+    var spans = evenSpans(cells.length);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
+  }
+  function blankText(cell) {
+    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var n;
+    while (n = walker.nextNode()) {
+      if ((n.nodeValue || "").trim() !== "") nodes.push(n);
+    }
+    nodes.forEach(function(node) {
+      var host2 = node.parentElement;
+      var heading = host2 && /^h[1-6]$/i.test(host2.tagName);
+      node.nodeValue = heading ? "Heading" : "Write something here.";
+    });
+  }
+  function cleanClone(cell) {
+    var clone = copyOf(cell);
+    blankText(clone);
+    return clone;
+  }
+  function addColumn(info) {
+    var clone = cleanClone(info.cell);
+    info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+  }
+  function duplicateColumn(info, dir) {
+    var clone = copyOf(info.cell);
+    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+  }
+  function confirmRemove(info) {
+    var cell = info.cell;
+    var used = (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
+    if (!used) return Promise.resolve(true);
+    return cmsConfirm(
+      info.count === 1 ? "Deleting the last column deletes this block. Continue?" : "Removing this column deletes its content. Continue?",
+      "Remove",
+      true
+    );
+  }
+  function removeColumn(info, block) {
+    info.cell.remove();
+    if (cellsOf(info.row).length) {
+      fixLayout(info.row);
+      return block;
+    }
+    if (info.row === block) {
+      block.remove();
+      return null;
+    }
+    info.row.remove();
+    return block;
+  }
+  function resizeColumn(info, delta) {
+    var spans = spanned(info.row);
+    if (!spans) return;
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var other = at < cells.length - 1 ? at + 1 : at - 1;
+    if (other < 0) return;
+    var mine = spans[at] + delta;
+    var theirs = spans[other] - delta;
+    if (mine < 1 || theirs < 1) return;
+    var prefix = widest(info.row, GRID_RE).prefix;
+    setSpan(cells[at], prefix, mine);
+    setSpan(cells[other], prefix, theirs);
+  }
+  function toSpanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var spans = spanned(row);
+    if (!spans) return null;
+    return { cells: cellsOf(row), spans, prefix: cur.prefix };
+  }
+  function setPair(prefix, a, an, b, bn) {
+    setSpan(a, prefix, an);
+    setSpan(b, prefix, bn);
+  }
+  function moveColumn(info, dir) {
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var to = at + dir;
+    if (to < 0 || to >= cells.length) return;
+    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
+    else info.row.insertBefore(cells[to], info.cell);
+  }
+  function splitIntoColumns(block) {
+    var row = block;
+    if (block.tagName === "P") {
+      row = document.createElement("div");
+      row.className = block.className;
+      block.parentNode.insertBefore(row, block);
+      block.classList.remove("cms-snippet");
+      if (!block.getAttribute("class")) block.removeAttribute("class");
+    }
+    var first = document.createElement("div");
+    while (row.firstChild) first.appendChild(row.firstChild);
+    if (row !== block) first.appendChild(block);
+    row.appendChild(first);
+    var second = document.createElement("div");
+    var p = document.createElement("p");
+    p.textContent = "Write something here.";
+    second.appendChild(p);
+    row.appendChild(second);
+    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
+    return row;
+  }
+  function duplicateBeside(block, dir) {
+    var row = document.createElement("div");
+    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
+    block.parentNode.insertBefore(row, block);
+    block.classList.remove("cms-snippet");
+    if (!block.getAttribute("class")) block.removeAttribute("class");
+    var first = document.createElement("div");
+    first.appendChild(block);
+    row.appendChild(first);
+    var copy = copyOf(first);
+    if (dir < 0) row.insertBefore(copy, first);
+    else row.appendChild(copy);
+    return { row, copy };
+  }
+
   // ../src/snippets.js
   var snippetsLoaded = false;
   var hostHeadCache = null;
@@ -1399,7 +1705,13 @@
       if (!nested.length) return;
       nested.forEach(function(inner) {
         var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
-        if (anc) anc.insertAdjacentElement("afterend", inner);
+        if (!anc) return;
+        if (cellFor(inner)) {
+          inner.classList.remove("cms-snippet");
+          if (!inner.getAttribute("class")) inner.removeAttribute("class");
+          return;
+        }
+        anc.insertAdjacentElement("afterend", inner);
       });
     }
   }
@@ -1715,302 +2027,6 @@
       e.stopPropagation();
       chooseMapInto(slot, "Paste a Google Maps link, its embed code, or type an address");
     }, true);
-  }
-
-  // ../src/clone.js
-  var MARKS = ["cms-col-active"];
-  function copyOf(el) {
-    var clone = el.cloneNode(true);
-    var all = [clone];
-    clone.querySelectorAll("*").forEach(function(n) {
-      all.push(n);
-    });
-    all.forEach(function(n) {
-      for (var i = n.attributes.length - 1; i >= 0; i--) {
-        if (n.attributes[i].name.indexOf("data-mce-") === 0) {
-          n.removeAttribute(n.attributes[i].name);
-        }
-      }
-      MARKS.forEach(function(m) {
-        n.classList.remove(m);
-      });
-      if (n.hasAttribute("class") && !n.getAttribute("class")) {
-        n.removeAttribute("class");
-      }
-    });
-    return clone;
-  }
-
-  // ../src/columns.js
-  var TRACKS = 12;
-  var EVEN_MAX = 4;
-  var MAX_COLS = 6;
-  var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
-  var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
-  var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
-  function readAll(el, re) {
-    var out = [];
-    var cls = el && el.getAttribute ? el.getAttribute("class") || "" : "";
-    var m;
-    re.lastIndex = 0;
-    while ((m = re.exec(cls)) !== null) {
-      out.push({ prefix: m[1], count: parseInt(m[2], 10) });
-      re.lastIndex = m.index + m[0].length - 1;
-    }
-    return out;
-  }
-  function widest(el, re) {
-    var all = readAll(el, re);
-    if (!all.length) return null;
-    return all.reduce(function(a, b) {
-      return b.count > a.count ? b : a;
-    });
-  }
-  function setTracks(el, n) {
-    var cur = widest(el, GRID_RE);
-    if (!cur) return;
-    var target = cur.prefix + "grid-cols-" + cur.count;
-    var next = cur.prefix + "grid-cols-" + n;
-    el.className = el.className.split(/\s+/).map(function(c) {
-      return c === target ? next : c;
-    }).join(" ");
-  }
-  function setSpan(cell, prefix, n) {
-    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function(c) {
-      return c !== "" && !SPAN_ONE.test(c);
-    });
-    if (n) kept.push(prefix + "col-span-" + n);
-    var cls = kept.join(" ");
-    if (cls) cell.setAttribute("class", cls);
-    else cell.removeAttribute("class");
-  }
-  function evenSpans(k) {
-    var base = Math.floor(TRACKS / k);
-    var rem = TRACKS % k;
-    var out = [];
-    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
-    return out;
-  }
-  function cellsOf(row) {
-    return Array.prototype.slice.call(row.children).filter(function(el) {
-      return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
-    });
-  }
-  function rowIn(block) {
-    if (!block) return null;
-    if (widest(block, GRID_RE)) return block;
-    var inner = block.querySelectorAll('[class*="grid-cols-"]');
-    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
-  }
-  var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
-  function canSplit(block) {
-    if (!block || !hasContent(block)) return false;
-    return !block.querySelector(SPLIT_HOSTILE);
-  }
-  function hasContent(block) {
-    if (!block) return false;
-    if ((block.textContent || "").trim()) return true;
-    return !!block.querySelector("img, video, iframe,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
-  }
-  function canPair(block) {
-    if (!block || block.matches("[data-cms-code]")) return false;
-    return hasContent(block);
-  }
-  function columnTarget(block, target) {
-    var row = rowIn(block);
-    if (!row) {
-      var split = canSplit(block);
-      var pair = canPair(block);
-      if (!split && !pair) return null;
-      return { mode: "split", block, canSplit: split, canPair: pair };
-    }
-    var cells = cellsOf(row);
-    if (!cells.length) return null;
-    var cell = null;
-    for (var i = 0; i < cells.length; i++) {
-      if (cells[i] === target || cells[i].contains(target)) {
-        cell = cells[i];
-        break;
-      }
-    }
-    if (!cell) return null;
-    var at = cells.indexOf(cell);
-    var tracks = widest(row, GRID_RE).count;
-    return {
-      mode: "cell",
-      row,
-      cell,
-      // Every cell, not just the one clicked: the resize handles are
-      // drawn on the boundaries between all of them.
-      cells,
-      index: at,
-      count: cells.length,
-      canAdd: cells.length < MAX_COLS,
-      // Resizing needs the spanned form, and reaching it exactly needs
-      // a track count twelve divides by.
-      canResize: cells.length > 1 && TRACKS % tracks === 0,
-      canMoveBack: at > 0,
-      canMoveOn: at < cells.length - 1
-    };
-  }
-  function spanned(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return null;
-    var factor = TRACKS / cur.count;
-    if (factor !== Math.floor(factor)) return null;
-    var cells = cellsOf(row);
-    var spans = cells.map(function(c) {
-      var s = widest(c, SPAN_RE);
-      return (s ? s.count : 1) * factor;
-    });
-    var total = spans.reduce(function(a, b) {
-      return a + b;
-    }, 0);
-    if (total !== TRACKS) spans = evenSpans(cells.length);
-    setTracks(row, TRACKS);
-    cells.forEach(function(c, i) {
-      setSpan(c, cur.prefix, spans[i]);
-    });
-    return spans;
-  }
-  function fixLayout(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return;
-    var cells = cellsOf(row);
-    if (!cells.length) return;
-    if (cells.length <= EVEN_MAX) {
-      setTracks(row, cells.length);
-      cells.forEach(function(c) {
-        setSpan(c, cur.prefix, 0);
-      });
-      return;
-    }
-    setTracks(row, TRACKS);
-    var spans = evenSpans(cells.length);
-    cells.forEach(function(c, i) {
-      setSpan(c, cur.prefix, spans[i]);
-    });
-  }
-  function blankText(cell) {
-    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
-    var nodes = [];
-    var n;
-    while (n = walker.nextNode()) {
-      if ((n.nodeValue || "").trim() !== "") nodes.push(n);
-    }
-    nodes.forEach(function(node) {
-      var host2 = node.parentElement;
-      var heading = host2 && /^h[1-6]$/i.test(host2.tagName);
-      node.nodeValue = heading ? "Heading" : "Write something here.";
-    });
-  }
-  function cleanClone(cell) {
-    var clone = copyOf(cell);
-    blankText(clone);
-    return clone;
-  }
-  function addColumn(info) {
-    var clone = cleanClone(info.cell);
-    info.row.insertBefore(clone, info.cell.nextSibling);
-    fixLayout(info.row);
-    return clone;
-  }
-  function duplicateColumn(info, dir) {
-    var clone = copyOf(info.cell);
-    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
-    fixLayout(info.row);
-    return clone;
-  }
-  function confirmRemove(info) {
-    var cell = info.cell;
-    var used = (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
-    if (!used) return Promise.resolve(true);
-    return cmsConfirm(
-      info.count === 1 ? "Deleting the last column deletes this block. Continue?" : "Removing this column deletes its content. Continue?",
-      "Remove",
-      true
-    );
-  }
-  function removeColumn(info, block) {
-    info.cell.remove();
-    if (cellsOf(info.row).length) {
-      fixLayout(info.row);
-      return block;
-    }
-    if (info.row === block) {
-      block.remove();
-      return null;
-    }
-    info.row.remove();
-    return block;
-  }
-  function resizeColumn(info, delta) {
-    var spans = spanned(info.row);
-    if (!spans) return;
-    var cells = cellsOf(info.row);
-    var at = cells.indexOf(info.cell);
-    var other = at < cells.length - 1 ? at + 1 : at - 1;
-    if (other < 0) return;
-    var mine = spans[at] + delta;
-    var theirs = spans[other] - delta;
-    if (mine < 1 || theirs < 1) return;
-    var prefix = widest(info.row, GRID_RE).prefix;
-    setSpan(cells[at], prefix, mine);
-    setSpan(cells[other], prefix, theirs);
-  }
-  function toSpanned(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return null;
-    var spans = spanned(row);
-    if (!spans) return null;
-    return { cells: cellsOf(row), spans, prefix: cur.prefix };
-  }
-  function setPair(prefix, a, an, b, bn) {
-    setSpan(a, prefix, an);
-    setSpan(b, prefix, bn);
-  }
-  function moveColumn(info, dir) {
-    var cells = cellsOf(info.row);
-    var at = cells.indexOf(info.cell);
-    var to = at + dir;
-    if (to < 0 || to >= cells.length) return;
-    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
-    else info.row.insertBefore(cells[to], info.cell);
-  }
-  function splitIntoColumns(block) {
-    var row = block;
-    if (block.tagName === "P") {
-      row = document.createElement("div");
-      row.className = block.className;
-      block.parentNode.insertBefore(row, block);
-      block.classList.remove("cms-snippet");
-      if (!block.getAttribute("class")) block.removeAttribute("class");
-    }
-    var first = document.createElement("div");
-    while (row.firstChild) first.appendChild(row.firstChild);
-    if (row !== block) first.appendChild(block);
-    row.appendChild(first);
-    var second = document.createElement("div");
-    var p = document.createElement("p");
-    p.textContent = "Write something here.";
-    second.appendChild(p);
-    row.appendChild(second);
-    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
-    return row;
-  }
-  function duplicateBeside(block, dir) {
-    var row = document.createElement("div");
-    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
-    block.parentNode.insertBefore(row, block);
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
-    var first = document.createElement("div");
-    first.appendChild(block);
-    row.appendChild(first);
-    var copy = copyOf(first);
-    if (dir < 0) row.insertBefore(copy, first);
-    else row.appendChild(copy);
-    return { row, copy };
   }
 
   // ../src/faq.js
