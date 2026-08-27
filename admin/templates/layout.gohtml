@@ -12,6 +12,12 @@
            allows no inline styles. It states no colors of its own, so it
            picks up the admin's ink from currentColor. */}}
     <link rel="stylesheet" href="{{.AdminPath}}{{.PagerCSSPath}}">
+    {{- /* The host's own, last, so its rules win at equal specificity:
+           a host that registers admin sections has to be able to style
+           the chrome they appear in — a nav count it wants read as a
+           badge, say — and the CSP forbids doing that inline. */}}
+    {{range .Stylesheets}}<link rel="stylesheet" href="{{.}}">
+    {{end -}}
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
     {{if .PageScript}}<script src="{{.AdminPath}}/static/{{.PageScript}}" defer></script>{{end}}
 </head>

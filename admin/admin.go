@@ -72,6 +72,10 @@ type Deps struct {
 	DefaultLocale  string
 	Locales        []string // all configured locales, [0] = DefaultLocale
 
+	// Stylesheets are extra stylesheet URLs the layout links on every
+	// admin page, after the admin's own. See Config.AdminStylesheets.
+	Stylesheets []string
+
 	// Version is the CMS release the layout stamps in the footer of every
 	// admin page (the host passes cms.Version()). Empty hides the footer,
 	// which is what tests and direct package use get.
@@ -448,6 +452,10 @@ type templateData struct {
 	// browsers rather than documents.
 	PageWide bool
 
+	// Stylesheets are the host's extra admin stylesheets, linked after
+	// the admin's own so their rules win at equal specificity.
+	Stylesheets []string
+
 	// PagerCSSPath is where the layout links the shared pagination
 	// stylesheet from, relative to AdminPath. A field rather than a
 	// template constant because only Go knows the route.
@@ -678,6 +686,7 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 		Locales:       s.deps.Locales,
 		EditLocale:    s.deps.DefaultLocale,
 		PagerCSSPath:  pagerCSSPath,
+		Stylesheets:   s.deps.Stylesheets,
 		Version:       s.deps.Version,
 	}
 	if s.deps.SiteBaseURL != nil {

@@ -2133,6 +2133,24 @@ AdminSections: []cms.AdminSection{
 sections; call `admin.ValidateSections` yourself to fail even earlier
 (e.g. in a test).
 
+**Styling the chrome your sections appear in.** A section's own
+stylesheet is linked from its own pages, so it cannot reach the sidebar,
+which renders on every admin page — and the admin's CSP forbids an
+inline `<style>`. `Config.AdminStylesheets` links a host stylesheet on
+every admin page, after the admin's own so its rules win at equal
+specificity:
+
+```go
+AdminStylesheets: []string{"/admin/x/registrations/adminassets/nav.css"},
+```
+
+Serve the file from a section's own asset route. The usual reason is a
+`NavCount` that means something other than "how many": every built-in
+count is a total, so a count of what is *outstanding* reads wrong as a
+bare number and wants a badge. Nav links carry no per-section class, so
+target them by href — `.cms-nav a[href$="/x/registrations/"]
+.cms-nav-count`.
+
 Inside a handler, four helpers from `github.com/tsawler/cms/admin`
 integrate with the admin UI:
 
