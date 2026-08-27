@@ -217,6 +217,10 @@ export function initShell() {
         '<button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + "</button>" +
         '<button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + "</button>" +
         '<button id="col-add" title="Add a column">' + ICONS.plus + "</button>" +
+        // The same gear the block chrome carries, pointed at one cell:
+        // a column is a box like any other, and giving this one a
+        // background should not mean learning a second control.
+        '<button id="col-set" title="Column settings">' + ICONS.gear + "</button>" +
         '<button id="col-del" title="Remove this column">' + ICONS.trash + "</button>" +
         "</div>" +
         // The question tool, anchored to the disclosure that was

@@ -1359,6 +1359,25 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// An editor's copy of a page must never be cached, and the editor
+	// script is why. Its URL carries a digest of the bundle so a new
+	// build is a new address (see editor.Version) — but that address
+	// lives in this HTML, and with no Cache-Control here a browser is
+	// free to cache the page heuristically. It then goes on naming the
+	// previous build's URL, which was served as immutable back when it
+	// was current, so the old script comes off the browser's own shelf
+	// and is never requested again. The symptom is an editor that does
+	// not match the code, surviving a rebuild, a restart, and every
+	// reload that does not bypass the cache — which is exactly the trap
+	// the digest was meant to close.
+	//
+	// The response is per-editor anyway: it carries a CSRF token, the
+	// draft rather than the published content, and whatever this user's
+	// permissions let them see. Vary: Cookie asks an intermediary to
+	// keep those apart; no-store settles it.
+	if edit != nil {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if err := c.renderer.Render(w, render.Input{
 		Page:      page,
 		Blocks:    blocks,
