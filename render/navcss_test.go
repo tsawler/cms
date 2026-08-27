@@ -21,20 +21,60 @@ import (
 // an element name unless it is wrapped in :where(), which zeroes the
 // specificity while still outranking the user agent.
 func TestNavCSSResetsDoNotOutrankHostHooks(t *testing.T) {
-	// Selectors like `button.cms-nav-toggle`, but not `.cms-nav-toggle`
-	// and not one already inside :where(...).
-	qualified := regexp.MustCompile(`(^|[,}])\s*([a-z]+)(\.cms-[a-z-]+)`)
+	// Both stylesheets that emit hooks the host is expected to style, not
+	// just the nav's: the trap belongs to the arrangement rather than to
+	// any one constant, and a new constant added without this in mind is
+	// the likeliest way back into the bug.
+	//
+	// btnCSS is deliberately absent. Its `a.cms-btn` is specific on
+	// purpose — it exists to outrank Tailwind Typography's `.prose a`
+	// underline, which a zero-specificity rule would lose to, putting the
+	// underline back under every button in prose. That rule is aimed at a
+	// plugin rather than at the host, so it is not the same thing wearing
+	// the same shape. imgShadowCSS is likewise a set of presets the gear
+	// applies, not a hook.
+	for name, css := range map[string]string{
+		"navCSS": navCSS, "faqCSS": faqCSS,
+	} {
+		// Selectors like `button.cms-nav-toggle`, but not `.cms-nav-toggle`
+		// and not one already inside :where(...).
+		qualified := regexp.MustCompile(`(^|[,}])\s*([a-z]+)(\.cms-[a-z-]+)`)
 
-	for _, m := range qualified.FindAllStringSubmatch(navCSS, -1) {
-		offender := m[2] + m[3]
-		// Find where it sits and check it is not inside a :where().
-		idx := strings.Index(navCSS, offender)
-		prefix := navCSS[max(0, idx-8):idx]
-		if strings.HasSuffix(prefix, ":where(") {
+		for _, m := range qualified.FindAllStringSubmatch(css, -1) {
+			offender := m[2] + m[3]
+			// Find where it sits and check it is not inside a :where().
+			idx := strings.Index(css, offender)
+			prefix := css[max(0, idx-8):idx]
+			if strings.HasSuffix(prefix, ":where(") {
+				continue
+			}
+			t.Errorf("%s has %q, which out-specifies the host's %q hook; "+
+				"wrap it in :where() so a site's own rule wins", name, offender, m[3])
+		}
+	}
+}
+
+// TestFAQCSSLeavesEveryHookToTheHost is the same guarantee for the FAQ,
+// stated as the rule rather than as a scan for one shape of mistake.
+//
+// {{cmsHead}} emits the module's <style> after the host's stylesheet, so
+// an unwrapped rule wins on order alone however specific the host's is.
+// Zeroing every selector with :where() is what makes "the host styles it"
+// true rather than aspirational.
+func TestFAQCSSLeavesEveryHookToTheHost(t *testing.T) {
+	for _, sel := range strings.Split(faqCSS, "}") {
+		i := strings.Index(sel, "{")
+		if i < 0 {
 			continue
 		}
-		t.Errorf("navCSS has %q, which out-specifies the host's %q hook; "+
-			"wrap it in :where() so a site's own rule wins", offender, m[3])
+		s := strings.TrimSpace(sel[:i])
+		if s == "" {
+			continue
+		}
+		if !strings.HasPrefix(s, ":where(") {
+			t.Errorf("faqCSS selector %q is not wrapped in :where(), so it "+
+				"beats the host's own rule on source order", s)
+		}
 	}
 }
 

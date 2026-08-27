@@ -2065,6 +2065,40 @@ const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 
 	// horizontal centering.
 	`figure>a>img:not(.cms-keep-margins){margin-top:0;margin-bottom:0}`
 
+// faqCSS is the functional minimum behind the FAQ snippets: enough that a
+// question reads as something to click and an open one is distinguishable
+// from a closed one, and nothing more. Colour, type and spacing are the
+// host's, the way the nav's are.
+//
+// Three things, none of them decorative:
+//
+//   - The summary gets a pointer and a focus ring that appears on
+//     keyboard focus only, so the control is obviously operable by mouse
+//     and obviously reachable by keyboard.
+//   - The marker is replaced by a rotating caret. Browsers disagree about
+//     the default disclosure triangle — Safari draws its own through
+//     ::-webkit-details-marker, everyone else through ::marker — so a
+//     host that wants a different one would otherwise be fighting three
+//     defaults instead of styling one class.
+//   - The answer's first child loses its top margin. Typography puts one
+//     on the first child of anything, which inside a disclosure starts
+//     the answer a line and a half below the question it belongs to.
+//
+// Every selector is wrapped in :where(), which zeroes its specificity.
+// {{cmsHead}} emits this after the host's own stylesheet, so an unwrapped
+// rule here would beat the host's equally-specific one purely by being
+// later — the same trap navCSS documents for element-qualified classes,
+// arriving from the other direction.
+const faqCSS = `:where(.cms-faq>summary){cursor:pointer;list-style:none;display:flex;align-items:center;gap:.5em}` +
+	`:where(.cms-faq>summary)::-webkit-details-marker{display:none}` +
+	`:where(.cms-faq>summary)::marker{content:""}` +
+	`:where(.cms-faq>summary)::before{content:"";flex:none;width:.5em;height:.5em;` +
+	`border-right:2px solid currentColor;border-bottom:2px solid currentColor;` +
+	`transform:rotate(-45deg);transition:transform .15s ease}` +
+	`:where(.cms-faq[open]>summary)::before{transform:rotate(45deg)}` +
+	`:where(.cms-faq>summary):focus-visible{outline:2px solid currentColor;outline-offset:2px}` +
+	`:where(.cms-faq>.cms-faq-body>:first-child){margin-top:0}`
+
 // localeLinks builds {{cmsLocales}}: the current page's URL in every
 // configured locale. Nil unless more than one locale is configured.
 func localeLinks(in Input) []LocaleLink {
@@ -2109,7 +2143,7 @@ func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template
 	if m := strings.TrimSpace(in.Site.SiteMeta); m != "" {
 		sb.WriteString(m + "\n")
 	}
-	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + PagerCSS + "</style>\n")
+	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + faqCSS + PagerCSS + "</style>\n")
 	// The notice bar's styling, only where a bar can appear: on a page
 	// actually carrying one, and on any edit render — an editor can
 	// switch the bar on from the settings dialog, and it has to look

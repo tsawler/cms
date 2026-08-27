@@ -42,6 +42,12 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`padding: 40px; margin-top: 40px; margin-bottom: 40px; border-radius: 12px; color: #ffee99">` +
 		`<blockquote style="color: inherit">block</blockquote></div>` +
 		`<div data-cms-snip-spacing="huge" style="padding: 41vh; margin-top: -20px">bad block</div>` +
+		// Column-gear output: the same styles, on one cell of a row. A
+		// cell is a bare <div> carrying no class of its own, so nothing
+		// but the element name can be what admits it.
+		`<div class="cms-snippet grid gap-6 sm:grid-cols-2"><div>plain cell</div>` +
+		`<div data-cms-snip-spacing="normal" style="background-color: rgb(238, 242, 255); ` +
+		`padding: 24px; border-radius: 8px">tinted cell</div></div>` +
 		`<span style="background-color: #112233">not a block</span>` +
 		`<a href="/z" data-cms-btn-size="huge">bad size</a>` +
 		`<a href="https://example.com" target="_blank" rel="noopener">new tab</a>` +
@@ -95,6 +101,12 @@ func TestEditorHTMLPolicy(t *testing.T) {
 		`border-radius: 12px`,
 		`color: #ffee99`,
 		`<blockquote style="color: inherit">`,
+		// The column gear writes the same styles onto a cell, which has
+		// no class to distinguish it from any other div.
+		`background-color: rgb(238, 242, 255)`,
+		`padding: 24px`,
+		`border-radius: 8px`,
+		`data-cms-snip-spacing="normal"`,
 		`target="_blank"`,
 		// UGCPolicy appends nofollow to every link's rel.
 		`rel="noopener nofollow"`,

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"html/template"
@@ -328,5 +329,57 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 	}
 	if strings.Contains(html, "&lt;h1&gt;") {
 		t.Error("host body was HTML-escaped")
+	}
+}
+
+// A host that registers admin sections has to be able to style the
+// chrome they appear in: the nav count beside its own link, for one.
+// The admin's CSP forbids an inline <style>, and a stylesheet linked
+// from a section's own page does not reach the nav on every other page,
+// so the layout links the host's stylesheets on all of them.
+func TestHostStylesheetsAreLinkedOnEveryPage(t *testing.T) {
+	tmpl, ok := parseTemplates()["custom"]
+	if !ok {
+		t.Fatal("no custom template in the parsed set")
+	}
+
+	data := templateData{
+		AdminPath:    "/admin",
+		PagerCSSPath: pagerCSSPath,
+		Stylesheets: []string{
+			"/admin/x/registrations/adminassets/nav.css",
+			"/static/other.css",
+		},
+	}
+
+	var out bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&out, "layout", data); err != nil {
+		t.Fatalf("rendering: %v", err)
+	}
+	html := out.String()
+
+	for _, want := range []string{
+		`<link rel="stylesheet" href="/admin/x/registrations/adminassets/nav.css">`,
+		`<link rel="stylesheet" href="/static/other.css">`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the layout does not link %q", want)
+		}
+	}
+
+	// Last, so a host rule wins against the admin's own at equal
+	// specificity.
+	if strings.Index(html, "/admin/static/admin.css") > strings.Index(html, "/static/other.css") {
+		t.Error("the host's stylesheets are linked before the admin's own")
+	}
+
+	// A host that registers none gets the chrome it always had.
+	var bare bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&bare, "layout",
+		templateData{AdminPath: "/admin", PagerCSSPath: pagerCSSPath}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(bare.String(), "<link rel=\"stylesheet\""); n != 2 {
+		t.Errorf("a host with no stylesheets got %d links, want the admin's own 2", n)
 	}
 }

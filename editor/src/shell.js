@@ -217,7 +217,21 @@ export function initShell() {
         '<button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + "</button>" +
         '<button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + "</button>" +
         '<button id="col-add" title="Add a column">' + ICONS.plus + "</button>" +
+        // The same gear the block chrome carries, pointed at one cell:
+        // a column is a box like any other, and giving this one a
+        // background should not mean learning a second control.
+        '<button id="col-set" title="Column settings">' + ICONS.gear + "</button>" +
         '<button id="col-del" title="Remove this column">' + ICONS.trash + "</button>" +
+        "</div>" +
+        // The question tool, anchored to the disclosure that was
+        // clicked. Same four verbs as the column tool minus resizing,
+        // which a stacked list has no equivalent of — someone who has
+        // reshaped a row already knows how to reshape an accordion.
+        '<div class="btnui" id="faq-ui">' +
+        '<button id="faq-up" title="Move this question up">' + ICONS.chevU + "</button>" +
+        '<button id="faq-down" title="Move this question down">' + ICONS.chevD + "</button>" +
+        '<button id="faq-add" title="Add a question below this one">' + ICONS.plus + "</button>" +
+        '<button id="faq-del" title="Delete this question">' + ICONS.trash + "</button>" +
         "</div>" +
         '<div class="btnui" id="img-ui">' +
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +

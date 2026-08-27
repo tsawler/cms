@@ -1156,6 +1156,312 @@
     });
   }
 
+  // ../src/clone.js
+  var MARKS = ["cms-col-active"];
+  function copyOf(el) {
+    var clone = el.cloneNode(true);
+    var all = [clone];
+    clone.querySelectorAll("*").forEach(function(n) {
+      all.push(n);
+    });
+    all.forEach(function(n) {
+      for (var i = n.attributes.length - 1; i >= 0; i--) {
+        if (n.attributes[i].name.indexOf("data-mce-") === 0) {
+          n.removeAttribute(n.attributes[i].name);
+        }
+      }
+      MARKS.forEach(function(m) {
+        n.classList.remove(m);
+      });
+      if (n.hasAttribute("class") && !n.getAttribute("class")) {
+        n.removeAttribute("class");
+      }
+    });
+    return clone;
+  }
+
+  // ../src/columns.js
+  var TRACKS = 12;
+  var EVEN_MAX = 4;
+  var MAX_COLS = 6;
+  var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
+  var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
+  var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
+  function readAll(el, re) {
+    var out = [];
+    var cls = el && el.getAttribute ? el.getAttribute("class") || "" : "";
+    var m;
+    re.lastIndex = 0;
+    while ((m = re.exec(cls)) !== null) {
+      out.push({ prefix: m[1], count: parseInt(m[2], 10) });
+      re.lastIndex = m.index + m[0].length - 1;
+    }
+    return out;
+  }
+  function widest(el, re) {
+    var all = readAll(el, re);
+    if (!all.length) return null;
+    return all.reduce(function(a, b) {
+      return b.count > a.count ? b : a;
+    });
+  }
+  function setTracks(el, n) {
+    var cur = widest(el, GRID_RE);
+    if (!cur) return;
+    var target = cur.prefix + "grid-cols-" + cur.count;
+    var next = cur.prefix + "grid-cols-" + n;
+    el.className = el.className.split(/\s+/).map(function(c) {
+      return c === target ? next : c;
+    }).join(" ");
+  }
+  function setSpan(cell, prefix, n) {
+    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function(c) {
+      return c !== "" && !SPAN_ONE.test(c);
+    });
+    if (n) kept.push(prefix + "col-span-" + n);
+    var cls = kept.join(" ");
+    if (cls) cell.setAttribute("class", cls);
+    else cell.removeAttribute("class");
+  }
+  function evenSpans(k) {
+    var base = Math.floor(TRACKS / k);
+    var rem = TRACKS % k;
+    var out = [];
+    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
+    return out;
+  }
+  function cellsOf(row) {
+    return Array.prototype.slice.call(row.children).filter(function(el) {
+      return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
+    });
+  }
+  function rowIn(block) {
+    if (!block) return null;
+    if (widest(block, GRID_RE)) return block;
+    var inner = block.querySelectorAll('[class*="grid-cols-"]');
+    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
+  }
+  function cellFor(el) {
+    var block = el.parentElement && el.parentElement.closest(".cms-snippet");
+    var row = block && rowIn(block);
+    if (!row) return null;
+    var cells = cellsOf(row);
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] !== el && cells[i].contains(el)) return cells[i];
+    }
+    return null;
+  }
+  var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
+  function canSplit(block) {
+    if (!block || !hasContent(block)) return false;
+    return !block.querySelector(SPLIT_HOSTILE);
+  }
+  function hasContent(block) {
+    if (!block) return false;
+    if ((block.textContent || "").trim()) return true;
+    return !!block.querySelector("img, video, iframe,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
+  }
+  function canPair(block) {
+    if (!block || block.matches("[data-cms-code]")) return false;
+    return hasContent(block);
+  }
+  function columnTarget(block, target) {
+    var row = rowIn(block);
+    if (!row) {
+      var split = canSplit(block);
+      var pair = canPair(block);
+      if (!split && !pair) return null;
+      return { mode: "split", block, canSplit: split, canPair: pair };
+    }
+    var cells = cellsOf(row);
+    if (!cells.length) return null;
+    var cell = null;
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] === target || cells[i].contains(target)) {
+        cell = cells[i];
+        break;
+      }
+    }
+    if (!cell) return null;
+    var at = cells.indexOf(cell);
+    var tracks = widest(row, GRID_RE).count;
+    return {
+      mode: "cell",
+      row,
+      cell,
+      // Every cell, not just the one clicked: the resize handles are
+      // drawn on the boundaries between all of them.
+      cells,
+      index: at,
+      count: cells.length,
+      canAdd: cells.length < MAX_COLS,
+      // Resizing needs the spanned form, and reaching it exactly needs
+      // a track count twelve divides by.
+      canResize: cells.length > 1 && TRACKS % tracks === 0,
+      canMoveBack: at > 0,
+      canMoveOn: at < cells.length - 1
+    };
+  }
+  function spanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var factor = TRACKS / cur.count;
+    if (factor !== Math.floor(factor)) return null;
+    var cells = cellsOf(row);
+    var spans = cells.map(function(c) {
+      var s = widest(c, SPAN_RE);
+      return (s ? s.count : 1) * factor;
+    });
+    var total = spans.reduce(function(a, b) {
+      return a + b;
+    }, 0);
+    if (total !== TRACKS) spans = evenSpans(cells.length);
+    setTracks(row, TRACKS);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
+    return spans;
+  }
+  function fixLayout(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return;
+    var cells = cellsOf(row);
+    if (!cells.length) return;
+    if (cells.length <= EVEN_MAX) {
+      setTracks(row, cells.length);
+      cells.forEach(function(c) {
+        setSpan(c, cur.prefix, 0);
+      });
+      return;
+    }
+    setTracks(row, TRACKS);
+    var spans = evenSpans(cells.length);
+    cells.forEach(function(c, i) {
+      setSpan(c, cur.prefix, spans[i]);
+    });
+  }
+  function blankText(cell) {
+    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var n;
+    while (n = walker.nextNode()) {
+      if ((n.nodeValue || "").trim() !== "") nodes.push(n);
+    }
+    nodes.forEach(function(node) {
+      var host2 = node.parentElement;
+      var heading = host2 && /^h[1-6]$/i.test(host2.tagName);
+      node.nodeValue = heading ? "Heading" : "Write something here.";
+    });
+  }
+  function cleanClone(cell) {
+    var clone = copyOf(cell);
+    blankText(clone);
+    return clone;
+  }
+  function addColumn(info) {
+    var clone = cleanClone(info.cell);
+    info.row.insertBefore(clone, info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+  }
+  function duplicateColumn(info, dir) {
+    var clone = copyOf(info.cell);
+    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
+    fixLayout(info.row);
+    return clone;
+  }
+  function confirmRemove(info) {
+    var cell = info.cell;
+    var used = (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
+    if (!used) return Promise.resolve(true);
+    return cmsConfirm(
+      info.count === 1 ? "Deleting the last column deletes this block. Continue?" : "Removing this column deletes its content. Continue?",
+      "Remove",
+      true
+    );
+  }
+  function removeColumn(info, block) {
+    info.cell.remove();
+    if (cellsOf(info.row).length) {
+      fixLayout(info.row);
+      return block;
+    }
+    if (info.row === block) {
+      block.remove();
+      return null;
+    }
+    info.row.remove();
+    return block;
+  }
+  function resizeColumn(info, delta) {
+    var spans = spanned(info.row);
+    if (!spans) return;
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var other = at < cells.length - 1 ? at + 1 : at - 1;
+    if (other < 0) return;
+    var mine = spans[at] + delta;
+    var theirs = spans[other] - delta;
+    if (mine < 1 || theirs < 1) return;
+    var prefix = widest(info.row, GRID_RE).prefix;
+    setSpan(cells[at], prefix, mine);
+    setSpan(cells[other], prefix, theirs);
+  }
+  function toSpanned(row) {
+    var cur = widest(row, GRID_RE);
+    if (!cur) return null;
+    var spans = spanned(row);
+    if (!spans) return null;
+    return { cells: cellsOf(row), spans, prefix: cur.prefix };
+  }
+  function setPair(prefix, a, an, b, bn) {
+    setSpan(a, prefix, an);
+    setSpan(b, prefix, bn);
+  }
+  function moveColumn(info, dir) {
+    var cells = cellsOf(info.row);
+    var at = cells.indexOf(info.cell);
+    var to = at + dir;
+    if (to < 0 || to >= cells.length) return;
+    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
+    else info.row.insertBefore(cells[to], info.cell);
+  }
+  function splitIntoColumns(block) {
+    var row = block;
+    if (block.tagName === "P") {
+      row = document.createElement("div");
+      row.className = block.className;
+      block.parentNode.insertBefore(row, block);
+      block.classList.remove("cms-snippet");
+      if (!block.getAttribute("class")) block.removeAttribute("class");
+    }
+    var first = document.createElement("div");
+    while (row.firstChild) first.appendChild(row.firstChild);
+    if (row !== block) first.appendChild(block);
+    row.appendChild(first);
+    var second = document.createElement("div");
+    var p = document.createElement("p");
+    p.textContent = "Write something here.";
+    second.appendChild(p);
+    row.appendChild(second);
+    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
+    return row;
+  }
+  function duplicateBeside(block, dir) {
+    var row = document.createElement("div");
+    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
+    block.parentNode.insertBefore(row, block);
+    block.classList.remove("cms-snippet");
+    if (!block.getAttribute("class")) block.removeAttribute("class");
+    var first = document.createElement("div");
+    first.appendChild(block);
+    row.appendChild(first);
+    var copy = copyOf(first);
+    if (dir < 0) row.insertBefore(copy, first);
+    else row.appendChild(copy);
+    return { row, copy };
+  }
+
   // ../src/snippets.js
   var snippetsLoaded = false;
   var hostHeadCache = null;
@@ -1399,7 +1705,13 @@
       if (!nested.length) return;
       nested.forEach(function(inner) {
         var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
-        if (anc) anc.insertAdjacentElement("afterend", inner);
+        if (!anc) return;
+        if (cellFor(inner)) {
+          inner.classList.remove("cms-snippet");
+          if (!inner.getAttribute("class")) inner.removeAttribute("class");
+          return;
+        }
+        anc.insertAdjacentElement("afterend", inner);
       });
     }
   }
@@ -1717,300 +2029,98 @@
     }, true);
   }
 
-  // ../src/clone.js
-  var MARKS = ["cms-col-active"];
-  function copyOf(el) {
-    var clone = el.cloneNode(true);
-    var all = [clone];
-    clone.querySelectorAll("*").forEach(function(n) {
-      all.push(n);
-    });
-    all.forEach(function(n) {
-      for (var i = n.attributes.length - 1; i >= 0; i--) {
-        if (n.attributes[i].name.indexOf("data-mce-") === 0) {
-          n.removeAttribute(n.attributes[i].name);
-        }
-      }
-      MARKS.forEach(function(m) {
-        n.classList.remove(m);
-      });
-      if (n.hasAttribute("class") && !n.getAttribute("class")) {
-        n.removeAttribute("class");
-      }
-    });
-    return clone;
-  }
-
-  // ../src/columns.js
-  var TRACKS = 12;
-  var EVEN_MAX = 4;
-  var MAX_COLS = 6;
-  var GRID_RE = /(?:^|\s)((?:[a-z0-9]+:)*)grid-cols-(\d+)(?=\s|$)/g;
-  var SPAN_RE = /(?:^|\s)((?:[a-z0-9]+:)*)col-span-(\d+)(?=\s|$)/g;
-  var SPAN_ONE = /^(?:[a-z0-9]+:)*col-span-\d+$/;
-  function readAll(el, re) {
-    var out = [];
-    var cls = el && el.getAttribute ? el.getAttribute("class") || "" : "";
-    var m;
-    re.lastIndex = 0;
-    while ((m = re.exec(cls)) !== null) {
-      out.push({ prefix: m[1], count: parseInt(m[2], 10) });
-      re.lastIndex = m.index + m[0].length - 1;
+  // ../src/faq.js
+  var FAQ = "cms-faq";
+  function itemOf(block, target) {
+    var n = target;
+    while (n && n !== block) {
+      if (n.classList && n.classList.contains(FAQ)) return n;
+      n = n.parentElement;
     }
-    return out;
+    return null;
   }
-  function widest(el, re) {
-    var all = readAll(el, re);
-    if (!all.length) return null;
-    return all.reduce(function(a, b) {
-      return b.count > a.count ? b : a;
-    });
-  }
-  function setTracks(el, n) {
-    var cur = widest(el, GRID_RE);
-    if (!cur) return;
-    var target = cur.prefix + "grid-cols-" + cur.count;
-    var next = cur.prefix + "grid-cols-" + n;
-    el.className = el.className.split(/\s+/).map(function(c) {
-      return c === target ? next : c;
-    }).join(" ");
-  }
-  function setSpan(cell, prefix, n) {
-    var kept = (cell.getAttribute("class") || "").split(/\s+/).filter(function(c) {
-      return c !== "" && !SPAN_ONE.test(c);
-    });
-    if (n) kept.push(prefix + "col-span-" + n);
-    var cls = kept.join(" ");
-    if (cls) cell.setAttribute("class", cls);
-    else cell.removeAttribute("class");
-  }
-  function evenSpans(k) {
-    var base = Math.floor(TRACKS / k);
-    var rem = TRACKS % k;
-    var out = [];
-    for (var i = 0; i < k; i++) out.push(base + (i < rem ? 1 : 0));
-    return out;
-  }
-  function cellsOf(row) {
-    return Array.prototype.slice.call(row.children).filter(function(el) {
-      return el.tagName !== "BR" && !el.hasAttribute("data-mce-bogus");
-    });
-  }
-  function rowIn(block) {
-    if (!block) return null;
-    if (widest(block, GRID_RE)) return block;
-    var inner = block.querySelectorAll('[class*="grid-cols-"]');
-    return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
-  }
-  var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
-  function canSplit(block) {
-    if (!block || !hasContent(block)) return false;
-    return !block.querySelector(SPLIT_HOSTILE);
-  }
-  function hasContent(block) {
-    if (!block) return false;
-    if ((block.textContent || "").trim()) return true;
-    return !!block.querySelector("img, video, iframe,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]");
-  }
-  function canPair(block) {
-    if (!block || block.matches("[data-cms-code]")) return false;
-    return hasContent(block);
-  }
-  function columnTarget(block, target) {
-    var row = rowIn(block);
-    if (!row) {
-      var split = canSplit(block);
-      var pair = canPair(block);
-      if (!split && !pair) return null;
-      return { mode: "split", block, canSplit: split, canPair: pair };
+  function runOf(item2) {
+    var run = [item2];
+    var n = item2.previousElementSibling;
+    while (n && n.classList && n.classList.contains(FAQ)) {
+      run.unshift(n);
+      n = n.previousElementSibling;
     }
-    var cells = cellsOf(row);
-    if (!cells.length) return null;
-    var cell = null;
-    for (var i = 0; i < cells.length; i++) {
-      if (cells[i] === target || cells[i].contains(target)) {
-        cell = cells[i];
+    n = item2.nextElementSibling;
+    while (n && n.classList && n.classList.contains(FAQ)) {
+      run.push(n);
+      n = n.nextElementSibling;
+    }
+    return run;
+  }
+  function faqTarget(block, target) {
+    var item2 = itemOf(block, target);
+    if (!item2) return null;
+    var run = runOf(item2);
+    var at = run.indexOf(item2);
+    return {
+      item: item2,
+      run,
+      index: at,
+      count: run.length,
+      canMoveUp: at > 0,
+      canMoveDown: at < run.length - 1
+    };
+  }
+  var PLACEHOLDER_Q = "A question people ask?";
+  var PLACEHOLDER_A = "A short, direct answer.";
+  function blankCopy(item2) {
+    var copy = copyOf(item2);
+    var summary = copy.querySelector("summary");
+    if (summary) summary.textContent = PLACEHOLDER_Q;
+    var body = null;
+    for (var n = copy.firstElementChild; n; n = n.nextElementSibling) {
+      if (n !== summary) {
+        body = n;
         break;
       }
     }
-    if (!cell) return null;
-    var at = cells.indexOf(cell);
-    var tracks = widest(row, GRID_RE).count;
-    return {
-      mode: "cell",
-      row,
-      cell,
-      // Every cell, not just the one clicked: the resize handles are
-      // drawn on the boundaries between all of them.
-      cells,
-      index: at,
-      count: cells.length,
-      canAdd: cells.length < MAX_COLS,
-      // Resizing needs the spanned form, and reaching it exactly needs
-      // a track count twelve divides by.
-      canResize: cells.length > 1 && TRACKS % tracks === 0,
-      canMoveBack: at > 0,
-      canMoveOn: at < cells.length - 1
-    };
-  }
-  function spanned(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return null;
-    var factor = TRACKS / cur.count;
-    if (factor !== Math.floor(factor)) return null;
-    var cells = cellsOf(row);
-    var spans = cells.map(function(c) {
-      var s = widest(c, SPAN_RE);
-      return (s ? s.count : 1) * factor;
-    });
-    var total = spans.reduce(function(a, b) {
-      return a + b;
-    }, 0);
-    if (total !== TRACKS) spans = evenSpans(cells.length);
-    setTracks(row, TRACKS);
-    cells.forEach(function(c, i) {
-      setSpan(c, cur.prefix, spans[i]);
-    });
-    return spans;
-  }
-  function fixLayout(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return;
-    var cells = cellsOf(row);
-    if (!cells.length) return;
-    if (cells.length <= EVEN_MAX) {
-      setTracks(row, cells.length);
-      cells.forEach(function(c) {
-        setSpan(c, cur.prefix, 0);
-      });
-      return;
+    if (body) {
+      var p = body.querySelector("p");
+      if (p) {
+        p.textContent = PLACEHOLDER_A;
+        while (p.nextElementSibling) p.nextElementSibling.remove();
+        while (p.previousElementSibling) p.previousElementSibling.remove();
+      } else {
+        body.textContent = PLACEHOLDER_A;
+      }
     }
-    setTracks(row, TRACKS);
-    var spans = evenSpans(cells.length);
-    cells.forEach(function(c, i) {
-      setSpan(c, cur.prefix, spans[i]);
-    });
+    copy.removeAttribute("open");
+    return copy;
   }
-  function blankText(cell) {
-    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
-    var nodes = [];
-    var n;
-    while (n = walker.nextNode()) {
-      if ((n.nodeValue || "").trim() !== "") nodes.push(n);
-    }
-    nodes.forEach(function(node) {
-      var host2 = node.parentElement;
-      var heading = host2 && /^h[1-6]$/i.test(host2.tagName);
-      node.nodeValue = heading ? "Heading" : "Write something here.";
-    });
+  function addQuestion(info) {
+    var copy = blankCopy(info.item);
+    info.item.parentNode.insertBefore(copy, info.item.nextSibling);
+    return copy;
   }
-  function cleanClone(cell) {
-    var clone = copyOf(cell);
-    blankText(clone);
-    return clone;
+  function moveQuestion(info, dir) {
+    var to = info.index + dir;
+    if (to < 0 || to >= info.count) return;
+    var other = info.run[to];
+    if (dir < 0) other.parentNode.insertBefore(info.item, other);
+    else other.parentNode.insertBefore(info.item, other.nextSibling);
   }
-  function addColumn(info) {
-    var clone = cleanClone(info.cell);
-    info.row.insertBefore(clone, info.cell.nextSibling);
-    fixLayout(info.row);
-    return clone;
-  }
-  function duplicateColumn(info, dir) {
-    var clone = copyOf(info.cell);
-    info.row.insertBefore(clone, dir < 0 ? info.cell : info.cell.nextSibling);
-    fixLayout(info.row);
-    return clone;
-  }
-  function confirmRemove(info) {
-    var cell = info.cell;
-    var used = (cell.textContent || "").trim() !== "" || cell.querySelector("img, video, iframe");
-    if (!used) return Promise.resolve(true);
+  function confirmRemove2(info) {
+    var summary = info.item.querySelector("summary");
+    var q = summary ? (summary.textContent || "").trim() : "";
+    var text = (info.item.textContent || "").trim();
+    var untouched = q === PLACEHOLDER_Q && text.replace(q, "").trim() === PLACEHOLDER_A;
+    if (untouched || !text) return Promise.resolve(true);
     return cmsConfirm(
-      info.count === 1 ? "Deleting the last column deletes this block. Continue?" : "Removing this column deletes its content. Continue?",
-      "Remove",
+      "Deleting this question deletes its answer. Continue?",
+      "Delete",
       true
     );
   }
-  function removeColumn(info, block) {
-    info.cell.remove();
-    if (cellsOf(info.row).length) {
-      fixLayout(info.row);
-      return block;
-    }
-    if (info.row === block) {
-      block.remove();
-      return null;
-    }
-    info.row.remove();
-    return block;
-  }
-  function resizeColumn(info, delta) {
-    var spans = spanned(info.row);
-    if (!spans) return;
-    var cells = cellsOf(info.row);
-    var at = cells.indexOf(info.cell);
-    var other = at < cells.length - 1 ? at + 1 : at - 1;
-    if (other < 0) return;
-    var mine = spans[at] + delta;
-    var theirs = spans[other] - delta;
-    if (mine < 1 || theirs < 1) return;
-    var prefix = widest(info.row, GRID_RE).prefix;
-    setSpan(cells[at], prefix, mine);
-    setSpan(cells[other], prefix, theirs);
-  }
-  function toSpanned(row) {
-    var cur = widest(row, GRID_RE);
-    if (!cur) return null;
-    var spans = spanned(row);
-    if (!spans) return null;
-    return { cells: cellsOf(row), spans, prefix: cur.prefix };
-  }
-  function setPair(prefix, a, an, b, bn) {
-    setSpan(a, prefix, an);
-    setSpan(b, prefix, bn);
-  }
-  function moveColumn(info, dir) {
-    var cells = cellsOf(info.row);
-    var at = cells.indexOf(info.cell);
-    var to = at + dir;
-    if (to < 0 || to >= cells.length) return;
-    if (dir < 0) info.row.insertBefore(info.cell, cells[to]);
-    else info.row.insertBefore(cells[to], info.cell);
-  }
-  function splitIntoColumns(block) {
-    var row = block;
-    if (block.tagName === "P") {
-      row = document.createElement("div");
-      row.className = block.className;
-      block.parentNode.insertBefore(row, block);
-      block.classList.remove("cms-snippet");
-      if (!block.getAttribute("class")) block.removeAttribute("class");
-    }
-    var first = document.createElement("div");
-    while (row.firstChild) first.appendChild(row.firstChild);
-    if (row !== block) first.appendChild(block);
-    row.appendChild(first);
-    var second = document.createElement("div");
-    var p = document.createElement("p");
-    p.textContent = "Write something here.";
-    second.appendChild(p);
-    row.appendChild(second);
-    row.className = (row.className + " grid gap-6 sm:grid-cols-2").trim();
-    return row;
-  }
-  function duplicateBeside(block, dir) {
-    var row = document.createElement("div");
-    row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
-    block.parentNode.insertBefore(row, block);
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
-    var first = document.createElement("div");
-    first.appendChild(block);
-    row.appendChild(first);
-    var copy = copyOf(first);
-    if (dir < 0) row.insertBefore(copy, first);
-    else row.appendChild(copy);
-    return { row, copy };
+  function removeQuestion(info) {
+    var next = info.run[info.index + 1] || info.run[info.index - 1] || null;
+    info.item.remove();
+    return next;
   }
 
   // ../src/colresize.js
@@ -2328,6 +2438,115 @@
     flash("Block duplicated");
   }
   var activeCol = null;
+  function openBlockSettings(el, title, asColumn) {
+    var cs = window.getComputedStyle(el);
+    var baseBg = rgbToHex(cs.backgroundColor);
+    var basePad = cs.padding;
+    var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
+    var baseRadius = classRadius2(el);
+    var setFields = [
+      {
+        id: "bgcolor",
+        label: "Background color",
+        type: "color",
+        value: rgbToHex(el.style.backgroundColor)
+      },
+      {
+        id: "textcolor",
+        label: "Text color",
+        type: "color",
+        value: rgbToHex(el.style.color)
+      },
+      {
+        id: "spacing",
+        label: "Spacing",
+        type: "select",
+        value: el.getAttribute("data-cms-snip-spacing") || "",
+        options: [
+          { value: "", label: "As designed" },
+          { value: "compact", label: "Compact" },
+          { value: "normal", label: "Comfortable" },
+          { value: "roomy", label: "Roomy" }
+        ]
+      },
+      // An override wins even when it is zero — a block squared off
+      // on purpose has to read back as 0, not as the rounding its
+      // classes would have given it. (`|| baseRadius` would not do:
+      // 0 is falsy, and that is exactly the deliberate case.)
+      {
+        id: "radius",
+        label: "Corner roundness",
+        type: "range",
+        min: 0,
+        max: 40,
+        value: String(Math.min(40, el.style.borderRadius ? parseInt(el.style.borderRadius, 10) || 0 : baseRadius))
+      }
+    ];
+    openDialog({
+      message: title,
+      okLabel: "Apply",
+      fields: setFields,
+      // A stand-in page: gray context lines above and below the
+      // block, so spacing and background read as they will inline.
+      preview: function(v, out) {
+        out.innerHTML = "";
+        var page = document.createElement("div");
+        page.style.cssText = "width:100%;box-sizing:border-box;background:#fff;border:1px solid #e3e6ea;border-radius:4px;padding:8px 14px";
+        var ctxLine = function() {
+          var l = document.createElement("div");
+          l.style.cssText = "height:6px;border-radius:3px;background:#e3e6ea";
+          return l;
+        };
+        var sp = SNIP_SPACING[v.spacing];
+        var bg = v.bgcolor || baseBg;
+        var box = document.createElement("div");
+        box.style.padding = sp ? sp.padding : basePad;
+        box.style.marginTop = sp ? sp.margin : baseMargin.top;
+        box.style.marginBottom = sp ? sp.margin : baseMargin.bottom;
+        box.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
+        if (bg) box.style.background = bg;
+        else box.style.border = "1px dashed #d9dce1";
+        var lineColor = v.textcolor || (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
+        var lines = function(into, shapes) {
+          shapes.forEach(function(d, i) {
+            var line = document.createElement("div");
+            line.style.cssText = "border-radius:3px";
+            line.style.height = d[0];
+            line.style.width = d[1];
+            line.style.marginTop = i ? "6px" : "0";
+            line.style.background = lineColor;
+            into.appendChild(line);
+          });
+        };
+        lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
+        page.appendChild(ctxLine());
+        if (asColumn) {
+          var row = document.createElement("div");
+          row.style.cssText = "display:flex;gap:8px;align-items:flex-start";
+          box.style.flex = "0 0 55%";
+          row.appendChild(box);
+          var beside = document.createElement("div");
+          beside.style.cssText = "flex:1 1 auto;padding:" + (sp ? sp.padding : basePad);
+          lines(beside, [["7px", "100%"], ["7px", "70%"]]);
+          row.appendChild(beside);
+          page.appendChild(row);
+        } else {
+          page.appendChild(box);
+        }
+        page.appendChild(ctxLine());
+        out.appendChild(page);
+      }
+    }).then(function(v) {
+      if (!v) return;
+      var ed = findOwningEditor(el);
+      runWithUndo(ed, function() {
+        applySnippetSettings(el, v, baseRadius);
+      });
+      markContainerDirty(el);
+      if (activeSnip && activeSnip.isConnected) showSnipUI(activeSnip);
+      placeColUI();
+    });
+  }
   function placeColUI() {
     if (!activeCol) return;
     var ui = $("col-ui");
@@ -2362,6 +2581,7 @@
     $("col-on").hidden = !cell || !info.canMoveOn;
     $("col-narrow").hidden = !cell || !info.canResize;
     $("col-wide").hidden = !cell || !info.canResize;
+    $("col-set").hidden = !cell;
     $("col-del").hidden = !cell;
     var canDup = cell ? info.canAdd : info.canPair;
     $("col-dup-back").hidden = !canDup;
@@ -2378,6 +2598,7 @@
       "col-dup-back",
       "col-dup-on",
       "col-add",
+      "col-set",
       "col-del"
     ].some(function(id) {
       return !$(id).hidden;
@@ -2423,6 +2644,52 @@
       if ("target" in out) target = out.target;
     });
     afterColumnEdit(container, now, target);
+  }
+  var activeFaq = null;
+  function placeFaqUI() {
+    if (!activeFaq) return;
+    var ui = $("faq-ui");
+    var box = ui.getBoundingClientRect();
+    var r = activeFaq.item.getBoundingClientRect();
+    var top = r.top - box.height / 2;
+    if (top < 64) top = 64;
+    var left = r.right - box.width;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+  }
+  function showFaqUI(block, target) {
+    var info = faqTarget(block, target);
+    if (!info) {
+      hideFaqUI();
+      return;
+    }
+    activeFaq = info;
+    $("faq-up").hidden = !info.canMoveUp;
+    $("faq-down").hidden = !info.canMoveDown;
+    $("faq-ui").classList.add("on");
+    placeFaqUI();
+  }
+  function hideFaqUI() {
+    activeFaq = null;
+    $("faq-ui").classList.remove("on");
+  }
+  function runFaqEdit(edit) {
+    if (!activeFaq) return;
+    var info = activeFaq;
+    var block = activeSnip;
+    var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(info.item);
+    var next = info.item;
+    runWithUndo(ed, function() {
+      var out = edit(info);
+      if (out !== void 0) next = out;
+    });
+    if (container) markContainerDirty(container);
+    if (!next || !next.isConnected) {
+      hideFaqUI();
+      return;
+    }
+    showFaqUI(block, next);
   }
   var activeImg = null;
   var IMG_SIZES = ["w-full h-auto", "w-2/3 h-auto", "w-1/2 h-auto", "w-1/3 h-auto"];
@@ -2556,6 +2823,7 @@
       hideSnipUI();
       hideColUI();
     }
+    if (except !== "faq") hideFaqUI();
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -2768,6 +3036,11 @@
         snip = t.closest(".cms-snippet");
         if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
       }
+      var faq = null;
+      if (!btn && !slot && !img && !vid && t.closest) {
+        faq = t.closest(".cms-faq");
+        if (faq && !faq.closest("[data-cms-region],[data-cms-sections]")) faq = null;
+      }
       if (btn) {
         e.preventDefault();
         btn.setAttribute("contenteditable", "false");
@@ -2791,6 +3064,8 @@
       } else {
         hideChrome();
       }
+      if (faq) showFaqUI(faq.parentElement || faq, t);
+      else hideFaqUI();
     }, true);
     window.addEventListener("scroll", function() {
       if (activeBtn) showButtonUI(activeBtn);
@@ -2799,6 +3074,7 @@
         placeColUI();
         placeHandles();
       }
+      if (activeFaq) placeFaqUI();
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -2810,6 +3086,7 @@
         placeColUI();
         placeHandles();
       }
+      if (activeFaq) placeFaqUI();
       if (activeImg) showImgUI(activeImg);
       if (activeVid) showVidUI(activeVid);
       if (activeSlot) showSlotUI(activeSlot);
@@ -3202,6 +3479,10 @@
         return { target: addColumn(info) };
       });
     });
+    $("col-set").addEventListener("click", function() {
+      if (!activeCol || activeCol.mode !== "cell") return;
+      openBlockSettings(activeCol.cell, "Column settings", true);
+    });
     $("col-del").addEventListener("click", function() {
       if (!activeCol || activeCol.mode !== "cell") return;
       var info = activeCol;
@@ -3218,106 +3499,42 @@
         afterColumnEdit(container, now, near);
       });
     });
-    $("snip-set").addEventListener("click", function() {
-      if (!activeSnip) return;
-      var el = activeSnip;
-      var cs = window.getComputedStyle(el);
-      var baseBg = rgbToHex(cs.backgroundColor);
-      var basePad = cs.padding;
-      var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
-      var baseRadius = classRadius2(el);
-      var setFields = [
-        {
-          id: "bgcolor",
-          label: "Background color",
-          type: "color",
-          value: rgbToHex(el.style.backgroundColor)
-        },
-        {
-          id: "textcolor",
-          label: "Text color",
-          type: "color",
-          value: rgbToHex(el.style.color)
-        },
-        {
-          id: "spacing",
-          label: "Spacing",
-          type: "select",
-          value: el.getAttribute("data-cms-snip-spacing") || "",
-          options: [
-            { value: "", label: "As designed" },
-            { value: "compact", label: "Compact" },
-            { value: "normal", label: "Comfortable" },
-            { value: "roomy", label: "Roomy" }
-          ]
-        },
-        // An override wins even when it is zero — a block squared off
-        // on purpose has to read back as 0, not as the rounding its
-        // classes would have given it. (`|| baseRadius` would not do:
-        // 0 is falsy, and that is exactly the deliberate case.)
-        {
-          id: "radius",
-          label: "Corner roundness",
-          type: "range",
-          min: 0,
-          max: 40,
-          value: String(Math.min(40, el.style.borderRadius ? parseInt(el.style.borderRadius, 10) || 0 : baseRadius))
-        }
-      ];
-      openDialog({
-        message: "Block settings",
-        okLabel: "Apply",
-        fields: setFields,
-        // A stand-in page: gray context lines above and below the
-        // block, so spacing and background read as they will inline.
-        preview: function(v, out) {
-          out.innerHTML = "";
-          var page = document.createElement("div");
-          page.style.cssText = "width:100%;box-sizing:border-box;background:#fff;border:1px solid #e3e6ea;border-radius:4px;padding:8px 14px";
-          var ctxLine = function() {
-            var l = document.createElement("div");
-            l.style.cssText = "height:6px;border-radius:3px;background:#e3e6ea";
-            return l;
-          };
-          var sp = SNIP_SPACING[v.spacing];
-          var bg = v.bgcolor || baseBg;
-          var box = document.createElement("div");
-          box.style.padding = sp ? sp.padding : basePad;
-          box.style.marginTop = sp ? sp.margin : baseMargin.top;
-          box.style.marginBottom = sp ? sp.margin : baseMargin.bottom;
-          box.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
-          if (bg) box.style.background = bg;
-          else box.style.border = "1px dashed #d9dce1";
-          var lineColor = v.textcolor || (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
-          var lines = function(into, shapes) {
-            shapes.forEach(function(d, i) {
-              var line = document.createElement("div");
-              line.style.cssText = "border-radius:3px";
-              line.style.height = d[0];
-              line.style.width = d[1];
-              line.style.marginTop = i ? "6px" : "0";
-              line.style.background = lineColor;
-              into.appendChild(line);
-            });
-          };
-          lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
-          page.appendChild(ctxLine());
-          page.appendChild(box);
-          page.appendChild(ctxLine());
-          out.appendChild(page);
-        }
-      }).then(function(v) {
-        if (!v) return;
-        var ed = findOwningEditor(el);
-        runWithUndo(ed, function() {
-          applySnippetSettings(el, v, baseRadius);
-        });
-        markContainerDirty(el);
-        if (activeSnip === el) {
-          showSnipUI(el);
-          placeColUI();
-        }
+    $("faq-up").addEventListener("click", function() {
+      runFaqEdit(function(info) {
+        moveQuestion(info, -1);
+        return info.item;
       });
+    });
+    $("faq-down").addEventListener("click", function() {
+      runFaqEdit(function(info) {
+        moveQuestion(info, 1);
+        return info.item;
+      });
+    });
+    $("faq-add").addEventListener("click", function() {
+      runFaqEdit(function(info) {
+        return addQuestion(info);
+      });
+    });
+    $("faq-del").addEventListener("click", function() {
+      if (!activeFaq) return;
+      var info = activeFaq;
+      var block = activeSnip;
+      var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+      confirmRemove2(info).then(function(yes) {
+        if (!yes) return;
+        var ed = findOwningEditor(info.item);
+        var near = null;
+        runWithUndo(ed, function() {
+          near = removeQuestion(info);
+        });
+        if (container) markContainerDirty(container);
+        if (near && near.isConnected) showFaqUI(block, near);
+        else hideFaqUI();
+      });
+    });
+    $("snip-set").addEventListener("click", function() {
+      if (activeSnip) openBlockSettings(activeSnip, "Block settings", false);
     });
     $("snip-up").addEventListener("click", function() {
       moveBlock(-1);
@@ -3621,6 +3838,11 @@
       });
     });
   }
+  function pasteHostSnippet(ed) {
+    var block = ed.dom.getParent(ed.selection.getNode(), ed.dom.isBlock);
+    if (!block || !ed.dom.hasClass(block, "cms-snippet")) return null;
+    return block.parentNode === ed.getBody() ? block : null;
+  }
   function initInlineEditor(el, onDirty, register) {
     var light = state.editorTheme === "light";
     var opts = {
@@ -3698,6 +3920,14 @@
         ed.on("focus", function() {
           state.lastEditor = ed;
           state.lastEditorDirty = onDirty;
+        });
+        ed.on("PastePostProcess", function(e) {
+          if (!pasteHostSnippet(ed)) return;
+          for (var n = e.node.firstChild; n; n = n.nextSibling) {
+            if (n.nodeType === 1 && ed.dom.isBlock(n)) {
+              ed.dom.addClass(n, "cms-snippet");
+            }
+          }
         });
         ed.on("PreInit", function() {
           var getCssText = ed.formatter.getCssText;
@@ -6965,8 +7195,10 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
    it there), so it covers nothing and can stay legible. Smaller and a
    touch quieter than the block chrome above it all the same: it edits a
    part of the block, not the block. */
-#col-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
-#col-ui:hover{opacity:1}
+/* The column and question tools are secondary to the block chrome, and
+   read that way: slightly recessed until pointed at. */
+#col-ui,#faq-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
+#col-ui:hover,#faq-ui:hover{opacity:1}
 #col-ui button{padding:4px 6px}
 #col-ui button svg{width:13px;height:13px}
 
@@ -7281,243 +7513,7 @@ border:1px solid transparent;opacity:.6}
 `;
 
   // ../src/light.css
-  var light_default = `/* Light-DOM styles for region outlines while editing. Imported as text
- * by shell.js and injected into <head> \u2014 these rules style the host
- * page's own content (regions, sections, snippets), which the shadow
- * root can't reach. */
-
-/* ---- chrome palette ----
-   The light-DOM half of the tokens styles.css defines for the shadow
-   root: same names, same two schemes, declared again because a shadow
-   root's custom properties do not reach out into the page. What lives
-   out here is the chrome that has to sit in the host's own markup \u2014
-   the section pills, the wrench menu beside the site nav \u2014 plus the
-   strip TinyMCE renders its toolbar into.
-
-   shell.js puts .cms-chrome-light on <body> for the light scheme. ---- */
-:root{
---cms-chrome-bg:#1c2128;
---cms-chrome-hi:#2a3140;
---cms-chrome-menu:#242a33;
---cms-chrome-fg:#fff;
---cms-chrome-line:rgba(255,255,255,.28);
---cms-chrome-ring:transparent;
---cms-wash-1:rgba(255,255,255,.1);
---cms-wash-2:rgba(255,255,255,.14);
---cms-wash-3:rgba(255,255,255,.18);
---cms-chrome-dngr:#fca5a5;
---cms-chrome-dngr-wash:rgba(252,165,165,.2);
---cms-chrome-shadow:0 8px 24px rgba(0,0,0,.4);
---cms-chrome-shadow-sm:0 4px 12px rgba(0,0,0,.35);
-}
-body.cms-chrome-light{
---cms-chrome-bg:#fff;
---cms-chrome-hi:#f1f3f6;
---cms-chrome-menu:#fff;
---cms-chrome-fg:#1c2128;
---cms-chrome-line:#d9dce1;
---cms-chrome-ring:#dfe3e8;
---cms-wash-1:rgba(28,33,40,.06);
---cms-wash-2:rgba(28,33,40,.08);
---cms-wash-3:rgba(28,33,40,.1);
---cms-chrome-dngr:#c0392b;
---cms-chrome-dngr-wash:rgba(192,57,43,.1);
---cms-chrome-shadow:0 8px 24px rgba(15,18,25,.22);
---cms-chrome-shadow-sm:0 4px 12px rgba(15,18,25,.2);
-}
-
-/* The tool rail is fixed to the left edge; push the page content
-   right so the rail sits beside it instead of covering it. The
-   transition matches the rail's appearance. */
-body{transition:margin-left .25s ease}
-body.cms-editing{margin-left:56px}
-/* The shared TinyMCE toolbar is pinned to the top of the viewport
-   (#cms-mce-toolbar), which works for the page's own content: a region
-   under it can be scrolled out from beneath it. The notice bar cannot \u2014
-   it is the first thing in the document, so at scroll 0 it sits under
-   the toolbar and there is nowhere to scroll to. Editing it was
-   therefore very nearly impossible.
-
-   So edit mode reserves the toolbar's lane above the bar, exactly as it
-   reserves the left edge for the rail. The space is claimed on entering
-   edit mode rather than on focusing the bar, so the thing being clicked
-   never moves out from under the pointer \u2014 and the toolbar then opens
-   in the gap directly above the region it belongs to. Only a bar at the
-   top of the page needs this; one a template placed somewhere else is
-   the host's own layout and is left alone. */
-body.cms-editing > [data-cms-notice]:first-child{margin-top:76px;transition:margin-top .25s ease}
-.cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
-.cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}
-.cms-editing [data-cms-region]:empty::before{content:'Click to edit\u2026';opacity:.4}
-/* The page title reads as editable the same way a text region does. It
-   is inline inside the host's heading, so the outline hugs the words. */
-.cms-editing [data-cms-title]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}
-.cms-editing [data-cms-title]:hover,.cms-editing [data-cms-title]:focus{outline-style:solid}
-.cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}
-.cms-editing [data-cms-image]:hover{outline-style:solid}
-/* TinyMCE inline adds its own focus outline; ours is enough. */
-.cms-editing [data-cms-region].mce-edit-focus{outline:1.5px solid rgba(47,95,224,.6)}
-#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}
-
-/* Sections */
-.cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}
-.cms-editing [data-cms-section]:hover{outline-style:solid}
-.cms-editing [data-cms-section-content]{min-height:2em}
-/* Straddles the section's top edge (half above, half below) so it reads
- * as a tab on the boundary instead of covering the first line of a
- * wide/full-width section's content. Dimmed until the section (or the
- * pill itself) is hovered \u2014 low idle opacity rather than hidden so it
- * stays discoverable, and still works on touch where hover needs a tap. */
-.cms-sec-ui{position:absolute;top:0;right:12px;transform:translateY(-50%);
-z-index:2147482996;display:flex;gap:2px;
-background:var(--cms-chrome-bg);border:1px solid var(--cms-chrome-line);border-radius:999px;
-padding:4px 6px;box-shadow:var(--cms-chrome-shadow-sm);
-opacity:.25;transition:opacity .15s ease}
-.cms-editing [data-cms-section]:hover .cms-sec-ui,.cms-sec-ui:hover{opacity:1}
-.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:var(--cms-chrome-fg);background:transparent;
-border:none;border-radius:999px;padding:6px 9px;cursor:pointer}
-.cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}
-.cms-sec-ui button:hover{background:var(--cms-wash-3)}
-.cms-sec-ui button[data-secact='del']{color:var(--cms-chrome-dngr)}
-.cms-sec-ui button[data-secact='del']:hover{background:var(--cms-chrome-dngr-wash)}
-/* Hidden when the area it adds to is full; the host page's own reset
-   must not be able to bring it back. */
-.cms-add-section[hidden],.cms-sec-ui button[hidden]{display:none!important}
-.cms-add-section{padding:14px;text-align:center}
-.cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;
-border:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}
-.cms-add-section button:hover{background:#dbe4fa}
-/* Names the area a button adds to, on pages with more than one. */
-.cms-add-region{margin-left:7px;padding:2px 7px;border-radius:999px;
-background:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}
-
-/* Buttons (a.cms-btn): click while editing for gear/trash chrome. */
-.cms-editing a.cms-btn{cursor:pointer}
-.cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}
-
-/* Snippet blocks (.cms-snippet): dotted outline while editing;
- * click for drag-handle/trash chrome. !important beats host CSS
- * (e.g. Tailwind preflight/utilities) that also sets outlines. */
-.cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
-.cms-editing .cms-snippet:hover{outline-style:solid!important}
-
-/* The column the column tool is acting on. Every button on that toolbar
- * changes one column and leaves the rest alone, so which one it has hold
- * of has to be visible \u2014 a row of identical cells is exactly where a
- * guess goes wrong. Inset offset so the tint hugs the cell instead of
- * bleeding into its neighbour's gutter. */
-.cms-editing .cms-col-active{outline:1.5px solid rgba(47,95,224,.55)!important;
-outline-offset:-1px;background-color:rgba(47,95,224,.05)}
-
-/* Admin tools (admintools.js): a wrench button appended to the site
- * nav's item list, so it spaces like one more menu item (pinned
- * top-left on pages without a nav) with the everyday admin actions.
- * Light DOM, so every rule is explicit \u2014 host CSS (Tailwind preflight
- * etc.) must not restyle it. */
-.cms-admin-li{list-style:none;display:flex;align-items:center;margin:0;padding:0}
-#cms-admin-tools{position:relative;display:inline-flex;line-height:0}
-#cms-admin-tools.cms-fixed{position:fixed;top:12px;left:12px;z-index:2147482996}
-#cms-admin-tools-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;
-padding:0;border:none;border-radius:50%;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);
-cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25),inset 0 0 0 1px var(--cms-chrome-ring)}
-#cms-admin-tools-btn:hover{background:var(--cms-chrome-hi)}
-#cms-admin-tools-btn svg{width:14px;height:14px;fill:currentColor}
-#cms-admin-tools .cms-admin-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:2147482997;
-display:none;flex-direction:column;background:var(--cms-chrome-menu);border-radius:12px;padding:6px;
-min-width:170px;box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);
-text-align:left}
-#cms-admin-tools.cms-open .cms-admin-menu{display:flex}
-#cms-admin-tools.cms-align-right .cms-admin-menu{left:auto;right:0}
-#cms-admin-tools .cms-admin-menu button,#cms-admin-tools .cms-admin-menu a{
-font:13px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:none;border:none;border-radius:8px;
-padding:8px 12px;margin:0;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}
-#cms-admin-tools .cms-admin-menu button:hover,#cms-admin-tools .cms-admin-menu a:hover{
-background:var(--cms-wash-1);color:var(--cms-chrome-fg)}
-#cms-admin-tools .cms-admin-menu hr{border:none;border-top:1px solid var(--cms-wash-2);margin:4px 6px}
-
-/* Site menus ({{cmsNav}}): while editing, clicking an item (long-press
- * on touch) opens its settings and drag rearranges; "\uFF0B" chips add
- * items. A mouse click on a dropdown toggle edits the dropdown itself,
- * so hovering opens its panel to keep the items inside reachable. */
-.cms-editing nav[data-cms-menu]{outline:1.5px dashed rgba(47,95,224,.45);outline-offset:6px;
-border-radius:2px;position:relative}
-/* Hovering the nav explains the interaction; the delay keeps it from
- * flashing on every pass-over, and it gets out of the way mid-drag. */
-.cms-editing nav[data-cms-menu]::after{content:'Click a menu item to edit it \u2014 drag to rearrange';
-position:absolute;top:calc(100% + 10px);left:0;z-index:2147482995;
-font:11px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:var(--cms-chrome-bg);
-padding:5px 10px;
-border-radius:6px;box-shadow:var(--cms-chrome-shadow-sm),inset 0 0 0 1px var(--cms-chrome-ring);
-white-space:nowrap;
-pointer-events:none;opacity:0;transition:opacity .15s ease .4s}
-.cms-editing nav[data-cms-menu]:hover::after{opacity:1}
-body.cms-nav-dragging nav[data-cms-menu]::after{display:none}
-/* An open (or hover-opened) dropdown panel occupies the same spot as
- * the hint \u2014 the panel wins. */
-.cms-editing nav[data-cms-menu]:has(.cms-nav-drop.cms-open)::after,
-.cms-editing nav[data-cms-menu]:has(.cms-nav-drop:hover)::after{display:none}
-.cms-editing nav[data-cms-menu] .cms-nav-item{cursor:pointer}
-.cms-editing nav[data-cms-menu] .cms-nav-drop:hover>.cms-nav-sub{display:block}
-.cms-nav-addli button{font:13px/1 system-ui,sans-serif;color:#2149b8;background:#e8edfb;
-border:1.5px dashed #2f5fe0;border-radius:8px;width:24px;height:24px;cursor:pointer;padding:0}
-.cms-nav-addli button:hover{background:#dbe4fa}
-.cms-nav-sub .cms-nav-addli{padding:.25em .9em}
-/* The vacated slot reads as a placeholder while its item is airborne. */
-.cms-nav-dragli{opacity:.3;outline:1.5px dashed rgba(47,95,224,.5);outline-offset:2px;border-radius:4px}
-body.cms-nav-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
-body.cms-nav-dragging .cms-nav-addli{opacity:.25}
-#cms-nav-ind{position:fixed;z-index:2147482996;background:#2f5fe0;border-radius:2px;
-pointer-events:none;display:none;transition:left .07s ease,top .07s ease,width .07s ease,height .07s ease}
-/* The drag ghost: a pill with the dragged item's label that follows the
- * pointer, dims when there's nowhere to drop, and settles into place on
- * release (transition set inline by settleGhost). */
-#cms-nav-ghost{position:fixed;left:0;top:0;z-index:2147482997;pointer-events:none;
-display:flex;align-items:center;gap:7px;white-space:nowrap;will-change:transform;opacity:.5;
-font:13px/1.3 system-ui,sans-serif;color:#1c2128;background:#fff;padding:7px 13px;
-border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.28)}
-#cms-nav-ghost .sub{color:#6b7280;font-size:11px}
-#cms-nav-ghost.nodrop{opacity:.25}
-
-/* Video slots: a click-to-fill placeholder from the video snippets.
- * While editing, players and embeds go click-through so a click reaches
- * the gear/trash chrome (buttons.js hit-tests their rectangles) instead
- * of playing the video or vanishing into a cross-origin iframe. */
-.cms-editing [data-cms-video-slot],.cms-editing [data-cms-photo-slot],.cms-editing [data-cms-map-slot]{cursor:pointer}
-.cms-editing [data-cms-video-slot]:hover,.cms-editing [data-cms-photo-slot]:hover,.cms-editing [data-cms-map-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}
-.cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,
-.cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}
-
-/* Flexible-space snippet: invisible on the live site, visible and
- * click-to-adjust while editing. */
-.cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;
-outline:1.5px dashed rgba(217,119,6,.55);outline-offset:-2px;
-background:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.06) 8px,transparent 8px,transparent 16px)}
-.cms-editing .cms-spacer:hover{outline-style:solid}
-.cms-editing .cms-spacer::after{content:'\u2195 Space \xB7 ' attr(data-height) ' \u2014 click to adjust';
-position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-font:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}
-
-/* Custom-code blocks: entering edit mode empties the block back to the
-   placeholder stored content holds, so while editing there is nothing to
-   show but the name. Every other state \u2014 a visitor's page, and a
-   logged-in editor's while merely viewing \u2014 has the entry's markup
-   inside this same wrapper, which is why the card styling is scoped to
-   edit mode. */
-.cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;
-outline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;
-background:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}
-.cms-editing .cms-code:hover{outline-style:solid}
-.cms-editing .cms-code::after{content:'\u27E8/\u27E9 Custom code \xB7 ' attr(data-cms-code);
-position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-font:11px system-ui,sans-serif;color:#1d4ed8;white-space:nowrap;pointer-events:none}
-
-/* Untranslated regions in edit mode: content shown is default-language
-   fallback until it is edited in this locale. */
-body.cms-editing [data-cms-fallback] {
-    outline: 2px dashed #f0b429 !important;
-    outline-offset: 3px;
-}
-`;
+  var light_default = "/* Light-DOM styles for region outlines while editing. Imported as text\n * by shell.js and injected into <head> \u2014 these rules style the host\n * page's own content (regions, sections, snippets), which the shadow\n * root can't reach. */\n\n/* ---- chrome palette ----\n   The light-DOM half of the tokens styles.css defines for the shadow\n   root: same names, same two schemes, declared again because a shadow\n   root's custom properties do not reach out into the page. What lives\n   out here is the chrome that has to sit in the host's own markup \u2014\n   the section pills, the wrench menu beside the site nav \u2014 plus the\n   strip TinyMCE renders its toolbar into.\n\n   shell.js puts .cms-chrome-light on <body> for the light scheme. ---- */\n:root{\n--cms-chrome-bg:#1c2128;\n--cms-chrome-hi:#2a3140;\n--cms-chrome-menu:#242a33;\n--cms-chrome-fg:#fff;\n--cms-chrome-line:rgba(255,255,255,.28);\n--cms-chrome-ring:transparent;\n--cms-wash-1:rgba(255,255,255,.1);\n--cms-wash-2:rgba(255,255,255,.14);\n--cms-wash-3:rgba(255,255,255,.18);\n--cms-chrome-dngr:#fca5a5;\n--cms-chrome-dngr-wash:rgba(252,165,165,.2);\n--cms-chrome-shadow:0 8px 24px rgba(0,0,0,.4);\n--cms-chrome-shadow-sm:0 4px 12px rgba(0,0,0,.35);\n}\nbody.cms-chrome-light{\n--cms-chrome-bg:#fff;\n--cms-chrome-hi:#f1f3f6;\n--cms-chrome-menu:#fff;\n--cms-chrome-fg:#1c2128;\n--cms-chrome-line:#d9dce1;\n--cms-chrome-ring:#dfe3e8;\n--cms-wash-1:rgba(28,33,40,.06);\n--cms-wash-2:rgba(28,33,40,.08);\n--cms-wash-3:rgba(28,33,40,.1);\n--cms-chrome-dngr:#c0392b;\n--cms-chrome-dngr-wash:rgba(192,57,43,.1);\n--cms-chrome-shadow:0 8px 24px rgba(15,18,25,.22);\n--cms-chrome-shadow-sm:0 4px 12px rgba(15,18,25,.2);\n}\n\n/* The tool rail is fixed to the left edge; push the page content\n   right so the rail sits beside it instead of covering it. The\n   transition matches the rail's appearance. */\nbody{transition:margin-left .25s ease}\nbody.cms-editing{margin-left:56px}\n/* The shared TinyMCE toolbar is pinned to the top of the viewport\n   (#cms-mce-toolbar), which works for the page's own content: a region\n   under it can be scrolled out from beneath it. The notice bar cannot \u2014\n   it is the first thing in the document, so at scroll 0 it sits under\n   the toolbar and there is nowhere to scroll to. Editing it was\n   therefore very nearly impossible.\n\n   So edit mode reserves the toolbar's lane above the bar, exactly as it\n   reserves the left edge for the rail. The space is claimed on entering\n   edit mode rather than on focusing the bar, so the thing being clicked\n   never moves out from under the pointer \u2014 and the toolbar then opens\n   in the gap directly above the region it belongs to. Only a bar at the\n   top of the page needs this; one a template placed somewhere else is\n   the host's own layout and is left alone. */\nbody.cms-editing > [data-cms-notice]:first-child{margin-top:76px;transition:margin-top .25s ease}\n.cms-editing [data-cms-region]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}\n.cms-editing [data-cms-region]:hover,.cms-editing [data-cms-region]:focus{outline-style:solid}\n.cms-editing [data-cms-region]:empty::before{content:'Click to edit\u2026';opacity:.4}\n/* Every answer is showing while editing, whether its question is open or\n   not.\n\n   Without this they are unreachable. A <summary> inside a contenteditable\n   does not toggle when clicked \u2014 the click places the caret instead, which\n   is the right behaviour for editing the question and leaves the answer\n   permanently hidden. Opening each one to write in it would also mean\n   deciding what to do with the `open` attribute at save time, since an\n   accordion that ships expanded is not an accordion.\n\n   So nothing is written to the document: the answers are revealed for as\n   long as edit mode lasts and hidden again the moment it ends, and what\n   gets saved is exactly what was there. !important because the rule it\n   overrides is the user agent's own.\n\n   Two rules, because browsers hide a closed disclosure two different\n   ways. The older one sets display:none on the content, which the first\n   rule overrides. Current Chrome instead gives it content-visibility:\n   hidden, which reserves the space and skips the painting \u2014 so the first\n   rule alone produces a gap under every question with nothing in it,\n   which is exactly what it looked like. ::details-content is the handle\n   for that, and is what actually reveals the words.\n\n   Dimmed slightly, and the caret left pointing right, so a question still\n   reads as closed while its answer is showing: otherwise every question\n   looks open and the marker says nothing about what a visitor will see. */\n.cms-editing .cms-faq:not([open]) > *:not(summary){display:block !important;opacity:.72}\n.cms-editing .cms-faq:not([open])::details-content{content-visibility:visible;block-size:auto}\n.cms-editing .cms-faq:not([open]) > summary::before{transform:rotate(-45deg)}\n\n/* The page title reads as editable the same way a text region does. It\n   is inline inside the host's heading, so the outline hugs the words. */\n.cms-editing [data-cms-title]{outline:1.5px dashed rgba(47,95,224,.6);outline-offset:3px;min-height:1em}\n.cms-editing [data-cms-title]:hover,.cms-editing [data-cms-title]:focus{outline-style:solid}\n.cms-editing [data-cms-image]{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:3px;cursor:pointer}\n.cms-editing [data-cms-image]:hover{outline-style:solid}\n/* TinyMCE inline adds its own focus outline; ours is enough. */\n.cms-editing [data-cms-region].mce-edit-focus{outline:1.5px solid rgba(47,95,224,.6)}\n#cms-mce-toolbar > *{pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.18);border-radius:8px}\n\n/* Sections */\n.cms-editing [data-cms-section]{position:relative;outline:1.5px dashed rgba(30,126,78,.55);outline-offset:-3px}\n.cms-editing [data-cms-section]:hover{outline-style:solid}\n.cms-editing [data-cms-section-content]{min-height:2em}\n/* Straddles the section's top edge (half above, half below) so it reads\n * as a tab on the boundary instead of covering the first line of a\n * wide/full-width section's content. Dimmed until the section (or the\n * pill itself) is hovered \u2014 low idle opacity rather than hidden so it\n * stays discoverable, and still works on touch where hover needs a tap. */\n.cms-sec-ui{position:absolute;top:0;right:12px;transform:translateY(-50%);\nz-index:2147482996;display:flex;gap:2px;\nbackground:var(--cms-chrome-bg);border:1px solid var(--cms-chrome-line);border-radius:999px;\npadding:4px 6px;box-shadow:var(--cms-chrome-shadow-sm);\nopacity:.25;transition:opacity .15s ease}\n.cms-editing [data-cms-section]:hover .cms-sec-ui,.cms-sec-ui:hover{opacity:1}\n.cms-sec-ui button{font:15px/1 system-ui,sans-serif;color:var(--cms-chrome-fg);background:transparent;\nborder:none;border-radius:999px;padding:6px 9px;cursor:pointer}\n.cms-sec-ui button svg{display:block;width:15px;height:15px;fill:currentColor}\n.cms-sec-ui button:hover{background:var(--cms-wash-3)}\n.cms-sec-ui button[data-secact='del']{color:var(--cms-chrome-dngr)}\n.cms-sec-ui button[data-secact='del']:hover{background:var(--cms-chrome-dngr-wash)}\n/* Hidden when the area it adds to is full; the host page's own reset\n   must not be able to bring it back. */\n.cms-add-section[hidden],.cms-sec-ui button[hidden]{display:none!important}\n.cms-add-section{padding:14px;text-align:center}\n.cms-add-section button{font:13px system-ui,sans-serif;color:#2149b8;background:#e8edfb;\nborder:1.5px dashed #2f5fe0;border-radius:10px;padding:10px 18px;cursor:pointer}\n.cms-add-section button:hover{background:#dbe4fa}\n/* Names the area a button adds to, on pages with more than one. */\n.cms-add-region{margin-left:7px;padding:2px 7px;border-radius:999px;\nbackground:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}\n\n/* Buttons (a.cms-btn): click while editing for gear/trash chrome. */\n.cms-editing a.cms-btn{cursor:pointer}\n.cms-editing a.cms-btn:hover{outline:1.5px dashed rgba(224,122,47,.75);outline-offset:2px}\n\n/* Snippet blocks (.cms-snippet): dotted outline while editing;\n * click for drag-handle/trash chrome. !important beats host CSS\n * (e.g. Tailwind preflight/utilities) that also sets outlines. */\n.cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}\n.cms-editing .cms-snippet:hover{outline-style:solid!important}\n\n/* The column the column tool is acting on. Every button on that toolbar\n * changes one column and leaves the rest alone, so which one it has hold\n * of has to be visible \u2014 a row of identical cells is exactly where a\n * guess goes wrong. Inset offset so the tint hugs the cell instead of\n * bleeding into its neighbour's gutter. */\n.cms-editing .cms-col-active{outline:1.5px solid rgba(47,95,224,.55)!important;\noutline-offset:-1px;background-color:rgba(47,95,224,.05)}\n\n/* Admin tools (admintools.js): a wrench button appended to the site\n * nav's item list, so it spaces like one more menu item (pinned\n * top-left on pages without a nav) with the everyday admin actions.\n * Light DOM, so every rule is explicit \u2014 host CSS (Tailwind preflight\n * etc.) must not restyle it. */\n.cms-admin-li{list-style:none;display:flex;align-items:center;margin:0;padding:0}\n#cms-admin-tools{position:relative;display:inline-flex;line-height:0}\n#cms-admin-tools.cms-fixed{position:fixed;top:12px;left:12px;z-index:2147482996}\n#cms-admin-tools-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;\npadding:0;border:none;border-radius:50%;background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);\ncursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25),inset 0 0 0 1px var(--cms-chrome-ring)}\n#cms-admin-tools-btn:hover{background:var(--cms-chrome-hi)}\n#cms-admin-tools-btn svg{width:14px;height:14px;fill:currentColor}\n#cms-admin-tools .cms-admin-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:2147482997;\ndisplay:none;flex-direction:column;background:var(--cms-chrome-menu);border-radius:12px;padding:6px;\nmin-width:170px;box-shadow:var(--cms-chrome-shadow),inset 0 0 0 1px var(--cms-chrome-ring);\ntext-align:left}\n#cms-admin-tools.cms-open .cms-admin-menu{display:flex}\n#cms-admin-tools.cms-align-right .cms-admin-menu{left:auto;right:0}\n#cms-admin-tools .cms-admin-menu button,#cms-admin-tools .cms-admin-menu a{\nfont:13px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:none;border:none;border-radius:8px;\npadding:8px 12px;margin:0;text-align:left;cursor:pointer;white-space:nowrap;text-decoration:none;display:block}\n#cms-admin-tools .cms-admin-menu button:hover,#cms-admin-tools .cms-admin-menu a:hover{\nbackground:var(--cms-wash-1);color:var(--cms-chrome-fg)}\n#cms-admin-tools .cms-admin-menu hr{border:none;border-top:1px solid var(--cms-wash-2);margin:4px 6px}\n\n/* Site menus ({{cmsNav}}): while editing, clicking an item (long-press\n * on touch) opens its settings and drag rearranges; \"\uFF0B\" chips add\n * items. A mouse click on a dropdown toggle edits the dropdown itself,\n * so hovering opens its panel to keep the items inside reachable. */\n.cms-editing nav[data-cms-menu]{outline:1.5px dashed rgba(47,95,224,.45);outline-offset:6px;\nborder-radius:2px;position:relative}\n/* Hovering the nav explains the interaction; the delay keeps it from\n * flashing on every pass-over, and it gets out of the way mid-drag. */\n.cms-editing nav[data-cms-menu]::after{content:'Click a menu item to edit it \u2014 drag to rearrange';\nposition:absolute;top:calc(100% + 10px);left:0;z-index:2147482995;\nfont:11px/1.4 system-ui,sans-serif;color:var(--cms-chrome-fg);background:var(--cms-chrome-bg);\npadding:5px 10px;\nborder-radius:6px;box-shadow:var(--cms-chrome-shadow-sm),inset 0 0 0 1px var(--cms-chrome-ring);\nwhite-space:nowrap;\npointer-events:none;opacity:0;transition:opacity .15s ease .4s}\n.cms-editing nav[data-cms-menu]:hover::after{opacity:1}\nbody.cms-nav-dragging nav[data-cms-menu]::after{display:none}\n/* An open (or hover-opened) dropdown panel occupies the same spot as\n * the hint \u2014 the panel wins. */\n.cms-editing nav[data-cms-menu]:has(.cms-nav-drop.cms-open)::after,\n.cms-editing nav[data-cms-menu]:has(.cms-nav-drop:hover)::after{display:none}\n.cms-editing nav[data-cms-menu] .cms-nav-item{cursor:pointer}\n.cms-editing nav[data-cms-menu] .cms-nav-drop:hover>.cms-nav-sub{display:block}\n.cms-nav-addli button{font:13px/1 system-ui,sans-serif;color:#2149b8;background:#e8edfb;\nborder:1.5px dashed #2f5fe0;border-radius:8px;width:24px;height:24px;cursor:pointer;padding:0}\n.cms-nav-addli button:hover{background:#dbe4fa}\n.cms-nav-sub .cms-nav-addli{padding:.25em .9em}\n/* The vacated slot reads as a placeholder while its item is airborne. */\n.cms-nav-dragli{opacity:.3;outline:1.5px dashed rgba(47,95,224,.5);outline-offset:2px;border-radius:4px}\nbody.cms-nav-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}\nbody.cms-nav-dragging .cms-nav-addli{opacity:.25}\n#cms-nav-ind{position:fixed;z-index:2147482996;background:#2f5fe0;border-radius:2px;\npointer-events:none;display:none;transition:left .07s ease,top .07s ease,width .07s ease,height .07s ease}\n/* The drag ghost: a pill with the dragged item's label that follows the\n * pointer, dims when there's nowhere to drop, and settles into place on\n * release (transition set inline by settleGhost). */\n#cms-nav-ghost{position:fixed;left:0;top:0;z-index:2147482997;pointer-events:none;\ndisplay:flex;align-items:center;gap:7px;white-space:nowrap;will-change:transform;opacity:.5;\nfont:13px/1.3 system-ui,sans-serif;color:#1c2128;background:#fff;padding:7px 13px;\nborder:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.28)}\n#cms-nav-ghost .sub{color:#6b7280;font-size:11px}\n#cms-nav-ghost.nodrop{opacity:.25}\n\n/* Video slots: a click-to-fill placeholder from the video snippets.\n * While editing, players and embeds go click-through so a click reaches\n * the gear/trash chrome (buttons.js hit-tests their rectangles) instead\n * of playing the video or vanishing into a cross-origin iframe. */\n.cms-editing [data-cms-video-slot],.cms-editing [data-cms-photo-slot],.cms-editing [data-cms-map-slot]{cursor:pointer}\n.cms-editing [data-cms-video-slot]:hover,.cms-editing [data-cms-photo-slot]:hover,.cms-editing [data-cms-map-slot]:hover{outline:1.5px solid rgba(139,92,246,.6);outline-offset:2px}\n.cms-editing [data-cms-region] iframe,.cms-editing [data-cms-sections] iframe,\n.cms-editing [data-cms-region] video,.cms-editing [data-cms-sections] video{pointer-events:none}\n\n/* Flexible-space snippet: invisible on the live site, visible and\n * click-to-adjust while editing. */\n.cms-editing .cms-spacer{position:relative;cursor:pointer;min-height:14px;\noutline:1.5px dashed rgba(217,119,6,.55);outline-offset:-2px;\nbackground:repeating-linear-gradient(-45deg,rgba(217,119,6,.06),rgba(217,119,6,.06) 8px,transparent 8px,transparent 16px)}\n.cms-editing .cms-spacer:hover{outline-style:solid}\n.cms-editing .cms-spacer::after{content:'\u2195 Space \xB7 ' attr(data-height) ' \u2014 click to adjust';\nposition:absolute;top:50%;left:50%;transform:translate(-50%,-50%);\nfont:11px system-ui,sans-serif;color:#b45309;white-space:nowrap;pointer-events:none}\n\n/* Custom-code blocks: entering edit mode empties the block back to the\n   placeholder stored content holds, so while editing there is nothing to\n   show but the name. Every other state \u2014 a visitor's page, and a\n   logged-in editor's while merely viewing \u2014 has the entry's markup\n   inside this same wrapper, which is why the card styling is scoped to\n   edit mode. */\n.cms-editing .cms-code{position:relative;min-height:52px;cursor:pointer;\noutline:1.5px dashed rgba(37,99,235,.55);outline-offset:-2px;\nbackground:repeating-linear-gradient(-45deg,rgba(37,99,235,.05),rgba(37,99,235,.05) 8px,transparent 8px,transparent 16px)}\n.cms-editing .cms-code:hover{outline-style:solid}\n.cms-editing .cms-code::after{content:'\u27E8/\u27E9 Custom code \xB7 ' attr(data-cms-code);\nposition:absolute;top:50%;left:50%;transform:translate(-50%,-50%);\nfont:11px system-ui,sans-serif;color:#1d4ed8;white-space:nowrap;pointer-events:none}\n\n/* Untranslated regions in edit mode: content shown is default-language\n   fallback until it is edited in this locale. */\nbody.cms-editing [data-cms-fallback] {\n    outline: 2px dashed #f0b429 !important;\n    outline-offset: 3px;\n}\n";
 
   // ../src/shell.js
   var ICONS = {
@@ -7561,7 +7557,7 @@ body.cms-editing [data-cms-fallback] {
     host = document.createElement("div");
     host.id = "cms-editor-host";
     shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button><button id="code-tab-meta" hidden>Meta tags</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div id="col-handles"></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.gear + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
+    shadow.innerHTML = "<style>" + styles_default + '</style><div class="bar" id="bar"><span class="chip" id="chip"></span><span class="locs" id="locs"></span><button id="edit" title="Edit this page in place"><span class="ic" id="edit-ic">' + ICONS.pencil + '</span><span id="edit-label">Edit</span></button><button id="save" disabled hidden title="Save your changes as a draft">Save</button><button id="publish" class="primary" title="Make the current draft live">Publish</button><span class="more"><button id="more" class="quiet" title="More actions" aria-haspopup="true" aria-expanded="false">\u22EF</button><div class="menu" id="more-menu"><button id="cancel" hidden>Revert unsaved changes</button><button id="revert-locale" class="dngr" hidden>Remove this translation\u2026</button><button id="discard" class="dngr" hidden>Discard draft\u2026</button><button id="unpublish" class="dngr" hidden>Unpublish page\u2026</button><button id="del-page" class="dngr" hidden>Delete page\u2026</button><hr id="menu-sep"><button id="meta-btn" hidden>Page settings\u2026</button><button id="dup-page" hidden>Duplicate page\u2026</button><button id="vis-btn" hidden>Make page private\u2026</button><button id="code-btn" hidden>Page CSS &amp; JS\u2026</button><a id="admin" href="#">Open admin</a></div></span><button id="close" class="quiet" title="Minimize editing tools">' + ICONS.hide + '</button></div><div class="rail" id="rail"><button id="rail-add" title="Add a section">\uFF0B<span>Section</span></button><button id="rail-snips" title="Snippets">\u29C9<span>Snippets</span></button><button id="rail-page" title="New page">\u229E<span>Page</span></button><button id="rail-post" title="New blog or news post">\u270E<span>Post</span></button></div><button class="post-pill" id="post-settings" hidden title="Edit this post&#39;s date, summary, thumbnail, and header image">\u2699<span>Post settings</span></button><div class="toast" id="toast" role="status" aria-live="polite"></div><button class="fab" id="fab" title="Show editing tools" aria-label="Show editing tools"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button><div class="overlay" id="overlay"></div><div class="panel" id="picker"><div class="head"><h2 id="picker-title">Choose an image</h2><input type="search" id="search" placeholder="Search by name\u2026"><div class="views"><button id="view-grid" title="Grid view" aria-label="Grid view">\u25A6</button><button id="view-list" title="List view" aria-label="List view">\u2261</button></div><button id="picker-close" title="Close" aria-label="Close">\xD7</button></div><div class="pbody"><div class="side" id="folders"></div><div class="main"><div class="up"><input type="file" id="file" accept="image/*"><button id="upload">Upload to this folder</button></div><div class="items grid" id="grid"></div></div></div></div><div class="drawer" id="drawer"><div class="dhead"><h2 id="drawer-title">Snippets</h2><div class="dactions"><button id="drawer-search-btn" title="Search by name" aria-label="Search by name">' + ICONS.search + '</button><button id="drawer-close" title="Close" aria-label="Close">\xD7</button></div></div><div class="dhint" id="drawer-hint">Drag a snippet onto the page, or click one to insert it at the cursor.</div><div class="dsearch" id="drawer-search" hidden><input type="search" id="snip-q" placeholder="Search by name&hellip;" aria-label="Search snippets by name"></div><div class="dcat" id="drawer-cat" hidden><select id="snip-cat" aria-label="Snippet category"></select></div><div class="dlist" id="snip-list"></div></div><div class="dlg-overlay" id="mm-overlay"></div><div class="dlg" id="mm" role="dialog" aria-modal="true"><p id="mm-title">Menu item</p><div class="fld"><label>Menu text</label><input type="text" id="mm-label" class="tinput" placeholder="e.g. About us"></div><div class="fld"><label>Links to</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-page" value="page">A page on this site</label><label class="chk"><input type="radio" name="mmkind" id="mm-kind-url" value="url">A web address</label><label class="chk" id="mm-kind-drop-row"><input type="radio" name="mmkind" id="mm-kind-drop" value="dropdown">Nothing \u2014 it opens a dropdown menu</label></div><div class="fld" id="mm-page-fld"><label>Page</label><div class="combo"><input type="text" id="mm-page" class="tinput" placeholder="Type to search pages\u2026" autocomplete="off"><div class="combo-list" id="mm-page-list" hidden></div></div></div><div class="fld" id="mm-url-fld"><label>Web address</label><input type="text" id="mm-url" class="tinput" placeholder="https://example.com or /contact"></div><div class="fld" id="mm-tab-fld"><label class="chk"><input type="checkbox" id="mm-newtab">Open in a new tab</label></div><p class="derr" id="mm-err" hidden></p><div class="acts"><button id="mm-remove" class="rm" hidden>Remove</button><button id="mm-cancel">Cancel</button><button id="mm-ok" class="ok">OK</button></div></div><div class="code-overlay" id="code-overlay"></div><div class="codepanel" id="code-panel"><div class="chead"><h2 id="code-title">Page CSS &amp; JS</h2><div class="ctabs"><button id="code-tab-css" class="on">CSS</button><button id="code-tab-js">JavaScript</button><button id="code-tab-meta" hidden>Meta tags</button></div><button id="code-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="code-hint"></span><button class="mbtn" id="code-cancel">Cancel</button><button class="mbtn primary" id="code-save">Save</button></div></div><div class="btnui" id="btn-ui"><button id="btn-set" title="Button settings">' + ICONS.gear + '</button><button id="btn-del" title="Delete button">' + ICONS.trash + '</button></div><div class="btnui" id="snip-ui"><button id="snip-move" title="Drag to move this block" draggable="true">\u283F</button><button id="snip-up" title="Move this block up">' + ICONS.chevU + '</button><button id="snip-down" title="Move this block down">' + ICONS.chevD + '</button><button id="snip-dup-up" title="Duplicate this block above">' + ICONS.dupUp + '</button><button id="snip-dup-down" title="Duplicate this block below">' + ICONS.dupDown + '</button><button id="snip-src" title="Edit the HTML of this block">' + ICONS.code + '</button><button id="snip-set" title="Block settings">' + ICONS.gear + '</button><button id="snip-del" title="Delete this block">' + ICONS.trash + '</button></div><div id="col-handles"></div><div class="btnui" id="col-ui"><button id="col-back" title="Move this column left">' + ICONS.chevL + '</button><button id="col-on" title="Move this column right">' + ICONS.chevR + '</button><button id="col-narrow" title="Make this column narrower">' + ICONS.narrower + '</button><button id="col-wide" title="Make this column wider">' + ICONS.wider + '</button><button id="col-dup-back" title="Duplicate this column to the left">' + ICONS.dupLeft + '</button><button id="col-dup-on" title="Duplicate this column to the right">' + ICONS.dupRight + '</button><button id="col-add" title="Add a column">' + ICONS.plus + '</button><button id="col-set" title="Column settings">' + ICONS.gear + '</button><button id="col-del" title="Remove this column">' + ICONS.trash + '</button></div><div class="btnui" id="faq-ui"><button id="faq-up" title="Move this question up">' + ICONS.chevU + '</button><button id="faq-down" title="Move this question down">' + ICONS.chevD + '</button><button id="faq-add" title="Add a question below this one">' + ICONS.plus + '</button><button id="faq-del" title="Delete this question">' + ICONS.trash + '</button></div><div class="btnui" id="img-ui"><button id="img-set" title="Image settings">' + ICONS.gear + '</button><button id="img-del" title="Delete image">' + ICONS.trash + '</button></div><div class="btnui" id="slot-ui"><button id="slot-pick" title="Choose a picture">' + ICONS.gear + '</button><button id="slot-clear" title="Remove this picture">' + ICONS.trash + '</button></div><div class="btnui" id="vid-ui"><button id="vid-set" title="Change this video">' + ICONS.gear + '</button><button id="vid-del" title="Delete video">' + ICONS.trash + '</button></div><div class="code-overlay" id="src-overlay"></div><div class="codepanel" id="src-panel"><div class="chead"><h2 id="src-title">HTML source</h2><button id="src-close" title="Close" aria-label="Close">\xD7</button></div><div class="cbody"><pre id="src-hl" aria-hidden="true"></pre><textarea id="src-ta" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea></div><div class="cfoot"><span class="chint" id="src-hint"></span><button class="mbtn" id="src-cancel">Cancel</button><button class="mbtn primary" id="src-apply">Apply</button></div></div><div class="dlg-overlay" id="dlg-overlay"></div><div class="dlg" id="dlg" role="dialog" aria-modal="true"><p id="dlg-msg"></p><div class="tabs" id="dlg-tabs" hidden></div><input type="text" id="dlg-input" hidden><p class="derr" id="dlg-err" hidden></p><div class="dbody"><div id="dlg-fields"></div><div id="dlg-preview" hidden></div></div><div class="acts"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="ok">OK</button></div></div>';
     document.documentElement.appendChild(host);
     host.classList.toggle("light", state.editorTheme === "light");
     $("admin").href = adminPath + "/";

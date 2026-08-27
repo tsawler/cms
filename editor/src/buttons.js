@@ -22,6 +22,10 @@ import {
     columnTarget, addColumn, duplicateColumn, confirmRemove, removeColumn,
     resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
 } from "./columns.js";
+import {
+    faqTarget, addQuestion, moveQuestion,
+    confirmRemove as confirmRemoveQuestion, removeQuestion,
+} from "./faq.js";
 import { copyOf } from "./clone.js";
 import { initColResize, showHandles, hideHandles, placeHandles } from "./colresize.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
@@ -293,6 +297,129 @@ function duplicateBlock(dir) {
  * wants is answered by which one they reach for, not by a mode. */
 var activeCol = null; // the columnTarget the chrome is attached to
 
+// openBlockSettings runs the settings dialog against one element and
+// applies what comes back as inline styles. Two controls point at it:
+// the block gear, at a whole snippet block, and the column gear, at a
+// single cell of a row. Same four choices and the same preview either
+// way, because a column is a box like any other and "give this one a
+// background" should not mean learning a second control — only the
+// title and the shape of the stand-in differ, `title` naming which is
+// being edited since the dialog is the only thing on screen once it is
+// open.
+//
+// A cell needs nothing special to hold this: it is a <div>, which is
+// already among the elements the server's policy allows these styles
+// on, so a coloured column survives a save exactly as a coloured block
+// does.
+function openBlockSettings(el, title, asColumn) {
+    var cs = window.getComputedStyle(el);
+    // Class-derived looks, for the preview when no override is set.
+    var baseBg = rgbToHex(cs.backgroundColor);
+    var basePad = cs.padding;
+    var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
+    // The rounding the block's classes give it, so Apply can tell a
+    // deliberate choice from the value the slider was merely showing.
+    var baseRadius = classRadius(el);
+    var setFields = [
+        { id: "bgcolor", label: "Background color", type: "color",
+            value: rgbToHex(el.style.backgroundColor) },
+        { id: "textcolor", label: "Text color", type: "color",
+            value: rgbToHex(el.style.color) },
+        { id: "spacing", label: "Spacing", type: "select",
+            value: el.getAttribute("data-cms-snip-spacing") || "",
+            options: [
+                { value: "", label: "As designed" },
+                { value: "compact", label: "Compact" },
+                { value: "normal", label: "Comfortable" },
+                { value: "roomy", label: "Roomy" },
+            ] },
+        // An override wins even when it is zero — a block squared off
+        // on purpose has to read back as 0, not as the rounding its
+        // classes would have given it. (`|| baseRadius` would not do:
+        // 0 is falsy, and that is exactly the deliberate case.)
+        { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40,
+            value: String(Math.min(40, el.style.borderRadius
+                ? parseInt(el.style.borderRadius, 10) || 0
+                : baseRadius)) },
+    ];
+    openDialog({
+        message: title,
+        okLabel: "Apply",
+        fields: setFields,
+        // A stand-in page: gray context lines above and below the
+        // block, so spacing and background read as they will inline.
+        preview: function (v, out) {
+            out.innerHTML = "";
+            var page = document.createElement("div");
+            // The preview pane centers flex children; an explicit
+            // width keeps the stand-in page from shrink-wrapping.
+            page.style.cssText = "width:100%;box-sizing:border-box;background:#fff;" +
+                "border:1px solid #e3e6ea;border-radius:4px;padding:8px 14px";
+            var ctxLine = function () {
+                var l = document.createElement("div");
+                l.style.cssText = "height:6px;border-radius:3px;background:#e3e6ea";
+                return l;
+            };
+            var sp = SNIP_SPACING[v.spacing];
+            var bg = v.bgcolor || baseBg;
+            var box = document.createElement("div");
+            box.style.padding = sp ? sp.padding : basePad;
+            box.style.marginTop = sp ? sp.margin : baseMargin.top;
+            box.style.marginBottom = sp ? sp.margin : baseMargin.bottom;
+            box.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
+            if (bg) box.style.background = bg;
+            else box.style.border = "1px dashed #d9dce1";
+            // Placeholder lines take the chosen text color, so a bad
+            // contrast choice is visible before it's applied.
+            var lineColor = v.textcolor ||
+                (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
+            var lines = function (into, shapes) {
+                shapes.forEach(function (d, i) {
+                    var line = document.createElement("div");
+                    line.style.cssText = "border-radius:3px";
+                    line.style.height = d[0];
+                    line.style.width = d[1];
+                    line.style.marginTop = i ? "6px" : "0";
+                    line.style.background = lineColor;
+                    into.appendChild(line);
+                });
+            };
+            lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
+            page.appendChild(ctxLine());
+            // A column is shown as one cell of a row rather than as a
+            // band across the page: its width is the thing a background
+            // reads against, and a full-width stand-in would promise a
+            // block that is not what gets painted.
+            if (asColumn) {
+                var row = document.createElement("div");
+                row.style.cssText = "display:flex;gap:8px;align-items:flex-start";
+                box.style.flex = "0 0 55%";
+                row.appendChild(box);
+                var beside = document.createElement("div");
+                beside.style.cssText = "flex:1 1 auto;padding:" + (sp ? sp.padding : basePad);
+                lines(beside, [["7px", "100%"], ["7px", "70%"]]);
+                row.appendChild(beside);
+                page.appendChild(row);
+            } else {
+                page.appendChild(box);
+            }
+            page.appendChild(ctxLine());
+            out.appendChild(page);
+        },
+    }).then(function (v) {
+        if (!v) return;
+        var ed = findOwningEditor(el);
+        runWithUndo(ed, function () { applySnippetSettings(el, v, baseRadius); });
+        markContainerDirty(el);
+        // Spacing and rounding move the geometry both toolbars measure
+        // themselves against, so whatever is still up re-anchors — which
+        // is not necessarily what was clicked, since the dialog is async
+        // and the block chrome sits on the row a column belongs to.
+        if (activeSnip && activeSnip.isConnected) showSnipUI(activeSnip);
+        placeColUI();
+    });
+}
+
 // placeColUI straddles the row's top border — half above, half below —
 // and centres the pill over the column it acts on.
 //
@@ -356,6 +483,10 @@ function showColUI(block, target) {
     $("col-on").hidden = !cell || !info.canMoveOn;
     $("col-narrow").hidden = !cell || !info.canResize;
     $("col-wide").hidden = !cell || !info.canResize;
+    // Settings are a cell's own: a block that is not a row yet has the
+    // block gear for exactly this, and pointing a second one at the same
+    // element would be two controls writing the same styles.
+    $("col-set").hidden = !cell;
     $("col-del").hidden = !cell;
     // The duplicate pair is the one thing on this toolbar that means
     // something in both modes, and it is the same sentence either way —
@@ -379,7 +510,7 @@ function showColUI(block, target) {
     // offers only Remove, and a row already at the maximum offers only
     // the moves. An empty pill would be a puzzle, so it stays away.
     var any = ["col-back", "col-on", "col-narrow", "col-wide",
-        "col-dup-back", "col-dup-on", "col-add", "col-del"]
+        "col-dup-back", "col-dup-on", "col-add", "col-set", "col-del"]
         .some(function (id) { return !$(id).hidden; });
     if (!any) {
         hideColUI();
@@ -439,6 +570,77 @@ function runColumnEdit(edit) {
         if ("target" in out) target = out.target;
     });
     afterColumnEdit(container, now, target);
+}
+
+/* Question chrome. A block holding a run of disclosures gets a small
+ * toolbar anchored to the one that was clicked, with the four verbs a
+ * list has: move it up, move it down, add one below it, delete it.
+ *
+ * It rides alongside the block chrome and the column tool for the same
+ * reason those ride alongside each other — a block, a column in it and a
+ * question in it are three things to edit, and which one someone wants is
+ * answered by which control they reach for rather than by a mode. */
+var activeFaq = null;
+
+// placeFaqUI sits the pill on the question's own top edge, right-aligned.
+//
+// Right rather than centred, which is what the column tool does: columns
+// sit side by side so centring says "this one", while questions are
+// stacked full-width and the only ambiguity is vertical. Right-aligned
+// also keeps it clear of the block chrome, which is drawn on the left.
+function placeFaqUI() {
+    if (!activeFaq) return;
+    var ui = $("faq-ui");
+    var box = ui.getBoundingClientRect();
+    var r = activeFaq.item.getBoundingClientRect();
+    var top = r.top - box.height / 2;
+    if (top < 64) top = 64; // never slide under TinyMCE's toolbar
+    var left = r.right - box.width;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+}
+
+function showFaqUI(block, target) {
+    var info = faqTarget(block, target);
+    if (!info) {
+        hideFaqUI();
+        return;
+    }
+    activeFaq = info;
+    // Hidden rather than disabled at the ends of the run: a control that
+    // cannot do anything is better absent than present and inert, and the
+    // pill is small enough that its width changing is not a distraction.
+    $("faq-up").hidden = !info.canMoveUp;
+    $("faq-down").hidden = !info.canMoveDown;
+    $("faq-ui").classList.add("on");
+    placeFaqUI();
+}
+
+export function hideFaqUI() {
+    activeFaq = null;
+    $("faq-ui").classList.remove("on");
+}
+
+// runFaqEdit is runColumnEdit's shape for questions: make the change
+// inside the owning editor's undo transaction, mark the region dirty, and
+// re-anchor the chrome on whatever is there afterwards.
+function runFaqEdit(edit) {
+    if (!activeFaq) return;
+    var info = activeFaq;
+    var block = activeSnip;
+    var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(info.item);
+    var next = info.item;
+    runWithUndo(ed, function () {
+        var out = edit(info);
+        if (out !== undefined) next = out;
+    });
+    if (container) markContainerDirty(container);
+    if (!next || !next.isConnected) {
+        hideFaqUI();
+        return;
+    }
+    showFaqUI(block, next);
 }
 
 /* Embedded images get a gear (alt text, caption, link, rendition, and
@@ -681,6 +883,9 @@ export function hideChrome(except) {
     // Column chrome belongs to the block chrome: it is raised by the same
     // click and never outlives it.
     if (except !== "snip") { hideSnipUI(); hideColUI(); }
+    // Not tied to "snip": a question can live outside a block, so its
+    // chrome is raised and hidden by the click handler on its own terms.
+    if (except !== "faq") hideFaqUI();
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -966,6 +1171,17 @@ export function initButtons() {
             snip = t.closest(".cms-snippet");
             if (snip && !snip.closest("[data-cms-region],[data-cms-sections]")) snip = null;
         }
+        // A question is looked for independently of the block chrome,
+        // because it is not always inside one. Content converted from
+        // the old site has its accordions sitting directly in a section,
+        // with no .cms-snippet wrapper — and a tool that only appeared on
+        // snippet-wrapped markup would be missing on exactly the pages
+        // that have the most questions.
+        var faq = null;
+        if (!btn && !slot && !img && !vid && t.closest) {
+            faq = t.closest(".cms-faq");
+            if (faq && !faq.closest("[data-cms-region],[data-cms-sections]")) faq = null;
+        }
         if (btn) {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
@@ -997,6 +1213,12 @@ export function initButtons() {
         } else {
             hideChrome();
         }
+        // Raised or hidden on every click, after whatever else the click
+        // did: the question tool rides alongside the block chrome rather
+        // than instead of it, and is the one piece of chrome that does
+        // not need a block to hang from.
+        if (faq) showFaqUI(faq.parentElement || faq, t);
+        else hideFaqUI();
     }, true);
 
     // Keep the chrome glued to its element through scrolls and resizes.
@@ -1004,6 +1226,7 @@ export function initButtons() {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
+        if (activeFaq) placeFaqUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1012,6 +1235,7 @@ export function initButtons() {
         if (activeBtn) showButtonUI(activeBtn);
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
+        if (activeFaq) placeFaqUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1337,6 +1561,10 @@ export function initButtons() {
             return { target: addColumn(info) };
         });
     });
+    $("col-set").addEventListener("click", function () {
+        if (!activeCol || activeCol.mode !== "cell") return;
+        openBlockSettings(activeCol.cell, "Column settings", true);
+    });
     $("col-del").addEventListener("click", function () {
         if (!activeCol || activeCol.mode !== "cell") return;
         var info = activeCol;
@@ -1355,97 +1583,38 @@ export function initButtons() {
         });
     });
 
-    $("snip-set").addEventListener("click", function () {
-        if (!activeSnip) return;
-        var el = activeSnip;
-        var cs = window.getComputedStyle(el);
-        // Class-derived looks, for the preview when no override is set.
-        var baseBg = rgbToHex(cs.backgroundColor);
-        var basePad = cs.padding;
-        var baseMargin = { top: cs.marginTop, bottom: cs.marginBottom };
-        // The rounding the block's classes give it, so Apply can tell a
-        // deliberate choice from the value the slider was merely showing.
-        var baseRadius = classRadius(el);
-        var setFields = [
-            { id: "bgcolor", label: "Background color", type: "color",
-                value: rgbToHex(el.style.backgroundColor) },
-            { id: "textcolor", label: "Text color", type: "color",
-                value: rgbToHex(el.style.color) },
-            { id: "spacing", label: "Spacing", type: "select",
-                value: el.getAttribute("data-cms-snip-spacing") || "",
-                options: [
-                    { value: "", label: "As designed" },
-                    { value: "compact", label: "Compact" },
-                    { value: "normal", label: "Comfortable" },
-                    { value: "roomy", label: "Roomy" },
-                ] },
-            // An override wins even when it is zero — a block squared off
-            // on purpose has to read back as 0, not as the rounding its
-            // classes would have given it. (`|| baseRadius` would not do:
-            // 0 is falsy, and that is exactly the deliberate case.)
-            { id: "radius", label: "Corner roundness", type: "range", min: 0, max: 40,
-                value: String(Math.min(40, el.style.borderRadius
-                    ? parseInt(el.style.borderRadius, 10) || 0
-                    : baseRadius)) },
-        ];
-        openDialog({
-            message: "Block settings",
-            okLabel: "Apply",
-            fields: setFields,
-            // A stand-in page: gray context lines above and below the
-            // block, so spacing and background read as they will inline.
-            preview: function (v, out) {
-                out.innerHTML = "";
-                var page = document.createElement("div");
-                // The preview pane centers flex children; an explicit
-                // width keeps the stand-in page from shrink-wrapping.
-                page.style.cssText = "width:100%;box-sizing:border-box;background:#fff;" +
-                    "border:1px solid #e3e6ea;border-radius:4px;padding:8px 14px";
-                var ctxLine = function () {
-                    var l = document.createElement("div");
-                    l.style.cssText = "height:6px;border-radius:3px;background:#e3e6ea";
-                    return l;
-                };
-                var sp = SNIP_SPACING[v.spacing];
-                var bg = v.bgcolor || baseBg;
-                var box = document.createElement("div");
-                box.style.padding = sp ? sp.padding : basePad;
-                box.style.marginTop = sp ? sp.margin : baseMargin.top;
-                box.style.marginBottom = sp ? sp.margin : baseMargin.bottom;
-                box.style.borderRadius = (parseInt(v.radius, 10) || 0) + "px";
-                if (bg) box.style.background = bg;
-                else box.style.border = "1px dashed #d9dce1";
-                // Placeholder lines take the chosen text color, so a bad
-                // contrast choice is visible before it's applied.
-                var lineColor = v.textcolor ||
-                    (snipDark(bg) ? "rgba(255,255,255,.8)" : "rgba(28,33,40,.3)");
-                var lines = function (into, shapes) {
-                    shapes.forEach(function (d, i) {
-                        var line = document.createElement("div");
-                        line.style.cssText = "border-radius:3px";
-                        line.style.height = d[0];
-                        line.style.width = d[1];
-                        line.style.marginTop = i ? "6px" : "0";
-                        line.style.background = lineColor;
-                        into.appendChild(line);
-                    });
-                };
-                lines(box, [["12px", "40%"], ["7px", "100%"], ["7px", "80%"]]);
-                page.appendChild(ctxLine());
-                page.appendChild(box);
-                page.appendChild(ctxLine());
-                out.appendChild(page);
-            },
-        }).then(function (v) {
-            if (!v) return;
-            var ed = findOwningEditor(el);
-            runWithUndo(ed, function () { applySnippetSettings(el, v, baseRadius); });
-            markContainerDirty(el);
-            if (activeSnip === el) {
-                showSnipUI(el); // re-anchor around the new size
-                placeColUI(); // spacing moved the row the column tool sits in
-            }
+    $("faq-up").addEventListener("click", function () {
+        runFaqEdit(function (info) { moveQuestion(info, -1); return info.item; });
+    });
+    $("faq-down").addEventListener("click", function () {
+        runFaqEdit(function (info) { moveQuestion(info, 1); return info.item; });
+    });
+    $("faq-add").addEventListener("click", function () {
+        // Anchored on the new question rather than the one it was added
+        // after: it holds the placeholder, so it is the one about to be
+        // written in — the same choice the column tool makes on split.
+        runFaqEdit(function (info) { return addQuestion(info); });
+    });
+    $("faq-del").addEventListener("click", function () {
+        if (!activeFaq) return;
+        var info = activeFaq;
+        var block = activeSnip;
+        // Noted while the question is still in the document: afterwards
+        // it has no siblings left to find a neighbour by.
+        var container = info.item.closest("[data-cms-region],[data-cms-sections]");
+        confirmRemoveQuestion(info).then(function (yes) {
+            if (!yes) return;
+            var ed = findOwningEditor(info.item);
+            var near = null;
+            runWithUndo(ed, function () { near = removeQuestion(info); });
+            if (container) markContainerDirty(container);
+            if (near && near.isConnected) showFaqUI(block, near);
+            else hideFaqUI();
         });
+    });
+
+    $("snip-set").addEventListener("click", function () {
+        if (activeSnip) openBlockSettings(activeSnip, "Block settings", false);
     });
 
     $("snip-up").addEventListener("click", function () { moveBlock(-1); });

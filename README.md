@@ -772,6 +772,81 @@ safelist: [
 Deleting a snippet never changes pages that already inserted it — inserted
 snippets are ordinary page content.
 
+### Questions and answers
+
+Two of the stock snippets build collapsible questions: the **FAQ**
+section preset, which starts with a heading and three of them, and
+**Question & answer**, which inserts one more. They are the same markup,
+so an accordion grows by putting the caret after the last answer and
+inserting another — and a hand-added question is indistinguishable from
+the three the section came with.
+
+Each one is a `<details>`:
+
+```html
+<details class="cms-faq">
+  <summary>A question people ask?</summary>
+  <div class="cms-faq-body"><p>A short, direct answer.</p></div>
+</details>
+```
+
+No JavaScript is involved, which is the reason for the element rather
+than a scripted panel: it opens and closes on its own, it is
+keyboard-operable and announced as a disclosure without any ARIA, the
+browser's in-page search finds text inside a closed one, and it prints
+open.
+
+**Editing them is a small toolbar.** Click a question while editing and a
+pill appears on its top edge with the four verbs a list has: move it up,
+move it down, add one below it, delete it. A new question is a copy of
+the one it was added after with its words replaced by placeholders, so it
+inherits whatever classes that markup carries and a site that has
+restyled its accordions gets restyled new questions for free.
+
+The tool works on any `<details class="cms-faq">`, whether it came from a
+snippet or from content that already had one — it does not require the
+`cms-snippet` wrapper the block chrome hangs from.
+
+"Up" and "down" move a question within its own run: consecutive
+`.cms-faq` siblings, so a page with two accordions under two headings has
+two independent lists, and the buttons disappear at each end rather than
+carrying a question across the gap. Deleting asks first only when the
+question has been written in; one still showing its placeholder goes
+without a prompt.
+
+**Answers are open while editing.** A `<summary>` inside an editable
+region does not toggle when clicked — the click places the caret, which
+is what editing the question needs — so a closed answer would otherwise
+have no way of being opened and no way of being written in. Edit mode
+shows every answer instead, dimmed and with the caret still pointing
+right so a question goes on reading as closed. Both the question and the
+answer are ordinary rich text: click and type.
+
+Nothing is written to the document to achieve that. There is no `open`
+attribute to strip at save time, and what is stored is exactly what was
+there — an accordion that ships expanded is not an accordion.
+
+`{{cmsHead}}` ships the functional minimum — a pointer cursor, a rotating
+caret in place of the browser's three different default markers, a
+keyboard focus ring, and a reset for the top margin Typography would
+otherwise put between a question and its answer. Everything else is
+yours, addressed through the two classes:
+
+```css
+.cms-faq          { border-bottom: 1px solid #e2e8f0; }
+.cms-faq > summary{ padding: .75rem 0; font-weight: 600; }
+.cms-faq-body     { padding-bottom: 1rem; }
+```
+
+Every injected rule is wrapped in `:where()`, so it carries no
+specificity and a plain class selector of yours wins — which matters
+because `{{cmsHead}}` is emitted *after* your stylesheet, and an
+unwrapped rule would otherwise beat an equally specific one of yours on
+source order alone.
+
+Nothing here needs safelisting: the classes are the CMS's own and its
+stylesheet defines them.
+
 ## Custom code blocks
 
 Some blocks are not content: an availability calendar, a pricing
@@ -2057,6 +2132,24 @@ AdminSections: []cms.AdminSection{
 `cms.New` rejects a config with malformed, duplicate, or handler-less
 sections; call `admin.ValidateSections` yourself to fail even earlier
 (e.g. in a test).
+
+**Styling the chrome your sections appear in.** A section's own
+stylesheet is linked from its own pages, so it cannot reach the sidebar,
+which renders on every admin page — and the admin's CSP forbids an
+inline `<style>`. `Config.AdminStylesheets` links a host stylesheet on
+every admin page, after the admin's own so its rules win at equal
+specificity:
+
+```go
+AdminStylesheets: []string{"/admin/x/registrations/adminassets/nav.css"},
+```
+
+Serve the file from a section's own asset route. The usual reason is a
+`NavCount` that means something other than "how many": every built-in
+count is a total, so a count of what is *outstanding* reads wrong as a
+bare number and wants a badge. Nav links carry no per-section class, so
+target them by href — `.cms-nav a[href$="/x/registrations/"]
+.cms-nav-count`.
 
 Inside a handler, four helpers from `github.com/tsawler/cms/admin`
 integrate with the admin UI:

@@ -181,8 +181,10 @@ border-radius:999px;padding:6px 9px;cursor:pointer;display:inline-flex}
    it there), so it covers nothing and can stay legible. Smaller and a
    touch quieter than the block chrome above it all the same: it edits a
    part of the block, not the block. */
-#col-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
-#col-ui:hover{opacity:1}
+/* The column and question tools are secondary to the block chrome, and
+   read that way: slightly recessed until pointed at. */
+#col-ui,#faq-ui{padding:2px 4px;opacity:.85;transition:opacity .12s}
+#col-ui:hover,#faq-ui:hover{opacity:1}
 #col-ui button{padding:4px 6px}
 #col-ui button svg{width:13px;height:13px}
 

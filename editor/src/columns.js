@@ -151,6 +151,25 @@ function rowIn(block) {
     return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
 }
 
+// cellFor reports the column a piece of content sits in: the cell of
+// its block's row that contains it, or null when the block it belongs
+// to is not a row at all. It is what tells an insert that landed inside
+// a column apart from one that merely landed inside another block —
+// the first is where someone put the caret, the second is an accident.
+//
+// An element that *is* one of the cells is not in a column, it is one,
+// so it reports null and stays a block's problem rather than a row's.
+export function cellFor(el) {
+    var block = el.parentElement && el.parentElement.closest(".cms-snippet");
+    var row = block && rowIn(block);
+    if (!row) return null;
+    var cells = cellsOf(row);
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i] !== el && cells[i].contains(el)) return cells[i];
+    }
+    return null;
+}
+
 // SPLIT_HOSTILE lists what stops a block being ordinary running text
 // that could be split into columns. Media and buttons are placed things:
 // dividing a block built around one is a judgement about its design, not

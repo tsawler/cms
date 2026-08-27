@@ -439,6 +439,24 @@ type Config struct {
 	// admin routes, now or after upgrades.
 	AdminSections []AdminSection
 
+	// AdminStylesheets are extra stylesheet URLs the admin links on every
+	// one of its pages, after its own. A host that registers
+	// AdminSections needs this to style the chrome those sections appear
+	// in — the count beside their nav link, say — which the admin's
+	// strict Content-Security-Policy makes impossible to do inline, and
+	// which a stylesheet linked from a section's own page cannot reach,
+	// since it is not loaded on the other pages the nav appears on.
+	//
+	// Each entry is a URL the host serves. An admin section's own asset
+	// route is the natural place:
+	//
+	//	AdminStylesheets: []string{"/admin/x/registrations/adminassets/nav.css"},
+	//
+	// They are linked last, so their rules win at equal specificity.
+	// Nothing validates them beyond the layout escaping the attribute:
+	// they are the host's own URLs, not user input.
+	AdminStylesheets []string
+
 	// Permissions declares deployment-specific permissions beyond the
 	// built-ins (blogs, news, pages, users), for functionality the host
 	// gates itself with auth.User.Can — e.g. in-place editing of its own
@@ -707,6 +725,7 @@ func New(cfg Config) (*CMS, error) {
 		SectionStyles:   cfg.SectionStyles,
 		PostTemplate:    cfg.PostTemplate,
 		Sections:        cfg.AdminSections,
+		Stylesheets:     cfg.AdminStylesheets,
 		Permissions:     permissions,
 		Logger:          cfg.Logger,
 		AdminPath:       cfg.AdminPath,
@@ -1340,6 +1359,25 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// An editor's copy of a page must never be cached, and the editor
+	// script is why. Its URL carries a digest of the bundle so a new
+	// build is a new address (see editor.Version) — but that address
+	// lives in this HTML, and with no Cache-Control here a browser is
+	// free to cache the page heuristically. It then goes on naming the
+	// previous build's URL, which was served as immutable back when it
+	// was current, so the old script comes off the browser's own shelf
+	// and is never requested again. The symptom is an editor that does
+	// not match the code, surviving a rebuild, a restart, and every
+	// reload that does not bypass the cache — which is exactly the trap
+	// the digest was meant to close.
+	//
+	// The response is per-editor anyway: it carries a CSRF token, the
+	// draft rather than the published content, and whatever this user's
+	// permissions let them see. Vary: Cookie asks an intermediary to
+	// keep those apart; no-store settles it.
+	if edit != nil {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if err := c.renderer.Render(w, render.Input{
 		Page:      page,
 		Blocks:    blocks,

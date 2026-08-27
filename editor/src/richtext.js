@@ -294,6 +294,32 @@ function initSectionEditors() {
     });
 }
 
+/* ---- pasting into a snippet -------------------------------------
+ * The plainest snippets *are* their block: the Text snippet is a
+ * single <p class="cms-snippet">. Paste more than one block's worth
+ * into one and the browser's own rules take over — the paragraph is
+ * replaced when its whole content was selected, split when the caret
+ * sat inside it — and the blocks that come out of that carry only
+ * what the clipboard held. The class does not survive, so the block
+ * quietly stops being a snippet: no outline, no drag handle, no
+ * trash, and nothing for the section tools to take hold of.
+ *
+ * Enter already carries the class onto the paragraph it makes, and
+ * paste does the same here: every top-level block a paste brings in
+ * inherits the snippet it landed in. Only a snippet that is itself
+ * the block being pasted into qualifies — a container snippet (the
+ * Article text <div>, a column grid) keeps its own outline and its
+ * children must stay plain, or unnestSnippets would tear the paste
+ * back out of it. */
+function pasteHostSnippet(ed) {
+    var block = ed.dom.getParent(ed.selection.getNode(), ed.dom.isBlock);
+    if (!block || !ed.dom.hasClass(block, "cms-snippet")) return null;
+    // Snippets are siblings at the top of a region by design; anything
+    // deeper is a nesting accident and not something to copy onto more
+    // blocks.
+    return block.parentNode === ed.getBody() ? block : null;
+}
+
 export function initInlineEditor(el, onDirty, register) {
     var light = state.editorTheme === "light";
     var opts = {
@@ -371,6 +397,18 @@ export function initInlineEditor(el, onDirty, register) {
         setup: function (ed) {
             register(ed);
             ed.on("focus", function () { state.lastEditor = ed; state.lastEditorDirty = onDirty; });
+            // Blocks arriving on the clipboard inherit the snippet
+            // they are pasted into — see pasteHostSnippet.
+            // PastePostProcess hands over the parsed fragment while
+            // the selection is still where the paste will land.
+            ed.on("PastePostProcess", function (e) {
+                if (!pasteHostSnippet(ed)) return;
+                for (var n = e.node.firstChild; n; n = n.nextSibling) {
+                    if (n.nodeType === 1 && ed.dom.isBlock(n)) {
+                        ed.dom.addClass(n, "cms-snippet");
+                    }
+                }
+            });
             // Buttons are atomic while editing (contenteditable=
             // false, see lockButtons): their text is edited via
             // the gear dialog only. Strip the lock attribute at

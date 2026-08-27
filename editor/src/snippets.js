@@ -11,6 +11,7 @@ import { markDirty, markSectionsDirty } from "./editing.js";
 import { lockButtons } from "./buttons.js";
 import { createSection, presetSectionHTML } from "./sections.js";
 import { chooseCodeBlock } from "./code.js";
+import { cellFor } from "./columns.js";
 
 var snippetsLoaded = false;
 
@@ -326,6 +327,17 @@ function loadSnippets() {
 // Snippets are sibling blocks by design, but an insert while the
 // caret sits inside another snippet nests them. Lift any nested
 // snippet out to sit right after the block it landed in.
+//
+// Unless it landed in a column, which is the one place inside a block
+// that content is *meant* to go: putting the caret in a column and
+// inserting a button is how a button gets into that column, and lifting
+// it out to sit under the whole row — full width, in nobody's column —
+// is the opposite of what was asked. What it loses instead is the
+// marker, exactly as splitting or duplicating a block into columns
+// drops it: there is one block here and it is the row, and leaving the
+// marker on is what would have this lift the content straight back out
+// again. Anything the content carries of its own — a button's cms-btn,
+// a video slot — is untouched, so its own chrome still works.
 export function unnestSnippets() {
     for (var guard = 0; guard < 4; guard++) {
         var nested = document.querySelectorAll(
@@ -334,7 +346,13 @@ export function unnestSnippets() {
         if (!nested.length) return;
         nested.forEach(function (inner) {
             var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
-            if (anc) anc.insertAdjacentElement("afterend", inner);
+            if (!anc) return;
+            if (cellFor(inner)) {
+                inner.classList.remove("cms-snippet");
+                if (!inner.getAttribute("class")) inner.removeAttribute("class");
+                return;
+            }
+            anc.insertAdjacentElement("afterend", inner);
         });
     }
 }
