@@ -76,6 +76,22 @@ export var EDITOR_BASE = (function () {
 // Entries sharing a group fold into a submenu, placed where the
 // group's first member appears among the ungrouped entries.
 export var styleFormats = [];
+
+// The colour entries, lifted out of the Styles menu into the toolbar's
+// own colour button (cmstextcolor in richtext.js). They are still the
+// host's classes and still apply as classes — what the button adds
+// underneath them is a picker for a colour nobody curated, which has to
+// be an inline style. Both live in the one menu because "which colour
+// is this text" is a single question, and answering it in two places
+// is how you end up with a named colour and a custom one fighting over
+// the same words.
+//
+// A group is the colour group when it is called "Color" or "Colour";
+// every other group stays a Styles submenu. Naming rather than a flag
+// on EditorStyle keeps the server's vocabulary as it was — see the
+// Group field's documentation in render.
+export var colorStyles = [];
+var COLOR_GROUP = /^colou?r$/i;
 try {
     var styleGroups = {}; // group title -> its {title, items} submenu
     (JSON.parse(cfg.styles || "[]") || []).forEach(function (s) {
@@ -83,7 +99,13 @@ try {
         var f = { title: s.label, classes: s.class.split(/\s+/) };
         if (s.block) f.block = s.block;
         else f.inline = "span";
-        if (s.group) {
+        if (s.group && COLOR_GROUP.test(s.group.trim())) {
+            // No title: this is a format to register, not a menu entry.
+            var cf = { classes: f.classes };
+            if (f.block) cf.block = f.block;
+            else cf.inline = "span";
+            colorStyles.push({ label: s.label, format: cf });
+        } else if (s.group) {
             if (!styleGroups[s.group]) {
                 styleGroups[s.group] = { title: s.group, items: [] };
                 styleFormats.push(styleGroups[s.group]);

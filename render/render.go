@@ -659,6 +659,14 @@ type EditorStyle struct {
 	// sharing a Group are folded together; the submenu sits where its
 	// first member appears, among any ungrouped top-level entries.
 	// Empty keeps the entry at the top level.
+	//
+	// "Color" (or "Colour") is the one group name the editor treats
+	// specially: those entries leave the Styles menu for the toolbar's
+	// colour button, where they sit above a picker for a colour nobody
+	// curated. They are still applied as classes — only the picker
+	// writes an inline style — so the group is the place to name the
+	// colours a site is willing to see, and putting text colours
+	// anywhere else just means editors meet them in two menus.
 	Group string `json:"group,omitempty"`
 }
 

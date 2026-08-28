@@ -284,11 +284,15 @@ rather than letting it vary:
 The in-place editor's toolbar starts with a **Styles** dropdown: a
 built-in **Headings** submenu (Headings 1–4, plus Paragraph to go back
 down), followed by a short list of named,
-on-brand text styles editors can apply to a selection. There is
-deliberately no free color picker and no font-family menu — every
-style applies CSS **classes**, so your stylesheet stays the single
-source of design truth, and a later redesign restyles existing content
-by changing the CSS rather than hunting down baked-in inline styles.
+on-brand text styles editors can apply to a selection. There is no
+font-family menu — every style here applies CSS **classes**, so your
+stylesheet stays the single source of design truth, and a later
+redesign restyles existing content by changing the CSS rather than
+hunting down baked-in inline styles.
+
+Text **colors** sit in their own toolbar button beside Styles rather
+than in this menu (see below); they follow the same class rule, with
+one deliberate exception.
 
 Heading 1 is in the submenu for the case that needs it: a region that
 carries the page's own headline, where the `<h1>` lives *inside* the
@@ -300,7 +304,7 @@ put several `<h1>`s on a page.
 ### The defaults
 
 With no configuration, the menu ships a Tailwind-flavored default set
-(the five colors fold into a "Color" submenu):
+(the five colors are lifted out into the toolbar's color button):
 
 | Label          | Classes                  | Applies to  | Group |
 |----------------|--------------------------|-------------|-------|
@@ -314,6 +318,25 @@ With no configuration, the menu ships a Tailwind-flavored default set
 | Monospace      | `font-mono`              | selection   |       |
 | Lead paragraph | `text-lg text-slate-600` | whole `<p>` |       |
 | Small print    | `text-sm text-slate-500` | selection   |       |
+
+### Text color
+
+Entries grouped under **"Color"** (or "Colour") do not appear in the
+Styles menu. They fill the toolbar's color button instead, above a
+**Custom color…** picker and **Remove color**. Group a style that way
+and it is a color; group it any other way and it is a Styles submenu.
+
+The curated entries still apply **classes**, exactly as they did in the
+Styles menu, and are listed first so the cheap click is the one a
+redesign can still reach. The picker is the exception: an arbitrary
+color can only be an inline `style="color: …"`, which is a decision
+frozen into those words — changing your stylesheet later will not move
+it. Offer the colors your design can live with under "Color", and the
+picker becomes the rare deliberate step rather than the default.
+
+Only `#rrggbb` and `rgb(r, g, b)` survive the server's sanitizer for
+non-admin editors, which is what the picker produces; an alpha channel
+would be dropped on save, so none is offered.
 
 ### Safelist the classes (important)
 
