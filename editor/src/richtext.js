@@ -2,8 +2,8 @@
  * TinyMCE (rich HTML regions)
  * ------------------------------------------------------------------ */
 
-import { state, styleFormats, mediaEnabled, EDITOR_BASE } from "./state.js";
-import { api } from "./util.js";
+import { state, styleFormats, colorStyles, mediaEnabled, EDITOR_BASE } from "./state.js";
+import { api, cssColorToHex } from "./util.js";
 import { markDirty, markSectionsDirty, htmlRegions } from "./editing.js";
 import { openPicker } from "./media.js";
 import { openDialog } from "./dialogs.js";
@@ -151,6 +151,82 @@ function applyTextSize(ed, value) {
         // saved HTML.
         if (!el.getAttribute("class")) el.removeAttribute("class");
     });
+}
+
+/* ---- text colour -------------------------------------------------
+ * The toolbar's colour control: the host's curated colours, applied as
+ * classes exactly as the Styles menu used to apply them, and under them
+ * a picker for any colour at all.
+ *
+ * The picker is the one place in this editor that writes a colour into
+ * content as an inline style, and it does so knowingly. A class is what
+ * lets a redesign reach text that was coloured a year ago; a hex is a
+ * decision frozen into the words. Everything curated therefore stays a
+ * class and stays first in the menu, so the cheap click is the one that
+ * ages well and the picker is the deliberate extra step.
+ *
+ * Only #rrggbb and rgb(r, g, b) survive the server's sanitizer, which is
+ * what the colour input produces — an alpha channel would be dropped on
+ * save, so nothing here offers one. */
+
+// COLOR_FMT names a curated colour's registered format. Registration
+// happens through the init options (see colorFormats), so the names have
+// to be derivable from the index alone, here and at the call sites.
+function colorFmt(i) { return "cmscolor" + i; }
+
+// CUSTOM_FMT is the picker's format: a span carrying the chosen colour.
+// Same shape TinyMCE's own forecolor uses, registered under our own name
+// so nothing depends on the theme's internals.
+var CUSTOM_FMT = "cmstextcolorcustom";
+
+// The three flags forecolor carries, and none of them is decoration.
+// remove_similar is what lets the format be removed by name without
+// naming the colour — without it "Remove color" matches nothing, since
+// the span it is trying to strip holds a real value and the removal
+// asks for a null one, and the colour silently stays put. links carries
+// the colour onto text inside an <a>, which is where "why is this bit
+// still blue" comes from otherwise. clear_child_styles drops colours on
+// nested spans, so recolouring a run that already had a coloured word
+// inside it changes all of it rather than all but that word.
+var CUSTOM_FMT_DEF = {
+    inline: "span",
+    styles: { color: "%value" },
+    links: true,
+    remove_similar: true,
+    clear_child_styles: true,
+};
+
+// colorFormats is the init `formats` contribution: one entry per curated
+// colour, plus the picker's.
+function colorFormats() {
+    var out = {};
+    colorStyles.forEach(function (c, i) { out[colorFmt(i)] = c.format; });
+    out[CUSTOM_FMT] = CUSTOM_FMT_DEF;
+    return out;
+}
+
+// clearTextColor takes every colour this control can apply back off the
+// selection — curated and custom both. Picking a colour clears first, so
+// two colours can never end up layered on the same words, each winning
+// somewhere different.
+function clearTextColor(ed) {
+    colorStyles.forEach(function (c, i) {
+        ed.formatter.remove(colorFmt(i), null, null, true);
+    });
+    ed.formatter.remove(CUSTOM_FMT, { value: null }, null, true);
+}
+
+// currentTextColor is the colour the selection actually renders in —
+// computed, so a colour coming from a class or from the section's own
+// styling is what the picker opens on rather than white.
+//
+// getStart, not getNode: a selection that spans a coloured run reports
+// the run's common ancestor as its "node", which is the paragraph
+// around it — so the picker would open on the body colour of the very
+// text it is being asked to recolour. The start element is inside the
+// run, and is what the words at the caret actually inherit from.
+function currentTextColor(ed) {
+    return cssColorToHex(ed.dom.getStyle(ed.selection.getStart(), "color", true));
 }
 
 /* ---- tables ------------------------------------------------------
@@ -336,7 +412,7 @@ export function initInlineEditor(el, onDirty, register) {
         // In inline mode the toolbar floats docked to the region
         // as soon as it gains focus — a click is enough, no text
         // selection needed.
-        toolbar: "styles cmstextsize | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" +
+        toolbar: "styles cmstextsize cmstextcolor | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" +
             (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
         fixed_toolbar_container: "#cms-mce-toolbar",
         plugins: "lists link autolink table",
@@ -366,7 +442,7 @@ export function initInlineEditor(el, onDirty, register) {
         // keep saved content styleable by the host's CSS. Images need
         // their own rules: under Tailwind's preflight an <img> is a
         // block element, so text-align on its parent can never move it.
-        formats: {
+        formats: Object.assign(colorFormats(), {
             // Semantic tags instead of TinyMCE's span-with-inline-style
             // defaults: the sanitizer strips every inline style except
             // text-align, so the default forms would vanish from
@@ -386,7 +462,7 @@ export function initInlineEditor(el, onDirty, register) {
                 { selector: alignBlocks, classes: "text-right" },
                 { selector: "img", classes: "float-right ml-6" },
             ],
-        },
+        }),
         // Never rewrite URLs relative to the current page — media
         // lives at absolute paths like /cms/media/… and relative
         // forms would break on nested pages.
@@ -493,6 +569,75 @@ export function initInlineEditor(el, onDirty, register) {
                             },
                         };
                     }));
+                },
+            });
+            // Text colour for the selection: the host's curated colours
+            // (as classes) over a picker for anything else (inline).
+            // An icon rather than a label, since the icon pack has one
+            // that reads as "colour" and two labelled menus in a row
+            // was already the widest thing on the toolbar.
+            ed.ui.registry.addMenuButton("cmstextcolor", {
+                icon: "text-color",
+                tooltip: "Text color",
+                fetch: function (callback) {
+                    var items = colorStyles.map(function (c, i) {
+                        var on = ed.formatter.match(colorFmt(i));
+                        return {
+                            type: "togglemenuitem",
+                            text: c.label,
+                            active: on,
+                            onAction: function () {
+                                runWithUndo(ed, function () {
+                                    clearTextColor(ed);
+                                    // Ticked already: the click means
+                                    // "take it off", and clearing did.
+                                    if (!on) ed.formatter.apply(colorFmt(i));
+                                });
+                                onDirty();
+                            },
+                        };
+                    });
+                    if (items.length) items.push({ type: "separator" });
+                    items.push({
+                        type: "menuitem",
+                        text: "Custom color\u2026",
+                        onAction: function () {
+                            // The dialog takes focus, and an inline
+                            // editor's selection does not survive that:
+                            // note where the words were before opening,
+                            // and go back to them either way, so a
+                            // cancel leaves the caret where it was.
+                            var mark = ed.selection.getBookmark(2, true);
+                            openDialog({
+                                message: "Text color",
+                                okLabel: "Apply",
+                                fields: [{ id: "color", label: "Color", type: "color",
+                                    value: currentTextColor(ed) }],
+                            }).then(function (v) {
+                                ed.focus();
+                                ed.selection.moveToBookmark(mark);
+                                if (!v) return;
+                                runWithUndo(ed, function () {
+                                    clearTextColor(ed);
+                                    // Cleared in the dialog: the colour
+                                    // is being taken off, not chosen.
+                                    if (v.color) {
+                                        ed.formatter.apply(CUSTOM_FMT, { value: v.color });
+                                    }
+                                });
+                                onDirty();
+                            });
+                        },
+                    });
+                    items.push({
+                        type: "menuitem",
+                        text: "Remove color",
+                        onAction: function () {
+                            runWithUndo(ed, function () { clearTextColor(ed); });
+                            onDirty();
+                        },
+                    });
+                    callback(items);
                 },
             });
             // Both media buttons skip TinyMCE's URL dialogs and go

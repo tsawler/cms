@@ -30,6 +30,8 @@
     return src.slice(0, src.lastIndexOf("/") + 1);
   })();
   var styleFormats = [];
+  var colorStyles = [];
+  var COLOR_GROUP = /^colou?r$/i;
   try {
     styleGroups = {};
     (JSON.parse(cfg.styles || "[]") || []).forEach(function(s) {
@@ -37,7 +39,12 @@
       var f = { title: s.label, classes: s.class.split(/\s+/) };
       if (s.block) f.block = s.block;
       else f.inline = "span";
-      if (s.group) {
+      if (s.group && COLOR_GROUP.test(s.group.trim())) {
+        var cf = { classes: f.classes };
+        if (f.block) cf.block = f.block;
+        else cf.inline = "span";
+        colorStyles.push({ label: s.label, format: cf });
+      } else if (s.group) {
         if (!styleGroups[s.group]) {
           styleGroups[s.group] = { title: s.group, items: [] };
           styleFormats.push(styleGroups[s.group]);
@@ -151,6 +158,34 @@
         return body;
       });
     });
+  }
+  var hexProbe = null;
+  function cssColorToHex(v) {
+    if (!v) return "";
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase();
+    try {
+      if (!hexProbe) {
+        hexProbe = document.createElement("canvas");
+        hexProbe.width = hexProbe.height = 1;
+      }
+      var c = hexProbe.getContext("2d", { willReadFrequently: true });
+      c.fillStyle = "#000";
+      c.fillStyle = v;
+      var black = c.fillStyle;
+      c.fillStyle = "#fff";
+      c.fillStyle = v;
+      if (c.fillStyle !== black) return "";
+      c.clearRect(0, 0, 1, 1);
+      c.fillRect(0, 0, 1, 1);
+      var d = c.getImageData(0, 0, 1, 1).data;
+      if (d[3] === 0) return "";
+      var h = function(n) {
+        return ("0" + n.toString(16)).slice(-2);
+      };
+      return "#" + h(d[0]) + h(d[1]) + h(d[2]);
+    } catch (e) {
+      return "";
+    }
   }
 
   // ../src/undo.js
@@ -3721,6 +3756,34 @@
       if (!el.getAttribute("class")) el.removeAttribute("class");
     });
   }
+  function colorFmt(i) {
+    return "cmscolor" + i;
+  }
+  var CUSTOM_FMT = "cmstextcolorcustom";
+  var CUSTOM_FMT_DEF = {
+    inline: "span",
+    styles: { color: "%value" },
+    links: true,
+    remove_similar: true,
+    clear_child_styles: true
+  };
+  function colorFormats() {
+    var out = {};
+    colorStyles.forEach(function(c, i) {
+      out[colorFmt(i)] = c.format;
+    });
+    out[CUSTOM_FMT] = CUSTOM_FMT_DEF;
+    return out;
+  }
+  function clearTextColor(ed) {
+    colorStyles.forEach(function(c, i) {
+      ed.formatter.remove(colorFmt(i), null, null, true);
+    });
+    ed.formatter.remove(CUSTOM_FMT, { value: null }, null, true);
+  }
+  function currentTextColor(ed) {
+    return cssColorToHex(ed.dom.getStyle(ed.selection.getStart(), "color", true));
+  }
   var TBL_LINES = {
     rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
     grid: { th: "border border-slate-300", td: "border border-slate-200" },
@@ -3859,7 +3922,7 @@
       // In inline mode the toolbar floats docked to the region
       // as soon as it gains focus — a click is enough, no text
       // selection needed.
-      toolbar: "styles cmstextsize | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
+      toolbar: "styles cmstextsize cmstextcolor | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
       fixed_toolbar_container: "#cms-mce-toolbar",
       plugins: "lists link autolink table",
       // Tables are structural only: no properties dialogs, no
@@ -3887,7 +3950,7 @@
       // keep saved content styleable by the host's CSS. Images need
       // their own rules: under Tailwind's preflight an <img> is a
       // block element, so text-align on its parent can never move it.
-      formats: {
+      formats: Object.assign(colorFormats(), {
         // Semantic tags instead of TinyMCE's span-with-inline-style
         // defaults: the sanitizer strips every inline style except
         // text-align, so the default forms would vanish from
@@ -3907,7 +3970,7 @@
           { selector: alignBlocks, classes: "text-right" },
           { selector: "img", classes: "float-right ml-6" }
         ]
-      },
+      }),
       // Never rewrite URLs relative to the current page — media
       // lives at absolute paths like /cms/media/… and relative
       // forms would break on nested pages.
@@ -3985,6 +4048,67 @@
                 }
               };
             }));
+          }
+        });
+        ed.ui.registry.addMenuButton("cmstextcolor", {
+          icon: "text-color",
+          tooltip: "Text color",
+          fetch: function(callback) {
+            var items = colorStyles.map(function(c, i) {
+              var on = ed.formatter.match(colorFmt(i));
+              return {
+                type: "togglemenuitem",
+                text: c.label,
+                active: on,
+                onAction: function() {
+                  runWithUndo(ed, function() {
+                    clearTextColor(ed);
+                    if (!on) ed.formatter.apply(colorFmt(i));
+                  });
+                  onDirty();
+                }
+              };
+            });
+            if (items.length) items.push({ type: "separator" });
+            items.push({
+              type: "menuitem",
+              text: "Custom color\u2026",
+              onAction: function() {
+                var mark = ed.selection.getBookmark(2, true);
+                openDialog({
+                  message: "Text color",
+                  okLabel: "Apply",
+                  fields: [{
+                    id: "color",
+                    label: "Color",
+                    type: "color",
+                    value: currentTextColor(ed)
+                  }]
+                }).then(function(v) {
+                  ed.focus();
+                  ed.selection.moveToBookmark(mark);
+                  if (!v) return;
+                  runWithUndo(ed, function() {
+                    clearTextColor(ed);
+                    if (v.color) {
+                      ed.formatter.apply(CUSTOM_FMT, { value: v.color });
+                    }
+                  });
+                  onDirty();
+                });
+              }
+            });
+            items.push({
+              type: "menuitem",
+              text: "Remove color",
+              onAction: function() {
+                runWithUndo(ed, function() {
+                  clearTextColor(ed);
+                });
+                onDirty();
+              }
+            });
+            callback(items);
           }
         });
         if (mediaEnabled) {
