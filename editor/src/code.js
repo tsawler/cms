@@ -93,6 +93,18 @@ function activate(el) {
                 live.setAttribute(a.name, a.value);
             }
         });
+        // A script element created by script carries the "force async"
+        // flag, so external scripts run in whatever order they finish
+        // downloading — not the order they are written in. A block that
+        // loads a library and then something that uses it therefore
+        // works for a visitor, whose scripts the parser ran in order,
+        // and fails intermittently for the editor looking at the same
+        // page. Clearing the flag restores document order. Only for
+        // src'd scripts that did not ask for async themselves: an author
+        // who wrote async meant it.
+        if (live.src && !old.hasAttribute("async")) {
+            live.async = false;
+        }
         // The type the author wrote, if any: from data-cms-type on
         // markup the server parked, or from the tag itself on markup
         // that came straight from the library over /api/code.

@@ -170,6 +170,25 @@ export function cellFor(el) {
     return null;
 }
 
+// columnHost reports which block the column tool should act on for a
+// click inside `block`. Blocks nest inside cells, so the innermost one
+// a click lands on is often a paragraph in a column rather than the row
+// itself — and the column controls belong to the row either way. So:
+// the nearest block, itself included, that is a row, or the block that
+// was clicked when nothing above it is (which is what puts the tool in
+// split mode, offering to make it one).
+//
+// The walk goes through blocks rather than every ancestor because only
+// a block can own a row: a bare <div> wrapping some markup inside a
+// snippet is part of that snippet's design, not a separate thing the
+// column tool could act on.
+export function columnHost(block) {
+    for (var b = block; b; b = b.parentElement && b.parentElement.closest(".cms-snippet")) {
+        if (rowIn(b)) return b;
+    }
+    return block;
+}
+
 // SPLIT_HOSTILE lists what stops a block being ordinary running text
 // that could be split into columns. Media and buttons are placed things:
 // dividing a block built around one is a judgement about its design, not
@@ -492,20 +511,26 @@ export function moveColumn(info, dir) {
 // classes — splitting divides what is inside one box, so the box stays
 // and the halves go in it. A bare <p> cannot hold divs — paragraphs do
 // not nest — so it moves inside a new <div> that takes over as the
-// block. That is worth doing for its own sake: pressing Enter in a bare
-// paragraph splits it into two sibling blocks, while inside a column
-// the paragraphs stay together and go on reading as one piece of text.
+// block, and stays a block itself inside its column.
+//
+// That last part is the whole of what a column is for. A cell is a
+// place content goes, so what goes in it is content of the same kind
+// that lives anywhere else: a paragraph that was a block before the
+// split is one after it, with its own outline and its own chrome, and
+// Enter inside it makes another one exactly as it does outside a row.
+// The row is a block too — the one the move, restyle and delete
+// controls act on — so the two nest, which is what unnestSnippets
+// allows inside a cell and nowhere else.
 export function splitIntoColumns(block) {
     var row = block;
     if (block.tagName === "P") {
         row = document.createElement("div");
-        row.className = block.className;
+        // The row is a new box around the paragraph, not a copy of it:
+        // it needs the marker that makes it the block and nothing else.
+        // Whatever the paragraph was styled with travels with the
+        // paragraph, which still carries it into the column.
+        row.className = "cms-snippet";
         block.parentNode.insertBefore(row, block);
-        // The paragraph keeps its own identity inside the row, but not
-        // the marker that made it a block: there is one block here, and
-        // it is now the row.
-        block.classList.remove("cms-snippet");
-        if (!block.getAttribute("class")) block.removeAttribute("class");
     }
     var first = document.createElement("div");
     while (row.firstChild) first.appendChild(row.firstChild);
@@ -514,6 +539,7 @@ export function splitIntoColumns(block) {
 
     var second = document.createElement("div");
     var p = document.createElement("p");
+    p.className = "cms-snippet";
     p.textContent = "Write something here.";
     second.appendChild(p);
     row.appendChild(second);
@@ -541,11 +567,10 @@ export function duplicateBeside(block, dir) {
     var row = document.createElement("div");
     row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
     block.parentNode.insertBefore(row, block);
-    // There is one block here now and it is the row; what was the block
-    // is a column's contents. (Leaving the marker on would have
-    // unnestSnippets lift the column straight back out of the row.)
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
+    // The block stays a block inside its column — its outline, its
+    // chrome and its settings are still its own — and the row is a
+    // block around it. Nesting is what a cell is for; see
+    // splitIntoColumns.
 
     var first = document.createElement("div");
     first.appendChild(block);
