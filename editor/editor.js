@@ -1047,6 +1047,9 @@
           live.setAttribute(a.name, a.value);
         }
       });
+      if (live.src && !old.hasAttribute("async")) {
+        live.async = false;
+      }
       var type = old.getAttribute("data-cms-type");
       if (type === null && old.getAttribute("type") !== INERT) {
         type = old.getAttribute("type");
@@ -1286,6 +1289,12 @@
     }
     return null;
   }
+  function columnHost(block) {
+    for (var b = block; b; b = b.parentElement && b.parentElement.closest(".cms-snippet")) {
+      if (rowIn(b)) return b;
+    }
+    return block;
+  }
   var SPLIT_HOSTILE = "img, video, iframe, a.cms-btn, .cms-snippet,[data-cms-video-slot], [data-cms-photo-slot], [data-cms-map-slot], [data-cms-image]";
   function canSplit(block) {
     if (!block || !hasContent(block)) return false;
@@ -1465,10 +1474,8 @@
     var row = block;
     if (block.tagName === "P") {
       row = document.createElement("div");
-      row.className = block.className;
+      row.className = "cms-snippet";
       block.parentNode.insertBefore(row, block);
-      block.classList.remove("cms-snippet");
-      if (!block.getAttribute("class")) block.removeAttribute("class");
     }
     var first = document.createElement("div");
     while (row.firstChild) first.appendChild(row.firstChild);
@@ -1476,6 +1483,7 @@
     row.appendChild(first);
     var second = document.createElement("div");
     var p = document.createElement("p");
+    p.className = "cms-snippet";
     p.textContent = "Write something here.";
     second.appendChild(p);
     row.appendChild(second);
@@ -1486,8 +1494,6 @@
     var row = document.createElement("div");
     row.className = "cms-snippet grid gap-6 sm:grid-cols-2";
     block.parentNode.insertBefore(row, block);
-    block.classList.remove("cms-snippet");
-    if (!block.getAttribute("class")) block.removeAttribute("class");
     var first = document.createElement("div");
     first.appendChild(block);
     row.appendChild(first);
@@ -1738,16 +1744,15 @@
         "[data-cms-region] .cms-snippet .cms-snippet,[data-cms-sections] .cms-snippet .cms-snippet"
       );
       if (!nested.length) return;
+      var lifted = false;
       nested.forEach(function(inner) {
         var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
         if (!anc) return;
-        if (cellFor(inner)) {
-          inner.classList.remove("cms-snippet");
-          if (!inner.getAttribute("class")) inner.removeAttribute("class");
-          return;
-        }
+        if (cellFor(inner)) return;
         anc.insertAdjacentElement("afterend", inner);
+        lifted = true;
       });
+      if (!lifted) return;
     }
   }
   function chooseSnippet(sn) {
@@ -2604,7 +2609,7 @@
     if (cell) cell.classList.add("cms-col-active");
   }
   function showColUI(block, target) {
-    var info = columnTarget(block, target);
+    var info = columnTarget(columnHost(block), target);
     if (!info) {
       hideColUI();
       return;
@@ -3904,7 +3909,8 @@
   function pasteHostSnippet(ed) {
     var block = ed.dom.getParent(ed.selection.getNode(), ed.dom.isBlock);
     if (!block || !ed.dom.hasClass(block, "cms-snippet")) return null;
-    return block.parentNode === ed.getBody() ? block : null;
+    if (block.parentNode === ed.getBody()) return block;
+    return cellFor(block) ? block : null;
   }
   function initInlineEditor(el, onDirty, register) {
     var light = state.editorTheme === "light";

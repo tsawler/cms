@@ -9,6 +9,7 @@ import { openPicker } from "./media.js";
 import { openDialog } from "./dialogs.js";
 import { runWithUndo } from "./undo.js";
 import { hideChrome } from "./buttons.js";
+import { cellFor } from "./columns.js";
 
 var tinyLoading = null;
 
@@ -384,16 +385,17 @@ function initSectionEditors() {
  * paste does the same here: every top-level block a paste brings in
  * inherits the snippet it landed in. Only a snippet that is itself
  * the block being pasted into qualifies — a container snippet (the
- * Article text <div>, a column grid) keeps its own outline and its
- * children must stay plain, or unnestSnippets would tear the paste
- * back out of it. */
+ * Article text <div>) keeps its own outline and its children must stay
+ * plain, or unnestSnippets would tear the paste back out of it. */
 function pasteHostSnippet(ed) {
     var block = ed.dom.getParent(ed.selection.getNode(), ed.dom.isBlock);
     if (!block || !ed.dom.hasClass(block, "cms-snippet")) return null;
-    // Snippets are siblings at the top of a region by design; anything
-    // deeper is a nesting accident and not something to copy onto more
-    // blocks.
-    return block.parentNode === ed.getBody() ? block : null;
+    // Snippets are siblings at the top of a region by design, or of a
+    // column, which is the other place they are allowed to stack; a
+    // snippet anywhere deeper is a nesting accident and not something to
+    // copy onto more blocks.
+    if (block.parentNode === ed.getBody()) return block;
+    return cellFor(block) ? block : null;
 }
 
 export function initInlineEditor(el, onDirty, register) {

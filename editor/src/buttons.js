@@ -19,8 +19,8 @@ import { chooseMapInto, isMapEmbed } from "./maps.js";
 import { openSource, elementSource } from "./source.js";
 import { openCodeEditor } from "./code.js";
 import {
-    columnTarget, addColumn, duplicateColumn, confirmRemove, removeColumn,
-    resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
+    columnTarget, columnHost, addColumn, duplicateColumn, confirmRemove,
+    removeColumn, resizeColumn, moveColumn, splitIntoColumns, duplicateBeside,
 } from "./columns.js";
 import {
     faqTarget, addQuestion, moveQuestion,
@@ -470,8 +470,13 @@ function markActiveCell(cell) {
     if (cell) cell.classList.add("cms-col-active");
 }
 
+// `block` is the block the click landed on, which inside a row is
+// usually one of the blocks in a column rather than the row itself.
+// columnHost climbs to the row from there, so editing a paragraph in a
+// column keeps the column tool on the row the paragraph sits in — the
+// block chrome is the one that follows the click inwards.
 function showColUI(block, target) {
-    var info = columnTarget(block, target);
+    var info = columnTarget(columnHost(block), target);
     if (!info) {
         hideColUI();
         return;

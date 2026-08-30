@@ -332,28 +332,31 @@ function loadSnippets() {
 // that content is *meant* to go: putting the caret in a column and
 // inserting a button is how a button gets into that column, and lifting
 // it out to sit under the whole row — full width, in nobody's column —
-// is the opposite of what was asked. What it loses instead is the
-// marker, exactly as splitting or duplicating a block into columns
-// drops it: there is one block here and it is the row, and leaving the
-// marker on is what would have this lift the content straight back out
-// again. Anything the content carries of its own — a button's cms-btn,
-// a video slot — is untouched, so its own chrome still works.
+// is the opposite of what was asked. So a block in a cell stays where
+// it was put, and stays a block: its own outline, its own move,
+// duplicate, restyle and delete, all acting inside the column, exactly
+// as they would outside one. A cell is the one container that holds
+// blocks rather than being made of them.
+//
+// The guard counts passes that actually moved something. Cell nesting
+// is permanent and always matches the query, so a loop that counted
+// query results instead would spin its full four passes on every call
+// for pages that have a column on them.
 export function unnestSnippets() {
     for (var guard = 0; guard < 4; guard++) {
         var nested = document.querySelectorAll(
             "[data-cms-region] .cms-snippet .cms-snippet," +
             "[data-cms-sections] .cms-snippet .cms-snippet");
         if (!nested.length) return;
+        var lifted = false;
         nested.forEach(function (inner) {
             var anc = inner.parentElement && inner.parentElement.closest(".cms-snippet");
             if (!anc) return;
-            if (cellFor(inner)) {
-                inner.classList.remove("cms-snippet");
-                if (!inner.getAttribute("class")) inner.removeAttribute("class");
-                return;
-            }
+            if (cellFor(inner)) return;
             anc.insertAdjacentElement("afterend", inner);
+            lifted = true;
         });
+        if (!lifted) return;
     }
 }
 
