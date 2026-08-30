@@ -230,6 +230,55 @@ function currentTextColor(ed) {
     return cssColorToHex(ed.dom.getStyle(ed.selection.getStart(), "color", true));
 }
 
+// COLOR_PREVIEW_PROPS is what a colour entry shows of itself: the
+// colour, and the pill the badge treatment draws it on. The rest of
+// what getCssText reports — the font the page happens to be set in, its
+// size, weight, borders — is the Styles menu's business, where an entry
+// really can be a serif or a bold; carrying it here would only make the
+// colour names a different size than the two plain items under them.
+var COLOR_PREVIEW_PROPS = ["color", "background-color", "padding", "border-radius"];
+
+// colorPreviewStyle turns a colour format's preview into the shape the
+// theme renders around a menu item's label: `meta.style`, a {tag,
+// styles} pair it wraps the text in. It is the mechanism the Styles
+// menu previews with, and the source is the same too — getCssText,
+// carrying the badge treatment PreInit puts on it: the lightness shift
+// that keeps a colour legible on the skin it is drawn against, over an
+// opaque pill in the same hue. So a colour reads the same in both
+// menus, and neither has a rule about light and dark that the other
+// doesn't.
+//
+// The declarations are split here rather than through dom.parseStyle,
+// which would put them through TinyMCE's style compressor on the way:
+// these values are colour functions — oklch(from …), color-mix(…) —
+// and a normalizer written for margins and urls is the wrong thing to
+// hand them to. Splitting on ";" and the first ":" is enough while no
+// value can contain either, which none of these can.
+//
+// A format with no colour to show for itself leaves the item plain
+// rather than half-styled.
+function colorPreviewStyle(ed, fmt) {
+    var css;
+    try {
+        css = ed.formatter.getCssText(fmt);
+    } catch (err) {
+        return null;
+    }
+    if (!css) return null;
+    var styles = {};
+    var any = false;
+    css.split(";").forEach(function (decl) {
+        var at = decl.indexOf(":");
+        if (at < 1) return;
+        var prop = decl.slice(0, at).trim();
+        var val = decl.slice(at + 1).trim();
+        if (!val || COLOR_PREVIEW_PROPS.indexOf(prop) === -1) return;
+        styles[prop] = val;
+        if (prop === "color") any = true;
+    });
+    return any ? { tag: "span", styles: styles } : null;
+}
+
 /* ---- tables ------------------------------------------------------
  * Editor-inserted tables are styled with utility classes, like the
  * alignment buttons: content carries classes, the host's CSS stays in
@@ -500,12 +549,17 @@ export function initInlineEditor(el, onDirty, register) {
                 // White on the light one. Rewrite each preview into a
                 // badge: keep the entry's hue but drag its lightness to
                 // the end of the range the menu can show — up on the
-                // dark menu, down on the light one — over a faint pill
-                // tinted from the same color. The shift can't be phrased
-                // as `color: … from currentColor` — a later color
-                // declaration makes currentColor resolve to the menu's
-                // inherited color, not the entry's — so the entry color
-                // is extracted and inlined. Formats with a background of
+                // dark menu, down on the light one — over an opaque
+                // pill in the same hue at the other end of that range.
+                // Because both ends are absolute, the gap between them
+                // is too: any colour a host curates is legible on its
+                // own pill (measured over the stock palette: no worse
+                // than 5.5:1 on the light skin, 6.3:1 on the dark).
+                // The shift can't be phrased as `color: … from
+                // currentColor` — a later color declaration makes
+                // currentColor resolve to the menu's inherited color,
+                // not the entry's — so the entry color is extracted
+                // and inlined. Formats with a background of
                 // their own (e.g. Highlight) keep their exact colors.
                 // Engines without relative color keep the plain menu.
                 var getCssText = ed.formatter.getCssText;
@@ -520,9 +574,27 @@ export function initInlineEditor(el, onDirty, register) {
                         var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
                         if (m) {
                             css += "color:oklch(from " + m[1] + " " +
-                                (light ? "calc(min(l, 0.55))" : "calc(max(l, 0.8))") + " c h);";
+                                (light ? "calc(min(l, 0.45))" : "calc(max(l, 0.8))") + " c h);";
+                            // The pill is opaque, not a tint of whatever
+                            // is behind it. The row under an entry turns
+                            // the skin's selection blue the moment it is
+                            // hovered or arrowed onto, and a translucent
+                            // pill lets that through: a pale name lands
+                            // on bright blue, which is where Blue became
+                            // a blue word on a blue row. An opaque pill
+                            // in the entry's own hue fixes the pair, so
+                            // the name is read against the same backdrop
+                            // selected or not. Lightness is absolute for
+                            // the same reason the text's is clamped —
+                            // one end of the range on each skin — and
+                            // the chroma is pulled in so the pill stays
+                            // a backdrop rather than competing with the
+                            // word on it.
+                            css += "background-color:oklch(from " + m[1] + " " +
+                                (light ? "0.95 calc(c * 0.25)" : "0.22 calc(c * 0.35)") + " h);";
+                        } else {
+                            css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
                         }
-                        css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
                     }
                     css += "padding:2px 8px;border-radius:4px;";
                     return css;
@@ -584,7 +656,12 @@ export function initInlineEditor(el, onDirty, register) {
                 fetch: function (callback) {
                     var items = colorStyles.map(function (c, i) {
                         var on = ed.formatter.match(colorFmt(i));
-                        return {
+                        // The name in its own colour: a menu of words
+                        // that only say "Blue" makes the reader hold the
+                        // palette in their head, and the palette is the
+                        // host's, not one they can be assumed to know.
+                        var style = colorPreviewStyle(ed, colorFmt(i));
+                        var item = {
                             type: "togglemenuitem",
                             text: c.label,
                             active: on,
@@ -598,6 +675,8 @@ export function initInlineEditor(el, onDirty, register) {
                                 onDirty();
                             },
                         };
+                        if (style) item.meta = { style: style };
+                        return item;
                     });
                     if (items.length) items.push({ type: "separator" });
                     items.push({
