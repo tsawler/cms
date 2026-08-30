@@ -111,9 +111,16 @@ func DefaultSnippets() []Snippet {
 <p class="text-lg font-semibold text-white mb-3">Ready to get started?</p>
 <a href="/" class="cms-btn inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white">Get in touch</a>
 </div>`},
+		// A column holds blocks, so what ships in one is marked as a
+		// block: each heading and paragraph here is its own, with its
+		// own outline, move, duplicate, restyle and delete, all acting
+		// inside its column. Nesting the marker is allowed in a cell
+		// and nowhere else (editor/src/snippets.js, unnestSnippets) —
+		// which is also why the cells themselves stay bare: a cell is a
+		// column, not a block in one.
 		{Name: "Two columns", Group: "Basic", HTML: `<div class="cms-snippet not-prose my-6 grid gap-6 sm:grid-cols-2">
-<div><h3 class="font-semibold mb-1">First column</h3><p class="text-slate-600">Write something here.</p></div>
-<div><h3 class="font-semibold mb-1">Second column</h3><p class="text-slate-600">And something here.</p></div>
+<div><h3 class="cms-snippet font-semibold mb-1">First column</h3><p class="cms-snippet text-slate-600">Write something here.</p></div>
+<div><h3 class="cms-snippet font-semibold mb-1">Second column</h3><p class="cms-snippet text-slate-600">And something here.</p></div>
 </div>`},
 		{Name: "Quote", Group: "Quotes", HTML: `<figure class="cms-snippet not-prose my-6 rounded-xl border border-slate-200 bg-slate-50 p-6">
 <blockquote class="text-lg text-slate-700">&ldquo;A quote worth repeating.&rdquo;</blockquote>

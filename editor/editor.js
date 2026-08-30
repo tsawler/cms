@@ -3789,6 +3789,28 @@
   function currentTextColor(ed) {
     return cssColorToHex(ed.dom.getStyle(ed.selection.getStart(), "color", true));
   }
+  var COLOR_PREVIEW_PROPS = ["color", "background-color", "padding", "border-radius"];
+  function colorPreviewStyle(ed, fmt) {
+    var css;
+    try {
+      css = ed.formatter.getCssText(fmt);
+    } catch (err) {
+      return null;
+    }
+    if (!css) return null;
+    var styles = {};
+    var any = false;
+    css.split(";").forEach(function(decl) {
+      var at = decl.indexOf(":");
+      if (at < 1) return;
+      var prop = decl.slice(0, at).trim();
+      var val = decl.slice(at + 1).trim();
+      if (!val || COLOR_PREVIEW_PROPS.indexOf(prop) === -1) return;
+      styles[prop] = val;
+      if (prop === "color") any = true;
+    });
+    return any ? { tag: "span", styles } : null;
+  }
   var TBL_LINES = {
     rows: { th: "border-b-2 border-slate-300", td: "border-b border-slate-200" },
     grid: { th: "border border-slate-300", td: "border border-slate-200" },
@@ -4009,9 +4031,11 @@
             if (css.indexOf("background-color") === -1) {
               var m = /(?:^|;)\s*color:\s*([^;]+)/.exec(css);
               if (m) {
-                css += "color:oklch(from " + m[1] + " " + (light ? "calc(min(l, 0.55))" : "calc(max(l, 0.8))") + " c h);";
+                css += "color:oklch(from " + m[1] + " " + (light ? "calc(min(l, 0.45))" : "calc(max(l, 0.8))") + " c h);";
+                css += "background-color:oklch(from " + m[1] + " " + (light ? "0.95 calc(c * 0.25)" : "0.22 calc(c * 0.35)") + " h);";
+              } else {
+                css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
               }
-              css += "background-color:color-mix(in srgb, currentColor 12%, transparent);";
             }
             css += "padding:2px 8px;border-radius:4px;";
             return css;
@@ -4062,7 +4086,8 @@
           fetch: function(callback) {
             var items = colorStyles.map(function(c, i) {
               var on = ed.formatter.match(colorFmt(i));
-              return {
+              var style = colorPreviewStyle(ed, colorFmt(i));
+              var item2 = {
                 type: "togglemenuitem",
                 text: c.label,
                 active: on,
@@ -4074,6 +4099,8 @@
                   onDirty();
                 }
               };
+              if (style) item2.meta = { style };
+              return item2;
             });
             if (items.length) items.push({ type: "separator" });
             items.push({

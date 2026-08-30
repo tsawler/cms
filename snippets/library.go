@@ -70,28 +70,43 @@ func LibrarySnippets() []Snippet {
 		// two columns. The original justified its text; these stay
 		// left-aligned (no text-justify in the safelist, and ragged-
 		// right reads better on the web).
+		//
+		// The body paragraphs are blocks, as everything in a column is
+		// (see "Two columns" in snippets.go); the title and the rule
+		// above them are not, because they are parts of this block's own
+		// design and a marker outside a cell would have unnestSnippets
+		// lift them out of it.
 		{Name: "Two-column article", Group: "Article", HTML: `<div class="cms-snippet not-prose my-6">
 <h2 class="text-center text-3xl font-bold">Flying high</h2>
 <div class="mx-auto mt-3 h-0.5 w-10 bg-blue-600"></div>
 <div class="mt-6 grid gap-6 sm:grid-cols-2">
 <div>
-<p class="text-slate-600">Open the article here: set the scene and tell readers why it matters.</p>
-<p class="mt-3 text-slate-600">Carry the thought into a second paragraph.</p>
+<p class="cms-snippet text-slate-600">Open the article here: set the scene and tell readers why it matters.</p>
+<p class="cms-snippet mt-3 text-slate-600">Carry the thought into a second paragraph.</p>
 </div>
 <div>
-<p class="text-slate-600">The second column continues the story.</p>
-<p class="mt-3 text-slate-600">And wraps up the introduction.</p>
+<p class="cms-snippet text-slate-600">The second column continues the story.</p>
+<p class="cms-snippet mt-3 text-slate-600">And wraps up the introduction.</p>
 </div>
 </div>
 </div>`},
 		// From article-04: kicker, display title, byline, two columns.
+		//
+		// Each column's paragraph sits in a <div> of its own rather than
+		// being the grid's child directly. The wrapper is what makes it
+		// a column with a paragraph in it instead of a paragraph that is
+		// a column: Enter in the latter adds a cell, so writing a second
+		// line in a two-column row would silently make it a three-column
+		// one. With the cell there, Enter does what it says, and the
+		// paragraph can carry the block marker every column's contents
+		// carry (see "Two columns" in snippets.go).
 		{Name: "Bylined article", Group: "Article", HTML: `<div class="cms-snippet not-prose my-6">
 <p class="text-sm uppercase tracking-widest text-slate-500">A beautiful day in October</p>
 <h2 class="mt-2 text-4xl font-bold tracking-tight">Time to think, time to create.</h2>
 <p class="mt-3 text-slate-500">&mdash; By David Anderson</p>
 <div class="mt-6 grid gap-6 sm:grid-cols-2">
-<p class="text-slate-600">Open the article here: set the scene and tell readers why it matters.</p>
-<p class="text-slate-600">The second column continues the story.</p>
+<div><p class="cms-snippet text-slate-600">Open the article here: set the scene and tell readers why it matters.</p></div>
+<div><p class="cms-snippet text-slate-600">The second column continues the story.</p></div>
 </div>
 </div>`},
 		// From article-07: an oversized ghost-gray headline, two text
@@ -99,8 +114,8 @@ func LibrarySnippets() []Snippet {
 		{Name: "Ghost headline article", Group: "Article", HTML: `<div class="cms-snippet not-prose my-6">
 <h2 class="text-center text-5xl font-bold tracking-tight text-slate-200">Sunday, lovely Sunday.</h2>
 <div class="mt-6 grid gap-6 sm:grid-cols-2">
-<p class="text-slate-600">Open the article here: set the scene and tell readers why it matters.</p>
-<p class="text-slate-600">The second column continues the story.</p>
+<div><p class="cms-snippet text-slate-600">Open the article here: set the scene and tell readers why it matters.</p></div>
+<div><p class="cms-snippet text-slate-600">The second column continues the story.</p></div>
 </div>
 <p class="mt-6 text-center text-slate-400"><em>By Jennifer Anderson</em></p>
 </div>`},
@@ -376,9 +391,16 @@ func LibrarySectionPresets() []Snippet {
 		// From asfeaturedon-01: the label sits in the row as the first
 		// cell, followed by press-logo slots. The pack's other featured
 		// -on blocks are the Partner logos layout with different words.
+		// The heading is a column like the logos beside it, so it sits
+		// in a cell of its own rather than being one — otherwise Enter
+		// while retitling it would add a fifth column to a four-track
+		// row and wrap the logos. Being in a cell, it is also a block
+		// there (see "Two columns" in snippets.go); the slots are not,
+		// because a slot is the whole of its column and already has its
+		// own chrome.
 		{Name: "Featured on", Group: "Partners", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8 grid items-center gap-6 sm:grid-cols-4">
-<h2 class="text-2xl font-bold uppercase tracking-widest">As featured on</h2>
+<div><h2 class="cms-snippet text-2xl font-bold uppercase tracking-widest">As featured on</h2></div>
 ` + photoSlotLogo + `
 ` + photoSlotLogo + `
 ` + photoSlotLogo + `
