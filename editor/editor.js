@@ -3952,6 +3952,24 @@
       // selection needed.
       toolbar: "styles cmstextsize cmstextcolor | bold italic underline strikethrough | alignleft aligncenter alignright | bullist numlist | blockquote hr table | link unlink" + (mediaEnabled ? " | cmsimage cmsvideo cmsdoc" : "") + " | removeformat",
       fixed_toolbar_container: "#cms-mce-toolbar",
+      // Every paragraph at the top of a region is a block in the
+      // editor's sense: an outline, a drag handle, a trash, something
+      // the section tools can take hold of. Splitting one carries the
+      // class already (that is how Enter makes another), but TinyMCE
+      // also *creates* blocks from nothing — the first keystroke in a
+      // region whose content was just selected and deleted, loose text
+      // that needs wrapping, whatever it puts back when a delete takes
+      // the last paragraph with it. Those arrive bare, and bare is the
+      // one state where the words someone just typed are the only
+      // thing on the page the block tools cannot take hold of.
+      //
+      // The name says root block and the option is documented for the
+      // wrapping case, but TinyMCE merges these attributes into every
+      // block it builds, at any depth — so this alone would put the
+      // marker on a paragraph made inside a callout or a column too.
+      // The NewBlock handler below takes it back off those; see there
+      // for why that split is where it belongs.
+      forced_root_block_attrs: { class: "cms-snippet" },
       plugins: "lists link autolink table",
       // Tables are structural only: no properties dialogs, no
       // drag-resizing, no colgroups — every path that would write
@@ -4011,6 +4029,14 @@
         ed.on("focus", function() {
           state.lastEditor = ed;
           state.lastEditorDirty = onDirty;
+        });
+        ed.on("NewBlock", function(e) {
+          var b = e.newBlock;
+          if (!b || !b.parentNode || b.parentNode === ed.getBody()) return;
+          var twin = b.previousElementSibling || b.nextElementSibling;
+          if (twin && ed.dom.hasClass(twin, "cms-snippet")) return;
+          ed.dom.removeClass(b, "cms-snippet");
+          if (!b.getAttribute("class")) b.removeAttribute("class");
         });
         ed.on("PastePostProcess", function(e) {
           if (!pasteHostSnippet(ed)) return;
