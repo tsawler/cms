@@ -26,6 +26,11 @@ func TestTemplatesRenderInFrench(t *testing.T) {
 		// masquerade banner alongside everything the admin role renders.
 		User:           &auth.User{ID: 1, Name: "Test", Role: auth.RoleSuperadmin},
 		MasqueradeFrom: &auth.User{ID: 9, Name: "Owner", Role: auth.RoleSuperadmin},
+		// A search on the inactive tab, so the users list renders its
+		// filter chrome — the tab markers, the hidden status field, and
+		// the Clear link.
+		UserQuery:  "ada",
+		UserStatus: "inactive",
 		// Two rows so the users table renders both sides of its CanManage
 		// branch: the Edit link and its absence.
 		Users: []userRow{

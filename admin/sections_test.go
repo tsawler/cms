@@ -302,7 +302,7 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 		Title:     "Reports",
 		Body:      template.HTML(`<h1>Reports</h1><p class="host">42 visits</p>`),
 		NavSections: []navLink{
-			{URL: "/admin/x/reports/", Label: "Reports"},
+			{URL: "/admin/x/reports/", Label: "Reports", Icon: template.HTML(`<svg data-host-icon="1"></svg>`)},
 			{URL: "/admin/x/stickers/", Label: "Stickers", Confirm: `Print them all? A "big" PDF.`},
 		},
 	}
@@ -318,7 +318,11 @@ func TestCustomTemplateRendersHostHTML(t *testing.T) {
 		`<title>Reports — CMS</title>`,               // title block
 		`href="/admin/x/reports/"`,                   // nav link target
 		`<span class="cms-nav-label">Reports</span>`, // nav link label
-		`href="/admin/static/admin.css"`,             // standard chrome
+		// A section's NavIcon lands in its glyph span unescaped; one
+		// without an icon falls back to its label's first letter.
+		`<span class="cms-nav-glyph" aria-hidden="true"><svg data-host-icon="1"></svg></span><span class="cms-nav-label">Reports</span>`,
+		`<span class="cms-nav-glyph" aria-hidden="true">S</span><span class="cms-nav-label">Stickers</span>`,
+		`href="/admin/static/admin.css"`, // standard chrome
 		// A Confirm section's link asks first, its message escaped into
 		// the attribute admin.js reads.
 		` data-confirm="Print them all? A &#34;big&#34; PDF." href="/admin/x/stickers/"`,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -166,6 +167,67 @@ func TestUserAllAndCount(t *testing.T) {
 				t.Errorf("All order = %v, want %v", gotNames, want)
 				break
 			}
+		}
+	})
+}
+
+// Filtered and CountFiltered back the admin's users list: a
+// case-insensitive name/email search, an active/inactive cut, and a
+// LIMIT/OFFSET window, with the count describing the same list.
+func TestUserFilteredAndCount(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := auth.NewStore(db)
+
+		seedUser(t, s, auth.User{Email: "ada@example.com", Name: "Ada Lovelace", Active: true})
+		seedUser(t, s, auth.User{Email: "grace@example.com", Name: "Grace Hopper", Active: true})
+		seedUser(t, s, auth.User{Email: "edsger@other.org", Name: "Edsger Dijkstra", Active: false})
+
+		active, inactive := true, false
+		cases := []struct {
+			name   string
+			filter auth.UserFilter
+			want   []string // expected names, in order
+		}{
+			{"zero filter lists everyone by name", auth.UserFilter{}, []string{"Ada Lovelace", "Edsger Dijkstra", "Grace Hopper"}},
+			{"active only", auth.UserFilter{Active: &active}, []string{"Ada Lovelace", "Grace Hopper"}},
+			{"inactive only", auth.UserFilter{Active: &inactive}, []string{"Edsger Dijkstra"}},
+			{"query matches names case-insensitively", auth.UserFilter{Query: "ADA"}, []string{"Ada Lovelace"}},
+			{"query matches email too", auth.UserFilter{Query: "other.org"}, []string{"Edsger Dijkstra"}},
+			{"query and status combine", auth.UserFilter{Query: "ada", Active: &inactive}, nil},
+			// The escaping cases: unescaped, "%" would match everyone
+			// and "a_a"'s underscore would match the d in "Ada".
+			{"a typed % is a literal", auth.UserFilter{Query: "%"}, nil},
+			{"a typed _ is a literal", auth.UserFilter{Query: "a_a"}, nil},
+		}
+		for _, c := range cases {
+			users, err := s.Filtered(ctx, c.filter, 100, 0)
+			if err != nil {
+				t.Fatalf("%s: Filtered: %v", c.name, err)
+			}
+			got := make([]string, len(users))
+			for i, u := range users {
+				got[i] = u.Name
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("%s: Filtered = %v, want %v", c.name, got, c.want)
+			}
+			n, err := s.CountFiltered(ctx, c.filter)
+			if err != nil {
+				t.Fatalf("%s: CountFiltered: %v", c.name, err)
+			}
+			if n != len(c.want) {
+				t.Errorf("%s: CountFiltered = %d, want %d", c.name, n, len(c.want))
+			}
+		}
+
+		// The window: the middle of the unfiltered list, one row wide.
+		window, err := s.Filtered(ctx, auth.UserFilter{}, 1, 1)
+		if err != nil {
+			t.Fatalf("Filtered window: %v", err)
+		}
+		if len(window) != 1 || window[0].Name != "Edsger Dijkstra" {
+			t.Errorf("Filtered(limit 1, offset 1) = %v, want just Edsger Dijkstra", window)
 		}
 	})
 }

@@ -257,6 +257,76 @@
         });
     }
 
+    // Sidebar collapse: the toggle flips a class on <html> — up there
+    // rather than on <body> so nav-state.js can reapply it on the next
+    // page before <body> exists — and remembers the choice in
+    // localStorage. The collapsed rail's labels stay in the document
+    // (visually hidden, so the links keep their accessible names) and
+    // reappear as the floating tooltip below.
+    var navToggle = document.getElementById("cms-nav-toggle");
+    if (navToggle) {
+        var applyNavState = function () {
+            var collapsed = document.documentElement.classList.contains("cms-nav-collapsed");
+            var label = navToggle.getAttribute(collapsed ? "data-t-expand" : "data-t-collapse");
+            navToggle.setAttribute("aria-label", label);
+            navToggle.setAttribute("title", label);
+            navToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        };
+        applyNavState();
+        navToggle.addEventListener("click", function () {
+            var collapsed = document.documentElement.classList.toggle("cms-nav-collapsed");
+            try {
+                if (collapsed) localStorage.setItem("cms-nav-collapsed", "1");
+                else localStorage.removeItem("cms-nav-collapsed");
+            } catch (e) { /* no storage: the toggle still works, per page */ }
+            applyNavState();
+        });
+    }
+
+    // Collapsed-rail tooltips: one floating pill (#cms-nav-tip), filled
+    // with the label of the nav link under the pointer or keyboard focus
+    // and parked just off its right edge. Fixed-positioned, so the
+    // sidebar's scrollbox can't clip it — which also means any scroll
+    // strands it, so scrolling hides it. Expanded, the labels are visible
+    // and the tip stays away.
+    var navTip = document.getElementById("cms-nav-tip");
+    if (navTip) {
+        var tipLinkOf = function (e) {
+            if (!document.documentElement.classList.contains("cms-nav-collapsed")) return null;
+            return e.target.closest ? e.target.closest(".cms-nav a") : null;
+        };
+        var showNavTip = function (link) {
+            var label = link.querySelector(".cms-nav-label");
+            if (!label) return;
+            navTip.textContent = label.textContent;
+            // The base state is invisible but laid out, so the tip can be
+            // measured before it fades in.
+            var box = link.getBoundingClientRect();
+            var top = box.top + box.height / 2 - navTip.offsetHeight / 2;
+            top = Math.max(4, Math.min(top, window.innerHeight - navTip.offsetHeight - 4));
+            navTip.style.left = Math.round(box.right + 10) + "px";
+            navTip.style.top = Math.round(top) + "px";
+            navTip.classList.add("cms-nav-tip-on");
+        };
+        var hideNavTip = function () { navTip.classList.remove("cms-nav-tip-on"); };
+        document.addEventListener("pointerover", function (e) {
+            var link = tipLinkOf(e);
+            if (link) showNavTip(link);
+        });
+        document.addEventListener("pointerout", function (e) {
+            var link = tipLinkOf(e);
+            if (link && !link.contains(e.relatedTarget)) hideNavTip();
+        });
+        document.addEventListener("focusin", function (e) {
+            var link = tipLinkOf(e);
+            if (link) showNavTip(link);
+        });
+        document.addEventListener("focusout", function (e) {
+            if (tipLinkOf(e)) hideNavTip();
+        });
+        document.addEventListener("scroll", hideNavTip, true);
+    }
+
     // Slug suggestion on the new-page form: fill [data-slug-target] from
     // [data-slug-source] until the user edits the slug themselves.
     var source = document.querySelector("[data-slug-source]");

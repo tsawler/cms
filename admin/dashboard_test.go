@@ -203,7 +203,9 @@ func TestDashboardTemplateTraffic(t *testing.T) {
 		t.Fatalf("rendering dashboard with empty traffic: %v", err)
 	}
 	out = sb.String()
-	if strings.Contains(out, "<svg") || !strings.Contains(out, "No page views recorded yet") {
+	// The sidebar's nav icons are SVG too, so absence is asserted on the
+	// chart's own markup rather than on any <svg> at all.
+	if strings.Contains(out, "cms-traffic-bar") || !strings.Contains(out, "No page views recorded yet") {
 		t.Error("empty traffic should render the note instead of a chart")
 	}
 }
