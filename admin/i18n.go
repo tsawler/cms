@@ -153,6 +153,9 @@ var frStrings = map[string]string{
 	"Users":       "Utilisateurs",
 	"Public Site": "Site public",
 	"Log out":     "Se déconnecter",
+	// The sidebar's collapse toggle.
+	"Collapse the menu": "Réduire le menu",
+	"Expand the menu":   "Déployer le menu",
 	// The sidebar's development stamp and what it means.
 	"Development": "Développement",
 	"Search engines are asked to skip this site. A superadmin switches it to production in the site settings dialog.": "Les moteurs de recherche sont priés d'ignorer ce site. Un superadmin le passe en production dans la fenêtre des réglages du site.",
@@ -263,17 +266,21 @@ var frStrings = map[string]string{
 	"Not configured — the host application must set Config.PostTemplate.":          "Non configuré — l'application hôte doit définir Config.PostTemplate.",
 
 	// Users list.
-	"New user":      "Nouvel utilisateur",
-	"Name":          "Nom",
-	"Role":          "Rôle",
-	"Status":        "État",
-	"active":        "actif",
-	"inactive":      "inactif",
-	"Edit":          "Modifier",
-	"No users yet.": "Aucun utilisateur pour l'instant.",
-	"editor":        "éditeur",
-	"admin":         "admin",
-	"superadmin":    "superadmin",
+	"New user":                    "Nouvel utilisateur",
+	"Name":                        "Nom",
+	"Role":                        "Rôle",
+	"Status":                      "État",
+	"active":                      "actif",
+	"inactive":                    "inactif",
+	"Active":                      "Actifs",
+	"Inactive":                    "Inactifs",
+	"Search by name or email…":    "Rechercher par nom ou courriel…",
+	"Edit":                        "Modifier",
+	"No users yet.":               "Aucun utilisateur pour l'instant.",
+	"No users match this filter.": "Aucun utilisateur ne correspond à ce filtre.",
+	"editor":                      "éditeur",
+	"admin":                       "admin",
+	"superadmin":                  "superadmin",
 
 	// Masquerade: the users-list button, the layout's banner, and the
 	// handlers' messages.

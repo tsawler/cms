@@ -39,6 +39,14 @@ type Section struct {
 	// means no nav link; the section is still routable.
 	NavLabel string
 
+	// NavIcon is the link's icon on the collapsed sidebar rail: inline
+	// SVG markup, drawn like the built-in set — a 24×24 viewBox, stroked
+	// in currentColor with no fill — so it takes the nav's ink and sizing
+	// for free. Rendered verbatim (the host is trusted code, exactly as
+	// with Stylesheets), so it must be well-formed. Empty falls back to
+	// the label's first letter. Ignored when NavLabel is empty.
+	NavIcon template.HTML
+
 	// NavAfter names the built-in sidebar entry this section's link
 	// follows: "dashboard", "pages", "posts", "media", "snippets", or
 	// "users". Empty keeps the default placement, after the built-in

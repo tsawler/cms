@@ -75,14 +75,28 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
     height: 100vh;
     overflow-y: auto;
 }
+/* Brand row: the wordmark on the left, the collapse toggle on the right. */
+.cms-sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    margin-bottom: 1.9rem;
+}
 .cms-brand {
     font-weight: 700;
     font-size: 1.15rem;
     letter-spacing: .02em;
     text-decoration: none;
     color: var(--cms-ink);
-    margin-bottom: 1.9rem;
 }
+.cms-nav-toggle { display: inline-flex; align-items: center; padding: .25rem .4rem; }
+.cms-nav-toggle svg { width: .95rem; height: .95rem; display: block; }
+.cms-nav-toggle-out { display: flex; }
+.cms-nav-toggle-in { display: none; }
+/* Glyphs (icons.gohtml icons, a host section's NavIcon, or a monogram
+   fallback) lead every nav entry but only show on the collapsed rail. */
+.cms-nav-glyph { display: none; }
 /* The development stamp, sitting under the brand: this site is being
    built and is kept out of search engines until a superadmin says
    otherwise. Pulled up close to the brand, since it qualifies it. */
@@ -149,6 +163,104 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 .cms-sidebar-actions { display: flex; gap: .4rem; }
 .cms-sidebar-actions form { margin: 0; }
 .cms-sidebar-actions .cms-btn { padding: .3rem .65rem; font-size: .8rem; }
+
+/* The collapsed sidebar: a narrow rail of icons, toggled by the button
+   beside the brand and remembered in localStorage (nav-state.js
+   reapplies the class before first paint; admin.js flips it and floats
+   each link's label beside the rail as .cms-nav-tip). Desktop only —
+   below 48rem the sidebar is already a compact top bar and the toggle
+   is hidden. */
+@media (min-width: 48.0625rem) {
+    html.cms-nav-collapsed .cms-sidebar { width: auto; padding: 1.4rem .6rem; }
+    html.cms-nav-collapsed .cms-sidebar-head { margin-bottom: 1.4rem; justify-content: center; }
+    html.cms-nav-collapsed .cms-brand,
+    html.cms-nav-collapsed .cms-contents-label,
+    html.cms-nav-collapsed .cms-sidebar-foot,
+    html.cms-nav-collapsed .cms-nav-leader,
+    html.cms-nav-collapsed .cms-nav-count { display: none; }
+    /* Labels are hidden visually rather than with display:none so each
+       link keeps its accessible name; sighted users get the same text
+       as a tooltip (.cms-nav-tip, positioned by admin.js). */
+    html.cms-nav-collapsed .cms-nav-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+    html.cms-nav-collapsed .cms-nav-toggle-out { display: none; }
+    html.cms-nav-collapsed .cms-nav-toggle-in { display: flex; }
+    html.cms-nav-collapsed .cms-nav a { padding: 0; justify-content: center; }
+    /* The 2rem tile centers whichever glyph the entry has: a stroke icon,
+       or the monogram fallback for host sections without a NavIcon. */
+    html.cms-nav-collapsed .cms-nav-glyph {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        font-size: .8rem;
+        font-weight: 700;
+    }
+    html.cms-nav-collapsed .cms-nav-glyph svg { width: 1.15rem; height: 1.15rem; }
+    /* The development / site-closed stamp survives as a colored dot;
+       its title still names the state on hover. */
+    html.cms-nav-collapsed .cms-site-mode { margin: 0 0 .9rem; text-align: center; }
+    html.cms-nav-collapsed .cms-site-mode .cms-badge {
+        width: .65rem;
+        height: .65rem;
+        padding: 0;
+        border-radius: 50%;
+        font-size: 0;
+        letter-spacing: 0;
+        background: currentColor;
+    }
+}
+
+/* The collapsed rail's tooltip: the traffic tip's ink-on-paper pill with
+   an arrow, floated beside the hovered entry by admin.js. Fixed so the
+   sidebar's scrollbox cannot clip it; base state invisible but laid out,
+   so it can be measured before it fades in. Shown only while the rail is
+   collapsed — admin.js checks — since the expanded menu's labels speak
+   for themselves. */
+.cms-nav-tip {
+    position: fixed;
+    z-index: 30;
+    pointer-events: none;
+    background: var(--cms-ink);
+    color: var(--cms-paper);
+    font-size: .8rem;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: .4rem .65rem;
+    border-radius: var(--cms-radius);
+    box-shadow: 0 2px 10px rgba(26, 35, 29, .28);
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-4px);
+    transition: opacity .12s ease, transform .12s ease, visibility .12s;
+}
+.cms-nav-tip-on {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+}
+.cms-nav-tip::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    background: var(--cms-ink);
+    border-radius: 1px;
+    transform: rotate(45deg);
+}
 
 /* Main column */
 .cms-main {
@@ -506,6 +618,7 @@ td.cms-slug { color: var(--cms-muted); }
 @media (prefers-reduced-motion: reduce) {
     .cms-toast { animation: none; }
     .cms-toast-out { transition: none; }
+    .cms-nav-tip { transition: none; transform: none; }
 }
 
 /* Masquerade banner: a superadmin working as someone else. Brass, like
@@ -639,6 +752,10 @@ td.cms-slug { color: var(--cms-muted); }
     flex-wrap: wrap;
 }
 .cms-browser-bar .cms-tabs { margin-bottom: 0; }
+/* A filter bar sitting directly on a table (the users list) carries its
+   own breathing room; the media browser's spacing comes from the path
+   bar below it instead. */
+.cms-list-bar { margin-bottom: 1.1rem; }
 .cms-browser-search { display: flex; gap: .5rem; align-items: center; }
 .cms-browser-search input[type="search"] {
     padding: .45rem .6rem;
@@ -1228,7 +1345,9 @@ body.cms-dragging .cms-table {
         border-bottom: 1px solid var(--cms-fog);
         padding: 1rem 1.25rem;
     }
-    .cms-brand { margin-bottom: .75rem; }
+    .cms-sidebar-head { margin-bottom: .75rem; }
+    /* The top-bar layout has no rail to collapse to. */
+    .cms-nav-toggle { display: none; }
     .cms-site-mode { margin: -.4rem 0 .6rem; }
     .cms-contents-label { display: none; }
     .cms-nav { flex-direction: row; flex-wrap: wrap; gap: .15rem .3rem; }

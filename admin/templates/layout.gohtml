@@ -18,6 +18,10 @@
            badge, say — and the CSP forbids doing that inline. */}}
     {{range .Stylesheets}}<link rel="stylesheet" href="{{.}}">
     {{end -}}
+    {{- /* Deliberately not deferred: it reapplies the saved sidebar
+           state (a class on <html>) before the body renders, so a
+           collapsed menu never flashes open on navigation. */}}
+    <script src="{{.AdminPath}}/static/nav-state.js"></script>
     <script src="{{.AdminPath}}/static/admin.js" defer></script>
     {{if .PageScript}}<script src="{{.AdminPath}}/static/{{.PageScript}}" defer></script>{{end}}
 </head>
@@ -26,7 +30,19 @@
 <body class="cms-admin{{if .User}} cms-has-sidebar{{end}}" data-t-copied="{{.T "Copied!"}}">
 {{if .User}}
 <aside class="cms-sidebar">
-    <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+    <div class="cms-sidebar-head">
+        <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+        {{- /* Collapses the sidebar to a rail of icons, for working
+               room. admin.js flips the class and keeps the state in
+               localStorage; nav-state.js reapplies it on the next page
+               before first paint. Without JS the button does nothing and
+               the menu simply stays open. */}}
+        <button type="button" id="cms-nav-toggle" class="cms-btn cms-btn-ghost cms-nav-toggle"
+                data-t-collapse="{{.T "Collapse the menu"}}" data-t-expand="{{.T "Expand the menu"}}"
+                aria-expanded="true" aria-label="{{.T "Collapse the menu"}}" title="{{.T "Collapse the menu"}}">
+            <span class="cms-nav-toggle-out">{{template "icon-collapse"}}</span><span class="cms-nav-toggle-in">{{template "icon-expand"}}</span>
+        </button>
+    </div>
     {{- /* The site is built but not yet findable. Stamped on every admin
            page, because the failure this guards against is nobody
            remembering the switch exists. */}}
@@ -42,37 +58,42 @@
         title="{{.T "The public site is closed — everyone but superadmins is turned away. A superadmin reopens it in the site settings dialog."}}">{{.T "Site closed"}}</span></p>
     {{end}}
     <p class="cms-contents-label">{{.T "Contents"}}</p>
+    {{- /* Every entry leads with a glyph — a built-in icon from
+           icons.gohtml, a host section's NavIcon, or failing those the
+           label's first letter. The expanded menu hides it; the collapsed
+           rail shows it alone, with the full label as a tooltip put on
+           by admin.js. */}}
     <nav class="cms-nav">
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
-            <span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-dashboard"}}</span><span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
         {{- template "navsections" .NavSectionsAt "dashboard"}}
         {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "pages"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/pages">
-            <span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-pages"}}</span><span class="cms-nav-label">{{.T "Pages"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Pages}}</span></a>
         {{end}}
         {{- template "navsections" .NavSectionsAt "pages"}}
         {{if and .PostsEnabled (or (.Can "blogs") (.Can "news"))}}
         <a {{if eq .NavCurrent "posts"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/posts">
-            <span class="cms-nav-label">{{.T "Blog & News"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Posts}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-posts"}}</span><span class="cms-nav-label">{{.T "Blog & News"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Posts}}</span></a>
         {{end}}
         {{- template "navsections" .NavSectionsAt "posts"}}
         {{if .MediaEnabled}}
         <a {{if eq .NavCurrent "media"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/media">
-            <span class="cms-nav-label">{{.T "Media"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Media}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-media"}}</span><span class="cms-nav-label">{{.T "Media"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Media}}</span></a>
         {{end}}
         {{- template "navsections" .NavSectionsAt "media"}}
         {{if and .PagesEnabled .IsSuperadmin}}
         <a {{if eq .NavCurrent "snippets"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/snippets">
-            <span class="cms-nav-label">{{.T "Snippets"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Snippets}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-snippets"}}</span><span class="cms-nav-label">{{.T "Snippets"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Snippets}}</span></a>
         {{end}}
         {{- template "navsections" .NavSectionsAt "snippets"}}
         {{if .Can "users"}}
         <a {{if eq .NavCurrent "users"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/users">
-            <span class="cms-nav-label">{{.T "Users"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Users}}</span></a>
+            <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-users"}}</span><span class="cms-nav-label">{{.T "Users"}}</span><span class="cms-nav-leader"></span><span class="cms-nav-count">{{.NavCounts.Users}}</span></a>
         {{end}}
         {{- template "navsections" .NavSectionsAt "users"}}
         {{- template "navsections" .NavSectionsAt ""}}
-        <a href="/"><span class="cms-nav-label">{{.T "Public Site"}}</span></a>
+        <a href="/"><span class="cms-nav-glyph" aria-hidden="true">{{template "icon-site"}}</span><span class="cms-nav-label">{{.T "Public Site"}}</span></a>
     </nav>
     <div class="cms-sidebar-foot">
         <a class="cms-whoami" href="{{.AdminPath}}/settings" title="{{.T "My account"}}">{{.User.Name}}</a>
@@ -112,6 +133,12 @@
     {{with .Version}}<footer class="cms-main-foot">CMS {{.}}</footer>{{end}}
 </main>
 {{if .User}}
+{{- /* The collapsed rail's tooltip: one floating element admin.js fills
+       with the hovered (or focused) entry's label and parks beside it.
+       Fixed-positioned so the sidebar's own scrollbox cannot clip it.
+       aria-hidden because it only repeats the link's label, which stays
+       in the accessibility tree (visually hidden) while collapsed. */}}
+<div class="cms-nav-tip" id="cms-nav-tip" aria-hidden="true"></div>
 {{- /* One confirmation dialog for the whole admin, driven by admin.js.
        Its title, detail, button label and tone all come from the form
        being submitted, so a confirmation can never drift from the action
@@ -136,4 +163,4 @@
        directly under the built-in entry its deployment names. */}}
 {{define "navsections"}}{{range .}}
         <a {{if .Active}}class="cms-active" aria-current="page"{{end}}{{with .Confirm}} data-confirm="{{.}}"{{end}} href="{{.URL}}">
-            <span class="cms-nav-label">{{.Label}}</span>{{if .HasCount}}<span class="cms-nav-leader"></span><span class="cms-nav-count">{{.Count}}</span>{{end}}</a>{{end}}{{end}}
+            <span class="cms-nav-glyph" aria-hidden="true">{{if .Icon}}{{.Icon}}{{else}}{{printf "%.1s" .Label}}{{end}}</span><span class="cms-nav-label">{{.Label}}</span>{{if .HasCount}}<span class="cms-nav-leader"></span><span class="cms-nav-count">{{.Count}}</span>{{end}}</a>{{end}}{{end}}

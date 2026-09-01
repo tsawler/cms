@@ -6,6 +6,28 @@
     <a class="cms-btn cms-btn-primary" href="{{.AdminPath}}/users/new">{{.T "New user"}}</a>
 </div>
 
+{{- /* Status tabs and a name/email search. Tab links keep the search,
+       the search form keeps the tab (its hidden status field), and the
+       page links below keep both — listPageURL carries the whole query
+       string. The handler validates status server-side; these links are
+       the only three values it accepts. */}}
+<div class="cms-browser-bar cms-list-bar">
+    <p class="cms-tabs">
+        <a {{if not .UserStatus}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/users{{if .UserQuery}}?q={{.UserQuery}}{{end}}">{{.T "Active"}}</a>
+        <a {{if eq .UserStatus "inactive"}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/users?status=inactive{{if .UserQuery}}&q={{.UserQuery}}{{end}}">{{.T "Inactive"}}</a>
+        <a {{if eq .UserStatus "all"}}class="cms-active"{{end}}
+           href="{{.AdminPath}}/users?status=all{{if .UserQuery}}&q={{.UserQuery}}{{end}}">{{.T "All"}}</a>
+    </p>
+    <form method="get" action="{{.AdminPath}}/users" class="cms-browser-search" role="search">
+        {{if .UserStatus}}<input type="hidden" name="status" value="{{.UserStatus}}">{{end}}
+        <input type="search" name="q" value="{{.UserQuery}}" placeholder="{{.T "Search by name or email…"}}"
+               aria-label="{{.T "Search by name or email…"}}">
+        {{if .UserQuery}}<a class="cms-btn cms-btn-ghost cms-btn-sm" href="{{.AdminPath}}/users{{if .UserStatus}}?status={{.UserStatus}}{{end}}">{{.T "Clear"}}</a>{{end}}
+    </form>
+</div>
+
 <table class="cms-table">
     <thead>
     <tr>
@@ -48,8 +70,13 @@
         <td class="cms-table-actions">{{if .CanManage}}<a href="{{$.AdminPath}}/users/{{.ID}}">{{$.T "Edit"}}</a>{{end}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="{{if .IsSuperadmin}}6{{else}}5{{end}}" class="cms-muted">{{.T "No users yet."}}</td></tr>
+    <tr><td colspan="{{if .IsSuperadmin}}6{{else}}5{{end}}" class="cms-muted">{{if or .UserQuery .UserStatus}}{{.T "No users match this filter."}}{{else}}{{.T "No users yet."}}{{end}}</td></tr>
     {{end}}
     </tbody>
 </table>
+
+{{/* The module's own pagination bar, the same one the posts list and the
+     public site's {{cmsPagination}} draw. It renders nothing while the
+     users fit on a single page. */}}
+{{with .Pager}}{{.HTML}}{{end}}
 {{end}}

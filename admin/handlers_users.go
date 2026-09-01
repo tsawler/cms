@@ -10,12 +10,39 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/auth"
+	"github.com/tsawler/cms/render"
 )
 
 const minPasswordLength = 8
 
 func (s *server) usersList(w http.ResponseWriter, r *http.Request) {
-	users, err := s.deps.Users.All(r.Context())
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	// The status tab. Validated to its known values here rather than
+	// trusted from the URL: junk is the default view, not an error page.
+	// Active accounts are the default — they are the working set, and
+	// departed accounts sit under their own tab instead of padding every
+	// page of the list.
+	status := r.URL.Query().Get("status")
+	if status != "inactive" && status != "all" {
+		status = ""
+	}
+	filter := auth.UserFilter{Query: query}
+	if status != "all" {
+		active := status == ""
+		filter.Active = &active
+	}
+
+	// Count, then clamp, then fetch — the posts list's order, so a
+	// ?page= past the end lands on the last real page.
+	total, err := s.deps.Users.CountFiltered(r.Context(), filter)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	pager := render.NewPager(listPage(r), s.perPage(), total, s.listPageURL(r))
+	pager.PrevLabel, pager.NextLabel = s.tr(r, "Previous"), s.tr(r, "Next")
+
+	users, err := s.deps.Users.Filtered(r.Context(), filter, pager.PerPage, pager.Offset())
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -27,6 +54,9 @@ func (s *server) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	data := s.newTemplateData(r)
 	data.Users = rows
+	data.UserQuery = query
+	data.UserStatus = status
+	data.Pager = pager
 	s.render(w, http.StatusOK, "users", data)
 }
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +149,72 @@ func (s *Store) All(ctx context.Context) ([]User, error) {
 		}
 		return *u, nil
 	})
+}
+
+// UserFilter narrows Filtered and CountFiltered. The zero value matches
+// every account.
+type UserFilter struct {
+	// Query keeps accounts whose name or email contains it,
+	// case-insensitively.
+	Query string
+	// Active, when set, keeps only accounts whose Active flag matches it.
+	Active *bool
+}
+
+// likeEscaper neutralizes LIKE's wildcards in a user-typed search, so a
+// "%" in the box means a percent sign rather than everything.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// filterWhere renders f as a WHERE clause ("" when f is empty) plus its
+// arguments. Shared by Filtered and CountFiltered so the count always
+// describes the same list the window is read from.
+func (s *Store) filterWhere(f UserFilter) (string, []any) {
+	var where []string
+	var args []any
+	if f.Query != "" {
+		args = append(args, "%"+likeEscaper.Replace(f.Query)+"%")
+		p := "$" + strconv.Itoa(len(args))
+		d := s.db.Dialect()
+		where = append(where, "("+d.CaseInsensitiveLike("name", p)+" OR "+d.CaseInsensitiveLike("email", p)+")")
+	}
+	if f.Active != nil {
+		args = append(args, *f.Active)
+		where = append(where, "active = $"+strconv.Itoa(len(args)))
+	}
+	if len(where) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+// Filtered returns one window of the users matching f, ordered by name
+// then email — the query behind the admin's paginated users list. Like
+// All it leaves Permissions unloaded.
+func (s *Store) Filtered(ctx context.Context, f UserFilter, limit, offset int) ([]User, error) {
+	where, args := s.filterWhere(f)
+	args = append(args, limit, offset)
+	n := len(args)
+	rows, err := s.db.Query(ctx, "SELECT "+userColumns+" FROM cms_users"+where+
+		" ORDER BY name, email LIMIT $"+strconv.Itoa(n-1)+" OFFSET $"+strconv.Itoa(n), args...)
+	if err != nil {
+		return nil, err
+	}
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (User, error) {
+		u, err := scanUser(row)
+		if err != nil {
+			return User{}, err
+		}
+		return *u, nil
+	})
+}
+
+// CountFiltered returns how many users match f — the total Filtered
+// pages through.
+func (s *Store) CountFiltered(ctx context.Context, f UserFilter) (int, error) {
+	where, args := s.filterWhere(f)
+	var n int
+	err := s.db.QueryRow(ctx, "SELECT count(*) FROM cms_users"+where, args...).Scan(&n)
+	return n, err
 }
 
 // Count returns the total number of users.

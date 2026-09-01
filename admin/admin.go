@@ -421,7 +421,7 @@ func parseTemplates() map[string]*template.Template {
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
-			"templates/layout.gohtml", "templates/form_regions.gohtml", "templates/"+page+".gohtml")
+			"templates/layout.gohtml", "templates/icons.gohtml", "templates/form_regions.gohtml", "templates/"+page+".gohtml")
 		if err != nil {
 			panic(fmt.Sprintf("cms admin: parsing template %s: %v", page, err))
 		}
@@ -496,7 +496,12 @@ type templateData struct {
 
 	// User management pages. Users carries a per-row CanManage so the
 	// table offers Edit exactly where the route allows it.
-	Users      []userRow
+	Users []userRow
+	// UserQuery and UserStatus are the users list's filters: the search
+	// term, and the status tab — "" (active accounts, the default),
+	// "inactive", or "all".
+	UserQuery  string
+	UserStatus string
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
@@ -629,6 +634,7 @@ func (td templateData) Abs(u string) string {
 type navLink struct {
 	URL      string
 	Label    string
+	Icon     template.HTML // the section's NavIcon; empty falls back to a monogram
 	Confirm  string
 	After    string
 	Active   bool
@@ -767,6 +773,7 @@ func navSectionsFor(sections []Section, adminPath string, u *auth.User, reqPath 
 		links = append(links, navLink{
 			URL:      adminPath + prefix + "/",
 			Label:    sec.NavLabel,
+			Icon:     sec.NavIcon,
 			Confirm:  sec.Confirm,
 			After:    sec.NavAfter,
 			Active:   reqPath == prefix || strings.HasPrefix(reqPath, prefix+"/"),
