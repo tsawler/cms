@@ -1087,6 +1087,15 @@
       el.innerHTML = "";
     });
   }
+  function stripCodeBodies(html) {
+    if (!html || html.indexOf("data-cms-code=") === -1) return html;
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll("[data-cms-code]").forEach(function(el) {
+      el.innerHTML = "";
+    });
+    return tpl.innerHTML;
+  }
   function cacheCode(key) {
     if (key in sources) return;
     api("/code/" + encodeURIComponent(key)).then(function(c) {
@@ -6940,12 +6949,12 @@
     var values = {};
     Object.keys(state.dirty).forEach(function(name) {
       if (state.mceEditors[name]) {
-        values[name] = state.mceEditors[name].getContent();
+        values[name] = stripCodeBodies(state.mceEditors[name].getContent());
         return;
       }
       var el = document.querySelector('[data-cms-region="' + name + '"]');
       if (el) {
-        values[name] = el.dataset.cmsKind === "text" ? el.textContent : el.innerHTML;
+        values[name] = el.dataset.cmsKind === "text" ? el.textContent : stripCodeBodies(el.innerHTML);
         return;
       }
       if (state.imageValues[name] !== void 0) values[name] = state.imageValues[name];
@@ -6978,7 +6987,7 @@
         bgcolor: wrapper.dataset.cmsBgcolor || "",
         bgimage: wrapper.dataset.cmsBgimage || "",
         bgposition: wrapper.dataset.cmsBgposition || "",
-        html
+        html: stripCodeBodies(html)
       });
     });
     return out;

@@ -165,6 +165,23 @@ export function collapseCode() {
     codeBlocks().forEach(function (el) { el.innerHTML = ""; });
 }
 
+// stripCodeBodies returns html with every custom-code block emptied
+// back to its placeholder. A save runs this over everything it sends,
+// because Save and Publish stay reachable after Done — when the blocks
+// have been filled and their scripts have run — and what the DOM holds
+// then is the widget's output, not the page's content. The server does
+// the same on the way in; this keeps the request honest and the
+// snapshot-and-cancel paths seeing the same markup a save sends.
+export function stripCodeBodies(html) {
+    if (!html || html.indexOf("data-cms-code=") === -1) return html;
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll("[data-cms-code]").forEach(function (el) {
+        el.innerHTML = "";
+    });
+    return tpl.innerHTML;
+}
+
 // cacheCode makes sure a key's markup is known, fetching it when the
 // page carried no block with that key to capture it from — which is the
 // case for one the editor has just inserted. Failure is silent: the

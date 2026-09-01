@@ -471,6 +471,12 @@ func (s *server) saveRegions(ctx context.Context, pageID int64, templateName str
 		case !isAdmin:
 			value = editorHTMLPolicy.Sanitize(value)
 		}
+		if kind == content.KindHTML {
+			// A custom-code block stores only its placeholder; whatever
+			// the client had inside it is the widget's output, not
+			// content (see render.CollapseCodePlaceholders).
+			value = render.CollapseCodePlaceholders(value)
+		}
 		if err := s.deps.Content.UpsertDraftBlock(ctx, pageID, region.Name,
 			locale, kind, value); err != nil {
 			return err
@@ -518,6 +524,7 @@ func (s *server) saveSharedRegions(ctx context.Context, values map[string]string
 		if !isAdmin {
 			value = editorHTMLPolicy.Sanitize(value)
 		}
+		value = render.CollapseCodePlaceholders(value)
 		if err := s.deps.Content.UpsertSharedBlock(ctx, region.Name, locale,
 			content.KindHTML, value); err != nil {
 			return err
