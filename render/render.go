@@ -2329,6 +2329,80 @@ func expandCode(s string, lookup CodeLookup) string {
 	})
 }
 
+// codeOpenRe finds the start tag of any custom-code block, whatever it
+// holds. Where codePlaceholderRe insists on an empty body, this one is
+// the first half of a walk to the matching </div>, for the case where a
+// body has to be thrown away rather than recognised.
+var codeOpenRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-cms-code="[a-z0-9][a-z0-9-]{0,63}"[^>]*>`)
+
+// divTagRe steps through the div start and end tags after a code block's
+// opening tag, so the block's own </div> can be told from one inside it.
+var divTagRe = regexp.MustCompile(`(?is)<(/?)div\b[^>]*>`)
+
+// CollapseCodePlaceholders empties every custom-code block in s, leaving
+// each as the bare placeholder a page is meant to store:
+//
+//	<div class="cms-snippet cms-code" data-cms-code="key"></div>
+//
+// Saves run it on the way in, whatever the client sent. The in-place
+// editor empties these blocks itself when edit mode starts, but Save
+// and Publish stay reachable after Done, when the blocks have been
+// filled again and their scripts have run — and a save from there used
+// to serialize the widget's output into the page. Once stored, that
+// output no longer matched the empty placeholder expandCode looks for,
+// so the block stopped being swapped for its library entry and instead
+// carried a live copy of it: a visitor got the stored button plus the
+// one the stored script made, and an editor, whose page fills and runs
+// the block once more, got three.
+//
+// A block's markup belongs to the library and is never content, so
+// there is nothing to lose here: whatever sits inside the placeholder is
+// the output of a script, or the library markup itself, and the next
+// render puts it back from the library. A block whose closing tag cannot
+// be found is left as it is, the same as any other markup.
+func CollapseCodePlaceholders(s string) string {
+	if !strings.Contains(s, "data-cms-code=") {
+		return s
+	}
+	var sb strings.Builder
+	rest := s
+	for {
+		loc := codeOpenRe.FindStringIndex(rest)
+		if loc == nil {
+			sb.WriteString(rest)
+			return sb.String()
+		}
+		sb.WriteString(rest[:loc[1]])
+		body := rest[loc[1]:]
+		end := codeBodyEnd(body)
+		if end < 0 {
+			// Unbalanced: keep the body and carry on past the tag.
+			rest = body
+			continue
+		}
+		sb.WriteString("</div>")
+		rest = body[end:]
+	}
+}
+
+// codeBodyEnd returns the index just past the </div> that closes a code
+// block whose opening tag ends where s starts, or -1 when the tags never
+// balance.
+func codeBodyEnd(s string) int {
+	depth := 1
+	for _, m := range divTagRe.FindAllStringSubmatchIndex(s, -1) {
+		if m[2] != m[3] { // a "/" was captured: an end tag
+			depth--
+			if depth == 0 {
+				return m[1]
+			}
+			continue
+		}
+		depth++
+	}
+	return -1
+}
+
 // InertScriptType is the type an edit render gives every <script> inside
 // a custom-code block. No browser knows it, so the parser stores the
 // element and runs nothing — which is the point: an editing page must

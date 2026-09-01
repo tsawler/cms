@@ -7,6 +7,7 @@ import { $ } from "./shell.js";
 import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm, openDialog } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
+import { stripCodeBodies } from "./code.js";
 import { hideChrome } from "./buttons.js";
 import { saveTitle } from "./title.js";
 
@@ -81,12 +82,12 @@ function collect() {
     var values = {};
     Object.keys(state.dirty).forEach(function (name) {
         if (state.mceEditors[name]) {
-            values[name] = state.mceEditors[name].getContent();
+            values[name] = stripCodeBodies(state.mceEditors[name].getContent());
             return;
         }
         var el = document.querySelector('[data-cms-region="' + name + '"]');
         if (el) {
-            values[name] = el.dataset.cmsKind === "text" ? el.textContent : el.innerHTML;
+            values[name] = el.dataset.cmsKind === "text" ? el.textContent : stripCodeBodies(el.innerHTML);
             return;
         }
         if (state.imageValues[name] !== undefined) values[name] = state.imageValues[name];
@@ -115,7 +116,7 @@ function collectSections(region) {
             height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
             bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
             bgposition: wrapper.dataset.cmsBgposition || "",
-            html: html });
+            html: stripCodeBodies(html) });
     });
     return out;
 }

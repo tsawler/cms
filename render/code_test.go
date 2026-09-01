@@ -293,3 +293,48 @@ func TestInertCodePassesMissingKeysThrough(t *testing.T) {
 		t.Errorf("a resolved key came back unparked: %q", html)
 	}
 }
+
+func TestCollapseCodePlaceholdersEmptiesFilledBlocks(t *testing.T) {
+	// What a save after Done used to send: the library markup, the
+	// button its script made, and the script itself, all inside the
+	// placeholder — with nested divs to get past.
+	in := `<div class="grid"><p>Words</p>` +
+		`<div class="cms-snippet cms-code" data-cms-code="estimate"><div class="cms-code-body"><div>x</div></div>` +
+		`<button>Request Estimate</button><script src="https://example.com/w.js"></script></div>` +
+		`<p>After</p></div>`
+	want := `<div class="grid"><p>Words</p>` +
+		`<div class="cms-snippet cms-code" data-cms-code="estimate"></div>` +
+		`<p>After</p></div>`
+	if got := CollapseCodePlaceholders(in); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestCollapseCodePlaceholdersRepeatedAndAlreadyEmpty(t *testing.T) {
+	in := `<div data-cms-code="a"></div><p>x</p><DIV class="cms-code" data-cms-code="b">` +
+		`<span>y</span></DIV><div data-cms-code="a">&nbsp;</div>`
+	want := `<div data-cms-code="a"></div><p>x</p><DIV class="cms-code" data-cms-code="b"></div><div data-cms-code="a"></div>`
+	if got := CollapseCodePlaceholders(in); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	// Then the render can expand every one of them again.
+	lookup := func(key string) (string, bool) { return "<i>" + key + "</i>", true }
+	got := expandCode(CollapseCodePlaceholders(in), lookup)
+	if strings.Count(got, "<i>a</i>") != 2 || strings.Count(got, "<i>b</i>") != 1 {
+		t.Errorf("after collapsing, expansion gave %s", got)
+	}
+}
+
+func TestCollapseCodePlaceholdersLeavesOtherMarkup(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"<p>no blocks here</p>",
+		`<div class="cms-snippet"><div>ordinary nested divs</div></div>`,
+		// Unbalanced: nothing to do safely, so nothing is done.
+		`<div data-cms-code="a"><div>never closed`,
+	} {
+		if got := CollapseCodePlaceholders(in); got != in {
+			t.Errorf("CollapseCodePlaceholders(%q) = %q, want unchanged", in, got)
+		}
+	}
+}

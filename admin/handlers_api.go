@@ -826,6 +826,9 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		if !isAdmin {
 			html = editorHTMLPolicy.Sanitize(html)
 		}
+		// Custom-code blocks go back to their empty placeholder whatever
+		// the client sent (see render.CollapseCodePlaceholders).
+		html = render.CollapseCodePlaceholders(html)
 		// Resolve settings against the configured options so unknown
 		// keys are stored as the fallback rather than junk.
 		settings := map[string]string{

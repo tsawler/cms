@@ -896,7 +896,9 @@ inline would either be stripped — silently deleting the widget the first
 time an editor fixed a typo in the same section — or have to be
 safelisted, which would hand every editor a script-injection hole. A
 placeholder carries nothing executable, so it rides through the sanitizer
-untouched.
+untouched. Every save also empties the placeholders on the way in — the
+editor before it sends, the server as it stores — so a widget's output
+never becomes page content, however the page was serialized.
 
 To use one, an admin opens the **Snippets** drawer and clicks **Custom
 code**, then picks a library entry or creates one. On the page the block
