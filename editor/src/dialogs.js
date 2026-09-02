@@ -8,6 +8,7 @@ import { openPicker } from "./media.js";
 var dlgResolve = null;
 var dlgIsPrompt = false;
 var dlgRequired = ""; // error shown when a required prompt is left empty
+var dlgMatch = ""; // word a prompt must be given before it will settle
 var dlgHasFields = false;
 var dlgValues = {}; // field id -> current value while a dialog is open
 var dlgPreview = null; // optional live-preview renderer (values, container)
@@ -44,6 +45,9 @@ export function openDialog(opts) {
         // opts.required is the error message shown in-form when the
         // prompt input is submitted empty; "" means empty is allowed.
         dlgRequired = opts.required || "";
+        // opts.match is the word the prompt has to be given before OK
+        // will settle it; "" means anything is accepted.
+        dlgMatch = opts.match || "";
         clearDialogError();
         // opts.selects is the shorthand for select-only field lists;
         // opts.fields supports typed fields (select, color, image).
@@ -118,7 +122,10 @@ export function openDialog(opts) {
                 b.addEventListener("click", function () { switchTab(name); });
                 tabBar.appendChild(b);
             });
-            switchTab(opts.tabs[0]);
+            // opts.activeTab reopens the dialog on the tab it was left
+            // on, rather than sending whoever comes back hunting for the
+            // field they were just looking at.
+            switchTab(opts.tabs.indexOf(opts.activeTab) !== -1 ? opts.activeTab : opts.tabs[0]);
         }
         dlgChanged(); // initial preview render
         var ok = $("dlg-ok");
@@ -723,6 +730,24 @@ export function cmsPrompt(message, placeholder, okLabel, value) {
     return openDialog({ message: message, prompt: true, placeholder: placeholder, okLabel: okLabel, value: value });
 }
 
+// cmsTypeConfirm is cmsConfirm for the changes a second click is too
+// cheap a guard for: it will not settle until the word is typed into
+// it, which is a step nobody takes while their attention is on the next
+// thing. Resolves true when the word was typed, false when the dialog
+// was dismissed — so it reads the same way cmsConfirm does at the call
+// site. Case and surrounding space are forgiven; the word is not.
+export function cmsTypeConfirm(message, word, okLabel, danger) {
+    return openDialog({
+        message: message,
+        prompt: true,
+        match: word,
+        placeholder: word,
+        required: "Type " + word + " to confirm.",
+        okLabel: okLabel,
+        danger: danger,
+    }).then(function (v) { return v !== null; });
+}
+
 // showDialogError marks the prompt input invalid with a message under
 // it — the same in-form treatment the admin's server-rendered forms
 // use, instead of HTML5 bubbles.
@@ -738,9 +763,17 @@ function clearDialogError() {
 }
 
 function dialogOK() {
-    if (dlgIsPrompt && dlgRequired && $("dlg-input").value.trim() === "") {
-        showDialogError(dlgRequired);
-        return; // keep the dialog open until there's a value
+    if (dlgIsPrompt) {
+        var typed = $("dlg-input").value.trim();
+        if (dlgRequired && typed === "") {
+            showDialogError(dlgRequired);
+            return; // keep the dialog open until there's a value
+        }
+        // A type-to-confirm dialog: anything but the word keeps it open.
+        if (dlgMatch && typed.toLowerCase() !== dlgMatch.toLowerCase()) {
+            showDialogError(dlgRequired || "Type " + dlgMatch + " to confirm.");
+            return;
+        }
     }
     if (dlgHasFields) {
         var values = {};

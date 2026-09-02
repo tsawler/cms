@@ -4495,262 +4495,323 @@
     if (!canPages) return;
     api("/settings").then(function(s) {
       var noticeRich = noticeToRich(currentNotice());
-      var fields = [
-        {
-          id: "siteName",
-          label: "Site name",
-          type: "text",
-          value: s.siteName,
-          tab: BRAND,
-          span: true,
-          placeholder: "Shown where the template places the brand"
-        }
-      ];
-      if (mediaEnabled) {
-        fields.push({ id: "logo", label: "Logo", type: "image", value: s.logoUrl, tab: BRAND });
-        fields.push({
-          id: "favicon",
-          label: "Favicon",
-          type: "image",
-          tab: BRAND,
-          value: s.faviconUrl,
-          prefer: "original"
-        });
+      var storedRobots = !!(s.robotsTxt || "").trim();
+      var first = {};
+      Object.keys(s).forEach(function(k) {
+        first[k] = s[k];
+      });
+      first.noticeText = noticeRich;
+      first.robotsTxt = storedRobots ? s.robotsTxt : defaultRobotsTxt();
+      show(first, null);
+      function reseed(values) {
+        return {
+          siteName: values.siteName,
+          logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl,
+          faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl,
+          menuAlign: values.menuAlign,
+          loginInNav: values.loginInNav === "1",
+          noticeBar: values.noticeBar === "1",
+          noticeText: values.noticeText,
+          noticeStyle: values.noticeStyle,
+          noticeStyles: s.noticeStyles,
+          noticeDismissible: values.noticeDismissible === "1",
+          editorTheme: values.editorTheme,
+          mode: values.mode !== void 0 ? values.mode : s.mode,
+          sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
+          robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : first.robotsTxt,
+          locked: values.locked !== void 0 ? values.locked === "1" : !!s.locked
+        };
       }
-      fields.push({
-        id: "menuAlign",
-        label: "Menu alignment",
-        type: "select",
-        value: s.menuAlign,
-        tab: MENU,
-        span: true,
-        options: [
-          { value: "", label: "Theme default" },
-          { value: "left", label: "Left" },
-          { value: "center", label: "Center" },
-          { value: "right", label: "Right" }
-        ]
-      });
-      fields.push({
-        id: "loginInNav",
-        label: "Show a \u201CLog in\u201D link in the menu for logged-out visitors",
-        type: "check",
-        value: s.loginInNav,
-        tab: MENU,
-        span: true
-      });
-      fields.push({
-        id: "noticeBar",
-        label: "Show a notice bar at the top of every page",
-        type: "check",
-        value: s.noticeBar,
-        tab: NOTICE,
-        span: true
-      });
-      fields.push({
-        id: "noticeText",
-        label: "What it says",
-        type: "rich",
-        tab: NOTICE,
-        span: true,
-        value: noticeRich,
-        placeholder: "Closed Monday 25 August \u2014 orders ship Tuesday."
-      });
-      fields.push({
-        id: "noticeStyle",
-        label: "Notice bar colour",
-        type: "select",
-        value: s.noticeStyle,
-        tab: NOTICE,
-        span: true,
-        options: (s.noticeStyles || NOTICE_STYLES).map(function(n) {
-          return { value: n.key, label: n.label };
-        })
-      });
-      fields.push({
-        id: "noticeDismissible",
-        label: "Let visitors close the notice",
-        type: "check",
-        value: s.noticeDismissible,
-        tab: NOTICE,
-        span: true
-      });
-      fields.push({ type: "note", span: true, tab: NOTICE, text: function(v) {
-        if (v.noticeBar !== "1") {
-          return "Off \u2014 no bar on any page. Switching it on adds a thin strip above everything else, for the one thing the whole site has to say at once: a holiday closure, a delivery delay.";
+      function show(seed, activeTab) {
+        var fields = [
+          {
+            id: "siteName",
+            label: "Site name",
+            type: "text",
+            value: seed.siteName,
+            tab: BRAND,
+            span: true,
+            placeholder: "Shown where the template places the brand"
+          }
+        ];
+        if (mediaEnabled) {
+          fields.push({ id: "logo", label: "Logo", type: "image", value: seed.logoUrl, tab: BRAND });
+          fields.push({
+            id: "favicon",
+            label: "Favicon",
+            type: "image",
+            tab: BRAND,
+            value: seed.faviconUrl,
+            prefer: "original"
+          });
         }
-        var dismiss = v.noticeDismissible === "1" ? " Visitors can close it, and it stays closed for them until you change the wording \u2014 a new notice shows again." : " There is no close button: the bar stays until you switch it off here.";
-        return "The wording is content, not a setting: it is saved as a draft here and goes live with the next Publish, in the language you are editing. A bar with nothing written in it shows to nobody. You can also write it in the bar on the page itself \u2014 it is a shared region like the footer." + dismiss;
-      } });
-      fields.push({
-        id: "editorTheme",
-        label: "Colour of the editing tools",
-        type: "select",
-        value: s.editorTheme,
-        tab: EDITOR,
-        span: true,
-        options: EDITOR_THEMES.map(function(t) {
-          return { value: t.key, label: t.label };
-        })
-      });
-      fields.push({ type: "note", span: true, tab: EDITOR, text: function(v) {
-        var which = v.editorTheme === "light" ? "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn pale, with dark text." : "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn dark, with pale text.";
-        return which + " Pick whichever stands out against this site's own design \u2014 the tools disappear when they are the same shade as the page under them. It changes nothing a visitor sees, and it applies to everyone who edits here.";
-      } });
-      if (isSuperadmin) {
         fields.push({
-          id: "mode",
-          label: "Site mode",
+          id: "menuAlign",
+          label: "Menu alignment",
           type: "select",
-          value: s.mode,
-          tab: SEARCH,
+          value: seed.menuAlign,
+          tab: MENU,
           span: true,
           options: [
-            { value: "development", label: "Development \u2014 keep out of search engines" },
-            { value: "production", label: "Production \u2014 live and findable" }
+            { value: "", label: "Theme default" },
+            { value: "left", label: "Left" },
+            { value: "center", label: "Center" },
+            { value: "right", label: "Right" }
           ]
         });
-        fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
-          return v.mode === "development" ? "Search engines are asked not to index the site. Anyone with the address can still read it \u2014 this hides the site from search, it does not make it private." : "The site is open to search engines. It can take days or weeks for pages to appear in results.";
-        } });
         fields.push({
-          id: "sitemap",
-          label: "Publish a sitemap at /sitemap.xml",
+          id: "loginInNav",
+          label: "Show a \u201CLog in\u201D link in the menu for logged-out visitors",
           type: "check",
-          value: s.sitemap,
-          tab: SEARCH,
+          value: seed.loginInNav,
+          tab: MENU,
           span: true
         });
-        fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
-          if (v.sitemap !== "1") {
-            return "Off \u2014 the CMS serves nothing at /sitemap.xml, leaving the address to the app hosting it.";
-          }
-          return v.mode === "development" ? "Listed once the site is in production. A site in development publishes no sitemap \u2014 it is asking not to be crawled." : "Every published, public page is listed, in every language, and the address is added to the robots.txt below.";
-        } });
-        var storedRobots = !!(s.robotsTxt || "").trim();
         fields.push({
-          id: "robotsTxt",
-          label: "robots.txt",
-          type: "textarea",
-          mono: true,
-          tab: SEARCH,
+          id: "noticeBar",
+          label: "Show a notice bar at the top of every page",
+          type: "check",
+          value: seed.noticeBar,
+          tab: NOTICE,
+          span: true
+        });
+        fields.push({
+          id: "noticeText",
+          label: "What it says",
+          type: "rich",
+          tab: NOTICE,
           span: true,
-          rows: 6,
-          value: storedRobots ? s.robotsTxt : defaultRobotsTxt(),
-          placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: " + window.location.origin + "/sitemap.xml"
+          value: seed.noticeText,
+          placeholder: "Closed Monday 25 August \u2014 orders ship Tuesday."
         });
-        fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
-          if (v.mode === "development") {
-            return "Served once the site is in production. While it is in development the CMS serves its own \u201CDisallow: /\u201D instead, so this file cannot invite crawlers into an unfinished site.";
-          }
-          if (!(v.robotsTxt || "").trim()) {
-            return "Empty \u2014 the CMS serves nothing at /robots.txt, leaving the address to the app hosting it.";
-          }
-          var sitemapLine = v.sitemap === "1" ? ", with a Sitemap: line added unless you write your own" : "";
-          if (!storedRobots) {
-            return "A starting point \u2014 nothing is stored yet. Saving serves this at /robots.txt" + sitemapLine + ", taking that address over from the app hosting the site; clearing the box hands it back.";
-          }
-          return "Served at /robots.txt" + sitemapLine + ". Crawlers may cache it for a day or so before they notice a change.";
-        } });
         fields.push({
-          id: "locked",
-          label: "Close the site to everyone but superadmins",
+          id: "noticeStyle",
+          label: "Notice bar colour",
+          type: "select",
+          value: seed.noticeStyle,
+          tab: NOTICE,
+          span: true,
+          options: (seed.noticeStyles || NOTICE_STYLES).map(function(n) {
+            return { value: n.key, label: n.label };
+          })
+        });
+        fields.push({
+          id: "noticeDismissible",
+          label: "Let visitors close the notice",
           type: "check",
-          value: s.locked,
-          tab: ACCESS,
+          value: seed.noticeDismissible,
+          tab: NOTICE,
           span: true
         });
-        fields.push({ type: "note", span: true, tab: ACCESS, text: function(v) {
-          if (v.locked !== "1") {
-            return "The site is open. Closing it turns every visitor away with a \u201Ctemporarily unavailable\u201D page \u2014 pages, forms, and everything else \u2014 while you and other superadmins keep browsing it as normal. For the afternoon a site has to be off: a bad import, a price list that went out wrong, a rebuild mid-flight.";
+        fields.push({ type: "note", span: true, tab: NOTICE, text: function(v) {
+          if (v.noticeBar !== "1") {
+            return "Off \u2014 no bar on any page. Switching it on adds a thin strip above everything else, for the one thing the whole site has to say at once: a holiday closure, a delivery delay.";
           }
-          return "The site is closed. Only superadmins see it; everyone else gets a \u201Ctemporarily unavailable\u201D page, and admins and editors cannot sign in while it lasts. Search engines are told this is temporary and keep the pages they have \u2014 for a few days, not indefinitely.";
+          var dismiss = v.noticeDismissible === "1" ? " Visitors can close it, and it stays closed for them until you change the wording \u2014 a new notice shows again." : " There is no close button: the bar stays until you switch it off here.";
+          return "The wording is content, not a setting: it is saved as a draft here and goes live with the next Publish, in the language you are editing. A bar with nothing written in it shows to nobody. You can also write it in the bar on the page itself \u2014 it is a shared region like the footer." + dismiss;
         } });
-      }
-      var tabs = [BRAND, MENU, NOTICE, EDITOR];
-      if (isSuperadmin) tabs.push(SEARCH, ACCESS);
-      openDialog({
-        message: "Site settings",
-        okLabel: "Save",
-        wide: true,
-        tabs,
-        fields
-      }).then(function(values) {
-        if (!values) return;
-        if (values.locked === "1" && !s.locked) {
-          return cmsConfirm(
-            "Close the site to everyone but superadmins? Every page answers \u201Ctemporarily unavailable\u201D until you reopen it here \u2014 visitors, forms, and search engines alike. You and other superadmins keep browsing it as normal.",
-            "Close the site",
-            true
-          ).then(function(ok) {
-            if (ok) commit();
+        fields.push({
+          id: "editorTheme",
+          label: "Colour of the editing tools",
+          type: "select",
+          value: seed.editorTheme,
+          tab: EDITOR,
+          span: true,
+          options: EDITOR_THEMES.map(function(t) {
+            return { value: t.key, label: t.label };
+          })
+        });
+        fields.push({ type: "note", span: true, tab: EDITOR, text: function(v) {
+          var which = v.editorTheme === "light" ? "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn pale, with dark text." : "The edit bar, the tool rail, the block and section toolbars and the formatting toolbar are drawn dark, with pale text.";
+          return which + " Pick whichever stands out against this site's own design \u2014 the tools disappear when they are the same shade as the page under them. It changes nothing a visitor sees, and it applies to everyone who edits here.";
+        } });
+        if (isSuperadmin) {
+          fields.push({
+            id: "mode",
+            label: "Site mode",
+            type: "select",
+            value: seed.mode,
+            tab: SEARCH,
+            span: true,
+            options: [
+              { value: "development", label: "Development \u2014 keep out of search engines" },
+              { value: "production", label: "Production \u2014 live and findable" }
+            ]
           });
+          fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
+            return v.mode === "development" ? "Search engines are asked not to index the site. Anyone with the address can still read it \u2014 this hides the site from search, it does not make it private." : "The site is open to search engines. It can take days or weeks for pages to appear in results.";
+          } });
+          fields.push({
+            id: "sitemap",
+            label: "Publish a sitemap at /sitemap.xml",
+            type: "check",
+            value: seed.sitemap,
+            tab: SEARCH,
+            span: true
+          });
+          fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
+            if (v.sitemap !== "1") {
+              return "Off \u2014 the CMS serves nothing at /sitemap.xml, leaving the address to the app hosting it.";
+            }
+            return v.mode === "development" ? "Listed once the site is in production. A site in development publishes no sitemap \u2014 it is asking not to be crawled." : "Every published, public page is listed, in every language, and the address is added to the robots.txt below.";
+          } });
+          fields.push({
+            id: "robotsTxt",
+            label: "robots.txt",
+            type: "textarea",
+            mono: true,
+            tab: SEARCH,
+            span: true,
+            rows: 6,
+            value: seed.robotsTxt,
+            placeholder: "User-agent: *\nDisallow: /private\n\nSitemap: " + window.location.origin + "/sitemap.xml"
+          });
+          fields.push({ type: "note", span: true, tab: SEARCH, text: function(v) {
+            if (v.mode === "development") {
+              return "Served once the site is in production. While it is in development the CMS serves its own \u201CDisallow: /\u201D instead, so this file cannot invite crawlers into an unfinished site.";
+            }
+            if (!(v.robotsTxt || "").trim()) {
+              return "Empty \u2014 the CMS serves nothing at /robots.txt, leaving the address to the app hosting it.";
+            }
+            var sitemapLine = v.sitemap === "1" ? ", with a Sitemap: line added unless you write your own" : "";
+            if (!storedRobots) {
+              return "A starting point \u2014 nothing is stored yet. Saving serves this at /robots.txt" + sitemapLine + ", taking that address over from the app hosting the site; clearing the box hands it back.";
+            }
+            return "Served at /robots.txt" + sitemapLine + ". Crawlers may cache it for a day or so before they notice a change.";
+          } });
+          fields.push({
+            id: "locked",
+            label: "Close the site to everyone but superadmins",
+            type: "check",
+            value: seed.locked,
+            tab: ACCESS,
+            span: true
+          });
+          fields.push({ type: "note", span: true, tab: ACCESS, text: function(v) {
+            if (v.locked !== "1") {
+              return "The site is open. Closing it turns every visitor away with a \u201Ctemporarily unavailable\u201D page \u2014 pages, forms, and everything else \u2014 while you and other superadmins keep browsing it as normal. For the afternoon a site has to be off: a bad import, a price list that went out wrong, a rebuild mid-flight.";
+            }
+            return "The site is closed. Only superadmins see it; everyone else gets a \u201Ctemporarily unavailable\u201D page, and admins and editors cannot sign in while it lasts. Search engines are told this is temporary and keep the pages they have \u2014 for a few days, not indefinitely.";
+          } });
         }
-        commit();
-        function commit() {
-          var next = {
-            menuAlign: values.menuAlign,
-            siteName: values.siteName.trim(),
-            logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
-            faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
-            loginInNav: values.loginInNav === "1",
-            // Site-wide CSS/JS has its own editor (wrench → Site
-            // CSS & JS); carry the stored values through so this
-            // save doesn't wipe them. The mode and robots.txt fields
-            // are absent for everyone but superadmins, and carry
-            // through the same way — the server ignores them from
-            // anyone else in any case.
-            siteCss: s.siteCss || "",
-            siteJs: s.siteJs || "",
-            mode: values.mode !== void 0 ? values.mode : s.mode || "",
-            robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : s.robotsTxt || "",
-            sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
-            locked: values.locked !== void 0 ? values.locked === "1" : !!s.locked,
-            noticeBar: values.noticeBar === "1",
-            noticeStyle: values.noticeStyle,
-            noticeDismissible: values.noticeDismissible === "1",
-            editorTheme: values.editorTheme
-          };
-          var typed = sanitizeRichHTML(values.noticeText || "");
-          var changed = typed !== noticeRich;
-          var nextNotice = changed ? richToNotice(typed) : notice.html;
-          if (changed) {
-            notice.html = nextNotice;
+        var tabs = [BRAND, MENU, NOTICE, EDITOR];
+        if (isSuperadmin) tabs.push(SEARCH, ACCESS);
+        openDialog({
+          message: "Site settings",
+          okLabel: "Save",
+          wide: true,
+          tabs,
+          activeTab,
+          fields
+        }).then(function(values) {
+          if (!values) return;
+          var gates = [];
+          if (values.mode !== void 0 && values.mode !== s.mode) {
+            gates.push({
+              tab: SEARCH,
+              ask: values.mode === "production" ? confirmProduction : confirmDevelopment
+            });
           }
-          api("/settings", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(next)
-          }).then(function() {
-            applySettings(next);
-            retitle(s.siteName, next.siteName);
-            if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
-            if (!changed) {
-              flash("Site settings saved.");
+          if (values.locked === "1" && !s.locked) gates.push({ tab: ACCESS, ask: confirmClose });
+          (function ask(i) {
+            if (i === gates.length) {
+              commit();
               return;
             }
-            notice.html = nextNotice;
-            writeNotice(nextNotice);
-            return api("/pages/" + pageId + "/regions", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                locale: cfg.locale,
-                regions: { "site:notice": nextNotice }
-              })
-            }).then(function() {
-              delete state.dirty["site:notice"];
-              if (!hasUnsaved()) $("save").disabled = true;
-              if (state.pageStatus === "published") state.hasUnpublished = true;
-              updateChip();
-              updateBarButtons();
-              flash("Saved \u2014 publish to put the notice live");
+            gates[i].ask().then(function(ok) {
+              if (ok) ask(i + 1);
+              else show(reseed(values), gates[i].tab);
             });
-          }).catch(function(err) {
-            setMsg(err.message);
-          });
-        }
-      });
+          })(0);
+          function confirmProduction() {
+            return cmsTypeConfirm(
+              "Put the site into production? Search engines are invited in, the sitemap and your robots.txt start being served, and anything unfinished here is unfinished in public. Getting a page back out of an index takes far longer than putting it in.",
+              "PRODUCTION",
+              "Go live",
+              true
+            );
+          }
+          function confirmDevelopment() {
+            return cmsTypeConfirm(
+              "Take the site out of search engines? Every page is marked noindex and the sitemap stops being served, so a live site starts falling out of results \u2014 and comes back slowly. Visitors with the address can still read it: this hides the site from search, it does not close it.",
+              "DEVELOPMENT",
+              "Take out of search",
+              true
+            );
+          }
+          function confirmClose() {
+            return cmsTypeConfirm(
+              "Close the site to everyone but superadmins? Every page answers \u201Ctemporarily unavailable\u201D until you reopen it here \u2014 visitors, forms, and search engines alike. Admins and editors cannot sign in while it lasts. You and other superadmins keep browsing it as normal.",
+              "CLOSE",
+              "Close the site",
+              true
+            );
+          }
+          function commit() {
+            var next = {
+              menuAlign: values.menuAlign,
+              siteName: values.siteName.trim(),
+              logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
+              faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
+              loginInNav: values.loginInNav === "1",
+              // Site-wide CSS/JS has its own editor (wrench → Site
+              // CSS & JS); carry the stored values through so this
+              // save doesn't wipe them. The mode and robots.txt fields
+              // are absent for everyone but superadmins, and carry
+              // through the same way — the server ignores them from
+              // anyone else in any case.
+              siteCss: s.siteCss || "",
+              siteJs: s.siteJs || "",
+              mode: values.mode !== void 0 ? values.mode : s.mode || "",
+              robotsTxt: values.robotsTxt !== void 0 ? values.robotsTxt : s.robotsTxt || "",
+              sitemap: values.sitemap !== void 0 ? values.sitemap === "1" : !!s.sitemap,
+              locked: values.locked !== void 0 ? values.locked === "1" : !!s.locked,
+              noticeBar: values.noticeBar === "1",
+              noticeStyle: values.noticeStyle,
+              noticeDismissible: values.noticeDismissible === "1",
+              editorTheme: values.editorTheme
+            };
+            var typed = sanitizeRichHTML(values.noticeText || "");
+            var changed = typed !== noticeRich;
+            var nextNotice = changed ? richToNotice(typed) : notice.html;
+            if (changed) {
+              notice.html = nextNotice;
+            }
+            api("/settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(next)
+            }).then(function() {
+              applySettings(next);
+              retitle(s.siteName, next.siteName);
+              if (next.editorTheme !== s.editorTheme) applyEditorTheme(next.editorTheme);
+              if (!changed) {
+                flash("Site settings saved.");
+                return;
+              }
+              notice.html = nextNotice;
+              writeNotice(nextNotice);
+              return api("/pages/" + pageId + "/regions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  locale: cfg.locale,
+                  regions: { "site:notice": nextNotice }
+                })
+              }).then(function() {
+                delete state.dirty["site:notice"];
+                if (!hasUnsaved()) $("save").disabled = true;
+                if (state.pageStatus === "published") state.hasUnpublished = true;
+                updateChip();
+                updateBarButtons();
+                flash("Saved \u2014 publish to put the notice live");
+              });
+            }).catch(function(err) {
+              setMsg(err.message);
+            });
+          }
+        });
+      }
     }).catch(function(err) {
       setMsg(err.message);
     });
@@ -6247,6 +6308,7 @@
   var dlgResolve = null;
   var dlgIsPrompt = false;
   var dlgRequired = "";
+  var dlgMatch = "";
   var dlgHasFields = false;
   var dlgValues = {};
   var dlgPreview = null;
@@ -6270,6 +6332,7 @@
       dlgResolve = resolve;
       dlgIsPrompt = !!opts.prompt;
       dlgRequired = opts.required || "";
+      dlgMatch = opts.match || "";
       clearDialogError();
       var defs = opts.fields || (opts.selects || []).map(function(f) {
         return { id: f.id, label: f.label, type: "select", options: f.options, value: f.value };
@@ -6336,7 +6399,7 @@
           });
           tabBar.appendChild(b);
         });
-        switchTab(opts.tabs[0]);
+        switchTab(opts.tabs.indexOf(opts.activeTab) !== -1 ? opts.activeTab : opts.tabs[0]);
       }
       dlgChanged();
       var ok = $("dlg-ok");
@@ -6849,6 +6912,19 @@
   function cmsPrompt(message, placeholder, okLabel, value) {
     return openDialog({ message, prompt: true, placeholder, okLabel, value });
   }
+  function cmsTypeConfirm(message, word, okLabel, danger) {
+    return openDialog({
+      message,
+      prompt: true,
+      match: word,
+      placeholder: word,
+      required: "Type " + word + " to confirm.",
+      okLabel,
+      danger
+    }).then(function(v) {
+      return v !== null;
+    });
+  }
   function showDialogError(msg) {
     $("dlg-err").textContent = msg;
     $("dlg-err").hidden = false;
@@ -6860,9 +6936,16 @@
     $("dlg-input").classList.remove("invalid");
   }
   function dialogOK() {
-    if (dlgIsPrompt && dlgRequired && $("dlg-input").value.trim() === "") {
-      showDialogError(dlgRequired);
-      return;
+    if (dlgIsPrompt) {
+      var typed = $("dlg-input").value.trim();
+      if (dlgRequired && typed === "") {
+        showDialogError(dlgRequired);
+        return;
+      }
+      if (dlgMatch && typed.toLowerCase() !== dlgMatch.toLowerCase()) {
+        showDialogError(dlgRequired || "Type " + dlgMatch + " to confirm.");
+        return;
+      }
     }
     if (dlgHasFields) {
       var values = {};
