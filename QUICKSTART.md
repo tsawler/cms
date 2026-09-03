@@ -1159,7 +1159,12 @@ for the shared-theme-file pattern and what it prevents.
   background/width options; nil gets Tailwind-first defaults. **Both
   defaults are Tailwind class names**, so a site not using Tailwind should
   override them with classes its own stylesheet defines —
-  `examples/mariadb` shows exactly that.
+  `examples/mariadb` shows exactly that. When you do set `Snippets`, build
+  on `snippets.All()` (everything the module ships) rather than listing
+  the individual constructors — config snippets are code, not database
+  rows, so a palette composed that way picks up blocks added by later
+  releases on the next rebuild, with nothing to seed. See
+  [Keeping the palette current](README.md#keeping-the-palette-current).
 - `ObjectStore` — replace S3 entirely. Implement `media.ObjectStore`
   (`Put`/`Get`/`Delete`/`PublicURL`) for local disk in development or any
   storage you already run. When set, `S3` is ignored.

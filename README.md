@@ -580,6 +580,55 @@ places:
 - **The admin UI** (`/admin/snippets`, admins only) — for blocks and
   section presets created after deployment.
 
+#### Keeping the palette current
+
+**Config snippets are code, not data.** They are registered on every
+startup and merged with the admin-created ones when the palette is
+served — nothing about them is stored in the database. So a module
+upgrade that adds blocks delivers them on the next `go get -u` and
+rebuild: no seed to re-run, no migration, and an editor's own snippets
+and existing pages are untouched.
+
+That only holds if your config asks for the whole library, and the
+reliable way to do that is `snippets.All()` — everything the module
+ships, in palette order:
+
+```go
+cfg.Snippets = snippets.All()   // identical to leaving it nil
+```
+
+Customize by composing *on top of* it, so the customization is expressed
+against whatever the module ships rather than against a list copied out
+of it:
+
+```go
+// Yours as well as the module's.
+cfg.Snippets = append(snippets.All(), mySnippets()...)
+
+// Yours instead of one group of the module's.
+lib := slices.DeleteFunc(snippets.All(),
+    func(s cms.Snippet) bool { return s.Group == "Buttons" })
+cfg.Snippets = append(myButtons(), lib...)
+
+// Inline blocks only — no section presets, from any source.
+cfg.Snippets = append(
+    slices.DeleteFunc(snippets.All(),
+        func(s cms.Snippet) bool { return len(s.Settings) != 0 }),
+    myPresets()...)
+```
+
+The four underlying constructors — `DefaultSnippets`, `LibrarySnippets`,
+`DefaultSectionPresets`, `LibrarySectionPresets` — are still exported and
+still the way to take a deliberate subset. Be aware of what that costs:
+such a list is a snapshot. Blocks added to a constructor it names arrive
+on upgrade; blocks added to one it does not name, or to a list that did
+not exist when the config was written, never arrive at all, on any site,
+with nothing to say so. A palette that is quietly missing a third of the
+library is the failure this is warning about, and `snippets.All()` is
+how not to have it. (A test in the module fails the build if a new
+constructor is not folded into `All`, so "everything the module ships"
+stays true rather than aspirational.)
+
 Clicking an inserted block raises its chrome:
 
 | | |

@@ -386,10 +386,22 @@ type Config struct {
 	// code). Admins can add more in the admin UI; the palette shows
 	// both. A snippet with Settings is a section preset — a one-click
 	// starting point in the "Add a section" chooser (see
-	// snippets.Snippet). Nil gets the Tailwind-first defaults
-	// (snippets.DefaultSnippets plus snippets.DefaultSectionPresets); an
-	// empty non-nil slice ships none. Snippet classes need safelisting
-	// like editor styles do.
+	// snippets.Snippet). An empty non-nil slice ships none. Snippet
+	// classes need safelisting like editor styles do.
+	//
+	// Nil gets everything the module ships (snippets.All), and so does
+	// building on top of snippets.All — which is the recommended way to
+	// customize, because a release that adds blocks then delivers them
+	// on the next rebuild. Nothing here is stored in the database, so
+	// there is no seed to re-run and nothing an upgrade can overwrite:
+	//
+	//	cfg.Snippets = append(snippets.All(), mySnippets()...)
+	//
+	// Composing from the individual constructors (DefaultSnippets,
+	// LibrarySnippets, DefaultSectionPresets, LibrarySectionPresets)
+	// still works and is the way to take a deliberate subset — but such
+	// a list is a snapshot, and blocks added to a constructor it does
+	// not name will not appear.
 	Snippets []Snippet
 
 	// SectionStyles are the curated background, width, and rounded-corner
@@ -563,9 +575,11 @@ func New(cfg Config) (*CMS, error) {
 		cfg.EditorStyles = render.DefaultEditorStyles()
 	}
 	if cfg.Snippets == nil {
-		cfg.Snippets = append(snippets.DefaultSnippets(), snippets.LibrarySnippets()...)
-		cfg.Snippets = append(cfg.Snippets, snippets.DefaultSectionPresets()...)
-		cfg.Snippets = append(cfg.Snippets, snippets.LibrarySectionPresets()...)
+		// snippets.All() rather than the four constructors spelled out:
+		// enumerating them here would be one more copy to keep in step,
+		// and the copies are how sites end up missing blocks the module
+		// ships (see all.go).
+		cfg.Snippets = snippets.All()
 	}
 	if cfg.SectionStyles == nil {
 		cfg.SectionStyles = render.DefaultSectionStyles()
