@@ -99,8 +99,7 @@ const teamCardHTML = `<div class="cms-team-card rounded-xl border border-slate-2
 <p class="mt-2 text-slate-600">A sentence or two about this person &mdash; what they do, and anything a visitor would want to know before getting in touch.</p>
 </div>`
 
-// teamBlockHTML is a staff page's worth of people: a heading over a grid
-// of teamCardHTML cards.
+// teamGridHTML is the row of people itself, with no heading over it.
 //
 // The grid classes are the whole answer to "what happens when a fourth
 // person joins". They set a *maximum* per row, not a fixed row: one
@@ -117,13 +116,38 @@ const teamCardHTML = `<div class="cms-team-card rounded-xl border border-slate-2
 // which is right for a two-up text layout and wrong for a staff list,
 // where the point is that people wrap. A marked grid is invisible to
 // columns.js (SELF_MANAGED there) and the card tool has it alone.
+//
+// No top margin here: the spacing between a heading and the people
+// under it belongs to the heading, which is the only one of the two
+// blocks below that has one.
+const teamGridHTML = `<div class="cms-team grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
+` + teamCardHTML + `
+` + teamCardHTML + `
+` + teamCardHTML + `
+</div>`
+
+// teamBlockHTML is a whole staff page section: a heading over the grid.
+// One block, one palette entry — and that is worth a note, because this
+// shipped as two and both attempts were wrong.
+//
+// The first cut offered an inline "Team cards" alongside this preset
+// with byte-identical markup: the same block under two names. The
+// second gave the inline one its own shape (this, minus the <h2>), so
+// the two at least looked different. They were still the same design
+// twice, in a chooser that lists inline blocks and presets together —
+// any block can start a section — and a reader hunting for the team
+// layout had to work out which of two near-identical cards was meant.
+//
+// What made a second entry unnecessary rather than merely confusing is
+// that the drawer inserts a preset inline anyway: clicking one from
+// Snippets drops its HTML at the caret and ignores the settings, which
+// only mean anything on a section (chooseSnippet in
+// editor/src/snippets.js). So a staff grid could always go into an
+// ordinary region — the second entry bought no capability, only the
+// convenience of arriving without a heading, which is one delete.
 const teamBlockHTML = `<div class="cms-snippet not-prose my-8">
-<h2 class="text-center text-3xl font-bold">Meet the team</h2>
-<div class="cms-team mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-` + teamCardHTML + `
-` + teamCardHTML + `
-` + teamCardHTML + `
-</div>
+<h2 class="mb-10 text-center text-3xl font-bold">Meet the team</h2>
+` + teamGridHTML + `
 </div>`
 
 const videoSlotHTML = `<div class="cms-video-slot not-prose flex aspect-video w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50" data-cms-video-slot=""><p class="font-semibold text-slate-500">&#127916; Click to add a video</p></div>`
@@ -196,11 +220,6 @@ func DefaultSnippets() []Snippet {
 		// last answer and inserts another. The section preset below is
 		// the same markup with a heading and three of these.
 		{Name: "Question & answer", Group: "Basic", HTML: `<div class="cms-snippet">` + faqItemHTML + `</div>`},
-		// A team grid dropped into a page that is already laid out, for
-		// the times a staff list belongs under an existing heading
-		// rather than in a section of its own. Identical markup to the
-		// "Team" section preset, so cards added either way match.
-		{Name: "Team cards", Group: "Team", HTML: teamBlockHTML},
 		{Name: "Flexible space", Group: "Basic", HTML: `<div class="cms-spacer" data-height="48px" style="height: 48px"></div>`},
 	}
 }

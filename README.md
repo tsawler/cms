@@ -819,7 +819,7 @@ safelist: [
     "text-slate-500", "text-slate-600", "text-slate-700", "text-center",
     "text-sm", "text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl",
     "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
-    "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
+    "mb-1", "mb-2", "mb-3", "mb-10", "mt-1", "mt-3", "my-4", "my-6", "my-8",
     "grid", "gap-6", "gap-8", "grid-cols-1", "sm:grid-cols-1",
     "sm:grid-cols-2", "sm:grid-cols-3", "sm:grid-cols-12",
     // The team grid's wrapping ladder (see "Team pages" below). Change
@@ -924,14 +924,19 @@ stylesheet defines them.
 
 ### Team pages
 
-Two of the stock presets build a staff page: **Team**, under the Team
-category in the section chooser, and **Team profiles**, the imported
-design with circular portraits. **Team cards** is the same markup as an
-inline snippet, for a staff list that belongs under an existing heading
-rather than in a section of its own.
+Two stock section presets build a staff page, both under the Team
+category: **Team**, a "Meet the team" heading over a grid of three
+cards, and **Team profiles**, the imported design — the same grid with
+circular portraits and no card panels.
 
-Each is a heading over a grid of cards, and each card is a photo slot, a
-name, the job title under it, and a line or two about the person:
+Either can also go into an ordinary rich region: open the **Snippets**
+drawer instead of the section chooser and click it, and the markup is
+inserted at the caret (the section settings only mean something on a
+section, so they are ignored). Delete the heading if the page already
+has one.
+
+Each card is a photo slot, a name, the job title under it, and a line or
+two about the person:
 
 ```html
 <div class="cms-team mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
