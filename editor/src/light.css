@@ -148,6 +148,43 @@ background:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}
 .cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
 .cms-editing .cms-snippet:hover{outline-style:solid!important}
 
+/* Sliders. While editing, the stack comes apart: every slide is shown,
+   one under another, at a workable height. That is the whole reason
+   this rule exists — a slider shows one slide at a time, and the other
+   three would be unreachable, unwritable, and invisible to the person
+   who has to fill them in. It is the same trade the FAQ makes above,
+   for the same reason.
+
+   !important throughout because it is overriding sliderCSS, which
+   {{cmsHead}} emits after the host's stylesheet and which is doing its
+   job correctly — the override is the exception, and only while the
+   page is being edited. Nothing here is written to the document: what
+   is saved is exactly the stacked slider that was stored. */
+.cms-editing .cms-slider{display:block!important;min-height:0!important;overflow:visible!important}
+/* And the full-bleed slider stops bleeding while editing. Live it runs
+   to both edges of the window, which is the point of it; in edit mode
+   that puts its left-hand end underneath the tool rail, taking the slide
+   number, the photo slot's corner and a strip of every slide's content
+   with it — all of them things an editor has to be able to see and
+   click. Back inside the section's own box for the duration. */
+.cms-editing .cms-slider-bleed{width:auto!important;max-width:none!important;
+margin-inline:0!important}
+.cms-editing .cms-slider>.cms-slide{opacity:1!important;visibility:visible!important;
+pointer-events:auto!important;transform:none!important;transition:none!important;
+min-height:16rem;margin-bottom:10px;outline:1.5px dashed rgba(47,95,224,.45);outline-offset:-2px}
+/* The scrim stays — the words are white, and white on an unscrimmed
+   photograph is what an editor would be typing into otherwise. */
+.cms-editing .cms-slider>.cms-slide:last-child{margin-bottom:0}
+/* Numbered, because the gear's list is numbered and the two have to be
+   talking about the same slide. Drawn in the corner over the picture,
+   outside the flow, so it never shifts the content being edited. */
+.cms-editing .cms-slider>.cms-slide{counter-increment:cms-slide}
+.cms-editing .cms-slider{counter-reset:cms-slide}
+.cms-editing .cms-slider>.cms-slide::before{content:"Slide " counter(cms-slide);
+position:absolute;top:0;left:0;z-index:3;
+background:var(--cms-chrome-bg);color:var(--cms-chrome-fg);
+font:11px/1 system-ui,sans-serif;padding:5px 8px;border-radius:0 0 8px 0;letter-spacing:.02em}
+
 /* Team cards (.cms-team-card): click one while editing for the card
  * toolbar. Only on hover, and only an outline — a staff page is a grid
  * of nine identical boxes and outlining all of them at rest would be a

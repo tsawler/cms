@@ -23,11 +23,12 @@ import (
 // whole section — the editor offers it only in the "Add a section"
 // chooser, and applies the settings (background, width, height, vertical
 // alignment) to the new section along with the HTML. Keys and values are
-// the section-settings vocabulary: "bg" and "width" name curated
-// SectionStyles option keys, "height" is "50"/"75"/"100", "valign" is
-// "center"/"bottom", "bgcolor" is #rrggbb, "bgimage" is a URL, and
-// "bgposition" anchors that image as a pair of percentages across and
-// down, e.g. "50% 20%" ("50% 50%" is centered, and is the default).
+// the section-settings vocabulary: "bg", "width", "corners", "padding"
+// and "size" name curated SectionStyles option keys, "height" is
+// "50"/"75"/"100", "valign" is "center"/"bottom", "bgcolor" is #rrggbb,
+// "bgimage" is a URL, and "bgposition" anchors that image as a pair of
+// percentages across and down, e.g. "50% 20%" ("50% 50%" is centered,
+// and is the default).
 // Unknown keys or invalid values fall back to the defaults,
 // same as the section settings dialog. Presets come from config or from
 // the admin snippets UI (which offers the curated settings; the
@@ -148,6 +149,58 @@ const teamGridHTML = `<div class="cms-team grid grid-cols-1 gap-8 sm:grid-cols-2
 const teamBlockHTML = `<div class="cms-snippet not-prose my-8">
 <h2 class="mb-10 text-center text-3xl font-bold">Meet the team</h2>
 ` + teamGridHTML + `
+</div>`
+
+// photoSlotFill is the "Click to add a photo" placeholder shaped for a
+// slide: no aspect ratio and no rounding of its own, because sliderCSS
+// stretches it to the slide's whole box (inset:0). Every other slot in
+// the library sets its own proportions; this is the one that takes them
+// from what it is dropped into.
+//
+// The class list still has to be the slots' own, because that is what
+// the editor keys on: [data-cms-photo-slot] makes it clickable and
+// photos.js swaps it for an <img>, carrying over any shape class it
+// finds — none here, which is exactly right, since the CSS sizes the
+// image the same way it sized the slot.
+const photoSlotFill = `<div class="cms-photo-slot not-prose flex items-center justify-center border-2 border-dashed border-slate-300 bg-slate-50" data-cms-photo-slot=""><p class="font-semibold text-slate-500">&#128247; Click to add a photo</p></div>`
+
+// slideHTML is one slide: a picture, and words on top of it.
+//
+// The words are ordinary content in an ordinary editable box, which is
+// the point — a slide is not a special kind of thing with a headline
+// field and a subtitle field, it is a box you can put anything in. Drop
+// a button in it, a second paragraph, a snippet from the drawer; the
+// editor treats it like any other content because it is.
+//
+// White text on the scrim rather than the host's prose colours: the one
+// thing that is certain about a slide is that there is a photograph
+// behind it, and prose-slate on a photograph is unreadable. A host that
+// wants otherwise edits the classes, the same as anywhere else.
+const slideHTML = `<div class="cms-slide cms-slide-scrim">
+` + photoSlotFill + `
+<div class="cms-slide-body text-center">
+<h2 class="text-4xl font-bold text-white sm:text-5xl">A headline for this slide</h2>
+<p class="mt-3 text-lg text-white">One line about what this picture is showing.</p>
+<p class="mt-6"><a href="/" class="cms-btn inline-block rounded-lg bg-white px-6 py-3 font-semibold text-slate-900">Find out more</a></p>
+</div>
+</div>`
+
+// sliderHTML is the block: a run of slides and nothing else.
+//
+// Nothing else is the notable part. There are no arrows in here and no
+// dots — sliderJS builds those from the slide count at runtime (see
+// render.go), so adding a slide cannot leave a dot behind and the
+// sanitizer never has to pass a <button> in content. What is stored is
+// the pictures and the words, which is all an editor ever put there.
+//
+// data-cms-slider carries the transition, and is the only setting on
+// the block. Autoplay adds data-cms-slider-auto when it is switched on;
+// off is the absence of the attribute rather than a zero, so a slider
+// nobody configured carries nothing at all.
+const sliderHTML = `<div class="cms-snippet cms-slider cms-slider-bleed not-prose" data-cms-slider="fade">
+` + slideHTML + `
+` + slideHTML + `
+` + slideHTML + `
 </div>`
 
 const videoSlotHTML = `<div class="cms-video-slot not-prose flex aspect-video w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50" data-cms-video-slot=""><p class="font-semibold text-slate-500">&#127916; Click to add a video</p></div>`
@@ -288,6 +341,17 @@ func DefaultSectionPresets() []Snippet {
 		// grows is in teamBlockHTML's comment.
 		{Name: "Team", Group: "Team", Settings: map[string]string{"width": "wide"},
 			HTML: teamBlockHTML},
+		// A slider, edge to edge: full width and no vertical padding,
+		// because the pictures are the section and a gutter around a
+		// slider reads as a mistake.
+		//
+		// No height setting, deliberately — a section's height is a
+		// min-height on a wrapper the slider cannot fill, so asking for
+		// one here would produce a short slider in a tall empty band.
+		// The block carries its own (see sliderCSS in render.go).
+		{Name: "Slider", Group: "Media", Settings: map[string]string{
+			"width": "full", "padding": "none"},
+			HTML: sliderHTML},
 		// Movie sections: a full-width player, and both split layouts.
 		// The slot picks up a library video or a YouTube/Vimeo embed when
 		// clicked while editing (see videoSlotHTML).

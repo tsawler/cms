@@ -14,6 +14,7 @@ import { setMenuEditing } from "./menu.js";
 import { injectSectionUI, reapplySectionClasses } from "./sections.js";
 import { setTitleEditing } from "./title.js";
 import { collapseCode, reviveCode } from "./code.js";
+import { collapseSliders } from "./slider.js";
 
 // Shared regions ("site:footer" and friends) are site furniture: they
 // take the pages permission to edit, so for anyone without it they are
@@ -76,6 +77,12 @@ export function setEditing(on) {
     // to be the empty placeholder, never a widget's output.
     if (on) {
         collapseCode();
+        // Same reasoning, for the arrows and dots sliderJS draws on the
+        // public page: generated chrome, sitting exactly where an editor
+        // needs to click, and serialized into the page's markup by the
+        // next save if it is still there. Before the snapshot, so Cancel
+        // restores the stored markup rather than a moment in a slide.
+        collapseSliders();
         state.snapshot = takeSnapshot();
     }
     document.body.classList.toggle("cms-editing", on);

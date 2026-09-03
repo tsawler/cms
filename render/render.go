@@ -2073,6 +2073,208 @@ const imgShadowCSS = `.cms-shadow-subtle{box-shadow:0 4px 12px rgba(0,0,0,.2),0 
 	// horizontal centering.
 	`figure>a>img:not(.cms-keep-margins){margin-top:0;margin-bottom:0}`
 
+// sliderCSS and sliderJS are the slider block: the one piece of stock
+// content that cannot be done with markup alone.
+//
+// Everything else the library ships is static HTML the browser lays out
+// by itself — the accordion is a <details> precisely so that no script
+// has to open it. A slider is different in kind: showing one of several
+// children and moving between them on a click is state, and state needs
+// code. So this follows the nav's arrangement rather than inventing one:
+// the layout is CSS here (shipped by {{cmsHead}}), the behaviour is a
+// small script shipped by {{cmsScripts}}, and the markup in the database
+// is nothing but the slides.
+//
+// The controls — arrows and dots — are built at runtime rather than
+// stored. Two reasons, and both are about the markup staying honest: a
+// stored dot list has to be renumbered every time a slide is added or
+// removed, by an editor who is not thinking about dots; and buttons in
+// content would have to be allowed through the sanitizer, where they
+// would be one more thing an editor can break by clicking into them.
+// Nothing in the database describes the chrome, so nothing can be out
+// of step with it.
+//
+// Height belongs to the slider rather than to the section, which is the
+// opposite of what it first seems it should be. A section's height
+// setting is a min-height on the <section>, and between that element
+// and this one sits the host's own content wrapper — so the height does
+// not propagate, and a slider inside a 75vh section is a 288px slider
+// sitting at the top of a tall empty band. Rather than chain height:100%
+// through markup the module does not own, the block states its own
+// height, and a host that wants another overrides one class.
+const sliderCSS = `.cms-slider{position:relative;overflow:hidden;` +
+	// A one-cell grid, so every slide sits in the same place and the
+	// slider is as tall as its tallest one. Nothing jumps when the
+	// visible slide changes, which a slider that resized per slide
+	// would do to the whole page under it.
+	`display:grid;grid-template-areas:"cms-slide";min-height:18rem}` +
+	// Edge to edge is a hero, and a hero is tall. Capped in rem as well
+	// as vh so a short, wide window gets a slider worth looking at and
+	// a very tall one does not get a slider three screens deep.
+	`.cms-slider-bleed{min-height:min(70vh,40rem)}` +
+	`.cms-slider>.cms-slide{grid-area:cms-slide;position:relative;` +
+	`display:flex;align-items:center;justify-content:center;min-width:0}` +
+	// Hidden slides keep their place in the layout — they are what sets
+	// the height — but leave the reading order. A naive opacity fade
+	// gets both of these wrong: a screen reader announces four
+	// headlines at once, and Tab lands on a button nobody can see.
+	`.cms-slider>.cms-slide{opacity:0;visibility:hidden;pointer-events:none}` +
+	`.cms-slider>.cms-slide.cms-slide-on{opacity:1;visibility:visible;pointer-events:auto}` +
+	`.cms-slider[data-cms-slider="fade"]>.cms-slide{transition:opacity .5s ease,visibility 0s linear .5s}` +
+	`.cms-slider[data-cms-slider="fade"]>.cms-slide.cms-slide-on{transition:opacity .5s ease}` +
+	// Slide: the same stack, moved sideways. A transform rather than a
+	// scrolling track, so the slides need no wrapper element and both
+	// transitions run on identical markup — switching between them is
+	// one attribute and nothing else.
+	`.cms-slider[data-cms-slider="slide"]>.cms-slide{transform:translateX(100%);` +
+	`transition:transform .45s ease,opacity .45s ease,visibility 0s linear .45s}` +
+	`.cms-slider[data-cms-slider="slide"]>.cms-slide.cms-slide-prev{transform:translateX(-100%)}` +
+	`.cms-slider[data-cms-slider="slide"]>.cms-slide.cms-slide-on{transform:translateX(0);` +
+	`transition:transform .45s ease,opacity .45s ease}` +
+	// The picture fills the slide and is cropped to it, the way a
+	// section background image is, and sits under the words rather than
+	// beside them.
+	//
+	// Selected as a bare <img> rather than by a class of its own: a
+	// slot becomes an image through editor/src/photos.js, which carries
+	// over the slot's shape classes and adds its own — it does not know
+	// about sliders, and a class this file invented would simply not be
+	// on the element it has to style.
+	`.cms-slider>.cms-slide>img,.cms-slider>.cms-slide>.cms-photo-slot{` +
+	`position:absolute;inset:0;width:100%;height:100%;object-fit:cover;margin:0;border-radius:0}` +
+	// Words over a photograph are unreadable often enough that the
+	// scrim is a default rather than a setting. It is drawn on the
+	// slide, over the picture and under the words.
+	`.cms-slider>.cms-slide.cms-slide-scrim::after{content:"";position:absolute;inset:0;` +
+	`background:rgba(0,0,0,.38)}` +
+	`.cms-slider>.cms-slide>.cms-slide-body{position:relative;z-index:2;width:100%;padding:2rem}` +
+	// An unfilled slot stretches over the whole slide, so its "Click to
+	// add a photo" label would land in the middle — behind the headline,
+	// reading as two sentences printed on top of each other. Sent to the
+	// foot of the slide instead, where it is still obviously the
+	// picture's and obviously clickable.
+	`.cms-slider>.cms-slide>.cms-photo-slot{align-items:flex-end;padding-bottom:1rem}` +
+	// Full bleed: the section preset's slider escapes its container's
+	// horizontal padding so the pictures reach both edges of the
+	// window. The inline block does not carry this class, which is the
+	// whole difference between the two.
+	`.cms-slider-bleed{width:100vw;max-width:100vw;margin-inline:calc(50% - 50vw)}` +
+	// Controls. Visible and hittable and no more than that: colour and
+	// shape are the host's, addressed through these classes.
+	`.cms-slider-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;` +
+	`display:flex;align-items:center;justify-content:center;` +
+	`width:2.75rem;height:2.75rem;border:0;border-radius:999px;cursor:pointer;` +
+	`background:rgba(0,0,0,.42);color:#fff;font:1.5rem/1 system-ui,sans-serif;padding:0}` +
+	`.cms-slider-nav:hover{background:rgba(0,0,0,.62)}` +
+	`.cms-slider-prev{left:.75rem}.cms-slider-next{right:.75rem}` +
+	`.cms-slider-dots{position:absolute;left:0;right:0;bottom:.75rem;z-index:3;` +
+	`display:flex;gap:.5rem;justify-content:center}` +
+	`.cms-slider-dot{width:.6rem;height:.6rem;padding:0;border:0;border-radius:999px;` +
+	`cursor:pointer;background:rgba(255,255,255,.5)}` +
+	`.cms-slider-dot[aria-current="true"]{background:#fff}` +
+	`.cms-slider-nav:focus-visible,.cms-slider-dot:focus-visible{outline:2px solid #fff;outline-offset:2px}` +
+	// A slider with one slide is not a slider.
+	`.cms-slider[data-cms-slider-single] .cms-slider-nav,` +
+	`.cms-slider[data-cms-slider-single] .cms-slider-dots{display:none}` +
+	// Somebody who has asked their system not to animate gets the
+	// change without the movement, not a slider that refuses to work.
+	`@media (prefers-reduced-motion:reduce){.cms-slider>.cms-slide{transition:none!important}}`
+
+// sliderJS drives every .cms-slider on the page. Like navJS it is one
+// delegated listener rather than a handler per slider, so a slider that
+// arrives after load — the editor inserting one — needs no wiring.
+//
+// It stands down completely while the page is being edited. The chrome
+// it would draw sits exactly where an editor needs to click, and an
+// autoplay timer that kept advancing would move the words out from under
+// somebody typing them. cms-editing on the body is the signal, and it is
+// checked on every tick rather than once, because edit mode is entered
+// long after this runs.
+const sliderJS = `(function(){` +
+	`function editing(){return document.body.classList.contains('cms-editing');}` +
+	`function slides(el){return Array.prototype.filter.call(el.children,function(c){` +
+	`return c.classList&&c.classList.contains('cms-slide');});}` +
+	`function show(el,i,dir){var ss=slides(el);if(!ss.length)return;` +
+	`i=(i%ss.length+ss.length)%ss.length;` +
+	`ss.forEach(function(s,n){s.classList.remove('cms-slide-prev');` +
+	`if(n!==i&&dir<0)s.classList.add('cms-slide-prev');` +
+	`s.classList.toggle('cms-slide-on',n===i);s.setAttribute('aria-hidden',n===i?'false':'true');});` +
+	`el.setAttribute('data-cms-slider-at',String(i));` +
+	`var dots=el.querySelectorAll('.cms-slider-dot');` +
+	`Array.prototype.forEach.call(dots,function(d,n){d.setAttribute('aria-current',n===i?'true':'false');});}` +
+	`function at(el){return parseInt(el.getAttribute('data-cms-slider-at')||'0',10)||0;}` +
+	`function go(el,step){show(el,at(el)+step,step);}` +
+	`function build(el){` +
+	// Rebuilt from scratch whenever the slide count changes, which is
+	// how an editor's add or delete reaches the dots without the editor
+	// knowing they exist.
+	`var n=slides(el).length;` +
+	`if(el.getAttribute('data-cms-slider-built')===String(n))return;` +
+	`el.setAttribute('data-cms-slider-built',String(n));` +
+	`Array.prototype.forEach.call(el.querySelectorAll(':scope>[data-cms-ui]'),` +
+	`function(x){x.remove();});` +
+	`if(n>1)el.removeAttribute('data-cms-slider-single');else el.setAttribute('data-cms-slider-single','');` +
+	// data-cms-ui is the editor's word for "chrome, not content". It is
+	// what the HTML view strips before it shows a block's markup
+	// (source.js), what the block chrome refuses to attach itself to
+	// (buttons.js), and — the reason it matters here — the one thing
+	// editor/src/slider.js has to look for to take all of this back out
+	// before a save. One attribute on each thing built, rather than a
+	// list of class names kept in step across two languages.
+	`var prev=document.createElement('button');prev.type='button';` +
+	`prev.className='cms-slider-nav cms-slider-prev';prev.setAttribute('aria-label','Previous slide');` +
+	`prev.setAttribute('data-cms-ui','');prev.innerHTML='&#8249;';` +
+	`var next=document.createElement('button');next.type='button';` +
+	`next.className='cms-slider-nav cms-slider-next';next.setAttribute('aria-label','Next slide');` +
+	`next.setAttribute('data-cms-ui','');next.innerHTML='&#8250;';` +
+	`var dots=document.createElement('div');dots.className='cms-slider-dots';` +
+	`dots.setAttribute('data-cms-ui','');` +
+	`for(var i=0;i<n;i++){var d=document.createElement('button');d.type='button';` +
+	`d.className='cms-slider-dot';d.setAttribute('data-cms-slider-to',String(i));` +
+	`d.setAttribute('aria-label','Slide '+(i+1));dots.appendChild(d);}` +
+	`el.appendChild(prev);el.appendChild(next);el.appendChild(dots);` +
+	// Start the autoplay clock here rather than leaving it unset. An
+	// absent timestamp reads as zero, which is 1970 — so the first tick
+	// after setup finds the interval long since elapsed and advances
+	// immediately, and a slider set to "every 9 seconds" jumps off its
+	// first slide before anybody has read it.
+	`el.setAttribute('data-cms-slider-last',String(Date.now()));` +
+	`show(el,Math.min(at(el),n-1),1);}` +
+	`function buildAll(){if(editing())return;` +
+	`Array.prototype.forEach.call(document.querySelectorAll('.cms-slider'),build);}` +
+	`document.addEventListener('click',function(e){` +
+	`if(editing()||!e.target.closest)return;` +
+	`var d=e.target.closest('.cms-slider-dot');` +
+	`if(d){var el=d.closest('.cms-slider');if(el){e.preventDefault();` +
+	`var to=parseInt(d.getAttribute('data-cms-slider-to'),10)||0;show(el,to,to<at(el)?-1:1);}return;}` +
+	`var b=e.target.closest('.cms-slider-nav');if(!b)return;` +
+	`var el=b.closest('.cms-slider');if(!el)return;e.preventDefault();` +
+	`go(el,b.classList.contains('cms-slider-prev')?-1:1);});` +
+	// The arrows answer to the keyboard when the slider itself has
+	// focus, which is what makes it operable without a mouse; a slider
+	// that grabbed the arrow keys globally would break page scrolling.
+	`document.addEventListener('keydown',function(e){` +
+	`if(editing())return;if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;` +
+	`var el=e.target.closest?e.target.closest('.cms-slider'):null;if(!el)return;` +
+	`e.preventDefault();go(el,e.key==='ArrowLeft'?-1:1);});` +
+	// Autoplay, off unless the block asks for it. Paused while a
+	// pointer is over the slider or focus is inside it, so it never
+	// takes a slide away from somebody reading or tabbing through it.
+	// document.hidden: a slider in a background tab should not be three
+	// slides further on when somebody comes back to it.
+	`setInterval(function(){if(editing()||document.hidden)return;` +
+	`Array.prototype.forEach.call(document.querySelectorAll('.cms-slider[data-cms-slider-auto]'),function(el){` +
+	`var ms=parseInt(el.getAttribute('data-cms-slider-auto'),10);if(!ms||ms<1000)return;` +
+	`if(el.matches(':hover')||el.contains(document.activeElement))return;` +
+	`var last=parseInt(el.getAttribute('data-cms-slider-last')||'0',10);var now=Date.now();` +
+	`if(now-last<ms)return;el.setAttribute('data-cms-slider-last',String(now));go(el,1);});},250);` +
+	`if(document.readyState!=='loading')buildAll();` +
+	`else document.addEventListener('DOMContentLoaded',buildAll);` +
+	// A slider inserted by the editor, or revealed when edit mode ends,
+	// has to pick up its chrome without a reload.
+	`new MutationObserver(buildAll).observe(document.documentElement,{childList:true,subtree:true});` +
+	`})();`
+
 // faqCSS is the functional minimum behind the FAQ snippets: enough that a
 // question reads as something to click and an open one is distinguishable
 // from a closed one, and nothing more. Colour, type and spacing are the
@@ -2151,7 +2353,7 @@ func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template
 	if m := strings.TrimSpace(in.Site.SiteMeta); m != "" {
 		sb.WriteString(m + "\n")
 	}
-	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + faqCSS + PagerCSS + "</style>\n")
+	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + faqCSS + sliderCSS + PagerCSS + "</style>\n")
 	// The notice bar's styling, only where a bar can appear: on a page
 	// actually carrying one, and on any edit render — an editor can
 	// switch the bar on from the settings dialog, and it has to look
@@ -2275,6 +2477,7 @@ func embedCode(code, tag string, closeRe *regexp.Regexp) string {
 func scriptsHTML(p *content.Page, site content.SiteSettings, bar notice) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
+	sb.WriteString("<script>" + sliderJS + "</script>\n")
 	// Wherever the close button is drawn it does something — on an edit
 	// render too, where the empty key makes it this pageview only. See
 	// notice.Close.

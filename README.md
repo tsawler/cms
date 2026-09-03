@@ -988,6 +988,79 @@ Neither class carries any appearance: everything these cards look like
 is in the Tailwind classes above, which is why changing the design is
 editing the markup rather than overriding CSS the module injected.
 
+### Sliders
+
+**Slider**, under Media in the section chooser, is a run of slides that a
+visitor moves through. Each slide is a picture from the media library
+with a box of content on top of it — and the content is ordinary content:
+click into it and type, drop a snippet in from the drawer, put a button
+in it. A slide is not a headline field and a subtitle field.
+
+```html
+<div class="cms-snippet cms-slider cms-slider-bleed not-prose" data-cms-slider="fade">
+  <div class="cms-slide cms-slide-scrim">
+    <div class="cms-photo-slot …" data-cms-photo-slot=""> … </div>
+    <div class="cms-slide-body text-center"> … heading, text, button … </div>
+  </div>
+  …
+</div>
+```
+
+**That is the whole of what is stored.** No arrows, no dots, no "which
+slide is showing" — `{{cmsScripts}}` ships a small script that builds the
+controls from the slide count at runtime, so adding a slide cannot leave
+a stale dot behind, and nothing a `<button>` in content could break has
+to be allowed through the sanitizer. `{{cmsHead}}` ships the layout. Both
+ride along the way the nav's already do; **a template missing
+`{{cmsScripts}}` gets a slider that never moves.**
+
+**Choosing pictures** works the two ways everything else in the library
+does: click a slide's "Click to add a photo" slot, or use the gear. Both
+produce the same `<img>`.
+
+**The gear** — click a slider while editing — holds everything that is
+about the run rather than about one slide:
+
+| | |
+|---|---|
+| Transition | **Fade** or **Slide** |
+| Move on its own | off, or every 4 / 6 / 9 seconds |
+| Slides | one row per slide, in playing order: move up, move down, change the picture, delete — and **Add a slide…**, which picks from the media library |
+
+Reordering a row moves the whole slide, words and all. A slide added from
+the gear is a copy of the first one with its words replaced by
+placeholders, so it inherits whatever that site's slides look like —
+including the button, if they carry one. The last slide has no delete
+button: an empty slider is invisible and unclickable, and removing the
+whole thing is the block chrome's trash can.
+
+**While editing, the stack comes apart.** A slider shows one slide at a
+time, which would leave the other three unreachable and unwritable, so
+edit mode lays them out one under another, numbered to match the gear's
+list, and stops the full-bleed one bleeding (it would otherwise run under
+the tool rail). Autoplay stops too. None of that is written to the
+document: what is saved is exactly the slides.
+
+**Height** belongs to the slider, not to the section — a section's height
+setting is a min-height on a wrapper the slider cannot fill, so a slider
+in a 75vh section would be a short slider in a tall empty band. The
+full-bleed one is `min(70vh, 40rem)`; override `.cms-slider-bleed` to
+change it.
+
+**Styling.** Everything the module injects is layout and legibility — the
+crop, the stack, the scrim behind the words, and controls that are
+visible and hittable and nothing more. Colour and shape are yours,
+through `.cms-slider`, `.cms-slide`, `.cms-slide-body`,
+`.cms-slider-nav` (`.cms-slider-prev` / `.cms-slider-next`),
+`.cms-slider-dots` and `.cms-slider-dot`. Only the slide's own text
+classes need safelisting; the rest are the CMS's own.
+
+Sliders respect `prefers-reduced-motion` (the slide changes, it just does
+not travel), pause autoplay while the pointer is over them or focus is
+inside them, stop in a background tab, take the arrow keys when focused,
+and keep hidden slides out of the reading order so a screen reader
+announces one headline rather than four.
+
 ## Custom code blocks
 
 Some blocks are not content: an availability calendar, a pricing
