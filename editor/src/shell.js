@@ -248,6 +248,14 @@ export function initShell() {
         '<button id="team-add" title="Add a blank person after this one">' + ICONS.plus + "</button>" +
         '<button id="team-del" title="Delete this person">' + ICONS.trash + "</button>" +
         "</div>" +
+        // The slider tool: one button, because everything a slider has
+        // that a block does not is a setting — which order the slides
+        // play in, how the page moves between them, whether it moves on
+        // its own. A gear is what this editor puts settings behind, and
+        // one gear is the whole toolbar.
+        '<div class="btnui" id="slider-ui">' +
+        '<button id="slider-set" title="Slider settings">' + ICONS.gear + "</button>" +
+        "</div>" +
         '<div class="btnui" id="img-ui">' +
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
         '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +

@@ -116,6 +116,17 @@ function refreshCategories() {
         if (!g) { hasCustom = true; return; }
         if (groups.indexOf(g) === -1) groups.push(g);
     });
+    // Alphabetical. The order they were discovered in is the order of
+    // the configured library, which is a sensible order to *read* the
+    // drawer in and a poor one to *search* it in: it puts Headlines
+    // before Basic for no reason a person hunting for a category could
+    // guess. localeCompare rather than a plain sort because group names
+    // are the host's own words, in the host's own language.
+    groups.sort(function (a, b) { return a.localeCompare(b); });
+    // Custom stays last wherever the alphabet would have put it. It is
+    // not a category alongside the others — it is where everything
+    // without one ends up — and a catch-all sorted into the middle of
+    // real categories reads as a missing entry.
     if (hasCustom) groups.push("Custom");
     $("drawer-cat").hidden = groups.length < 2;
     var current = sel.value;

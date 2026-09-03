@@ -47,6 +47,23 @@ func TestDefaultSectionPresetSettings(t *testing.T) {
 				if styles.Width(val).Key != val {
 					t.Errorf("preset %q: unknown width key %q", sn.Name, val)
 				}
+			// The three axes added after this test was written. They are
+			// as much a part of a preset's vocabulary as width is —
+			// applySectionSettings in the editor reads all three, and
+			// sectionHTML renders them — and the Slider preset is the
+			// first stock one to set any of them.
+			case "corners":
+				if styles.Corner(val).Key != val {
+					t.Errorf("preset %q: unknown corners key %q", sn.Name, val)
+				}
+			case "padding":
+				if styles.Padding(val).Key != val {
+					t.Errorf("preset %q: unknown padding key %q", sn.Name, val)
+				}
+			case "size":
+				if styles.Size(val).Key != val {
+					t.Errorf("preset %q: unknown size key %q", sn.Name, val)
+				}
 			case "height":
 				if render.ValidSectionHeight(val) != val {
 					t.Errorf("preset %q: invalid height %q", sn.Name, val)

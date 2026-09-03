@@ -30,6 +30,7 @@ import {
     teamTarget, addCard, duplicateCard, moveCard,
     confirmRemove as confirmRemoveCard, removeCard,
 } from "./team.js";
+import { sliderTarget, openSliderSettings } from "./slider.js";
 import { copyOf } from "./clone.js";
 import { initColResize, showHandles, hideHandles, placeHandles } from "./colresize.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
@@ -738,6 +739,39 @@ function runTeamEdit(edit) {
     showTeamUI(root, next);
 }
 
+/* Slider chrome. One gear, anchored to the slider's top-right corner.
+ *
+ * Top-right rather than centred on an edge: a slider is usually the
+ * full width of the section and often the full height of the screen, so
+ * "centred" would put the gear in the middle of the picture, over the
+ * words somebody is editing. The corner is where the image and video
+ * gears already sit, and a slider is that kind of thing — one big placed
+ * object with settings behind it. */
+var activeSlider = null;
+
+function placeSliderUI() {
+    if (!activeSlider) return;
+    var ui = $("slider-ui");
+    var r = activeSlider.getBoundingClientRect();
+    var top = r.top + 8;
+    // A slider taller than the screen starts above the fold; pin the
+    // gear under TinyMCE's toolbar rather than letting it scroll off.
+    if (top < 64) top = r.bottom > 64 + 44 ? 64 : r.bottom + 6;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, r.right - ui.offsetWidth - 8) + "px";
+}
+
+function showSliderUI(el) {
+    activeSlider = el;
+    $("slider-ui").classList.add("on");
+    placeSliderUI();
+}
+
+export function hideSliderUI() {
+    activeSlider = null;
+    $("slider-ui").classList.remove("on");
+}
+
 /* Embedded images get a gear (alt text, caption, link, rendition, and
  * style presets) and a trash can, anchored to the image's top-right
  * corner like the section toolbar. */
@@ -984,6 +1018,7 @@ export function hideChrome(except) {
     // Not tied to "snip" either: a card grid need not be a block, and
     // the click handler raises and hides this on its own terms.
     if (except !== "team") hideTeamUI();
+    if (except !== "slider") hideSliderUI();
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -1329,6 +1364,12 @@ export function initButtons() {
         else hideFaqUI();
         if (card) showTeamUI(card.parentElement || card, t);
         else hideTeamUI();
+        // Likewise the slider gear. It rides alongside the block chrome
+        // rather than replacing it: the block is still a block, with a
+        // background and spacing and a trash can of its own.
+        var slider = (!btn && !slot && !img && !vid) ? sliderTarget(t) : null;
+        if (slider) showSliderUI(slider);
+        else hideSliderUI();
     }, true);
 
     // Keep the chrome glued to its element through scrolls and resizes.
@@ -1338,6 +1379,7 @@ export function initButtons() {
         if (activeCol) { placeColUI(); placeHandles(); }
         if (activeFaq) placeFaqUI();
         if (activeTeam) placeTeamUI();
+        if (activeSlider) placeSliderUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1348,6 +1390,7 @@ export function initButtons() {
         if (activeCol) { placeColUI(); placeHandles(); }
         if (activeFaq) placeFaqUI();
         if (activeTeam) placeTeamUI();
+        if (activeSlider) placeSliderUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1760,6 +1803,23 @@ export function initButtons() {
             if (container) markContainerDirty(container);
             if (near && near.isConnected) showTeamUI(root, near);
             else hideTeamUI();
+        });
+    });
+
+    $("slider-set").addEventListener("click", function () {
+        if (!activeSlider) return;
+        var el = activeSlider;
+        var container = el.closest("[data-cms-region],[data-cms-sections]");
+        var ed = findOwningEditor(el);
+        openSliderSettings(el, function (change) {
+            runWithUndo(ed, change);
+            if (container) markContainerDirty(container);
+            // A slide added from the gear may have brought a button with
+            // it, and the gear itself has to re-measure: the block's
+            // height changes when a slide is added or removed.
+            lockButtons();
+            if (el.isConnected) showSliderUI(el);
+            else hideSliderUI();
         });
     });
 

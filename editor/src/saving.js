@@ -8,6 +8,19 @@ import { api, setMsg, flash } from "./util.js";
 import { cmsConfirm, openDialog } from "./dialogs.js";
 import { setEditing, restoreSnapshot, hasUnsaved, updateBarButtons } from "./editing.js";
 import { stripCodeBodies } from "./code.js";
+import { stripSliderChrome } from "./slider.js";
+
+// clean is what every save runs over the markup it is about to send:
+// the two kinds of generated content that live in the page but must
+// never live in the database. Both stay reachable after Done — Save and
+// Publish do — so by the time a save happens a code block has run its
+// script and a slider has drawn its arrows again, and what the DOM holds
+// is output rather than content. The server strips the same things on
+// the way in; this keeps the request honest and makes the snapshot,
+// cancel and save paths all see identical markup.
+function clean(html) {
+    return stripSliderChrome(stripCodeBodies(html));
+}
 import { hideChrome } from "./buttons.js";
 import { saveTitle } from "./title.js";
 
@@ -82,12 +95,12 @@ function collect() {
     var values = {};
     Object.keys(state.dirty).forEach(function (name) {
         if (state.mceEditors[name]) {
-            values[name] = stripCodeBodies(state.mceEditors[name].getContent());
+            values[name] = clean(state.mceEditors[name].getContent());
             return;
         }
         var el = document.querySelector('[data-cms-region="' + name + '"]');
         if (el) {
-            values[name] = el.dataset.cmsKind === "text" ? el.textContent : stripCodeBodies(el.innerHTML);
+            values[name] = el.dataset.cmsKind === "text" ? el.textContent : clean(el.innerHTML);
             return;
         }
         if (state.imageValues[name] !== undefined) values[name] = state.imageValues[name];
@@ -116,7 +129,7 @@ function collectSections(region) {
             height: wrapper.dataset.cmsHeight || "", valign: wrapper.dataset.cmsValign || "",
             bgcolor: wrapper.dataset.cmsBgcolor || "", bgimage: wrapper.dataset.cmsBgimage || "",
             bgposition: wrapper.dataset.cmsBgposition || "",
-            html: stripCodeBodies(html) });
+            html: clean(html) });
     });
     return out;
 }

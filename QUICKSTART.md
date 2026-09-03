@@ -557,7 +557,7 @@ safelist: [
     "font-serif", "gap-6", "gap-8", "grid", "h-0.5", "h-auto",
     "hover:bg-blue-600", "hover:bg-slate-300", "hover:bg-slate-900",
     "hover:text-white", "inline-block", "items-center", "justify-center",
-    "max-w-3xl", "max-w-5xl", "max-w-none", "mb-1", "mb-2", "mb-3",
+    "max-w-3xl", "max-w-5xl", "max-w-none", "mb-1", "mb-2", "mb-3", "mb-10",
     "ml-6", "mr-2", "mr-6", "mt-1", "mt-10", "mt-2", "mt-3", "mt-4",
     "mt-6", "mx-auto", "my-4", "my-6", "my-8", "not-prose",
     "object-contain", "object-cover", "odd:bg-slate-50", "overflow-x-auto", "p-1", "p-2", "p-4", "p-6",

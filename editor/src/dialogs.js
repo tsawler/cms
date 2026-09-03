@@ -94,6 +94,7 @@ export function openDialog(opts) {
             else if (f.type === "rich") buildRichField(wrap, f);
             else if (f.type === "datetime") buildDatetimeField(wrap, f);
             else if (f.type === "check") buildCheckField(wrap, f);
+            else if (f.type === "slides") buildSlidesField(wrap, f);
             else buildSelectField(wrap, f);
             fields.appendChild(wrap);
         });
@@ -707,6 +708,126 @@ function buildImageField(wrap, f) {
     if (clear) row.appendChild(clear);
     wrap.appendChild(row);
     show();
+}
+
+// buildSlidesField is the slide manager: one row per slide, in the order
+// they play, each with its picture and the three things you can do to
+// one — move it along, change its picture, throw it away — plus a button
+// that adds another from the media library.
+//
+// A list field rather than a numbered pile of image fields, because the
+// order IS the content here: "slide 3" is not a name, it is a position,
+// and renaming every field below the one you deleted is exactly the
+// bookkeeping this is meant to take off an editor.
+//
+// The value is an array of rows, and a row is a reference, not a copy:
+// {ref} names a slide that already exists on the page (so its words and
+// its layout survive being moved), and {img} carries a picture chosen
+// here. A row with a ref and no img is an untouched slide; one with an
+// img and no ref is a slide being added. What is missing from the array
+// was deleted. The caller reads all of that back — see applySlides in
+// slider.js — and the dialog itself never touches the page.
+function buildSlidesField(wrap, f) {
+    var rows = (f.value || []).map(function (r) {
+        return { ref: r.ref, img: r.img || "", alt: r.alt || "" };
+    });
+    dlgValues[f.id] = rows;
+
+    var list = document.createElement("div");
+    list.className = "slides";
+    var add = document.createElement("button");
+    add.type = "button";
+    add.className = "sl-add";
+    add.textContent = f.addLabel || "Add a slide…";
+
+    function move(i, dir) {
+        var to = i + dir;
+        if (to < 0 || to >= rows.length) return;
+        var tmp = rows[i];
+        rows[i] = rows[to];
+        rows[to] = tmp;
+        render();
+    }
+
+    function render() {
+        list.innerHTML = "";
+        rows.forEach(function (row, i) {
+            var el = document.createElement("div");
+            el.className = "sl-row";
+
+            var thumb = document.createElement("img");
+            // A slide whose picture has not been chosen yet still needs
+            // a row: it is a slide, it has words on it, and it plays.
+            if (row.img) thumb.src = row.img;
+            else thumb.classList.add("sl-empty");
+            el.appendChild(thumb);
+
+            var name = document.createElement("span");
+            name.className = "cval";
+            name.textContent = "Slide " + (i + 1) + (row.img ? "" : " — no picture yet");
+            el.appendChild(name);
+
+            [["\u2191", "Move up", -1], ["\u2193", "Move down", 1]].forEach(function (b) {
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = b[0];
+                btn.title = b[1];
+                // Hidden at the ends rather than disabled, the way every
+                // other reorder control in this editor does it.
+                btn.hidden = b[2] < 0 ? i === 0 : i === rows.length - 1;
+                btn.addEventListener("click", function () { move(i, b[2]); });
+                el.appendChild(btn);
+            });
+
+            var pick = document.createElement("button");
+            pick.type = "button";
+            pick.textContent = row.img ? "Change…" : "Choose…";
+            pick.addEventListener("click", function () {
+                openPicker("image", function (item) {
+                    row.img = item.web;
+                    row.alt = item.alt || "";
+                    render();
+                    dlgChanged();
+                });
+            });
+            el.appendChild(pick);
+
+            var del = document.createElement("button");
+            del.type = "button";
+            del.className = "rm";
+            del.textContent = "\u00d7";
+            del.title = "Delete this slide";
+            del.addEventListener("click", function () {
+                rows.splice(i, 1);
+                render();
+                dlgChanged();
+            });
+            el.appendChild(del);
+
+            list.appendChild(el);
+        });
+        // Never leave a slider with nothing in it: an empty block is
+        // invisible on the page and impossible to click, so the last
+        // slide's delete button is the one that isn't offered. Removing
+        // the slider is the block chrome's trash can.
+        if (rows.length < 2) {
+            var only = list.querySelector(".rm");
+            if (only) only.hidden = true;
+        }
+        dlgValues[f.id] = rows;
+    }
+
+    add.addEventListener("click", function () {
+        openPicker("image", function (item) {
+            rows.push({ ref: null, img: item.web, alt: item.alt || "" });
+            render();
+            dlgChanged();
+        });
+    });
+
+    render();
+    wrap.appendChild(list);
+    wrap.appendChild(add);
 }
 
 function settleDialog(value) {

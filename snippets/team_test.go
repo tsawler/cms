@@ -16,9 +16,39 @@ func TestTeamPresetIsBuiltFromTheCard(t *testing.T) {
 	if n := strings.Count(team.HTML, teamCardHTML); n != 3 {
 		t.Errorf("Team preset is built from %d copies of teamCardHTML, want 3", n)
 	}
-	inline := find(t, DefaultSnippets(), "Team cards")
-	if inline.HTML != team.HTML {
-		t.Error("the inline snippet and the section preset are different markup")
+}
+
+// TestOneEntryPerTeamDesign is the lesson from shipping this twice. The
+// palette offered "Team" and "Team cards" — first as identical markup,
+// then as the same design with and without a heading — and both times a
+// reader looking for the team layout found two near-identical cards and
+// had to work out which was meant.
+//
+// One design, one entry. Variants have to be visibly different designs
+// (Team profiles, with its circular portraits, is a fair second card);
+// "the same thing minus a heading" is not, especially since the drawer
+// inserts a preset inline anyway.
+func TestOneEntryPerTeamDesign(t *testing.T) {
+	var offering []string
+	for _, s := range All() {
+		if strings.Contains(s.HTML, teamGridHTML) {
+			offering = append(offering, s.Name)
+		}
+	}
+	if len(offering) != 1 {
+		t.Errorf("%d blocks offer the same team grid (%v) — one design, one palette entry", len(offering), offering)
+	}
+}
+
+// TestEveryDefaultBlockIsDistinct is the general form of the same rule:
+// no two blocks a host can be offered may be identical markup.
+func TestEveryDefaultBlockIsDistinct(t *testing.T) {
+	seen := map[string]string{}
+	for _, s := range All() {
+		if prev, dup := seen[s.HTML]; dup {
+			t.Errorf("%q and %q are the same markup under two names", prev, s.Name)
+		}
+		seen[s.HTML] = s.Name
 	}
 }
 

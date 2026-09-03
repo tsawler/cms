@@ -53,6 +53,13 @@ var (
 	btnSizeRe    = regexp.MustCompile(`^[sml]$`)
 	// The block gear (snippet settings) stores curated spacing presets.
 	snipSpacingRe = regexp.MustCompile(`^(compact|normal|roomy)$`)
+	// The slider gear's two settings: the transition, and the autoplay
+	// interval in milliseconds. The interval is bounded rather than any
+	// number — sliderJS ignores anything under a second, and a bound
+	// here means a hand-written value cannot ask for a slider that
+	// flickers.
+	sliderTransitionRe = regexp.MustCompile(`^(fade|slide)$`)
+	sliderAutoRe       = regexp.MustCompile(`^([1-9][0-9]{3}|[1-5][0-9]{4}|60000)$`)
 	// The gear's text color rides on the block root; descendants whose
 	// classes set their own color get pinned to color:inherit so the
 	// choice actually takes.
@@ -90,6 +97,15 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	// And the map slots: a click prompts for a Google Maps link or an
 	// address and swaps in a bounded maps iframe.
 	p.AllowAttrs("data-cms-map-slot").Matching(regexp.MustCompile(`^$`)).OnElements("div")
+	// The slider block's two settings. Everything else a slider carries
+	// at runtime — which slide is showing, the arrows, the dots — is
+	// built by sliderJS and deliberately not allowed through: it is
+	// generated chrome, and content that described it would be content
+	// that could disagree with it. The editor strips it before every
+	// save (stripSliderChrome); this is the server saying the same thing
+	// to a request that arrived any other way.
+	p.AllowAttrs("data-cms-slider").Matching(sliderTransitionRe).OnElements("div")
+	p.AllowAttrs("data-cms-slider-auto").Matching(sliderAutoRe).OnElements("div")
 	// External video embeds from the video slot: iframes strictly bounded
 	// to YouTube/Vimeo player URLs, with only presentation attributes.
 	p.AllowAttrs("src").Matching(embedURLRe).OnElements("iframe")

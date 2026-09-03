@@ -408,6 +408,23 @@ border-radius:6px;background:#fff;cursor:pointer}
 .dlg .crow button,.dlg .irow button{padding:4px 10px;font-size:12px}
 .dlg .irow img{width:48px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #d9dce1}
 .dlg .crow input,.dlg .irow input{margin:0}
+/* slide list (the slider gear): one row per slide, in playing order.
+   Rows are the image row's shape — same thumbnail, same small buttons —
+   because they are the same kind of thing repeated, and an editor who
+   has set a background image has already used this control. */
+.dlg .slides{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.dlg .sl-row{display:flex;gap:8px;align-items:center}
+.dlg .sl-row img{width:48px;height:34px;object-fit:cover;border-radius:6px;
+border:1px solid #d9dce1;background:#f3f4f6;flex:none}
+/* A slide with no picture yet: the same box, empty, so the row keeps its
+   shape and the list stays a list of equal things. */
+.dlg .sl-row img.sl-empty{border-style:dashed}
+.dlg .sl-row button{padding:4px 9px;font-size:12px;flex:none}
+.dlg .sl-row button[hidden]{display:none}
+.dlg .sl-row .rm{color:#c0392b;border-color:#eac3bd;font-size:14px;line-height:1}
+.dlg .sl-row .rm:hover{background:#fdf2f0}
+.dlg .sl-add{font-size:12px;padding:6px 12px}
+
 /* computed note under a field: explanation, not input, so it carries
    its own spacing and its wrapper carries none */
 .dlg .fld.note{margin:0}
