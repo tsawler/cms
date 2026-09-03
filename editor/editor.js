@@ -1590,6 +1590,9 @@
       }
       if (groups.indexOf(g) === -1) groups.push(g);
     });
+    groups.sort(function(a, b) {
+      return a.localeCompare(b);
+    });
     if (hasCustom) groups.push("Custom");
     $("drawer-cat").hidden = groups.length < 2;
     var current = sel.value;

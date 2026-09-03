@@ -349,7 +349,7 @@ func DefaultSectionPresets() []Snippet {
 		// min-height on a wrapper the slider cannot fill, so asking for
 		// one here would produce a short slider in a tall empty band.
 		// The block carries its own (see sliderCSS in render.go).
-		{Name: "Slider", Group: "Media", Settings: map[string]string{
+		{Name: "Slider", Group: "Slider", Settings: map[string]string{
 			"width": "full", "padding": "none"},
 			HTML: sliderHTML},
 		// Movie sections: a full-width player, and both split layouts.
