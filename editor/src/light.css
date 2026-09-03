@@ -148,6 +148,15 @@ background:rgba(33,73,184,.14);font-size:11px;letter-spacing:.02em}
 .cms-editing .cms-snippet{outline:1.5px dotted rgba(139,92,246,.6)!important;outline-offset:4px}
 .cms-editing .cms-snippet:hover{outline-style:solid!important}
 
+/* Team cards (.cms-team-card): click one while editing for the card
+ * toolbar. Only on hover, and only an outline — a staff page is a grid
+ * of nine identical boxes and outlining all of them at rest would be a
+ * lattice, not an affordance. The block they sit in already carries the
+ * dotted snippet outline, so what is missing without this is only that a
+ * single card is separately clickable, which is exactly what pointing at
+ * one should say. */
+.cms-editing .cms-team-card:hover{outline:1.5px dashed rgba(47,95,224,.55);outline-offset:4px}
+
 /* The column the column tool is acting on. Every button on that toolbar
  * changes one column and leaves the rest alone, so which one it has hold
  * of has to be visible — a row of identical cells is exactly where a

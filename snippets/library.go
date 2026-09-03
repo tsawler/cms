@@ -13,7 +13,11 @@ package snippets
 // text characters or are dropped.
 
 // Photo slots: the "Click to add a photo" placeholders the imported
-// photo-bearing blocks ship with. Like videoSlotHTML, the marker
+// photo-bearing blocks ship with. They are the package's, not this
+// file's — teamCardHTML in snippets.go takes the square one, because a
+// staff portrait wants exactly the shape a gallery tile does and a
+// second copy of these class lists is a second thing to keep in step
+// with photos.js. Like videoSlotHTML, the marker
 // attribute makes the slot clickable while editing: the editor opens
 // the media library and swaps the slot for an <img> that keeps the
 // slot's shape classes (aspect ratio, size, rounding, centering) plus
@@ -174,21 +178,28 @@ func LibrarySectionPresets() []Snippet {
 </div>`},
 		// From profile-01: heading plus three portrait cards, each
 		// portrait a circular photo slot.
+		//
+		// The grid and the cards carry the card tool's markers, same as
+		// the stock "Team" preset in snippets.go: this is the other way
+		// to start a staff page, and the two should not disagree about
+		// what happens when a fourth person joins. So it wraps rather
+		// than squeezing a fourth portrait into the same row, and the
+		// column tool leaves it alone — see teamBlockHTML for why.
 		{Name: "Team profiles", Group: "Team", Settings: map[string]string{"width": "wide"},
 			HTML: `<div class="cms-snippet not-prose my-8">
 <h2 class="text-center text-3xl font-bold uppercase tracking-widest">Meet our team</h2>
-<div class="mt-10 grid gap-8 text-center sm:grid-cols-3">
-<div>
+<div class="cms-team mt-10 grid grid-cols-1 gap-8 text-center sm:grid-cols-2 lg:grid-cols-3">
+<div class="cms-team-card">
 ` + photoSlotCircle + `
 <h3 class="mt-4 text-lg font-semibold uppercase tracking-widest">Vincent Nelson</h3>
 <p class="mt-1 text-sm uppercase tracking-widest text-slate-400">Web designer</p>
 </div>
-<div>
+<div class="cms-team-card">
 ` + photoSlotCircle + `
 <h3 class="mt-4 text-lg font-semibold uppercase tracking-widest">Nathan Williams</h3>
 <p class="mt-1 text-sm uppercase tracking-widest text-slate-400">Web developer</p>
 </div>
-<div>
+<div class="cms-team-card">
 ` + photoSlotCircle + `
 <h3 class="mt-4 text-lg font-semibold uppercase tracking-widest">Thomas Calvin</h3>
 <p class="mt-1 text-sm uppercase tracking-widest text-slate-400">Account manager</p>

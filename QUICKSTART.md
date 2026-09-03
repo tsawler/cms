@@ -540,7 +540,7 @@ snippet library, and the section presets:
 
 ```css
 /* Tailwind v4 — in assets/input.css, alongside @import "tailwindcss"; */
-@source inline("align-top aspect-square aspect-video bg-blue-50 bg-blue-600 bg-blue-700 bg-slate-200 bg-slate-50 bg-slate-900 bg-white bg-yellow-200 block border border-2 border-b border-b-2 border-blue-200 border-blue-600 border-dashed border-slate-200 border-slate-300 border-slate-900 columns-1 columns-2 columns-3 flex float-left float-right font-bold font-mono font-semibold font-serif gap-6 gap-8 grid h-0.5 h-auto hover:bg-blue-600 hover:bg-slate-300 hover:bg-slate-900 hover:text-white inline-block items-center justify-center max-w-3xl max-w-5xl max-w-none mb-1 mb-2 mb-3 ml-6 mr-2 mr-6 mt-1 mt-10 mt-2 mt-3 mt-4 mt-6 mx-auto my-4 my-6 my-8 not-prose object-contain object-cover odd:bg-slate-50 overflow-x-auto p-1 p-2 p-4 p-6 prose prose-invert prose-lg prose-slate prose-sm prose-xl px-5 px-6 px-8 py-0 py-12 py-2.5 py-20 py-3 py-6 rounded-2xl rounded-3xl rounded-full rounded-lg rounded-xl size-24 sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6 sm:col-span-7 sm:col-span-8 sm:col-span-9 sm:col-span-10 sm:col-span-11 sm:col-span-12 sm:grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 sm:grid-cols-4 sm:grid-cols-12 sm:text-2xl sm:text-3xl sm:text-4xl sm:text-5xl sm:text-7xl text-2xl text-3xl text-4xl text-5xl text-6xl text-blue-600 text-blue-700 text-blue-900 text-center text-emerald-600 text-left text-lg text-red-600 text-right text-slate-200 text-slate-400 text-slate-500 text-slate-600 text-slate-700 text-slate-900 text-sm text-white text-xl tracking-tight tracking-widest uppercase w-1/2 w-1/3 w-10 w-2/3 w-auto w-full");
+@source inline("align-top aspect-square aspect-video bg-blue-50 bg-blue-600 bg-blue-700 bg-slate-200 bg-slate-50 bg-slate-900 bg-white bg-yellow-200 block border border-2 border-b border-b-2 border-blue-200 border-blue-600 border-dashed border-slate-200 border-slate-300 border-slate-900 columns-1 columns-2 columns-3 flex float-left float-right font-bold font-mono font-semibold font-serif gap-6 gap-8 grid grid-cols-1 h-0.5 h-auto hover:bg-blue-600 hover:bg-slate-300 hover:bg-slate-900 hover:text-white inline-block items-center justify-center lg:grid-cols-3 max-w-3xl max-w-5xl max-w-none mb-1 mb-2 mb-3 ml-6 mr-2 mr-6 mt-1 mt-10 mt-2 mt-3 mt-4 mt-6 mx-auto my-4 my-6 my-8 not-prose object-contain object-cover odd:bg-slate-50 overflow-x-auto p-1 p-2 p-4 p-6 prose prose-invert prose-lg prose-slate prose-sm prose-xl px-5 px-6 px-8 py-0 py-12 py-2.5 py-20 py-3 py-6 rounded-2xl rounded-3xl rounded-full rounded-lg rounded-xl size-24 sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6 sm:col-span-7 sm:col-span-8 sm:col-span-9 sm:col-span-10 sm:col-span-11 sm:col-span-12 sm:grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 sm:grid-cols-4 sm:grid-cols-12 sm:text-2xl sm:text-3xl sm:text-4xl sm:text-5xl sm:text-7xl text-2xl text-3xl text-4xl text-5xl text-6xl text-blue-600 text-blue-700 text-blue-900 text-center text-emerald-600 text-left text-lg text-red-600 text-right text-slate-200 text-slate-400 text-slate-500 text-slate-600 text-slate-700 text-slate-900 text-sm text-white text-xl tracking-tight tracking-widest uppercase w-1/2 w-1/3 w-10 w-2/3 w-auto w-full");
 ```
 
 ```js
@@ -569,6 +569,7 @@ safelist: [
     "sm:col-span-1", "sm:col-span-2", "sm:col-span-3", "sm:col-span-4",
     "sm:col-span-5", "sm:col-span-6", "sm:col-span-7", "sm:col-span-8",
     "sm:col-span-9", "sm:col-span-10", "sm:col-span-11", "sm:col-span-12",
+    "grid-cols-1", "lg:grid-cols-3",
     "sm:grid-cols-1", "sm:grid-cols-2", "sm:grid-cols-3",
     "sm:grid-cols-4", "sm:grid-cols-12", "sm:text-2xl", "sm:text-3xl", "sm:text-4xl", "sm:text-5xl",
     "sm:text-7xl", "text-2xl", "text-3xl", "text-4xl", "text-5xl",
@@ -1158,7 +1159,12 @@ for the shared-theme-file pattern and what it prevents.
   background/width options; nil gets Tailwind-first defaults. **Both
   defaults are Tailwind class names**, so a site not using Tailwind should
   override them with classes its own stylesheet defines —
-  `examples/mariadb` shows exactly that.
+  `examples/mariadb` shows exactly that. When you do set `Snippets`, build
+  on `snippets.All()` (everything the module ships) rather than listing
+  the individual constructors — config snippets are code, not database
+  rows, so a palette composed that way picks up blocks added by later
+  releases on the next rebuild, with nothing to seed. See
+  [Keeping the palette current](README.md#keeping-the-palette-current).
 - `ObjectStore` — replace S3 entirely. Implement `media.ObjectStore`
   (`Put`/`Get`/`Delete`/`PublicURL`) for local disk in development or any
   storage you already run. When set, `S3` is ignored.

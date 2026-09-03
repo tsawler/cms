@@ -38,6 +38,51 @@ function imgClassFor(slot) {
     return keep.join(" ");
 }
 
+// SLOT_CHROME is the placeholder's own look — the dashed box and the
+// centring that make it read as somewhere a picture goes. Kept apart
+// from the shape classes below because those two halves are exactly what
+// imgClassFor splits an existing slot into, in the other direction.
+//
+// It has to match the slot markup in snippets/library.go. A mismatch is
+// not a crash but a slow drift: a card emptied here would grow a
+// slightly different placeholder from the one it shipped with.
+var SLOT_CHROME = "cms-photo-slot not-prose flex items-center justify-center " +
+    "rounded-lg border-2 border-dashed border-slate-300 bg-slate-50";
+var SLOT_LABEL = '<p class="font-semibold text-slate-500">&#128247; Click to add a photo</p>';
+
+// emptySlot is imgClassFor run backwards: it rebuilds the placeholder an
+// image was dropped into, keeping the shape the slot had (a circle stays
+// a circle, a 1:1 tile stays 1:1) and putting the chrome back.
+//
+// It exists for the card tool's "add a blank one" (team.js). A blank
+// card is a copy of its neighbour with the words replaced, and a copy
+// that kept the neighbour's face would be the one placeholder nobody
+// could mistake for a placeholder.
+export function emptySlot(img) {
+    var keep = [];
+    (img.getAttribute("class") || "").split(/\s+/).forEach(function (c) {
+        // w-full and object-cover are imgClassFor's additions, not the
+        // slot's; everything else it kept came off the slot and goes
+        // back on it. rounded-* is in SLOT_CHROME already, so a slot
+        // whose shape is a circle replaces it rather than adding to it.
+        if (/^(aspect-|size-|rounded($|-)|mx-auto$)/.test(c)) keep.push(c);
+    });
+    var chrome = SLOT_CHROME;
+    if (keep.some(function (c) { return /^rounded($|-)/.test(c); })) {
+        chrome = chrome.replace(" rounded-lg", "");
+    }
+    var div = document.createElement("div");
+    div.setAttribute("class", chrome + (keep.length ? " " + keep.join(" ") : ""));
+    div.setAttribute("data-cms-photo-slot", "");
+    // A slot too small for a label gets the camera alone, the way
+    // photoSlotCircle ships. size-* is the only fixed-size form the
+    // slots use, and it is the small one.
+    div.innerHTML = keep.some(function (c) { return c.indexOf("size-") === 0; })
+        ? '<p class="text-2xl">&#128247;</p>'
+        : SLOT_LABEL;
+    return div;
+}
+
 export function initPhotoSlots() {
     // Capture phase, registered before the snippet-chrome handler, so a
     // slot click opens the picker instead of the drag/trash chrome.

@@ -72,6 +72,60 @@ const faqItemHTML = `<details class="cms-faq">
 <div class="cms-faq-body"><p>A short, direct answer.</p></div>
 </details>`
 
+// teamCardHTML is one person on a team page: a portrait, their name, the
+// job title under it, and a line or two about them.
+//
+// The card is a bare <div>, not a nested .cms-snippet, for the same
+// reason a column cell is bare — it is one of a run of siblings the card
+// tool reshapes (editor/src/team.js), not a block sitting in one. Its
+// marker class carries no appearance; everything the card looks like is
+// in the Tailwind classes below, so a host that wants square-cornered
+// portraits or a bigger name edits the markup rather than fighting CSS
+// the module injected.
+//
+// The box is the Testimonials preset's, down to the class list: a
+// bordered, rounded, padded panel. Two card designs a screen apart in
+// the same library should not be two different opinions about what a
+// card is, and a host restyling one has the other for free.
+//
+// The placeholders are read back by the card tool: deleting a card that
+// still says exactly this goes without a prompt, and one somebody has
+// written in asks first. Change the words here and they must change in
+// team.js too — there is a test that says so.
+const teamCardHTML = `<div class="cms-team-card rounded-xl border border-slate-200 bg-white p-6">
+` + photoSlotSquare + `
+<h3 class="mt-4 text-lg font-semibold">Full Name</h3>
+<p class="text-sm text-slate-500">Job title</p>
+<p class="mt-2 text-slate-600">A sentence or two about this person &mdash; what they do, and anything a visitor would want to know before getting in touch.</p>
+</div>`
+
+// teamBlockHTML is a staff page's worth of people: a heading over a grid
+// of teamCardHTML cards.
+//
+// The grid classes are the whole answer to "what happens when a fourth
+// person joins". They set a *maximum* per row, not a fixed row: one
+// column on a phone so a portrait is never squeezed to a thumbnail, two
+// from the small breakpoint up, three from large — and a fourth card
+// wraps onto a second row on its own, with no markup change and nothing
+// for the editor to rebalance. Someone whose staff page wants four
+// across changes lg:grid-cols-3 to lg:grid-cols-4 in the block's HTML
+// (the ⟨/⟩ button) and safelists that one class.
+//
+// The cms-team class on the grid is what keeps the column tool off it.
+// Both tools answer the same click, and they answer it differently: the
+// column tool grows the track count so a new cell joins the same row,
+// which is right for a two-up text layout and wrong for a staff list,
+// where the point is that people wrap. A marked grid is invisible to
+// columns.js (SELF_MANAGED there) and the card tool has it alone.
+const teamBlockHTML = `<div class="cms-snippet not-prose my-8">
+<h2 class="text-center text-3xl font-bold">Meet the team</h2>
+<div class="cms-team mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
+` + teamCardHTML + `
+` + teamCardHTML + `
+` + teamCardHTML + `
+</div>
+</div>`
+
 const videoSlotHTML = `<div class="cms-video-slot not-prose flex aspect-video w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50" data-cms-video-slot=""><p class="font-semibold text-slate-500">&#127916; Click to add a video</p></div>`
 
 // DefaultSnippets is the Tailwind-first default library, used when the
@@ -142,6 +196,11 @@ func DefaultSnippets() []Snippet {
 		// last answer and inserts another. The section preset below is
 		// the same markup with a heading and three of these.
 		{Name: "Question & answer", Group: "Basic", HTML: `<div class="cms-snippet">` + faqItemHTML + `</div>`},
+		// A team grid dropped into a page that is already laid out, for
+		// the times a staff list belongs under an existing heading
+		// rather than in a section of its own. Identical markup to the
+		// "Team" section preset, so cards added either way match.
+		{Name: "Team cards", Group: "Team", HTML: teamBlockHTML},
 		{Name: "Flexible space", Group: "Basic", HTML: `<div class="cms-spacer" data-height="48px" style="height: 48px"></div>`},
 	}
 }
@@ -205,6 +264,11 @@ func DefaultSectionPresets() []Snippet {
 ` + faqItemHTML + `
 ` + faqItemHTML + `
 </div>`},
+		// A staff page in one section. Wide, because three portraits
+		// side by side want the room; everything else about how it
+		// grows is in teamBlockHTML's comment.
+		{Name: "Team", Group: "Team", Settings: map[string]string{"width": "wide"},
+			HTML: teamBlockHTML},
 		// Movie sections: a full-width player, and both split layouts.
 		// The slot picks up a library video or a YouTube/Vimeo embed when
 		// clicked while editing (see videoSlotHTML).
