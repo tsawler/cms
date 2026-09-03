@@ -23,7 +23,7 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 
 ## 1. Prerequisites
 
-- **Go 1.25+**
+- **Go 1.26+** (the `go` directive in the module's `go.mod`)
 - **A database** — see the next section
 - **Docker** (optional, for the database and the CAPTCHA server)
 - **Tailwind CSS standalone CLI** (optional, for the recommended styling
