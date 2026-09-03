@@ -233,6 +233,21 @@ export function initShell() {
         '<button id="faq-add" title="Add a question below this one">' + ICONS.plus + "</button>" +
         '<button id="faq-del" title="Delete this question">' + ICONS.trash + "</button>" +
         "</div>" +
+        // The team-card tool, anchored to the card that was clicked.
+        // The column tool's vocabulary minus the two resize buttons: a
+        // card in a wrapping grid is what a column is, except that its
+        // width belongs to the breakpoint rather than to the editor, so
+        // "narrower" has nothing to act on. Same icons in the same
+        // order, so reshaping a staff page is a thing somebody already
+        // knows how to do by the time they get here.
+        '<div class="btnui" id="team-ui">' +
+        '<button id="team-back" title="Move this person left">' + ICONS.chevL + "</button>" +
+        '<button id="team-on" title="Move this person right">' + ICONS.chevR + "</button>" +
+        '<button id="team-dup-back" title="Duplicate this person to the left">' + ICONS.dupLeft + "</button>" +
+        '<button id="team-dup-on" title="Duplicate this person to the right">' + ICONS.dupRight + "</button>" +
+        '<button id="team-add" title="Add a blank person after this one">' + ICONS.plus + "</button>" +
+        '<button id="team-del" title="Delete this person">' + ICONS.trash + "</button>" +
+        "</div>" +
         '<div class="btnui" id="img-ui">' +
         '<button id="img-set" title="Image settings">' + ICONS.gear + "</button>" +
         '<button id="img-del" title="Delete image">' + ICONS.trash + "</button>" +

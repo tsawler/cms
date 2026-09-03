@@ -26,6 +26,10 @@ import {
     faqTarget, addQuestion, moveQuestion,
     confirmRemove as confirmRemoveQuestion, removeQuestion,
 } from "./faq.js";
+import {
+    teamTarget, addCard, duplicateCard, moveCard,
+    confirmRemove as confirmRemoveCard, removeCard,
+} from "./team.js";
 import { copyOf } from "./clone.js";
 import { initColResize, showHandles, hideHandles, placeHandles } from "./colresize.js";
 import { findOwningEditor, runWithUndo } from "./undo.js";
@@ -648,6 +652,92 @@ function runFaqEdit(edit) {
     showFaqUI(block, next);
 }
 
+/* Team-card chrome. A grid of people gets a small toolbar anchored to
+ * the card that was clicked, with the verbs a run of cards has: move it
+ * along either way, put a copy either side of it, add a blank one after
+ * it, delete it.
+ *
+ * Like the question tool it rides alongside the block chrome rather than
+ * replacing it — the grid is one block and a person in it is another
+ * thing to edit — and it is raised by the same click. */
+var activeTeam = null;
+
+// placeTeamUI straddles the card's own top edge, centred over it.
+//
+// Centred, which is the column tool's answer to "which one of these
+// identical boxes", and on the *card's* edge rather than the grid's,
+// which is where it differs. The column tool anchors to the row because
+// a toolbar that stepped up and down as cells were clicked would read as
+// belonging to the content; a wrapping grid has no single top edge to
+// anchor to — the second row's cards are nowhere near the first row's —
+// so the card's own edge is the only honest place, and being physically
+// attached to the card is also what makes the tint the column tool needs
+// unnecessary here.
+function placeTeamUI() {
+    if (!activeTeam) return;
+    var ui = $("team-ui");
+    // Measured, not assumed: the pill's width changes with how many of
+    // its buttons this card can use.
+    var box = ui.getBoundingClientRect();
+    var r = activeTeam.card.getBoundingClientRect();
+    var top = r.top - box.height / 2;
+    if (top < 64) top = 64; // never slide under TinyMCE's toolbar
+    var left = r.left + (r.width - box.width) / 2;
+    ui.style.top = top + "px";
+    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+}
+
+function showTeamUI(root, target) {
+    var info = teamTarget(root, target);
+    if (!info) {
+        hideTeamUI();
+        return;
+    }
+    activeTeam = info;
+    // Hidden rather than disabled at the ends of the run, the same way
+    // the question tool and the column tool handle theirs: a control
+    // that cannot do anything is better absent than present and inert.
+    //
+    // The duplicate pair is never hidden. Unlike a column, a card has no
+    // maximum — a fourth one wraps instead of squeezing the other three
+    // — so "put another beside this" is always available, which is the
+    // whole reason this tool is not the column tool.
+    $("team-back").hidden = !info.canMoveBack;
+    $("team-on").hidden = !info.canMoveOn;
+    $("team-ui").classList.add("on");
+    placeTeamUI();
+}
+
+export function hideTeamUI() {
+    activeTeam = null;
+    $("team-ui").classList.remove("on");
+}
+
+// runTeamEdit is runFaqEdit's shape for cards: make the change inside the
+// owning editor's undo transaction, mark the region dirty, and re-anchor
+// the chrome on whatever is there afterwards.
+function runTeamEdit(edit) {
+    if (!activeTeam) return;
+    var info = activeTeam;
+    var root = info.card.parentElement;
+    var container = info.card.closest("[data-cms-region],[data-cms-sections]");
+    var ed = findOwningEditor(info.card);
+    var next = info.card;
+    runWithUndo(ed, function () {
+        var out = edit(info);
+        if (out !== undefined) next = out;
+    });
+    // A duplicated card may carry a button, and a copied one is not yet
+    // locked against navigation while editing.
+    lockButtons();
+    if (container) markContainerDirty(container);
+    if (!next || !next.isConnected) {
+        hideTeamUI();
+        return;
+    }
+    showTeamUI(root, next);
+}
+
 /* Embedded images get a gear (alt text, caption, link, rendition, and
  * style presets) and a trash can, anchored to the image's top-right
  * corner like the section toolbar. */
@@ -891,6 +981,9 @@ export function hideChrome(except) {
     // Not tied to "snip": a question can live outside a block, so its
     // chrome is raised and hidden by the click handler on its own terms.
     if (except !== "faq") hideFaqUI();
+    // Not tied to "snip" either: a card grid need not be a block, and
+    // the click handler raises and hides this on its own terms.
+    if (except !== "team") hideTeamUI();
     if (except !== "img") hideImgUI();
     if (except !== "vid") hideVidUI();
     if (except !== "slot") hideSlotUI();
@@ -1187,6 +1280,16 @@ export function initButtons() {
             faq = t.closest(".cms-faq");
             if (faq && !faq.closest("[data-cms-region],[data-cms-sections]")) faq = null;
         }
+        // A card is looked for the same way and for the same reason: a
+        // team grid converted from an old site, or written by hand into
+        // a section, has no .cms-snippet wrapper, and the tool that adds
+        // people would be missing on exactly the pages that have the
+        // most of them.
+        var card = null;
+        if (!btn && !slot && !img && !vid && t.closest) {
+            card = t.closest(".cms-team-card");
+            if (card && !card.closest("[data-cms-region],[data-cms-sections]")) card = null;
+        }
         if (btn) {
             e.preventDefault(); // never navigate while editing
             btn.setAttribute("contenteditable", "false"); // covers drag-dropped buttons
@@ -1224,6 +1327,8 @@ export function initButtons() {
         // not need a block to hang from.
         if (faq) showFaqUI(faq.parentElement || faq, t);
         else hideFaqUI();
+        if (card) showTeamUI(card.parentElement || card, t);
+        else hideTeamUI();
     }, true);
 
     // Keep the chrome glued to its element through scrolls and resizes.
@@ -1232,6 +1337,7 @@ export function initButtons() {
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
         if (activeFaq) placeFaqUI();
+        if (activeTeam) placeTeamUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1241,6 +1347,7 @@ export function initButtons() {
         if (activeSnip) showSnipUI(activeSnip);
         if (activeCol) { placeColUI(); placeHandles(); }
         if (activeFaq) placeFaqUI();
+        if (activeTeam) placeTeamUI();
         if (activeImg) showImgUI(activeImg);
         if (activeVid) showVidUI(activeVid);
         if (activeSlot) showSlotUI(activeSlot);
@@ -1615,6 +1722,44 @@ export function initButtons() {
             if (container) markContainerDirty(container);
             if (near && near.isConnected) showFaqUI(block, near);
             else hideFaqUI();
+        });
+    });
+
+    $("team-back").addEventListener("click", function () {
+        runTeamEdit(function (info) { moveCard(info, -1); return info.card; });
+    });
+    $("team-on").addEventListener("click", function () {
+        runTeamEdit(function (info) { moveCard(info, 1); return info.card; });
+    });
+    // Both duplicates re-anchor on the copy, not on the original. The
+    // copy is the one about to be rewritten — that is what somebody
+    // duplicating a person is doing next — and having the toolbar
+    // already on it means the arrows move the new card rather than
+    // shuffling the one that was already right.
+    $("team-dup-back").addEventListener("click", function () {
+        runTeamEdit(function (info) { return duplicateCard(info, -1); });
+    });
+    $("team-dup-on").addEventListener("click", function () {
+        runTeamEdit(function (info) { return duplicateCard(info, 1); });
+    });
+    $("team-add").addEventListener("click", function () {
+        runTeamEdit(function (info) { return addCard(info); });
+    });
+    $("team-del").addEventListener("click", function () {
+        if (!activeTeam) return;
+        var info = activeTeam;
+        var root = info.card.parentElement;
+        // Noted while the card is still in the document: afterwards it
+        // has no siblings left to find a neighbour by.
+        var container = info.card.closest("[data-cms-region],[data-cms-sections]");
+        confirmRemoveCard(info).then(function (yes) {
+            if (!yes) return;
+            var ed = findOwningEditor(info.card);
+            var near = null;
+            runWithUndo(ed, function () { near = removeCard(info); });
+            if (container) markContainerDirty(container);
+            if (near && near.isConnected) showTeamUI(root, near);
+            else hideTeamUI();
         });
     });
 

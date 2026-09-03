@@ -139,15 +139,35 @@ function cellsOf(row) {
 
 /* ---- finding the row -------------------------------------------- */
 
+// SELF_MANAGED names the grids another tool owns. A team grid (team.js)
+// is a grid with a track count like any other, and every button here
+// would do the wrong thing to it: the point of that layout is that a
+// fourth person wraps onto a second row, and the only way this tool
+// knows to make room is to grow the track count so they don't. Two tools
+// writing the same grid-cols class would also undo each other's work
+// silently, which is the worse half of the problem.
+//
+// Marked as a class on the grid rather than inferred from what is in it:
+// a host's own wrapping card layout gets the same treatment by saying so
+// (and gets the card tool along with it), and nothing here has to guess.
+var SELF_MANAGED = ".cms-team";
+
 // rowIn finds the element holding a track count: the block root when the
 // root carries it ("Two columns", "Quote with portrait"), otherwise the
 // one descendant that does — much of the imported library puts a heading
 // first and the grid under it. A block holding several such elements has
 // no single answer, so it gets no control rather than a guess.
+//
+// A self-managed grid is not one of the candidates, at either level. A
+// block whose only grid is a team grid therefore reads as "not a row",
+// which is right: the column tool still offers to stand the whole block
+// beside a copy of itself, and leaves the people inside it alone.
 function rowIn(block) {
     if (!block) return null;
-    if (widest(block, GRID_RE)) return block;
-    var inner = block.querySelectorAll('[class*="grid-cols-"]');
+    if (widest(block, GRID_RE)) return block.matches(SELF_MANAGED) ? null : block;
+    var inner = Array.prototype.filter.call(
+        block.querySelectorAll('[class*="grid-cols-"]'),
+        function (el) { return !el.matches(SELF_MANAGED); });
     return inner.length === 1 && widest(inner[0], GRID_RE) ? inner[0] : null;
 }
 

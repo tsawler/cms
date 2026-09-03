@@ -771,8 +771,11 @@ safelist: [
     "text-sm", "text-lg", "text-xl", "text-2xl", "text-3xl", "text-4xl",
     "sm:text-5xl", "tracking-tight", "font-semibold", "font-bold",
     "mb-1", "mb-2", "mb-3", "mt-1", "mt-3", "my-4", "my-6", "my-8",
-    "grid", "gap-6", "gap-8", "sm:grid-cols-1", "sm:grid-cols-2",
-    "sm:grid-cols-3", "sm:grid-cols-12",
+    "grid", "gap-6", "gap-8", "grid-cols-1", "sm:grid-cols-1",
+    "sm:grid-cols-2", "sm:grid-cols-3", "sm:grid-cols-12",
+    // The team grid's wrapping ladder (see "Team pages" below). Change
+    // lg:grid-cols-3 in the block and safelist whatever you change it to.
+    "lg:grid-cols-3",
     "columns-1", "columns-2", "columns-3",
     "inline-block", "flex", "items-center", "justify-center",
     "w-full", "aspect-video", "border-2", "border-dashed",
@@ -869,6 +872,67 @@ source order alone.
 
 Nothing here needs safelisting: the classes are the CMS's own and its
 stylesheet defines them.
+
+### Team pages
+
+Two of the stock presets build a staff page: **Team**, under the Team
+category in the section chooser, and **Team profiles**, the imported
+design with circular portraits. **Team cards** is the same markup as an
+inline snippet, for a staff list that belongs under an existing heading
+rather than in a section of its own.
+
+Each is a heading over a grid of cards, and each card is a photo slot, a
+name, the job title under it, and a line or two about the person:
+
+```html
+<div class="cms-team mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="cms-team-card">
+    <div class="cms-photo-slot …" data-cms-photo-slot=""> … </div>
+    <h3 class="mt-4 text-lg font-semibold">Full Name</h3>
+    <p class="text-sm text-slate-500">Job title</p>
+    <p class="mt-2 text-slate-600">A sentence or two about this person …</p>
+  </div>
+  …
+</div>
+```
+
+**The grid classes are a maximum per row, not a fixed row.** One column
+on a phone, two from `sm:`, three from `lg:` — and a fourth person wraps
+onto a second row on their own. Nobody gets narrower because a colleague
+was hired, and a portrait is never squeezed to a thumbnail on a small
+screen. A staff page that wants four across changes `lg:grid-cols-3` in
+the block's HTML (the ⟨/⟩ button) and safelists the class it changed to.
+
+**Editing is a small toolbar.** Click a card while editing and a pill
+appears centred on its top edge, with the column tool's verbs minus the
+two resize buttons: move this person left, move them right, duplicate
+them to the left, duplicate them to the right, add a blank card after
+them, delete them. Duplicating copies the card whole — words, photo and
+all — because "another one like this" is usually about the card's shape;
+the ＋ is for a genuinely blank one, and it puts the photo slot back so
+the newest hire never silently wears a colleague's portrait.
+
+"Left" and "right" move a person within their own run: consecutive
+`.cms-team-card` siblings, so a page with a Leadership grid and a Sales
+grid has two independent lists and the arrows disappear at each end
+rather than carrying somebody across the gap. Deleting asks first only
+when the card has been written in or has a photo; one still showing its
+placeholders goes without a prompt. Like the question tool, this works
+on any `.cms-team-card` — including markup converted from an old site —
+and does not need the `cms-snippet` wrapper the block chrome hangs from.
+
+**`cms-team` on the grid is what keeps the column tool off it.** Both
+tools answer a click inside a grid, and they answer it differently: the
+column tool grows the track count so a new cell joins the *same* row,
+which is right for a two-up text layout and exactly wrong for a staff
+list. A grid carrying that class is invisible to the column tool, so the
+two can never write the same `grid-cols-*` class. Put it on your own
+wrapping card layouts to get the same treatment — and the card toolbar
+along with it, for any child you mark `cms-team-card`.
+
+Neither class carries any appearance: everything these cards look like
+is in the Tailwind classes above, which is why changing the design is
+editing the markup rather than overriding CSS the module injected.
 
 ## Custom code blocks
 
