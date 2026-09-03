@@ -19,7 +19,7 @@
 # Pin to the Tailwind version the site's CSS is authored against.
 ARG TAILWIND_VERSION=v4.3.3
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 ARG TAILWIND_VERSION
 ARG TARGETARCH
 # Standalone Tailwind CLI (no node): musl build for Alpine, which needs
