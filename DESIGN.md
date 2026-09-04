@@ -19,6 +19,7 @@ non-technical end users and built to be extended per customer.
 11. Optional French/English content, English default.
 12. **Distributed as a Go module** so per-customer functionality can be added
     without forking the core.
+13. Site search over the published, publicly visible pages, posts and news.
 
 ## Core concept
 
@@ -565,6 +566,118 @@ published listing page at the feed's slug when one exists. The
 publishing schedule — visibility is the page's draft/published status.
 Categories/tags are deferred.
 
+### 4.4 Site search — a derived index, written as Publish goes past
+
+A page's words are not in one place. They are spread across `cms_blocks`
+— one row per section, per region, per locale, in draft and published
+copies — as sanitized HTML, with the title and summary off in
+`cms_page_meta`. Every approach that searches those tables directly runs
+into the same three walls: a `LIKE` across a join cannot rank, cannot
+strip the markup on the way past (so a search for "hero" matches every
+section whose wrapper says `class="hero"`), and leaves no plain text to
+cut a result snippet out of.
+
+So the searchable form of a page is **derived once, when the page is
+published, and kept in `cms_search_docs`** — one row per (page, locale)
+holding tags-stripped, entity-decoded, whitespace-collapsed text. This is
+the one place in the module where reusing the live tables would have cost
+more than a derived one; posts being pages (4.3) and shared regions
+hanging off `__site` (4.2.1) are the same trade pointed the other way.
+
+**The table's contents are the whole security story.** A row exists only
+for a page that is published, public, and not the system page.
+`Store.reindexPage` is the only writer and the only thing that decides
+it; every caller is simply "reindex this page" and does not need to know
+why. Nothing is re-checked when the index is queried, because anything a
+search could find has already passed that condition. That invariant, not
+a `WHERE` clause, is what keeps a draft out of a results page.
+
+Reindexing happens **inside the transaction that caused it**, so the
+index and the content it describes become true at the same instant:
+`PublishAs` after the block copy, and `Unpublish`, `SetVisibility`,
+`Update` (slug) and `UpdatePost` (feed, date) for the changes that are
+not staged and take effect at once. Page deletion needs no code — the FK
+cascades. Shared regions are deliberately *not* indexed: the footer is on
+every page, so indexing it would make "copyright" match the whole site.
+
+Extraction is `bluemonday`'s strict policy, which is already a dependency
+and — the part a tag-stripping regexp gets wrong — elides the *contents*
+of the elements nobody reads, `script` and `style` among them. Two
+things it does not do are handled around it: every `<` is padded with a
+space first, because `<p>a</p><p>b</p>` would otherwise come out as one
+word that appears on no page; and entities are decoded afterwards,
+because bluemonday escapes what it emits and this is the one caller that
+wants text rather than HTML.
+
+**The query is parsed, not passed through.** Both engines read
+punctuation in a query as operators and they do not agree on which, so a
+visitor typing an unbalanced quote gets a syntax error from one and
+something surprising from the other. `content.ParseSearchQuery` reduces
+what was typed to words, quoted phrases, and `-exclusions`, dropping
+every other character; each dialect renders that back into its own
+syntax. Postgres gets `websearch_to_tsquery`, MySQL gets boolean mode
+with an explicit `+` on each included term (its default is OR, which is
+not what a search box means). The same typed words then mean the same
+thing on either engine, and nothing a visitor types is ever read as an
+operator by accident.
+
+The engines' full-text machinery is used rather than `LIKE`, behind four
+`Dialect` methods. Postgres stores a weighted `tsvector` (title A,
+summary B, body D) and ranks with `ts_rank_cd`; MySQL carries two
+`FULLTEXT` indexes — one over all three columns and one over the title
+alone — and adds the second `MATCH` to the score, because `MATCH()` can
+only name the columns some one index was built on. Both arrive at the
+same behaviour: a page *about* a thing outranks a page that mentions it.
+The one asymmetry that leaks is `innodb_ft_min_token_size`, which keeps
+words under three characters out of MySQL's index entirely; the store
+matches those with `LIKE` instead, so a site writing about AI or 3D
+printing is searchable on either engine. On Postgres, where nothing is
+too short, that path never engages.
+
+Config: `SearchTemplate` turns the feature on (parsed like `PostTemplate`
+and hidden from the page choosers), `SearchPath` moves the address
+(default `search`, locale-prefixed for free since it routes like a slug),
+`SearchPerPage` sizes a page of results. The results page is handed a
+**synthesized** `content.Page` rather than a stored one — a row in
+`cms_pages` would be a page in the admin list that nobody may edit,
+delete, or unpublish without breaking the address — so the template
+should not declare editable regions. A real page at the same slug wins:
+the route is tried only after the page lookup misses, which is the same
+bargain `/robots.txt` and `/sitemap.xml` strike with the host app.
+Content is indexed whether or not search is switched on, because an index
+kept only while the feature was on would be wrong the moment it came
+back.
+
+`{{cmsSearch}}` returns a `*SearchPage` — the query, one page of hits,
+and an embedded `Pager` — the same shape `{{cmsFeed}}` has, and
+`{{cmsPagination}}` draws either. `{{cmsSearchForm}}` is the box on its
+own. There is no data-or-markup pair like `cmsMenu`/`cmsNav` here: a
+search form is a form, and a host wanting different markup writes four
+lines against `render.SearchQueryParam`.
+
+In the nav, `SiteSettings.SearchInNav` adds a magnifying glass at the end
+of `{{cmsNav}}` — in the first nav on the page only, the rule the
+editor's admin-tools button already follows. The toggle is **a link to
+the results page, not a button**, and that is the whole no-JavaScript
+story: with the script it is a disclosure that opens a panel and focuses
+the box, without it the visitor lands on a search page that has a box of
+its own. The panel lives inside the `<li>`, so it drops under the icon on
+a wide screen and flows in place inside the burger panel on a narrow one,
+the arrangement `.cms-nav-sub` already uses. The `<li>` deliberately does
+not carry `.cms-nav-item`: that class is how the editor recognizes a menu
+entry, and this is not one. An edit render always carries the item,
+hidden when the setting is off, so switching it on in the settings dialog
+reveals markup the *server* built — which is how the editor avoids
+growing a second copy of this markup to keep in step, the way
+`editor/src/menu.js` has to for menu items.
+
+An install that had content before it had a search index builds one off
+its first request, in the background, when the index is empty; a SQL
+migration cannot do it because the extraction is Go.
+`(*CMS).ReindexSearch` is the same rebuild, exported for the other case
+that needs it — a change to how text is extracted, which makes every
+stored document a little wrong in the same way.
+
 ### 5. i18n — prefix routing, region-level fallback, in-place translation
 
 `Config.Locales` lists the site's locales; the first is the default and
@@ -670,6 +783,15 @@ cms_page_versions page_id, payload, payload_hash, kind (publish|manual), note,
                   saved_by, saved_at
                   -- one edition of a page: its whole published content, all
                   --   locales, frozen as a JSON document (see below)
+cms_search_docs   page_id, locale, kind (page|blog|news), slug, title, summary,
+                  body, published_at, tsv
+                  -- the derived site-search index (4.4): one row per page per
+                  --   locale, holding the page's words with the markup taken
+                  --   off, written inside the transaction that publishes
+                  -- a row exists only for a published, public, non-system page,
+                  --   which is why a search re-checks nothing
+                  -- tsv is Postgres only; MySQL's FULLTEXT indexes read the
+                  --   three text columns directly
 ```
 
 `cms_page_versions` is the page history. A version is the same tuple of

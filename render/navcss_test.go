@@ -101,7 +101,7 @@ func TestNavMarkupGivesDropdownsTheSameHook(t *testing.T) {
 		}},
 		{Label: "Financing", URL: "/financing"},
 	}
-	got := string(navHTML("main", entries, "", false, ""))
+	got := string(navHTML("main", entries, "", false, "", "", "", false))
 
 	if !strings.Contains(got, `class="cms-nav-link cms-nav-toggle"`) {
 		t.Errorf("a dropdown's button must carry cms-nav-link too:\n%s", got)

@@ -267,6 +267,12 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 		p.PostID); err != nil {
 		return err
 	}
+	// Feed, date and slug apply at once, and a search result carries all
+	// three: what kind of thing it is, when it was published, and where it
+	// lives. The staged fields wait for Publish, as everywhere else.
+	if err := s.reindexPage(ctx, tx, p.ID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

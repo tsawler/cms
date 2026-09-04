@@ -4949,6 +4949,10 @@
       });
       if (ALIGNS.indexOf(s.menuAlign) !== -1) nav.classList.add("cms-nav-" + s.menuAlign);
     });
+    document.querySelectorAll("li.cms-nav-search").forEach(function(li) {
+      li.classList.toggle("cms-nav-search-off", !s.searchInNav);
+      if (!s.searchInNav) li.classList.remove("cms-open");
+    });
     document.querySelectorAll(".cms-brand").forEach(function(el) {
       el.textContent = "";
       var name = s.siteName || (s.logoUrl ? "" : el.dataset.cmsDefault || "");
@@ -4996,6 +5000,8 @@
           faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl,
           menuAlign: values.menuAlign,
           loginInNav: values.loginInNav === "1",
+          searchInNav: values.searchInNav !== void 0 ? values.searchInNav === "1" : !!s.searchInNav,
+          searchInstalled: s.searchInstalled,
           noticeBar: values.noticeBar === "1",
           noticeText: values.noticeText,
           noticeStyle: values.noticeStyle,
@@ -5053,6 +5059,22 @@
           tab: MENU,
           span: true
         });
+        if (seed.searchInstalled) {
+          fields.push({
+            id: "searchInNav",
+            label: "Show a search box in the menu",
+            type: "check",
+            value: seed.searchInNav,
+            tab: MENU,
+            span: true
+          });
+          fields.push({ type: "note", span: true, tab: MENU, text: function(v) {
+            if (v.searchInNav !== "1") {
+              return "Off \u2014 no search box in the menu. Visitors can still reach the search page directly if the site links to it.";
+            }
+            return "A magnifying glass at the end of the menu opens a search box below it. It searches the published words of every public page, post and news item \u2014 drafts and private pages are not in it at all.";
+          } });
+        }
         fields.push({
           id: "noticeBar",
           label: "Show a notice bar at the top of every page",
@@ -5240,6 +5262,10 @@
               logoUrl: values.logo !== void 0 ? values.logo : s.logoUrl || "",
               faviconUrl: values.favicon !== void 0 ? values.favicon : s.faviconUrl || "",
               loginInNav: values.loginInNav === "1",
+              // Absent when the site has no results page; the
+              // stored value carries through rather than being
+              // read as "off".
+              searchInNav: values.searchInNav !== void 0 ? values.searchInNav === "1" : !!s.searchInNav,
               // Site-wide CSS/JS has its own editor (wrench → Site
               // CSS & JS); carry the stored values through so this
               // save doesn't wipe them. The mode and robots.txt fields
@@ -5592,6 +5618,8 @@
       ul.appendChild(itemLI(item2, true));
     });
     if (menuEditing()) ul.appendChild(addChip());
+    var search = nav.querySelector("li.cms-nav-search");
+    if (search) ul.appendChild(search);
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);

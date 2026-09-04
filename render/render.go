@@ -580,8 +580,10 @@ var stubFuncs = template.FuncMap{
 	"cmsScripts":     func() template.HTML { return "" },
 	"cmsPosts":       func(string, int) []PostInfo { return nil },
 	"cmsFeed":        func(string, ...int) *FeedPage { return nil },
-	"cmsPagination":  func(*FeedPage) template.HTML { return "" },
+	"cmsPagination":  func(any) template.HTML { return "" },
 	"cmsLocales":     func() []LocaleLink { return nil },
+	"cmsSearch":      func(...int) *SearchPage { return nil },
+	"cmsSearchForm":  func() template.HTML { return "" },
 }
 
 // CheckTemplate parses src as a page template, with the cms template funcs
@@ -1191,6 +1193,22 @@ type Input struct {
 	// prev/next and numbered links. Nil falls back to a bare "?page=n",
 	// which is right for a render with no request behind it.
 	PageURL func(n int) string
+	// Search supplies {{cmsSearch}} with one page of results. Nil — a
+	// site whose host configured no results template — makes the func
+	// return nothing, and leaves the nav's magnifying glass off however
+	// the site setting is set: an icon that opens a box that leads
+	// nowhere is worse than no icon.
+	Search SearchLister
+	// SearchQuery is what the visitor asked for (?q=), echoed back into
+	// the search boxes and searched for by {{cmsSearch}}.
+	SearchQuery string
+	// SearchPath is the site-relative address of the results page,
+	// already carrying the render's locale prefix — "/search", or
+	// "/fr/search". Empty leaves every search control unrendered.
+	SearchPath string
+	// SearchPerPage sizes a {{cmsSearch}} page. Zero uses
+	// DefaultSearchPerPage; a template may override it per call.
+	SearchPerPage int
 	// Locales is the site's configured locale list ([0] = default), for
 	// {{cmsLocales}} and hreflang links. Nil or single-entry disables
 	// both.
@@ -1330,6 +1348,10 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	noticeText := sharedRegion(NoticeRegion, nil)
 	bar := buildNotice(in.Site, noticeText, sharedFallback(NoticeRegion), edit != nil)
 	noticePlaced := false
+	// Whether a nav has already taken the search box; see the cmsNav
+	// closure below. Template funcs run in the order the template calls
+	// them, which is the order the navs appear in the page.
+	searchPlaced := false
 
 	funcs := template.FuncMap{
 		"cmsText":   func(key string) string { return text(key) },
@@ -1395,7 +1417,21 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			if in.Site.LoginInNav && edit == nil && in.AdminPath != "" {
 				loginURL = in.AdminPath + "/login"
 			}
-			return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil, loginURL)
+			// The search box goes in the first nav on the page and no
+			// other. A site with a footer menu as well as a header one
+			// wants one magnifying glass, in the bar — and "the first
+			// one" is the rule the editor's own admin-tools button
+			// already follows, so the two land in the same place.
+			//
+			// An edit render carries it whether the setting is on or
+			// off — hidden when off, see searchNavItem.
+			searchPath := ""
+			if !searchPlaced && (in.Site.SearchInNav || edit != nil) {
+				searchPath = in.SearchPath
+				searchPlaced = searchPath != ""
+			}
+			return navHTML(key, menus[key], in.Site.MenuAlign, edit != nil, loginURL,
+				searchPath, in.SearchQuery, in.Site.SearchInNav)
 		},
 		"cmsBrand": func(fallback ...string) template.HTML { return brandHTML(in.Site, fallback) },
 		// cmsSiteName is the stored site name as plain text, for the
@@ -1416,8 +1452,13 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 			noticePlaced = true
 			return template.HTML(bar.HTML)
 		},
-		"cmsHead":    func() template.HTML { return headHTML(page, r.contentCSSHref(), in, bar) },
-		"cmsScripts": func() template.HTML { return scriptsHTML(page, in.Site, bar) },
+		"cmsHead": func() template.HTML { return headHTML(page, r.contentCSSHref(), in, bar) },
+		"cmsScripts": func() template.HTML {
+			// An edit render gets the toggle script too, since the box it
+			// operates is there waiting to be switched on.
+			return scriptsHTML(page, in.Site, bar,
+				in.SearchPath != "" && (in.Site.SearchInNav || edit != nil))
+		},
 		"cmsPosts": func(feed string, limit int) []PostInfo {
 			if in.Posts == nil {
 				return nil
@@ -1428,13 +1469,56 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		"cmsFeed": func(feed string, perPage ...int) *FeedPage {
 			return feedPage(in, feed, perPage)
 		},
-		"cmsPagination": func(f *FeedPage) template.HTML {
-			if f == nil {
-				return ""
+		// cmsPagination draws the bar for anything paginated: a
+		// {{cmsFeed}} page, a {{cmsSearch}} page, or a bare Pager a host
+		// func built. It takes `any` rather than one of those because
+		// Go templates cannot take the address of a struct field, so a
+		// caller holding a *SearchPage has no way to hand over the
+		// *Pager inside it — and asking every listing to grow its own
+		// pagination func would give the site two bars that drift.
+		// Each case checks for nil separately: a typed nil pointer in an
+		// interface is not a nil interface, and the promoted HTML method
+		// would panic on one.
+		"cmsPagination": func(v any) template.HTML {
+			switch p := v.(type) {
+			case *FeedPage:
+				if p == nil {
+					return ""
+				}
+				return p.HTML()
+			case *SearchPage:
+				if p == nil {
+					return ""
+				}
+				return p.HTML()
+			case *Pager:
+				if p == nil {
+					return ""
+				}
+				return p.HTML()
+			case Pager:
+				return p.HTML()
 			}
-			return f.HTML()
+			return ""
 		},
 		"cmsLocales": func() []LocaleLink { return localeLinks(in) },
+		// cmsSearch is the results page: one page of hits for the ?q= the
+		// request carried, plus the pager to reach the rest. It is the
+		// only cms func that answers about the request rather than about
+		// the page, which is what a results page is.
+		"cmsSearch": func(perPage ...int) *SearchPage {
+			return searchPage(in, perPage)
+		},
+		// cmsSearchForm is the search box on its own — for the results
+		// page, which needs one whether or not the nav carries the
+		// magnifying glass, and for a site that wants a box somewhere of
+		// its own choosing. The data-or-markup pair {{cmsNav}} and
+		// {{cmsMenu}} make has no counterpart here: a search form is a
+		// form, and a host that wants different markup writes the four
+		// lines itself against SearchQueryParam.
+		"cmsSearchForm": func() template.HTML {
+			return SearchFormHTML(in.SearchPath, in.SearchQuery)
+		},
 	}
 	if edit != nil {
 		// Editable renders wrap region output in marker elements the
@@ -1791,7 +1875,8 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages 
 
 // navHTML renders {{cmsNav "main"}}: complete nav markup with stable
 // cms-nav-* classes the host site styles, one dropdown level, a
-// hamburger toggle that takes over on narrow screens, and — on
+// hamburger toggle that takes over on narrow screens, an optional search
+// control at the end, and — on
 // edit renders — the data-cms-menu-item markers the in-place editor uses
 // for click-to-edit. The functional CSS and the dropdown-toggle
 // script ship via cmsHead/cmsScripts. The editor re-renders this markup
@@ -1802,7 +1887,8 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages 
 // tooling that mishandles non-ASCII source.
 const loginIcon = "\U0001F510"
 
-func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL string) template.HTML {
+func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL string,
+	searchPath, searchQuery string, searchOn bool) template.HTML {
 	cls := "cms-nav"
 	switch align {
 	case "left", "center", "right":
@@ -1825,6 +1911,11 @@ func navHTML(key string, entries []MenuEntry, align string, edit bool, loginURL 
 		sb.WriteString(html.EscapeString(loginURL))
 		sb.WriteString(`" aria-label="Log in" title="Log in">` + loginIcon + `</a></li>`)
 	}
+	// The search box last, so it sits at the end of the bar whatever the
+	// menu holds — and, on an edit render, past the "＋" chip the editor
+	// appends, since it is not a menu item and must not look like the
+	// place a new one lands.
+	sb.WriteString(searchNavItem(searchPath, searchQuery, searchOn))
 	sb.WriteString(`</ul></nav>`)
 	return template.HTML(sb.String())
 }
@@ -2354,6 +2445,12 @@ func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template
 		sb.WriteString(m + "\n")
 	}
 	sb.WriteString("<style>" + btnCSS + imgShadowCSS + navCSS + faqCSS + sliderCSS + PagerCSS + "</style>\n")
+	// The search styling, only on a site that has search: the nav's
+	// panel, or a results page's own box. A site with neither carries
+	// none of it, the same bargain the notice bar's CSS strikes below.
+	if in.SearchPath != "" && (in.Site.SearchInNav || in.Search != nil || in.Edit != nil) {
+		sb.WriteString("<style>" + SearchCSS + "</style>\n")
+	}
 	// The notice bar's styling, only where a bar can appear: on a page
 	// actually carrying one, and on any edit render — an editor can
 	// switch the bar on from the settings dialog, and it has to look
@@ -2474,10 +2571,16 @@ func embedCode(code, tag string, closeRe *regexp.Regexp) string {
 // site-wide JS before the page's own, so a page can build on it. Both
 // are written raw (plain code gets a <script> wrapper, markup passes
 // through verbatim); editing is restricted to admins.
-func scriptsHTML(p *content.Page, site content.SiteSettings, bar notice) template.HTML {
+func scriptsHTML(p *content.Page, site content.SiteSettings, bar notice, search bool) template.HTML {
 	var sb strings.Builder
 	sb.WriteString("<script>" + navJS + "</script>\n")
 	sb.WriteString("<script>" + sliderJS + "</script>\n")
+	// Only where there is a magnifying glass to click. The box on a
+	// results page needs no script — it is a form, and submitting it is
+	// the browser's job.
+	if search {
+		sb.WriteString("<script>" + searchJS + "</script>\n")
+	}
 	// Wherever the close button is drawn it does something — on an edit
 	// render too, where the empty key makes it this pageview only. See
 	// notice.Close.

@@ -134,6 +134,10 @@ type Store struct {
 	defaultLocale string
 	// versionsKept bounds each page's history; see SetVersionsKept.
 	versionsKept int
+	// locales is every locale the site serves, so publishing a page can
+	// index it once for each; see SetLocales. Empty means the default
+	// locale alone.
+	locales []string
 }
 
 // NewStore returns a Store backed by db. defaultLocale is the fallback
@@ -478,6 +482,13 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return err
 	}
+	// Slug and visibility are the two fields here that are not staged, and
+	// both change what a search result would say — one its address, the
+	// other whether it may exist at all. The staged fields do not: they
+	// reach the index on the Publish that puts them on the site.
+	if err := s.reindexPage(ctx, tx, p.ID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -634,6 +645,12 @@ func (s *Store) PublishAs(ctx context.Context, pageID int64, by *int64) error {
 	if err := pruneVersions(ctx, tx, pageID, s.versionsKept); err != nil {
 		return err
 	}
+	// The search index, rebuilt from the rows that were just made live and
+	// inside the same transaction, so what the site serves and what a
+	// search can find become true together.
+	if err := s.reindexPage(ctx, tx, pageID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -686,7 +703,12 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 // SetVisibility changes who may view the page on the public site. It does
 // not touch publication status or content.
 func (s *Store) SetVisibility(ctx context.Context, pageID int64, v Visibility) error {
-	tag, err := s.db.Exec(ctx,
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
 		"UPDATE cms_pages SET visibility = $2, updated_at = now() WHERE id = $1",
 		pageID, v.orPublic())
 	if err != nil {
@@ -695,13 +717,25 @@ func (s *Store) SetVisibility(ctx context.Context, pageID int64, v Visibility) e
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	// Making a page private takes it out of the search index; making it
+	// public again puts it back. A transaction, so the two can never
+	// disagree — a private page left findable is the failure that matters
+	// here, and it is the one an unguarded second statement would cause.
+	if err := s.reindexPage(ctx, tx, pageID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Unpublish takes a page off the public site. Draft and published content
 // are left as they are.
 func (s *Store) Unpublish(ctx context.Context, pageID int64) error {
-	tag, err := s.db.Exec(ctx,
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
 		"UPDATE cms_pages SET status = 'draft', updated_at = now() WHERE id = $1", pageID)
 	if err != nil {
 		return err
@@ -709,5 +743,10 @@ func (s *Store) Unpublish(ctx context.Context, pageID int64) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	// A page taken off the site leaves the search index with it, in the
+	// same transaction, for the reason SetVisibility gives.
+	if err := s.reindexPage(ctx, tx, pageID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

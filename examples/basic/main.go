@@ -113,6 +113,10 @@ func run(logger *slog.Logger) error {
 		{File: "templates/pages/news.gohtml", Label: "News listing"},
 	}
 	cfg.PostTemplate = cms.PageTemplate{File: "templates/pages/post.gohtml", Label: "Post"}
+	// Site search. Setting the template is what turns it on: the CMS then
+	// answers at /search, and the site-settings dialog offers the switch
+	// that puts a magnifying glass in the menu bar.
+	cfg.SearchTemplate = cms.PageTemplate{File: "templates/pages/search.gohtml", Label: "Search results"}
 	cfg.AdminSections = []cms.AdminSection{
 		{Path: "reports", NavLabel: "Reports", Handler: reportsSection(db)},
 	}
