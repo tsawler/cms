@@ -85,6 +85,11 @@ type Deps struct {
 	// zero value disables the Blog & News admin.
 	PostTemplate render.PageTemplate
 
+	// SearchTemplate is the template site search results render with; the
+	// zero value means the site has no results page, and the settings
+	// dialog then does not offer to put a search box in the nav.
+	SearchTemplate render.PageTemplate
+
 	// RememberFor is how long a "Remember me" login persists. The zero
 	// value falls back to 30 days so a partially-populated Deps (tests,
 	// direct package use) behaves sensibly.

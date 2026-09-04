@@ -514,9 +514,15 @@ func (s *server) apiGetSettings(w http.ResponseWriter, r *http.Request) {
 		"logoUrl":    site.LogoURL,
 		"faviconUrl": site.FaviconURL,
 		"loginInNav": site.LoginInNav,
-		"siteCss":    site.SiteCSS,
-		"siteJs":     site.SiteJS,
-		"siteMeta":   site.SiteMeta,
+		// The search box in the nav, and whether there is any point
+		// offering it: a site whose host configured no results template
+		// has nowhere for the icon to lead, so the dialog leaves the
+		// switch out rather than showing one that does nothing.
+		"searchInNav":     site.SearchInNav,
+		"searchInstalled": s.deps.Renderer != nil && s.deps.SearchTemplate.File != "",
+		"siteCss":         site.SiteCSS,
+		"siteJs":          site.SiteJS,
+		"siteMeta":        site.SiteMeta,
 		// Everyone who can open the dialog is told the mode — the switch
 		// itself is superadmin-only, but a save has to carry the stored
 		// value back, and an editor seeing "Development" explains why the
@@ -566,7 +572,7 @@ const maxRobotsLen = 10_000
 // save from anyone else must never be able to shut the site or reopen
 // it.
 // PUT /api/settings  body: {"menuAlign", "siteName", "logoUrl",
-// "faviconUrl", "loginInNav", "siteCss", "siteJs", "siteMeta", "mode",
+// "faviconUrl", "loginInNav", "searchInNav", "siteCss", "siteJs", "siteMeta", "mode",
 // "robotsTxt", "sitemap", "locked", "noticeBar", "noticeStyle",
 // "noticeDismissible", "editorTheme"}
 func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
@@ -576,8 +582,12 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		LogoURL    string `json:"logoUrl"`
 		FaviconURL string `json:"faviconUrl"`
 		LoginInNav bool   `json:"loginInNav"`
-		SiteCSS    string `json:"siteCss"`
-		SiteJS     string `json:"siteJs"`
+		// A pointer for the reason the notice fields are: a body that
+		// never mentions it must not switch off a search box the site is
+		// showing.
+		SearchInNav *bool  `json:"searchInNav"`
+		SiteCSS     string `json:"siteCss"`
+		SiteJS      string `json:"siteJs"`
 		// A pointer, unlike its two neighbours: the site settings dialog
 		// PUTs a body that echoes the CSS and JS back but has never heard
 		// of the meta tags, and a plain string missing from it would read
@@ -698,6 +708,13 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if body.NoticeDismissible != nil {
 		noticeDismiss = *body.NoticeDismissible
 	}
+	// The search box in the nav is site furniture like the menu
+	// alignment: anyone who can open the dialog may switch it on, and it
+	// publishes nothing.
+	searchInNav := current.SearchInNav
+	if body.SearchInNav != nil {
+		searchInNav = *body.SearchInNav
+	}
 	// The editor's chrome is nobody's privilege: it is the tools the
 	// person editing has to see, and changing it publishes nothing.
 	editorTheme := current.EditorTheme
@@ -721,18 +738,19 @@ func (s *server) apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.Content.SaveSiteSettings(r.Context(), content.SiteSettings{
-		MenuAlign:  body.MenuAlign,
-		SiteName:   name,
-		LogoURL:    logo,
-		FaviconURL: favicon,
-		LoginInNav: body.LoginInNav,
-		SiteCSS:    css,
-		SiteJS:     js,
-		SiteMeta:   meta,
-		Mode:       mode,
-		RobotsTxt:  robots,
-		Sitemap:    sitemap,
-		Locked:     locked,
+		MenuAlign:   body.MenuAlign,
+		SiteName:    name,
+		LogoURL:     logo,
+		FaviconURL:  favicon,
+		LoginInNav:  body.LoginInNav,
+		SearchInNav: searchInNav,
+		SiteCSS:     css,
+		SiteJS:      js,
+		SiteMeta:    meta,
+		Mode:        mode,
+		RobotsTxt:   robots,
+		Sitemap:     sitemap,
+		Locked:      locked,
 
 		NoticeBar:         noticeBar,
 		NoticeStyle:       noticeStyle,

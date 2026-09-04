@@ -3,6 +3,7 @@ package dialect
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // MySQL is the dialect for MySQL 8.0.31+ and MariaDB 10.6+.
@@ -67,3 +68,75 @@ func (MySQL) Lock(ctx context.Context, ex Execer, key string) (func(), error) {
 }
 
 func (MySQL) MigrationDir() string { return "mysql" }
+
+// SearchIndexWrite adds nothing to the insert: the FULLTEXT indexes on
+// cms_search_docs read title, summary and body directly, so there is no
+// derived column to keep in step with them.
+func (MySQL) SearchIndexWrite(cfg, title, summary, body string) (string, string) {
+	return "", ""
+}
+
+// SearchMatch scores a document twice: once across all three indexed
+// fields, and once against the title alone, which is why the table carries
+// a second FULLTEXT index over that column by itself. Adding the two is
+// how the title outranks the body here — Postgres does the same job with
+// setweight, but MATCH() can only name the columns some one index was
+// built on, so the weighting has to happen in the query.
+//
+// The multiplier is chosen for the same reason Postgres's weights are:
+// a page *about* the thing should beat a page that mentions it, by a
+// margin that a longer body cannot close.
+//
+// Boolean mode rather than natural language mode, for two reasons. Natural
+// language mode drops any word appearing in more than half the rows —
+// which on a small site is most of its vocabulary, and produces the
+// baffling result that the more a site writes about something the less
+// findable it is. And boolean mode is the only one that can express the
+// AND-by-default and exclusion that SearchQuery renders.
+func (MySQL) SearchMatch(cfg, q string) (string, string) {
+	all := "MATCH (title, summary, body) AGAINST (" + q + " IN BOOLEAN MODE)"
+	title := "MATCH (title) AGAINST (" + q + " IN BOOLEAN MODE)"
+	return all, all + " + 4 * " + title
+}
+
+// SearchQuery renders terms in boolean-mode syntax. Every included term
+// gets a "+": without one, boolean mode treats a word as optional, so
+// searching for two words would return the pages holding either. AND is
+// what a search box means and what Postgres's websearch does.
+//
+// Nothing else reaches the engine. The terms arrive already stripped of
+// boolean mode's operator characters (see content.ParseSearchQuery), so a
+// visitor cannot type a "(" and get a syntax error, or a "*" and get a
+// prefix search they did not ask for.
+func (MySQL) SearchQuery(terms []SearchTerm) string {
+	var b strings.Builder
+	for _, t := range terms {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		if t.Exclude {
+			b.WriteByte('-')
+		} else {
+			b.WriteByte('+')
+		}
+		if t.Phrase {
+			b.WriteByte('"')
+			b.WriteString(t.Text)
+			b.WriteByte('"')
+			continue
+		}
+		b.WriteString(t.Text)
+	}
+	return b.String()
+}
+
+// SearchConfig returns "": neither engine has per-language text search
+// configurations, so the parameter the query passes is unused.
+func (MySQL) SearchConfig(locale string) string { return "" }
+
+// SearchMinWordLen is 3, the innodb_ft_min_token_size default on both
+// engines: shorter words are never put in the index in the first place.
+// The variable is the server operator's and can be lowered, but a module
+// that ships a schema cannot count on that having been done, and reading
+// it per query to find out would cost more than the LIKE it saves.
+func (MySQL) SearchMinWordLen() int { return 3 }

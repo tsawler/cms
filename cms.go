@@ -294,6 +294,35 @@ type Config struct {
 	// zero value disables blog & news.
 	PostTemplate PageTemplate
 
+	// SearchTemplate is the page template site search results render
+	// with, and setting it is what turns site search on: the CMS then
+	// answers at SearchPath, and the in-place editor offers the site
+	// setting that puts a magnifying glass in {{cmsNav}}.
+	//
+	// Like PostTemplate it is parsed as a PageTemplate but kept out of
+	// the page template choosers — it backs one address, not a page
+	// anyone creates. It is handed a synthesized page rather than a
+	// stored one, so it should call {{cmsSearch}} for the results,
+	// {{cmsSearchForm}} for the box, and {{cmsPagination}} for the rest,
+	// and should not declare editable regions: there is no page behind
+	// it for an editor to save them to.
+	//
+	// The zero value disables site search. Content is indexed either way
+	// — an index kept only while the feature is on would be wrong the
+	// moment it was switched back on — so turning it on later costs
+	// nothing but the template.
+	SearchTemplate PageTemplate
+
+	// SearchPath is where results are served, as a slug without slashes
+	// around it. "" uses DefaultSearchPath ("search"). A page with this
+	// slug wins: the CMS answers here only when no page does, so an
+	// install that already has a hand-built search page keeps it.
+	SearchPath string
+
+	// SearchPerPage is how many results one page of a search shows.
+	// Zero, the default, uses render.DefaultSearchPerPage (10).
+	SearchPerPage int
+
 	// S3 configures the object store for image uploads. If nil, the
 	// media library is disabled.
 	S3 *S3Config
@@ -518,6 +547,10 @@ type CMS struct {
 	admin      http.Handler
 	cssBuilder *cssRebuilder // nil unless Config.Tailwind is set
 	cssOnce    sync.Once     // schedules the initial build on first traffic
+	// searchOnce builds the search index on first traffic when the site
+	// has content and no index — an install upgrading into site search.
+	// See backfillSearchIndex.
+	searchOnce sync.Once
 
 	// The public-facing settings, cached together: every public response
 	// consults the site mode, including the media and asset routes that
@@ -569,6 +602,19 @@ func New(cfg Config) (*CMS, error) {
 	}
 	if cfg.PostsPerPage == 0 {
 		cfg.PostsPerPage = render.DefaultPostsPerPage
+	}
+	if cfg.SearchPerPage < 0 {
+		return nil, fmt.Errorf("cms: SearchPerPage must not be negative, got %d", cfg.SearchPerPage)
+	}
+	if cfg.SearchPerPage == 0 {
+		cfg.SearchPerPage = render.DefaultSearchPerPage
+	}
+	cfg.SearchPath = content.NormalizeSlug(cfg.SearchPath)
+	if cfg.SearchPath == "" {
+		cfg.SearchPath = DefaultSearchPath
+	}
+	if !content.ValidSlug(cfg.SearchPath) {
+		return nil, fmt.Errorf("cms: SearchPath %q is not a usable page address", cfg.SearchPath)
 	}
 	if cfg.AdminPerPage < 0 {
 		return nil, fmt.Errorf("cms: AdminPerPage must not be negative, got %d", cfg.AdminPerPage)
@@ -670,6 +716,9 @@ func New(cfg Config) (*CMS, error) {
 	users.SetLogger(cfg.Logger)
 	contentStore := content.NewStore(db, cfg.Locales[0])
 	contentStore.SetVersionsKept(cfg.PageVersionsKept)
+	// Publishing a page indexes it once per locale the site serves, so
+	// the store has to know what those are; see content.Store.SetLocales.
+	contentStore.SetLocales(cfg.Locales)
 	codeStore := snippets.NewCodeStore(db)
 
 	var renderer *render.Renderer
@@ -677,6 +726,9 @@ func New(cfg Config) (*CMS, error) {
 		var hidden []render.PageTemplate
 		if cfg.PostTemplate.File != "" {
 			hidden = append(hidden, cfg.PostTemplate)
+		}
+		if cfg.SearchTemplate.File != "" {
+			hidden = append(hidden, cfg.SearchTemplate)
 		}
 		var err error
 		renderer, err = render.NewWithFuncs(cfg.TemplateFS, cfg.SharedTemplates,
@@ -750,6 +802,7 @@ func New(cfg Config) (*CMS, error) {
 		ConfigSnippets:  cfg.Snippets,
 		SectionStyles:   cfg.SectionStyles,
 		PostTemplate:    cfg.PostTemplate,
+		SearchTemplate:  cfg.SearchTemplate,
 		Sections:        cfg.AdminSections,
 		Stylesheets:     cfg.AdminStylesheets,
 		Permissions:     permissions,
@@ -1245,6 +1298,11 @@ func (c *CMS) SiteLocked(ctx context.Context) bool {
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
+	// An install that had pages before it had a search index builds one
+	// off its first request, in the background. Unconditional on whether
+	// search is switched on: content is indexed either way, so that
+	// turning it on is only a matter of the template.
+	c.searchOnce.Do(c.backfillSearchIndex)
 	if c.cssBuilder != nil {
 		// First traffic covers a cold start (content changed while the
 		// process was down, or the feature was just enabled)...
@@ -1281,6 +1339,16 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	// what is published.
 	page, err := c.content.GetBySlug(r.Context(), slug, locale, !editing)
 	if errors.Is(err, content.ErrNotFound) {
+		// Site search answers here, and only here: after the lookup, so a
+		// page actually stored at this slug wins. An install that built
+		// its own /search page before the CMS had one keeps it, which is
+		// the same bargain /robots.txt and /sitemap.xml strike with the
+		// host app — the CMS claims an address only when nothing else
+		// answers at it.
+		if c.searchEnabled() && slug == c.cfg.SearchPath {
+			c.serveSearch(w, r, locale)
+			return
+		}
 		c.notFound(w)
 		return
 	}
@@ -1429,6 +1497,10 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		PostsPerPage: c.cfg.PostsPerPage,
 		PageNumber:   listingPage(r),
 		PageURL:      listingPageURL(r),
+		// Where the nav's magnifying glass leads, on every page that
+		// draws a nav. The results themselves are not read here — only
+		// the search page calls {{cmsSearch}} — so this costs no query.
+		SearchPath: c.searchPathFor(locale),
 		// Host template funcs bound to this request, so a query they run
 		// carries the request's context. Nil when the host registered
 		// none, or none that need the request.

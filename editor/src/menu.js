@@ -226,6 +226,12 @@ function renderNav(nav) {
     ul.className = "cms-nav-list";
     menus[key].forEach(function (item) { ul.appendChild(itemLI(item, true)); });
     if (menuEditing()) ul.appendChild(addChip());
+    // The search item is the server's markup, not a menu item — item
+    // addressing skips it (it carries .cms-nav-search) and the re-render
+    // would otherwise drop it, exactly like the admin-tools <li> below.
+    // Moving the node keeps whatever is typed in its box.
+    var search = nav.querySelector("li.cms-nav-search");
+    if (search) ul.appendChild(search);
     nav.innerHTML = "";
     nav.appendChild(burger);
     nav.appendChild(ul);

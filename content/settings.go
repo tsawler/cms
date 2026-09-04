@@ -19,6 +19,11 @@ type SiteSettings struct {
 	// LoginInNav adds a "Log in" link to {{cmsNav}} for visitors who
 	// aren't logged in, pointing at the admin login page.
 	LoginInNav bool
+	// SearchInNav puts a magnifying glass at the end of {{cmsNav}} that
+	// opens a search box. It shows only where there is somewhere for it
+	// to lead: a host that configured no Config.SearchTemplate has no
+	// results page, and the icon stays off however this is set.
+	SearchInNav bool
 	// SiteCSS and SiteJS are injected raw into every public page (via
 	// cmsHead/cmsScripts). Each holds plain code or full markup — <style>,
 	// <link>, and <script> tags pass through as-is. Editing them is
@@ -136,18 +141,19 @@ func ValidEditorTheme(t string) bool {
 
 // Keys the settings are stored under in cms_settings.
 const (
-	settingMenuAlign  = "menu_align"
-	settingSiteName   = "site_name"
-	settingLogoURL    = "logo_url"
-	settingFaviconURL = "favicon_url"
-	settingLoginInNav = "login_in_nav"
-	settingSiteCSS    = "site_css"
-	settingSiteJS     = "site_js"
-	settingSiteMeta   = "site_meta"
-	settingSiteMode   = "site_mode"
-	settingRobotsTxt  = "robots_txt"
-	settingSitemap    = "sitemap"
-	settingSiteLocked = "site_locked"
+	settingMenuAlign   = "menu_align"
+	settingSiteName    = "site_name"
+	settingLogoURL     = "logo_url"
+	settingFaviconURL  = "favicon_url"
+	settingLoginInNav  = "login_in_nav"
+	settingSearchInNav = "search_in_nav"
+	settingSiteCSS     = "site_css"
+	settingSiteJS      = "site_js"
+	settingSiteMeta    = "site_meta"
+	settingSiteMode    = "site_mode"
+	settingRobotsTxt   = "robots_txt"
+	settingSitemap     = "sitemap"
+	settingSiteLocked  = "site_locked"
 
 	settingNoticeBar         = "notice_bar"
 	settingNoticeStyle       = "notice_style"
@@ -184,6 +190,8 @@ func (s *Store) SiteSettings(ctx context.Context) (SiteSettings, error) {
 			out.FaviconURL = v
 		case settingLoginInNav:
 			out.LoginInNav = v == "1"
+		case settingSearchInNav:
+			out.SearchInNav = v == "1"
 		case settingSiteCSS:
 			out.SiteCSS = v
 		case settingSiteJS:
@@ -223,6 +231,10 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 	if in.LoginInNav {
 		loginInNav = "1"
 	}
+	searchInNav := ""
+	if in.SearchInNav {
+		searchInNav = "1"
+	}
 	if in.Sitemap {
 		sitemap = "1"
 	}
@@ -237,18 +249,19 @@ func (s *Store) SaveSiteSettings(ctx context.Context, in SiteSettings) error {
 		noticeDismissible = "1"
 	}
 	for k, v := range map[string]string{
-		settingMenuAlign:  in.MenuAlign,
-		settingSiteName:   in.SiteName,
-		settingLogoURL:    in.LogoURL,
-		settingFaviconURL: in.FaviconURL,
-		settingLoginInNav: loginInNav,
-		settingSiteCSS:    in.SiteCSS,
-		settingSiteJS:     in.SiteJS,
-		settingSiteMeta:   in.SiteMeta,
-		settingSiteMode:   in.Mode,
-		settingRobotsTxt:  in.RobotsTxt,
-		settingSitemap:    sitemap,
-		settingSiteLocked: locked,
+		settingMenuAlign:   in.MenuAlign,
+		settingSiteName:    in.SiteName,
+		settingLogoURL:     in.LogoURL,
+		settingFaviconURL:  in.FaviconURL,
+		settingLoginInNav:  loginInNav,
+		settingSearchInNav: searchInNav,
+		settingSiteCSS:     in.SiteCSS,
+		settingSiteJS:      in.SiteJS,
+		settingSiteMeta:    in.SiteMeta,
+		settingSiteMode:    in.Mode,
+		settingRobotsTxt:   in.RobotsTxt,
+		settingSitemap:     sitemap,
+		settingSiteLocked:  locked,
 
 		settingNoticeBar:         noticeBar,
 		settingNoticeStyle:       in.NoticeStyle,

@@ -1,0 +1,42 @@
+{{template "base" .}}
+
+{{define "content"}}
+{{/* Site search results. There is no stored page behind this one — it is
+     a template and a query — so it should not declare editable regions:
+     there would be nowhere to save them. */}}
+{{$results := cmsSearch}}
+<section class="mx-auto max-w-3xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">Search</h1>
+
+    <div class="mt-6">{{cmsSearchForm}}</div>
+
+    {{if $results.Searched}}
+    <p class="mt-6 text-sm text-slate-500">
+        {{if $results.Total}}
+            {{$results.Total}} result{{if ne $results.Total 1}}s{{end}} for &ldquo;{{$results.Query}}&rdquo;
+        {{else}}
+            Nothing found for &ldquo;{{$results.Query}}&rdquo;. Try fewer words, or different ones.
+        {{end}}
+    </p>
+
+    <ol class="mt-8 space-y-8">
+        {{range $results.Hits}}
+        <li>
+            <h2 class="text-lg font-semibold">
+                <a href="{{.URL}}" class="text-slate-900 hover:underline">{{.Title}}</a>
+            </h2>
+            {{if .IsPost}}
+            <p class="mt-1 text-xs uppercase tracking-wide text-slate-400">{{.Kind}} &middot; {{cmsDate .PublishedAt}}</p>
+            {{end}}
+            {{/* The page's own summary when it has one — it was written for
+                 a reader deciding whether to click. The snippet cut from
+                 the page's text is the fallback. */}}
+            <p class="mt-2 text-sm text-slate-600">{{with .Summary}}{{.}}{{else}}{{.Snippet}}{{end}}</p>
+        </li>
+        {{end}}
+    </ol>
+
+    {{cmsPagination $results}}
+    {{end}}
+</section>
+{{end}}

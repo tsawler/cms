@@ -1,0 +1,51 @@
+{{template "base" .}}
+
+{{define "content"}}
+{{/* The site search results page. It is reached at /search (and /fr/search
+     on a localized site) once Config.SearchTemplate points here — there is
+     no stored page behind it, so this template should not declare editable
+     regions: there would be nowhere to save them.
+
+     {{cmsSearch}} reads the ?q= off the request, runs it, and hands back
+     one page of hits plus the pager to reach the rest — the same shape
+     {{cmsFeed}} has. Pass a number to size the page here instead of using
+     Config.SearchPerPage. */}}
+{{$results := cmsSearch}}
+<section class="mx-auto max-w-3xl px-6 py-12">
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">Search</h1>
+
+    {{/* The box. It is the same markup and the same classes as the one in
+         the menu bar, so one stylesheet dresses both. */}}
+    <div class="mt-6">{{cmsSearchForm}}</div>
+
+    {{if $results.Searched}}
+    <p class="mt-6 text-sm text-slate-500">
+        {{if $results.Total}}
+            {{$results.Total}} result{{if ne $results.Total 1}}s{{end}} for “{{$results.Query}}”
+        {{else}}
+            Nothing found for “{{$results.Query}}”. Try fewer words, or different ones.
+        {{end}}
+    </p>
+
+    <ol class="mt-8 space-y-8">
+        {{range $results.Hits}}
+        <li>
+            <h2 class="text-lg font-semibold">
+                <a href="{{.URL}}" class="text-slate-900 hover:underline">{{.Title}}</a>
+            </h2>
+            <p class="mt-1 text-xs uppercase tracking-wide text-slate-400">
+                {{if .IsPost}}{{.Kind}} · {{cmsDate .PublishedAt}}{{else}}Page{{end}}
+            </p>
+            {{/* The page's own summary when it has one — it was written
+                 for a reader deciding whether to click. The snippet cut
+                 from the page's text is the fallback. Both are plain
+                 text: the markup came off on the way into the index. */}}
+            <p class="mt-2 text-sm text-slate-600">{{with .Summary}}{{.}}{{else}}{{.Snippet}}{{end}}</p>
+        </li>
+        {{end}}
+    </ol>
+
+    {{cmsPagination $results}}
+    {{end}}
+</section>
+{{end}}

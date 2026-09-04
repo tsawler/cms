@@ -278,6 +278,14 @@ function applySettings(s) {
         ALIGNS.forEach(function (a) { nav.classList.remove("cms-nav-" + a); });
         if (ALIGNS.indexOf(s.menuAlign) !== -1) nav.classList.add("cms-nav-" + s.menuAlign);
     });
+    // The search box. An edit render always carries the item, hidden when
+    // the setting is off, so switching it here is only a class — the
+    // markup, the icon and the form are the server's, and there is no
+    // second copy of them to keep in step.
+    document.querySelectorAll("li.cms-nav-search").forEach(function (li) {
+        li.classList.toggle("cms-nav-search-off", !s.searchInNav);
+        if (!s.searchInNav) li.classList.remove("cms-open");
+    });
     document.querySelectorAll(".cms-brand").forEach(function (el) {
         el.textContent = "";
         var name = s.siteName || (s.logoUrl ? "" : el.dataset.cmsDefault || "");
@@ -352,6 +360,9 @@ export function openSiteSettings() {
                 faviconUrl: values.favicon !== undefined ? values.favicon : s.faviconUrl,
                 menuAlign: values.menuAlign,
                 loginInNav: values.loginInNav === "1",
+                searchInNav: values.searchInNav !== undefined
+                    ? values.searchInNav === "1" : !!s.searchInNav,
+                searchInstalled: s.searchInstalled,
                 noticeBar: values.noticeBar === "1",
                 noticeText: values.noticeText,
                 noticeStyle: values.noticeStyle,
@@ -396,6 +407,23 @@ export function openSiteSettings() {
                 ] });
             fields.push({ id: "loginInNav", label: "Show a “Log in” link in the menu for logged-out visitors",
                 type: "check", value: seed.loginInNav, tab: MENU, span: true });
+            // Only where there is a results page to reach. Without one the
+            // switch would set a setting that changes nothing a visitor
+            // sees, which is worse than not offering it: the icon would
+            // simply never appear and nobody could tell why.
+            if (seed.searchInstalled) {
+                fields.push({ id: "searchInNav", label: "Show a search box in the menu",
+                    type: "check", value: seed.searchInNav, tab: MENU, span: true });
+                fields.push({ type: "note", span: true, tab: MENU, text: function (v) {
+                    if (v.searchInNav !== "1") {
+                        return "Off \u2014 no search box in the menu. Visitors can still reach the " +
+                            "search page directly if the site links to it.";
+                    }
+                    return "A magnifying glass at the end of the menu opens a search box below it. " +
+                        "It searches the published words of every public page, post and news item \u2014 " +
+                        "drafts and private pages are not in it at all.";
+                } });
+            }
             // The notice bar. Only its switch and its look are settings —
             // the words are a shared region, written in the bar itself, so
             // that they translate and publish like the footer does. The note
@@ -637,6 +665,11 @@ export function openSiteSettings() {
                         logoUrl: values.logo !== undefined ? values.logo : (s.logoUrl || ""),
                         faviconUrl: values.favicon !== undefined ? values.favicon : (s.faviconUrl || ""),
                         loginInNav: values.loginInNav === "1",
+                        // Absent when the site has no results page; the
+                        // stored value carries through rather than being
+                        // read as "off".
+                        searchInNav: values.searchInNav !== undefined
+                            ? values.searchInNav === "1" : !!s.searchInNav,
                         // Site-wide CSS/JS has its own editor (wrench → Site
                         // CSS & JS); carry the stored values through so this
                         // save doesn't wipe them. The mode and robots.txt fields

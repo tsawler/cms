@@ -73,6 +73,56 @@ type Dialect interface {
 	// MigrationDir is the subdirectory of migrations/sql holding this
 	// engine's schema.
 	MigrationDir() string
+
+	// SearchIndexWrite renders the extra column cms_search_docs needs when
+	// a document is written, and the expression that fills it, given the
+	// placeholders holding the text search configuration and the
+	// document's three indexed fields. An engine whose full-text index
+	// reads those columns directly — MySQL's does — returns two empty
+	// strings, and the INSERT is built without them.
+	SearchIndexWrite(cfg, title, summary, body string) (col, expr string)
+
+	// SearchMatch renders the WHERE condition that selects the documents
+	// matching a query, and the expression that scores them, given the
+	// placeholders holding the configuration and the rendered query.
+	// Higher scores are better matches on both engines.
+	SearchMatch(cfg, q string) (where, rank string)
+
+	// SearchQuery renders parsed query terms into the string this engine's
+	// match expression takes. The parsing happens once, above this
+	// package (content.ParseSearchQuery), so the two engines are asked the
+	// same question in their own words rather than each being handed
+	// whatever the visitor typed.
+	SearchQuery(terms []SearchTerm) string
+
+	// SearchConfig names the text search configuration to index and query
+	// a locale's documents with. Only Postgres has such a thing; MySQL
+	// returns "" and ignores the parameter it is passed.
+	SearchConfig(locale string) string
+
+	// SearchMinWordLen is the shortest word this engine's full-text index
+	// holds. A term below it is in no index and so matches nothing, which
+	// is why content.Store.Search matches short terms with LIKE instead —
+	// searching a site that writes about AI or 3D printing should not
+	// depend on which database is underneath.
+	SearchMinWordLen() int
+}
+
+// SearchTerm is one unit of a parsed search query: a word, or a quoted
+// phrase, either of which the visitor may have prefixed with "-" to mean
+// "and not this".
+//
+// Queries are parsed rather than passed through because both engines read
+// punctuation in the query as operators, and they do not agree on which.
+// A visitor typing an unbalanced quote or a stray "*" would get a syntax
+// error from one engine and something surprising from the other. Parsing
+// to this and rendering back out means the same typed words mean the same
+// thing on both, and nothing a visitor types is ever read as an operator
+// by accident.
+type SearchTerm struct {
+	Text    string
+	Phrase  bool // several words that must appear together, in order
+	Exclude bool // the visitor wrote "-word": documents holding it are out
 }
 
 // For returns the Dialect named by name, or nil when it is unknown.

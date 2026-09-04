@@ -187,6 +187,10 @@ var manifest = []file{
 	{src: "templates/pages/home.gohtml.tmpl", dst: "templates/pages/home.gohtml", mode: 0o644, when: always},
 	{src: "templates/pages/standard.gohtml.tmpl", dst: "templates/pages/standard.gohtml", mode: 0o644, when: always},
 	{src: "templates/pages/canvas.gohtml.tmpl", dst: "templates/pages/canvas.gohtml", mode: 0o644, when: always},
+	// Site search has no option of its own: it is one template and one
+	// config line, and the magnifying glass only appears once someone
+	// switches it on in the site settings.
+	{src: "templates/pages/search.gohtml.tmpl", dst: "templates/pages/search.gohtml", mode: 0o644, when: always},
 
 	{src: "templates/pages/blog.gohtml.tmpl", dst: "templates/pages/blog.gohtml", mode: 0o644, when: ifBlog},
 	{src: "templates/pages/news.gohtml.tmpl", dst: "templates/pages/news.gohtml", mode: 0o644, when: ifBlog},
