@@ -2781,6 +2781,19 @@
     activeSnip = null;
     $("snip-ui").classList.remove("on");
   }
+  var CHROME_GAP = 6;
+  function clearSnipUI(left, top, width, height) {
+    var snip = $("snip-ui");
+    if (!snip.classList.contains("on")) return top;
+    var s = snip.getBoundingClientRect();
+    if (!s.width) return top;
+    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return top;
+    if (s.bottom <= top || s.top >= top + height) return top;
+    var lift = top - s.height - CHROME_GAP;
+    if (lift < 64) return s.bottom + CHROME_GAP;
+    snip.style.top = lift + "px";
+    return top;
+  }
   function moveBlock(dir) {
     if (!activeSnip) return;
     var el = activeSnip;
@@ -2930,9 +2943,12 @@
     var r = cell.getBoundingClientRect();
     var top = row.getBoundingClientRect().top - box.height / 2;
     if (top < 64) top = 64;
-    var left = r.left + (r.width - box.width) / 2;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(
+      r.left + (r.width - box.width) / 2,
+      window.innerWidth - box.width - 8
+    ));
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
   }
   function markActiveCell(cell) {
     document.querySelectorAll(".cms-col-active").forEach(function(el) {
@@ -3027,9 +3043,12 @@
     var r = activeFaq.item.getBoundingClientRect();
     var top = r.top - box.height / 2;
     if (top < 64) top = 64;
-    var left = r.right - box.width;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(
+      r.right - box.width,
+      window.innerWidth - box.width - 8
+    ));
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
   }
   function showFaqUI(block, target) {
     var info = faqTarget(block, target);
@@ -3073,9 +3092,12 @@
     var r = activeTeam.card.getBoundingClientRect();
     var top = r.top - box.height / 2;
     if (top < 64) top = 64;
-    var left = r.left + (r.width - box.width) / 2;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(
+      r.left + (r.width - box.width) / 2,
+      window.innerWidth - box.width - 8
+    ));
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
   }
   function showTeamUI(root, target) {
     var info = teamTarget(root, target);
