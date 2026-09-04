@@ -98,11 +98,23 @@ func (s *Store) UpsertSharedBlock(ctx context.Context, region, locale string, ki
 // shows shared content, so there is no page to publish it "on": it goes
 // live alongside whichever page the editor published from.
 func (s *Store) PublishShared(ctx context.Context) error {
+	return s.PublishSharedAs(ctx, nil)
+}
+
+// PublishSharedAs is PublishShared, attributing the edition to the user
+// with id by.
+//
+// The site page keeps its own history, like any page — which is what makes
+// a footer recoverable at all, since shared content belongs to no page that
+// could hold a version of it. It is also why an unchanged snapshot is never
+// stored: this runs on every publish anywhere on the site, and almost none
+// of those touched the footer.
+func (s *Store) PublishSharedAs(ctx context.Context, by *int64) error {
 	siteID, err := s.SitePageID(ctx)
 	if err != nil {
 		return err
 	}
-	return s.Publish(ctx, siteID)
+	return s.PublishAs(ctx, siteID, by)
 }
 
 // HasSharedUnpublishedChanges reports whether shared regions hold saved

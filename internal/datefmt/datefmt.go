@@ -77,3 +77,20 @@ func frenchDay(t time.Time) string {
 	}
 	return strconv.Itoa(t.Day())
 }
+
+// ShortTime writes Short plus the clock: "Jul 30, 2026, 2:14 PM" in
+// English, "30 juil. 2026, 14 h 14" in French. It is for a list where two
+// entries can share a day and the date alone would not tell them apart —
+// a page's publishing history, where republishing twice in an afternoon is
+// ordinary.
+//
+// French Canadian spaces the hour marker on both sides and runs on a
+// 24-hour clock, which is why this is not Short plus a format string.
+func ShortTime(t time.Time, locale string) string {
+	switch lang(locale) {
+	case "fr":
+		return Short(t, locale) + ", " + t.Format("15") + " h " + t.Format("04")
+	default:
+		return Short(t, locale) + ", " + t.Format("3:04 PM")
+	}
+}

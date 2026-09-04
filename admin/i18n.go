@@ -114,6 +114,13 @@ func (td templateData) D(t time.Time) string {
 	return datefmt.Short(t, td.AdminLang)
 }
 
+// DT is D with the clock, for a list where two entries can share a day
+// and the date alone would not tell them apart — a page's publishing
+// history, where republishing twice in an afternoon is ordinary.
+func (td templateData) DT(t time.Time) string {
+	return datefmt.ShortTime(t, td.AdminLang)
+}
+
 // setLang handles the topbar language toggle: it stores the chosen admin
 // language in a long-lived cookie and sends the user back where they were.
 // POST /lang  form value "to" = "en" | "fr"
@@ -334,6 +341,26 @@ var frStrings = map[string]string{
 	"You don't have permission to publish in that feed.":     "Vous n'avez pas la permission de publier dans ce fil.",
 	"Editing shared site areas needs the pages permission.":  "La modification des zones partagées du site requiert la permission Pages.",
 	"That address is reserved for blog and news posts.":      "Cette adresse est réservée aux billets de blogue et aux nouvelles.",
+
+	// Page history.
+	"History": "Historique",
+	"— every published version of this page, and how to put one back.": "— chaque version publiée de cette page, et comment en rétablir une.",
+	"— every published version of this post, and how to put one back.": "— chaque version publiée de ce billet, et comment en rétablir une.",
+	"Back to the editor": "Retour à l'éditeur",
+	"Published":          "Publiée le",
+	"By":                 "Par",
+	"live":               "en ligne",
+	"Preview":            "Aperçu",
+	"Restore":            "Restaurer",
+	"Restore & publish":  "Restaurer et publier",
+	"Every time this page is published, what went live is kept here. Restoring puts an old version back into the draft — nothing changes on the site until you publish.": "Chaque fois que cette page est publiée, ce qui est mis en ligne est conservé ici. La restauration replace une ancienne version dans le brouillon — rien ne change sur le site tant que vous ne publiez pas.",
+	"This page has unpublished draft changes. Restoring an old version will replace them.":                                                                               "Cette page comporte des modifications non publiées. Restaurer une ancienne version les remplacera.",
+	"Replace the current draft with this version? Your unpublished changes will be lost.":                                                                                "Remplacer le brouillon actuel par cette version ? Vos modifications non publiées seront perdues.",
+	"No history yet — it starts the first time this page is published.":                                                                                                  "Aucun historique pour l'instant — il commence à la première publication de cette page.",
+	"Version restored into the draft. Publish when you're ready to make it live.":                                                                                        "Version restaurée dans le brouillon. Publiez quand vous serez prêt à la mettre en ligne.",
+	"Version restored and published — it is live on the site again.":                                                                                                     "Version restaurée et publiée — elle est de nouveau en ligne sur le site.",
+	"Custom-code blocks this version used had been deleted and were put back:":                                                                                           "Des blocs de code personnalisé utilisés par cette version avaient été supprimés et ont été rétablis :",
+	"These custom-code blocks have changed since and were left as they are:":                                                                                             "Ces blocs de code personnalisé ont changé depuis et ont été laissés tels quels :",
 
 	// Pages list.
 	"New page":   "Nouvelle page",
@@ -658,6 +685,9 @@ var frStrings = map[string]string{
 	"Too many sections on one page.":                                   "Trop de sections sur une même page.",
 	"Unknown sections area.":                                           "Zone de sections inconnue.",
 	"Publishing failed — try again.":                                   "La publication a échoué — réessayez.",
+	"Loading the history failed — try again.":                          "Le chargement de l'historique a échoué — réessayez.",
+	"That version is no longer available.":                             "Cette version n'est plus disponible.",
+	"Restoring failed — try again.":                                    "La restauration a échoué — réessayez.",
 	"Discarding failed — try again.":                                   "L'abandon a échoué — réessayez.",
 	"Unknown media kind.":                                              "Type de média inconnu.",
 	"Could not load the media library.":                                "Impossible de charger la médiathèque.",

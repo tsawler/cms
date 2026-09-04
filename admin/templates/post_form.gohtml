@@ -150,6 +150,11 @@
 {{.T "and press"}} <strong>{{.T "Edit"}}</strong> {{.T "to write in place with sections and snippets."}}</p>
 {{end}}
 
+{{if and (not .IsNew) .IsDefaultLocale}}
+<p class="cms-hint cms-history-link"><a href="{{.AdminPath}}/posts/{{.FormPost.PostID}}/versions">{{.T "History"}}</a>
+{{.T "— every published version of this post, and how to put one back."}}</p>
+{{end}}
+
 {{if and (not .IsNew) .HasDraftEdits .IsDefaultLocale}}
 <form method="post" action="{{.AdminPath}}/posts/{{.FormPost.PostID}}/discard" class="cms-discard"
       data-confirm="{{.T "Discard your unpublished changes and revert to the published version? This can't be undone."}}">

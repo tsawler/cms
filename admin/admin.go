@@ -289,6 +289,9 @@ func New(d Deps) http.Handler {
 				r.Post("/pages/{id}/discard", s.pageDiscard)
 				r.Post("/pages/{id}/unpublish", s.pageUnpublish)
 				r.Get("/pages/{id}/preview", s.pagePreview)
+				r.Get("/pages/{id}/versions", s.pageVersions)
+				r.Get("/pages/{id}/versions/{vid}/preview", s.pageVersionPreview)
+				r.Post("/pages/{id}/versions/{vid}/restore", s.pageVersionRestore)
 			})
 
 			// JSON API for the in-place editor. Reads stay open to
@@ -312,6 +315,8 @@ func New(d Deps) http.Handler {
 			r.Post("/api/pages/{id}/publish", s.apiPublish)
 			r.Post("/api/pages/{id}/unpublish", s.apiUnpublish)
 			r.Post("/api/pages/{id}/discard", s.apiDiscard)
+			r.Get("/api/pages/{id}/versions", s.apiPageVersions)
+			r.Post("/api/pages/{id}/versions/{vid}/restore", s.apiRestoreVersion)
 			r.Put("/api/pages/{id}/visibility", s.apiSetVisibility)
 			r.Get("/api/snippets", s.apiSnippetsList)
 
@@ -347,6 +352,9 @@ func New(d Deps) http.Handler {
 					r.Post("/posts/{id}/discard", s.postDiscard)
 					r.Post("/posts/{id}/unpublish", s.postUnpublish)
 					r.Get("/posts/{id}/preview", s.postPreview)
+					r.Get("/posts/{id}/versions", s.postVersions)
+					r.Get("/posts/{id}/versions/{vid}/preview", s.postVersionPreview)
+					r.Post("/posts/{id}/versions/{vid}/restore", s.postVersionRestore)
 					r.Post("/api/posts", s.apiCreatePost)
 					r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
 				})
@@ -417,7 +425,7 @@ func New(d Deps) http.Handler {
 // parseTemplates builds one template set per page, each combining the shared
 // layout with that page's {{define "content"}} block.
 func parseTemplates() map[string]*template.Template {
-	pages := []string{"login", "login_2fa", "forgot_password", "reset_password", "dashboard", "settings", "users", "user_form", "pages", "page_form", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
+	pages := []string{"login", "login_2fa", "forgot_password", "reset_password", "dashboard", "settings", "users", "user_form", "pages", "page_form", "versions", "posts", "post_form", "media", "snippets", "snippet_form", "custom"}
 	m := make(map[string]*template.Template, len(pages))
 	for _, page := range pages {
 		t, err := template.ParseFS(templateFS,
@@ -526,6 +534,12 @@ type templateData struct {
 	Regions       []render.Region
 	BlockContent  map[string]string // draft content keyed by region name
 	HasDraftEdits bool              // draft blocks differ from the published set
+	// Versions is a page's published editions, newest first, and
+	// HistoryBase the admin URL its preview and restore links extend —
+	// the page's form for a page, the post's for a post, since the two
+	// sections address the same content by different ids.
+	Versions    []content.Version
+	HistoryBase string
 	// RegionsTemplate names the template whose regions the form_regions
 	// partial edits (the page's template, or the post template).
 	RegionsTemplate string

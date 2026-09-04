@@ -17,6 +17,7 @@ var envVars = []string{
 	"CAP_URL", "CAP_INTERNAL_URL", "CAP_SITE_KEY", "CAP_SECRET", "CAP_WIDGET",
 	"CMS_SESSION_REDIS_ADDR", "CMS_SESSION_REDIS_PASSWORD", "CMS_SESSION_REDIS_DB",
 	"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE",
+	"CMS_PAGE_VERSIONS_KEPT",
 	"CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
 	"CMS_SITE_URL",
@@ -91,6 +92,7 @@ func TestConfigFromEnvFull(t *testing.T) {
 		"CMS_REMEMBER_DAYS":          "14",
 		"CMS_POSTS_PER_PAGE":         "6",
 		"CMS_ADMIN_PER_PAGE":         "40",
+		"CMS_PAGE_VERSIONS_KEPT":     "12",
 		"CMS_MEDIA_WEBP_QUALITY":     "0.5",
 		"CMS_MEDIA_MAX_VIDEO_MB":     "128",
 		"CMS_TAILWIND_COMMAND":       "./tw.sh {content} {output}",
@@ -135,6 +137,9 @@ func TestConfigFromEnvFull(t *testing.T) {
 	if cfg.AdminPerPage != 40 {
 		t.Errorf("AdminPerPage = %v, want 40", cfg.AdminPerPage)
 	}
+	if cfg.PageVersionsKept != 12 {
+		t.Errorf("PageVersionsKept = %v, want 12", cfg.PageVersionsKept)
+	}
 	if cfg.MediaWebPQuality != 0.5 {
 		t.Errorf("MediaWebPQuality = %v, want 0.5", cfg.MediaWebPQuality)
 	}
@@ -157,6 +162,7 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 		"CMS_REMEMBER_DAYS":      "soon",
 		"CMS_POSTS_PER_PAGE":     "lots",
 		"CMS_ADMIN_PER_PAGE":     "many",
+		"CMS_PAGE_VERSIONS_KEPT": "all of them",
 		"CMS_MEDIA_WEBP_QUALITY": "high",
 		"CMS_MEDIA_MAX_VIDEO_MB": "big",
 		"CMS_MEDIA_ADOPT":        "sometimes",
@@ -170,7 +176,8 @@ func TestConfigFromEnvMalformed(t *testing.T) {
 
 	// Zero and negative "remember me" days are as wrong as non-numeric,
 	// and so is a page that holds no posts.
-	for _, k := range []string{"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE"} {
+	for _, k := range []string{"CMS_REMEMBER_DAYS", "CMS_POSTS_PER_PAGE", "CMS_ADMIN_PER_PAGE",
+		"CMS_PAGE_VERSIONS_KEPT"} {
 		for _, bad := range []string{"0", "-3"} {
 			clearEnv(t)
 			t.Setenv(k, bad)

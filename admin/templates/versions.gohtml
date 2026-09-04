@@ -1,0 +1,49 @@
+{{define "title"}}{{.T "History"}} — CMS{{end}}
+
+{{define "content"}}
+<div class="cms-page-head">
+    <h1>{{.T "History"}}</h1>
+    <a class="cms-btn cms-btn-ghost" href="{{.HistoryBase}}">{{.T "Back to the editor"}}</a>
+</div>
+
+<p class="cms-hint">{{.T "Every time this page is published, what went live is kept here. Restoring puts an old version back into the draft — nothing changes on the site until you publish."}}</p>
+
+{{if .HasDraftEdits}}
+<p class="cms-notice">{{.T "This page has unpublished draft changes. Restoring an old version will replace them."}}</p>
+{{end}}
+
+<table class="cms-table">
+    <thead>
+    <tr>
+        <th>{{.T "Published"}}</th>
+        <th>{{.T "By"}}</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    {{range $i, $v := .Versions}}
+    <tr>
+        <td>{{$.DT $v.SavedAt}}{{if eq $i 0}} <span class="cms-badge cms-badge-ok">{{$.T "live"}}</span>{{end}}</td>
+        <td class="cms-muted">{{if $v.SavedByName}}{{$v.SavedByName}}{{else}}—{{end}}</td>
+        <td class="cms-table-actions">
+            <div class="cms-actions">
+                <a href="{{$.HistoryBase}}/versions/{{$v.ID}}/preview" target="_blank" rel="noopener">{{$.T "Preview"}}</a>
+                {{/* The newest version is what the site is already
+                     serving, so there is nothing to restore it to. */}}
+                {{if ne $i 0}}
+                <form method="post" action="{{$.HistoryBase}}/versions/{{$v.ID}}/restore"
+                      data-confirm="{{$.T "Replace the current draft with this version? Your unpublished changes will be lost."}}">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" name="action" value="draft" class="cms-btn cms-btn-ghost">{{$.T "Restore"}}</button>
+                    <button type="submit" name="action" value="publish" class="cms-btn cms-btn-ghost">{{$.T "Restore & publish"}}</button>
+                </form>
+                {{end}}
+            </div>
+        </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="3" class="cms-muted">{{.T "No history yet — it starts the first time this page is published."}}</td></tr>
+    {{end}}
+    </tbody>
+</table>
+{{end}}

@@ -540,6 +540,9 @@ td.cms-slug { color: var(--cms-muted); }
 .cms-advanced { margin: 1.25rem 0; }
 .cms-advanced summary { cursor: pointer; color: var(--cms-muted); font-size: .9rem; margin-bottom: .75rem; }
 .cms-actions { display: flex; gap: .5rem; align-items: center; }
+/* The history link sits above the discard/unpublish forms, spaced like
+   them so the block below the form reads as one list of afterthoughts. */
+.cms-history-link { margin-top: 1.5rem; }
 .cms-discard { margin-top: 1.5rem; }
 .cms-discard .cms-hint { margin-bottom: .5rem; }
 .cms-unpublish { margin-top: 1.5rem; }
@@ -561,6 +564,19 @@ td.cms-slug { color: var(--cms-muted); }
    red of .cms-alert — which the same page uses for "that password was
    wrong", and the two must not read as one thing. */
 .cms-locked-notice {
+    background: var(--cms-brass-tint);
+    border: 1px solid var(--cms-brass-line);
+    color: var(--cms-brass);
+    border-radius: var(--cms-radius);
+    padding: .6rem .9rem;
+    margin: 0 0 1rem;
+    font-size: .92rem;
+}
+/* A caution on an admin screen — the history page warning that restoring
+   will overwrite an unpublished draft. Brass for the same reason
+   .cms-locked-notice is: it states a condition the reader should weigh,
+   not a failure, and .cms-alert's red is spoken for by real errors. */
+.cms-notice {
     background: var(--cms-brass-tint);
     border: 1px solid var(--cms-brass-line);
     color: var(--cms-brass);

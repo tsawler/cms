@@ -109,6 +109,9 @@ export function setEditing(on) {
     // Visibility follows the same rule: posts belong to their feed's
     // listings, so they stay managed as a whole from the admin.
     $("vis-btn").hidden = !on || !!postInfo;
+    // History is offered on any page that can be published from here.
+    // A post's is reached from Blog & News, like its settings.
+    $("history").hidden = !on || !!postInfo;
     // Untranslated regions (showing default-language fallback) get a
     // tooltip to go with their dashed amber outline.
     if (on) {

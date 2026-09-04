@@ -1037,7 +1037,7 @@ func (s *server) apiPublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.publishWithShared(r.Context(), page.ID); err != nil {
+	if err := s.publishWithShared(r.Context(), page.ID, s.actingUserID(r)); err != nil {
 		s.deps.Logger.Error("cms admin: api publishing", "page", page.ID, "err", err)
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Publishing failed — try again."))
 		return

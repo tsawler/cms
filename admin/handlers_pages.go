@@ -425,7 +425,7 @@ func (s *server) finishContentSave(w http.ResponseWriter, r *http.Request, pageI
 		published = s.tr(r, "Post published.")
 	}
 	if r.PostFormValue("action") == "publish" {
-		if err := s.publishWithShared(r.Context(), pageID); err != nil {
+		if err := s.publishWithShared(r.Context(), pageID, s.actingUserID(r)); err != nil {
 			s.serverError(w, err)
 			return
 		}
@@ -555,11 +555,27 @@ func (s *server) saveSharedRegions(ctx context.Context, values map[string]string
 // page the editor publishes, which is also the page they were edited on.
 // Publishing twice over unchanged shared content is a no-op, so this costs
 // nothing when nobody has touched the footer.
-func (s *server) publishWithShared(ctx context.Context, pageID int64) error {
-	if err := s.deps.Content.Publish(ctx, pageID); err != nil {
+//
+// by is the account to record against both editions this may create — the
+// page's and the site page's — or nil when nobody is. Callers holding a
+// request get it from actingUserID.
+func (s *server) publishWithShared(ctx context.Context, pageID int64, by *int64) error {
+	if err := s.deps.Content.PublishAs(ctx, pageID, by); err != nil {
 		return err
 	}
-	return s.deps.Content.PublishShared(ctx)
+	return s.deps.Content.PublishSharedAs(ctx, by)
+}
+
+// actingUserID is the signed-in user's id for attributing a change to,
+// or nil when the request carries no usable session. Nil is a real answer
+// rather than a failure: the store records an unattributed edition, which
+// is what a page published by something other than a person deserves.
+func (s *server) actingUserID(r *http.Request) *int64 {
+	u := s.currentUser(r)
+	if u == nil {
+		return nil
+	}
+	return &u.ID
 }
 
 // validImageURL accepts empty (no image), app-relative, or http(s) URLs.
