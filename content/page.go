@@ -132,6 +132,8 @@ func ValidSlug(s string) bool {
 type Store struct {
 	db            *sqldb.DB
 	defaultLocale string
+	// versionsKept bounds each page's history; see SetVersionsKept.
+	versionsKept int
 }
 
 // NewStore returns a Store backed by db. defaultLocale is the fallback
@@ -141,7 +143,20 @@ func NewStore(db *sqldb.DB, defaultLocale string) *Store {
 	if defaultLocale == "" {
 		defaultLocale = "en"
 	}
-	return &Store{db: db, defaultLocale: defaultLocale}
+	return &Store{db: db, defaultLocale: defaultLocale, versionsKept: DefaultVersionsKept}
+}
+
+// SetVersionsKept bounds how many editions of each page Publish keeps,
+// oldest dropped first. Zero or less restores DefaultVersionsKept.
+//
+// It is a knob for the operator rather than a site setting: payloads hold
+// whole pages, so the right number is a question about the database, not
+// about the site's content. The CMS points it at Config.PageVersionsKept.
+func (s *Store) SetVersionsKept(n int) {
+	if n <= 0 {
+		n = DefaultVersionsKept
+	}
+	s.versionsKept = n
 }
 
 // pageColumns reads metadata from the requested-locale join (m) with
@@ -551,7 +566,23 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 // Publish makes the page's draft content live: the published block set and
 // metadata are replaced by copies of the draft ones, the staged page-level
 // fields are copied onto the page row, and the page is marked published.
+//
+// It attributes the edition it records to nobody. Use PublishAs when a
+// person is behind the publish, so the page's history says who.
 func (s *Store) Publish(ctx context.Context, pageID int64) error {
+	return s.PublishAs(ctx, pageID, nil)
+}
+
+// PublishAs is Publish, recording the edition it creates against the user
+// with id by (nil when no account is responsible — a seed, a migration, the
+// host application publishing on its own).
+//
+// The snapshot is taken inside the publishing transaction, after the page
+// has been made live and before the commit, so it captures exactly what the
+// site is about to serve and a publish that fails leaves no edition behind
+// claiming to have gone live. History that repeats itself is not stored:
+// see SaveVersion.
+func (s *Store) PublishAs(ctx context.Context, pageID int64, by *int64) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -593,6 +624,15 @@ func (s *Store) Publish(ctx context.Context, pageID int64) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	// The page is live as of the statements above, so this reads the new
+	// published state rather than the one being replaced: a version is an
+	// edition the site served, and the newest is what is live now.
+	if _, err := saveVersion(ctx, tx, pageID, VersionPublish, "", by); err != nil {
+		return err
+	}
+	if err := pruneVersions(ctx, tx, pageID, s.versionsKept); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

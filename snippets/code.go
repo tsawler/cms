@@ -37,10 +37,21 @@ type CodeSnippet struct {
 // ErrDuplicateCodeKey is returned when a key is already taken.
 var ErrDuplicateCodeKey = errors.New("snippets: code key already exists")
 
-// codeKeyRe is the key vocabulary, kept deliberately narrow: it appears
-// in an HTML attribute the sanitizer must be able to bound with a regex
-// of its own, so nothing here may need escaping.
-var codeKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+// codeKeyChars is the key vocabulary, kept deliberately narrow: a key
+// appears in an HTML attribute the sanitizer must be able to bound with a
+// regex of its own, so nothing here may need escaping. The two patterns
+// below are both built from it, so neither can drift from the other.
+const codeKeyChars = `[a-z0-9][a-z0-9-]{0,63}`
+
+// codeKeyRe matches a key on its own.
+var codeKeyRe = regexp.MustCompile(`^` + codeKeyChars + `$`)
+
+// codeRefRe finds a key where a page names one: the data-cms-code
+// attribute of a custom-code placeholder. Deliberately looser than the
+// placeholder pattern the renderer expands, which insists on an empty
+// body — this only has to find what a page refers to, and a reference
+// with something in it is still a reference.
+var codeRefRe = regexp.MustCompile(`(?i)\bdata-cms-code="(` + codeKeyChars + `)"`)
 
 // ValidCodeKey reports whether key is a usable code-snippet key: a
 // lowercase letter or digit followed by up to 63 more of those or
@@ -52,6 +63,27 @@ func ValidCodeKey(key string) bool { return codeKeyRe.MatchString(key) }
 // sanitizer bounds the placeholder attribute with it, and having one
 // definition is what keeps the two from drifting apart.
 func CodeKeyPattern() *regexp.Regexp { return codeKeyRe }
+
+// CodeKeysIn returns the code-snippet keys html refers to, deduplicated
+// and in the order they first appear. Nothing to do with whether those
+// keys exist: it reports what the markup asks for, which is the question
+// a caller collecting a page's dependencies has.
+func CodeKeysIn(html string) []string {
+	if !strings.Contains(html, "data-cms-code=") {
+		return nil
+	}
+	var keys []string
+	seen := map[string]bool{}
+	for _, m := range codeRefRe.FindAllStringSubmatch(html, -1) {
+		key := strings.ToLower(m[1])
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
+}
 
 // CodeKeyFor turns a human name into a key candidate: lowercased, runs of
 // anything outside [a-z0-9] collapsed to a single hyphen, trimmed to the

@@ -272,6 +272,17 @@ type Config struct {
 	// signed-out caller can send.
 	AdminMaxRequestBytes int64
 
+	// PageVersionsKept bounds each page's history: publishing records what
+	// went live, and the oldest editions beyond this many are dropped.
+	// Zero, the default, keeps content.DefaultVersionsKept of them.
+	//
+	// A version holds a whole page's published content, so the number is a
+	// question about the database rather than about the site — raise it
+	// where storage is cheap and an editor may want to reach a long way
+	// back, lower it on a site whose pages are large and republished
+	// constantly.
+	PageVersionsKept int
+
 	// PostTemplate is the page template blog and news posts render with.
 	// A post is an ordinary page underneath — its slug lives under blog/
 	// or news/ and its body is edited in place like any page, sections
@@ -658,6 +669,7 @@ func New(cfg Config) (*CMS, error) {
 	users := auth.NewStore(db)
 	users.SetLogger(cfg.Logger)
 	contentStore := content.NewStore(db, cfg.Locales[0])
+	contentStore.SetVersionsKept(cfg.PageVersionsKept)
 	codeStore := snippets.NewCodeStore(db)
 
 	var renderer *render.Renderer

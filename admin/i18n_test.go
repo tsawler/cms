@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
@@ -51,6 +52,15 @@ func TestTemplatesRenderInFrench(t *testing.T) {
 		Locales:       []string{"en", "fr"},
 		EditLocale:    "fr",
 		HasDraftEdits: true,
+		// Two editions so the history table renders both branches of its
+		// per-row markup: the newest, which is live and offers no restore,
+		// and an older one that does. One has no author, for the row a
+		// deleted account leaves behind.
+		Versions: []content.Version{
+			{ID: 2, Kind: content.VersionPublish, SavedByName: "Ada", SavedAt: time.Now()},
+			{ID: 1, Kind: content.VersionPublish, SavedAt: time.Now().Add(-time.Hour)},
+		},
+		HistoryBase:   "/admin/pages/1",
 		Regions:       []render.Region{{Name: "body", Kind: "sections"}, {Name: "lede", Kind: "text"}, {Name: "hero", Kind: "image"}},
 		RememberHours: 24,
 	}

@@ -138,7 +138,7 @@ func TestPublishWithSharedGoesLiveTogether(t *testing.T) {
 			t.Fatalf("saveSharedRegions: %v", err)
 		}
 
-		if err := s.publishWithShared(ctx, page.ID); err != nil {
+		if err := s.publishWithShared(ctx, page.ID, nil); err != nil {
 			t.Fatalf("publishWithShared: %v", err)
 		}
 

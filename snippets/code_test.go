@@ -50,3 +50,42 @@ func TestCodeKeyFor(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeKeysIn(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+		want []string
+	}{
+		{"none", `<p>Just words</p>`, nil},
+		{"one placeholder", `<div class="cms-snippet cms-code" data-cms-code="signup"></div>`,
+			[]string{"signup"}},
+		{"two, in order", `<div data-cms-code="map"></div><p>x</p><div data-cms-code="chart"></div>`,
+			[]string{"map", "chart"}},
+		// The same block used twice on a page is one dependency.
+		{"deduplicated", `<div data-cms-code="map"></div><div data-cms-code="map"></div>`,
+			[]string{"map"}},
+		// A reference with something in it is still a reference: the
+		// renderer only expands empty placeholders, but a page that has
+		// been filled in and re-saved still depends on the block.
+		{"non-empty body", `<div data-cms-code="signup"><button>Go</button></div>`,
+			[]string{"signup"}},
+		// Anything outside the key vocabulary is not a key.
+		{"invalid key", `<div data-cms-code="Not A Key"></div>`, nil},
+		{"empty key", `<div data-cms-code=""></div>`, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := snippets.CodeKeysIn(tc.html)
+			if len(got) != len(tc.want) {
+				t.Fatalf("CodeKeysIn = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("CodeKeysIn = %v, want %v", got, tc.want)
+					break
+				}
+			}
+		})
+	}
+}

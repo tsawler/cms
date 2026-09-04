@@ -26,6 +26,7 @@ import { initButtons } from "./buttons.js";
 import { initSaving } from "./saving.js";
 import { initPageCode } from "./pagecode.js";
 import { initPageSettings } from "./pagemeta.js";
+import { initHistory } from "./history.js";
 import { initSource } from "./source.js";
 import { initSnippets } from "./snippets.js";
 import { initPostSettings } from "./postsettings.js";
@@ -48,6 +49,7 @@ initButtons();
 initSaving();
 initPageCode();
 initPageSettings();
+initHistory(); // the ⋯ menu's Page history entry
 initSource(); // the HTML-source modal for snippet blocks and sections
 initBarMin(); // restores the remembered minimized state before first paint
 initSnippets();

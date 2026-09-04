@@ -543,6 +543,31 @@ as a placeholder: type to translate, leave empty to keep following the
 original. Posts keep the same two fields in their **⚙ Post settings**
 pill instead, next to the date and listing image.
 
+The ⋯ menu's **Page history** goes back to an earlier published version.
+Every publish keeps a copy of what went live — attributed to whoever
+published it — and picking one from the list puts it back into the
+*draft*: nothing changes on the site until you Publish, and until then
+**Discard draft** returns you to what visitors are seeing. Since the
+editor already shows draft content, restoring is its own preview — the
+page reloads onto the old version and you are looking at it.
+
+The same history is on the page's admin form (and a post's, under Blog &
+News) as a **History** link, which adds a Preview of any version through
+the real site templates and a **Restore & publish** for when something is
+wrong on the live site right now. How many versions each page keeps is
+`Config.PageVersionsKept` (default 50, oldest dropped first).
+
+A version carries the custom-code blocks the page used, so a widget that
+was deleted from the library since comes back with the page that showed
+it. One that still exists but has been rewritten is left alone and
+mentioned instead — the library is shared, and restoring one page should
+not rewrite a widget other pages are showing.
+
+Media and shared regions like the footer are not part of a version: they
+are stored outside the page and stay as they are now. Shared regions keep
+a history of their own, since they belong to the site rather than to any
+one page.
+
 The rail's **Snippets** button opens a drawer of ready-made blocks: drag
 one onto a rich region (or click to insert at the cursor), then edit its
 text and images in place like any other content. Snippets come from two
@@ -2752,6 +2777,7 @@ a startup error rather than a silent fallback.
 | `CMS_SITE_LOCKED` | unset (the stored switch decides) | Forces the [site lock](#closing-the-site-the-lock) on or off whatever the admin has saved. `false` reopens a site locked by someone who then lost the way in; `true` brings one up closed. It overrides the stored setting without changing it, so removing the variable hands the switch back to the admin. A non-boolean value is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | How many posts a paginated `{{cmsFeed}}` listing shows per page. An invalid or non-positive value is a startup error. A template can override it per listing with `{{cmsFeed "blog" 6}}`. |
 | `CMS_ADMIN_PER_PAGE` | `25` | How many rows a paginated admin list shows per page (Blog & News, and Pages). Separate from `CMS_POSTS_PER_PAGE`: an editor's table wants more rows than a public listing. An invalid or non-positive value is a startup error. |
+| `CMS_PAGE_VERSIONS_KEPT` | `50` | How many published editions of each page the history keeps. Publishing records what went live and drops the oldest beyond this many. A version holds a whole page's content, so the right number is a question about the database rather than about the site. An invalid or non-positive value is a startup error. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. A non-numeric value is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload size cap in MB. A non-numeric value is a startup error. |
 | `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |

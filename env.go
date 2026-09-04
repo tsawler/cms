@@ -32,6 +32,8 @@ import (
 //   - CMS_ADMIN_PER_PAGE → AdminPerPage, how many rows a paginated admin
 //     list shows on one page. Separate from CMS_POSTS_PER_PAGE, which
 //     sizes the public listing.
+//   - CMS_PAGE_VERSIONS_KEPT → PageVersionsKept, how many published
+//     editions of each page the history keeps.
 //   - CMS_SITE_LOCKED (true/false) → LockOverride, forcing the site lock
 //     on or off whatever the admin has stored. Unset leaves the stored
 //     switch alone; CMS_SITE_LOCKED=false is the way to reopen a site
@@ -134,6 +136,14 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("cms: CMS_ADMIN_PER_PAGE %q is not a positive number of rows", v)
 		}
 		cfg.AdminPerPage = n
+	}
+
+	if v := os.Getenv("CMS_PAGE_VERSIONS_KEPT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("cms: CMS_PAGE_VERSIONS_KEPT %q is not a positive number of versions", v)
+		}
+		cfg.PageVersionsKept = n
 	}
 
 	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {

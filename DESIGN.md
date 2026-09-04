@@ -666,11 +666,79 @@ cms_media         id, store_key, filename, mime, width, height, size, uploaded_b
                   -- store_key is relative to the media root: no row embeds S3_KEY_PREFIX
 cms_media_meta    media_id, locale, alt_text
 cms_snippets      key, name, html, editable_slots, source (code|db)
-cms_versions      entity_type, entity_id, locale, payload jsonb, saved_by, saved_at
+cms_page_versions page_id, payload, payload_hash, kind (publish|manual), note,
+                  saved_by, saved_at
+                  -- one edition of a page: its whole published content, all
+                  --   locales, frozen as a JSON document (see below)
 ```
 
-`cms_versions` gives cheap undo/history — every publish snapshots the
-previous state.
+`cms_page_versions` is the page history. A version is the same tuple of
+data `Publish` already copies — every region, every locale, plus the
+page-level fields staged in `cms_page_drafts` — so history is that
+existing snapshot given a third place to live rather than a new concept.
+Some consequences worth knowing:
+
+- **The payload is an opaque document, not shadow rows.** Nothing queries
+  into a version; it is written once, listed by its metadata, and
+  restored wholesale. Keeping it as text also means an old edition stays
+  readable after the live tables' shape moves on. A third value in the
+  `status` column was the alternative, and it would have put history
+  inside the `EXCEPT` probes in `HasUnpublishedChanges` and reshaped the
+  `UNIQUE` key on `cms_blocks`.
+- **A version carries no slug or visibility.** 0021 kept those out of the
+  draft/publish workflow because they are addressing rather than content,
+  and a rollback that silently moved a page's URL would be a surprise.
+- **Identical snapshots are not stored.** Publishing any page publishes
+  the site's shared content with it (4.2.1), so without the
+  `payload_hash` check the `__site` page would collect a near-identical
+  edition every time anyone published anything.
+- **Custom-code blocks are frozen with the page, and put back only when
+  the library has lost them.** A page's markup holds an inert placeholder
+  naming a `code_key`; the body lives in `cms_code_snippets`. An edition
+  copies the bodies its blocks name, so a widget deleted since is
+  recoverable. Restoring recreates a key the library no longer holds —
+  safe precisely because nothing else can be using it — and *reports*,
+  rather than overwrites, one it still holds under a different body: the
+  library is shared, and a button labelled "restore this page" must not
+  rewrite a widget other pages show. A consequence: rewriting a block
+  changes what its pages publish, so their next publish records an
+  edition even though the pages were not touched. That is honest, and it
+  is not something `HasUnpublishedChanges` reports — code is not staged
+  at all, so an edit to one is live everywhere the moment it is saved.
+- **Everything else is still the world around the page.** Media lives in
+  the library, registered snippets live in the host's templates, and
+  shared regions version as `__site`'s own history. A version puts the
+  page's own content back; those are wherever they are now.
+- **The payload format is numbered, and the two directions differ.** An
+  older payload reads straight into the current struct — every change so
+  far has been an added field, and what an old edition does not carry
+  reads as absent, which is what "this predates that feature" should
+  mean. A *newer* payload is refused: a build rolled back over a database
+  a later one has written to would otherwise read it short, which on a
+  restore means losing content rather than failing. A change that is not
+  additive needs a real branch in `decodeSnapshot` rather than that rule.
+- **Restore writes the draft**, exactly as `DiscardDraft` does — nothing
+  reaches the public site without a Publish, and the editor can preview
+  an old edition before committing to it. "Restore & publish" does both
+  in one click, for the case the feature really exists for: something is
+  wrong on the live site *now*.
+- **In the editor, restoring is its own preview.** The editor shows
+  draft content, and a restore writes the draft — so the page reloads
+  onto the old version and you are looking at it, with Publish and
+  Discard draft already on the bar to decide its fate. That is why the
+  ⋯ menu's Page history offers a version list and nothing else, while
+  the admin screen, which is not standing on the page, needs a Preview.
+  The newest version is never offered as a destination: it is what the
+  site is already serving, and "go back to now" is Discard draft.
+- **The history screen is one template for pages and posts.** A post is a
+  page underneath, so its history is its backing page's; only the loader
+  that enforces the permission and the URL the screen sits under differ,
+  and both are arguments. A version preview renders the stored edition
+  through the real site templates, with two things taken from now rather
+  than from the edition: the shared regions (the site's current chrome,
+  which this page's edition never held) and, when the host has since
+  dropped the template an edition was written for, the page's current
+  one — an old edition is still worth looking at when its layout is gone.
 
 ## Tech choices
 
