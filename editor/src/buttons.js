@@ -227,6 +227,46 @@ export function hideSnipUI() {
     $("snip-ui").classList.remove("on");
 }
 
+// The block chrome and the pills that ride alongside it — the column
+// tool, the question tool, the team-card tool — anchor to different
+// things on purpose, and in a wide column those anchors are nowhere
+// near each other. A narrow column collapses the difference: the block
+// chrome is left-aligned above the block, the column tool is centred on
+// a cell barely wider than a pill, and whichever is drawn second simply
+// covers the other's buttons.
+//
+// Neither can give up its anchor — one names the block, the other names
+// the column — so the block chrome yields position instead. It is the
+// outer of the two, and the exact height it floats above its block
+// carries no meaning, so lifting it clear reads as the pair being
+// stacked rather than as either having come off its element.
+//
+// Called by the smaller pill once it knows where it is going, which is
+// also the order the click handler and the scroll listener place them
+// in: the block chrome first, then whatever rides alongside it. Returns
+// the top the caller should use — its own, normally, or a lower one for
+// the case where there is no room above to lift anything into.
+var CHROME_GAP = 6;
+function clearSnipUI(left, top, width, height) {
+    var snip = $("snip-ui");
+    if (!snip.classList.contains("on")) return top;
+    var s = snip.getBoundingClientRect();
+    if (!s.width) return top;
+    // Side by side with a gap between them, or already stacked: nothing
+    // is covering anything. The gap is on the horizontal test only —
+    // two pills that merely touch read as one long pill, while the
+    // vertical stack this produces is meant to sit close.
+    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return top;
+    if (s.bottom <= top || s.top >= top + height) return top;
+    var lift = top - s.height - CHROME_GAP;
+    // Lifting the block chrome under TinyMCE's toolbar is no better than
+    // leaving it underneath the pill. With no room above, the smaller
+    // pill takes the lower lane instead and sits inside its element.
+    if (lift < 64) return s.bottom + CHROME_GAP;
+    snip.style.top = lift + "px";
+    return top;
+}
+
 // moveBlock trades a block with its neighbour above or below. Sections
 // have had this since they existed (the up/down buttons in sections.js);
 // blocks have had only the drag handle, which is the same verb done
@@ -434,8 +474,9 @@ function openBlockSettings(el, title, asColumn) {
 // (.cms-sec-ui in light.css), so a toolbar on an edge consistently
 // reads as belonging to the container it is drawn on. Centring on the
 // column rather than its left edge is what makes "this one" obvious in
-// a row of identical cells, and it keeps the pill clear of the block
-// chrome, which is left-aligned above the block.
+// a row of identical cells, and in a column wide enough for it that is
+// also well clear of the block chrome, which is left-aligned above the
+// block. In a narrow one it is not, and clearSnipUI settles it.
 //
 // The top is the *row's*, not the cell's: cells rarely start at the same
 // height (a short one, a photo above text), and a toolbar that stepped
@@ -454,9 +495,12 @@ function placeColUI() {
     // TinyMCE's toolbar is pinned to the top of the viewport; never
     // slide underneath it.
     if (top < 64) top = 64;
-    var left = r.left + (r.width - box.width) / 2;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(r.left + (r.width - box.width) / 2,
+        window.innerWidth - box.width - 8));
+    // A narrow column centres this pill on top of the block chrome; one
+    // of the two has to move, and it is not this one.
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
 }
 
 // markActiveCell tints the one column every button on the toolbar acts
@@ -605,9 +649,12 @@ function placeFaqUI() {
     var r = activeFaq.item.getBoundingClientRect();
     var top = r.top - box.height / 2;
     if (top < 64) top = 64; // never slide under TinyMCE's toolbar
-    var left = r.right - box.width;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(r.right - box.width,
+        window.innerWidth - box.width - 8));
+    // Right-aligned is clear of the block chrome in anything but a
+    // narrow column, where the two edges are the same edge.
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
 }
 
 function showFaqUI(block, target) {
@@ -683,9 +730,12 @@ function placeTeamUI() {
     var r = activeTeam.card.getBoundingClientRect();
     var top = r.top - box.height / 2;
     if (top < 64) top = 64; // never slide under TinyMCE's toolbar
-    var left = r.left + (r.width - box.width) / 2;
-    ui.style.top = top + "px";
-    ui.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + "px";
+    var left = Math.max(8, Math.min(r.left + (r.width - box.width) / 2,
+        window.innerWidth - box.width - 8));
+    // A card only a little wider than the pill puts it over the block
+    // chrome, the same way a narrow column does.
+    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
+    ui.style.left = left + "px";
 }
 
 function showTeamUI(root, target) {
