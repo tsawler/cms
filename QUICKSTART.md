@@ -18,7 +18,7 @@ A complete reference implementation lives in [`examples/basic`](examples/basic)
 
 > **In a hurry?** `go run github.com/tsawler/cms/cmd/cms@latest init mysite`
 > writes everything this guide builds by hand, in one step — see
-> [Starting a new site](README.md#starting-a-new-site). Come back here when
+> [Generate it instead](#generate-it-instead) in step 2. Come back here when
 > you want to know what each piece is doing and why.
 
 ## 1. Prerequisites
@@ -60,6 +60,56 @@ This guide uses Postgres. Where MySQL differs — three places, all in step 3
 and step 5 — it says so inline.
 
 ## 2. Create the project
+
+### Generate it instead
+
+Everything this guide builds by hand can be written in one step. From an
+empty directory:
+
+```sh
+go run github.com/tsawler/cms/cmd/cms@latest init mysite
+```
+
+That creates `mysite/`, its `go.mod`, `main.go`, the base layout and page
+templates, `.env`, and a `docker-compose.yml` — the same shape as the tree
+below — and pins the `cms` requirement to the version of the generator you
+ran, so the generated `main.go` and the library it compiles against stay in
+step. Then:
+
+```sh
+cd mysite
+docker compose up -d      # start the database
+go mod tidy
+go generate .             # compile static/site.css (needs the tailwindcss CLI)
+go run .                  # http://localhost:4000, admin at /admin/
+```
+
+If you would rather have the generator on your PATH than fetch it each
+time:
+
+```sh
+go install github.com/tsawler/cms/cmd/cms@latest
+cms init mysite
+```
+
+`init` picks the database with `-db` (`postgres`, `mysql`, or `mariadb`),
+and can leave out the blog templates (`-blog=false`) or the Tailwind build
+(`-tailwind=false`). It never overwrites an existing file unless you pass
+`-force`, so it is safe to re-run inside a project that has moved on — a
+second run only fills in what is missing. Run `cms init -h` for the full
+flag list, or see [Starting a new site](README.md#starting-a-new-site)
+for a table of the useful ones.
+
+Working against a local checkout of this module rather than a published
+version? `-replace /path/to/cms` writes the replace directive for you.
+
+The generator is also a library — [`scaffold.Write`](scaffold/scaffold.go)
+— if you want to wrap it in your own tooling.
+
+Come back here when you want to know what each generated piece is doing
+and why. The rest of this guide builds the same site by hand.
+
+### By hand
 
 ```sh
 mkdir mysite && cd mysite
