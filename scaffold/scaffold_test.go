@@ -298,6 +298,92 @@ func TestSiteNameDefaultsToDirectory(t *testing.T) {
 	}
 }
 
+// TestSearchIsWiredUnconditionally guards site search in a generated site.
+// It takes two halves that live apart and are useless alone: the template
+// file, and the cfg.SearchTemplate line in main.go that points at it. The
+// file without the config line is dead weight the CMS never reaches; the
+// config line without the file fails when the renderer first parses
+// templates, in front of the site's first visitor.
+//
+// Neither half sits behind an option, and that is the thing under test.
+// Blog & news has -blog to switch it off, so the natural mistake is to
+// assume search belongs to the same feature and tuck it into that
+// conditional — which would leave `cms init -blog=false` generating a site
+// whose search is silently off, with a Config field that reads as if it
+// were on.
+func TestSearchIsWiredUnconditionally(t *testing.T) {
+	const searchTemplate = "templates/pages/search.gohtml"
+
+	// The File argument out of the cfg.SearchTemplate line, so that
+	// rewording the Label stays free but moving or renaming the template
+	// without moving the config line does not.
+	wiring := regexp.MustCompile(`cfg\.SearchTemplate\s*=\s*cms\.PageTemplate\{\s*File:\s*"([^"]+)"`)
+
+	for _, blog := range []bool{false, true} {
+		for _, tailwind := range []bool{false, true} {
+			name := "bare"
+			if blog {
+				name += "+blog"
+			}
+			if tailwind {
+				name += "+tailwind"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				if _, err := Write(dir, Options{Blog: blog, Tailwind: tailwind}); err != nil {
+					t.Fatal(err)
+				}
+
+				if got := read(t, dir, searchTemplate); strings.TrimSpace(got) == "" {
+					t.Fatalf("%s was not generated, so site search has no template", searchTemplate)
+				}
+
+				main := read(t, dir, "main.go")
+				m := wiring.FindStringSubmatch(main)
+				if m == nil {
+					t.Fatalf("main.go does not set cfg.SearchTemplate, so site search is off:\n%s",
+						firstLineWith(main, "SearchTemplate"))
+				}
+				if m[1] != searchTemplate {
+					t.Errorf("cfg.SearchTemplate points at %q, but the generated file is %q",
+						m[1], searchTemplate)
+				}
+
+				// The search template backs one address rather than a page
+				// anyone creates, so it must stay out of the chooser: listed
+				// there, an editor could make a page whose regions have
+				// nowhere to be saved.
+				if chooser := pageTemplateChooser(t, main); strings.Contains(chooser, "search.gohtml") {
+					t.Errorf("search.gohtml is offered in cfg.PageTemplates, "+
+						"so editors can create pages with it:\n%s", chooser)
+				}
+			})
+		}
+	}
+}
+
+// pageTemplateChooser returns the body of the cfg.PageTemplates literal in
+// a generated main.go — the list of templates an editor may pick when
+// creating a page.
+func pageTemplateChooser(t *testing.T, main string) string {
+	t.Helper()
+	const open = "cfg.PageTemplates = []cms.PageTemplate{"
+	i := strings.Index(main, open)
+	if i < 0 {
+		t.Fatal("generated main.go has no cfg.PageTemplates literal")
+	}
+	rest := main[i+len(open):]
+	// go/format has already run, so the literal sits at one tab inside
+	// run() and its closing brace is the first "\n\t}" — not "\n}", which
+	// is run()'s own brace, far below the lines this is meant to bound.
+	if j := strings.Index(rest, "\n\t}"); j >= 0 {
+		return rest[:j]
+	}
+	t.Fatal("cfg.PageTemplates literal is not closed")
+	return ""
+}
+
 // TestGeneratedProjectBuilds is the test that keeps the starter main.go
 // honest: it compiles the generated project against this very checkout of
 // the cms module, so renaming a Config field or changing a method
