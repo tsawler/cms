@@ -54,9 +54,29 @@ read [QUICKSTART.md](QUICKSTART.md).
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - Overview of the system architecture
-- [Quick Start](QUICKSTART.md) - Getting started guide
-- [Design Principles](DESIGN.md) - Core design concepts  
+Start here:
+
+- [Quick Start](QUICKSTART.md) — build a working site from an empty
+  directory, step by step
+- [Architecture](docs/ARCHITECTURE.md) — how the packages fit together
+- [Design Principles](DESIGN.md) — the rationale behind the design
+
+Feature guides, in more depth than the quickstart:
+
+- [Snippets, code blocks & sections](docs/snippets-and-sections.md) — the
+  building blocks an editor drops into a page, and how sections arrange them
+- [Navigation & site chrome](docs/navigation-and-layout.md) — menus, shared
+  regions, the notice bar, and site-wide settings
+- [Site search](docs/site-search.md) — full-text search over the published
+  public site
+- [Users, roles & permissions](docs/users-and-permissions.md) — the role
+  model, the dashboard, bot protection, password resets, two-factor login
+- [Host application integration](docs/host-integration.md) — mounting your
+  own pages inside the admin area, and the embedding contract
+- [Going to production](docs/production.md) — search-engine visibility,
+  robots.txt, sitemaps, and closing the site behind the lock
+- [Working on the CMS](docs/contributing.md) — running the bundled examples
+  and rebuilding the in-place editor
 
 ## Packages
 

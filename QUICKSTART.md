@@ -260,7 +260,7 @@ site-wide notice bar — a holiday closure, a delivery delay — switched on
 in **Site settings** goes in above everything else on its own, right
 after your `<body>` tag, on every page. Call it only to put the bar
 somewhere else. The wording — with bold, italic and links — is written
-in the dialog, or in the bar itself like the footer. See [the notice bar](README.md#the-notice-bar).
+in the dialog, or in the bar itself like the footer. See [the notice bar](docs/navigation-and-layout.md#the-notice-bar).
 
 The dot (`.`) each page template receives carries `.Title`,
 `.Description`, `.Slug`, `.Locale`, and `.Post` (nil except on blog/news
@@ -775,6 +775,8 @@ Blank-canvas types, either from the admin or the tool rail.
 
 ## 8. Build the menu
 
+> Deeper: [navigation & site chrome](docs/navigation-and-layout.md).
+
 Menus are edited on the site itself, not in the admin. While in edit
 mode, **right-click** (long-press on touch) the `{{cmsNav "main"}}` area:
 
@@ -1033,6 +1035,8 @@ still applies.
 
 ### Forgot password
 
+> Deeper: [password resets, bot protection, and two-factor login](docs/users-and-permissions.md).
+
 Give `cms.Config` a `Mailer` — one method, `Send(ctx, to, subject, text,
 html)` — and the login page grows a "Forgot your password?" link backed
 by the full reset flow: single-use emailed links that expire after an
@@ -1048,6 +1052,8 @@ Without a `Mailer` the feature is off: no link, and the reset routes
 answer 404. See "Password resets" in the README for the full design.
 
 ### Custom admin pages
+
+> Deeper: [host application integration](docs/host-integration.md).
 
 Reports, imports, settings — register plain handlers and they're mounted
 *inside* the admin's login/session/CSRF middleware at `/admin/x/{path}/`:
@@ -1173,10 +1179,6 @@ If you validate templates at build time with `render.CheckTemplate`,
 switch to `render.CheckTemplateFuncs` and pass the same map, or every
 template calling a host func reports a spurious parse failure.
 
-`examples/wheels` is a worked version: `vehicles.go` holds the store and
-both maps, and `templates/pages/home.gohtml` ranges over the result
-between two `cmsText` slots.
-
 ### Content-driven Tailwind rebuilds
 
 Superadmins can type any class into content through the HTML source
@@ -1214,7 +1216,7 @@ for the shared-theme-file pattern and what it prevents.
   the individual constructors — config snippets are code, not database
   rows, so a palette composed that way picks up blocks added by later
   releases on the next rebuild, with nothing to seed. See
-  [Keeping the palette current](README.md#keeping-the-palette-current).
+  [Keeping the palette current](docs/snippets-and-sections.md#keeping-the-palette-current).
 - `ObjectStore` — replace S3 entirely. Implement `media.ObjectStore`
   (`Put`/`Get`/`Delete`/`PublicURL`) for local disk in development or any
   storage you already run. When set, `S3` is ignored.
@@ -1278,6 +1280,9 @@ address comes from — is your program's business; the variables
 
 ## 10. Going to production
 
+> Deeper: [going to production](docs/production.md) — keeping a site out of
+> search engines until it is ready, robots.txt, sitemaps, and the site lock.
+
 - **Switch the site to production.** A freshly seeded site starts in
   **development**, where it asks search engines to skip it — the admin
   sidebar stamps every page while it does. A superadmin flips it in the
@@ -1313,18 +1318,19 @@ You now have a complete site. These go deeper:
   everything in step 9 wired up: Docker, Tailwind, S3 media, CAPTCHA, blog &
   news, and a custom admin section. Postgres by default; MySQL and MariaDB
   behind compose profiles.
-- [`examples/wheels`](examples/wheels) — a design mockup turned into a
-  working site: a custom Tailwind v4 theme shared by both builds, an
-  editor vocabulary in the site's own palette, all copy seeded as content
-  rather than defaulted in templates, and a data-driven vehicle strip
-  through `TemplateFuncs`.
 - [`examples/mariadb`](examples/mariadb) — the opposite end: the smallest
   host that does something real. MariaDB, hand-written CSS, no Tailwind, no
   build step. The one to read if you're not using Tailwind, since it shows
   how to override `SectionStyles` and `EditorStyles` with your own classes.
-- [README.md](README.md) — the feature reference, in more depth than this
-  guide: the Styles menu, the snippet palette, section composition,
-  localization, menus, and bot protection.
+- The guides in [`docs/`](docs/) — the feature reference, in more depth than
+  this guide:
+  [snippets, code blocks & sections](docs/snippets-and-sections.md),
+  [navigation & site chrome](docs/navigation-and-layout.md),
+  [site search](docs/site-search.md),
+  [users, roles & permissions](docs/users-and-permissions.md),
+  [host application integration](docs/host-integration.md),
+  [going to production](docs/production.md), and
+  [working on the CMS](docs/contributing.md).
 - [DESIGN.md](DESIGN.md) — architecture and design rationale.
 
 Running the CMS's own tests needs Docker: `make test` runs the store suite
