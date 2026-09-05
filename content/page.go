@@ -138,6 +138,10 @@ type Store struct {
 	// index it once for each; see SetLocales. Empty means the default
 	// locale alone.
 	locales []string
+	// templateRegions tells the search index which of a page's blocks are
+	// actually drawn by its template; see SetTemplateRegions. Nil indexes
+	// every published block.
+	templateRegions TemplateRegions
 }
 
 // NewStore returns a Store backed by db. defaultLocale is the fallback

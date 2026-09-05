@@ -407,10 +407,21 @@ export function openSiteSettings() {
                 ] });
             fields.push({ id: "loginInNav", label: "Show a “Log in” link in the menu for logged-out visitors",
                 type: "check", value: seed.loginInNav, tab: MENU, span: true });
-            // Only where there is a results page to reach. Without one the
-            // switch would set a setting that changes nothing a visitor
-            // sees, which is worse than not offering it: the icon would
-            // simply never appear and nobody could tell why.
+            // The switch only where there is a results page to reach —
+            // otherwise it would set a setting that changes nothing a
+            // visitor sees. But an absent switch is what sends someone
+            // hunting through this dialog for a feature they have read
+            // about, so the gap says what it is and who can close it: the
+            // template is the developer's to add, not the editor's.
+            if (!seed.searchInstalled) {
+                fields.push({ type: "note", span: true, tab: MENU, text: function () {
+                    return "Site search is not set up on this site, so there is no search box to " +
+                        "show here yet. It needs a results page, which is one template and one " +
+                        "line of configuration \u2014 whoever maintains this site can add it " +
+                        "(cfg.SearchTemplate in the site\u2019s main.go). The switch appears here " +
+                        "once they have.";
+                } });
+            }
             if (seed.searchInstalled) {
                 fields.push({ id: "searchInNav", label: "Show a search box in the menu",
                     type: "check", value: seed.searchInNav, tab: MENU, span: true });
