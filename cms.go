@@ -738,6 +738,25 @@ func New(cfg Config) (*CMS, error) {
 		}
 	}
 
+	// What the search index may hold: only the regions a page's template
+	// actually draws. Blocks left behind by a reworked layout are still in
+	// the database — on purpose — but they are on no page, so they are not
+	// findable on one. Without a renderer there is nobody to ask, and every
+	// published block is indexed.
+	if renderer != nil {
+		contentStore.SetTemplateRegions(func(template string) ([]string, bool) {
+			if !renderer.Knows(template) {
+				return nil, false
+			}
+			declared := renderer.Regions(template)
+			names := make([]string, 0, len(declared))
+			for _, r := range declared {
+				names = append(names, r.Name)
+			}
+			return names, true
+		})
+	}
+
 	objects := cfg.ObjectStore
 	if objects == nil && cfg.S3 != nil {
 		var err error

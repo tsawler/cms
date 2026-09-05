@@ -1559,13 +1559,31 @@ grows a switch that puts a magnifying glass at the end of the menu bar.
 Clicking it drops a search box below the bar; without JavaScript it is an
 ordinary link to the search page, which has a box of its own.
 
+**Adding it to a site that already exists.** `cms init` writes
+`templates/pages/search.gohtml` and the config line for you, but a site
+scaffolded before this feature existed has neither — and until it has
+both, there is nothing to switch on: the site-settings dialog says so
+rather than showing a switch that would do nothing. Two steps, once:
+
+1. Copy `templates/pages/search.gohtml` from
+   [the example site](examples/basic/templates/pages/search.gohtml) into
+   your own `templates/pages/`, and restyle it — it is your markup, the
+   same as any other page template.
+2. Add `cfg.SearchTemplate` to `main.go`, as above.
+
+Your existing content needs nothing: the index builds itself in the
+background the first time the new build serves a request.
+
 **What is searched.** The published words of every public page, post and
 news item — the text a visitor reads, with the HTML taken off on the way
 in, so a search never matches a class name or the site's own JavaScript.
 Drafts, unpublished pages and private pages are not in the index at all,
 so nothing that is not on the site can turn up in a result. Shared
 regions are left out too: a footer is on every page, and indexing it
-would make the whole site match its copyright line. Each language is
+would make the whole site match its copyright line. So is anything a
+page's template no longer draws — reworking a layout leaves the old
+region's content in place, and a search should find what is on the page
+rather than what is behind it. Each language is
 indexed separately, and a page with no translation is findable in the
 other language by the words a visitor would actually be shown there.
 

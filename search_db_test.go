@@ -209,3 +209,51 @@ func TestSearchIndexIsBuiltOnFirstTraffic(t *testing.T) {
 		}
 	})
 }
+
+// A region a template no longer draws keeps its blocks — that is what
+// makes reworking a layout reversible — but those words are on no page,
+// so a search must not find them there.
+func TestSearchIgnoresBlocksNoTemplateDraws(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSearchTestCMS(t, db, true)
+
+		id, err := c.content.Insert(ctx, &content.Page{
+			Slug: "beliefs", Title: "Beliefs", TemplateName: "templates/pages/standard.gohtml",
+		}, "en")
+		if err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+		// "main" is the only region standard.gohtml declares; "band" is
+		// what an earlier version of the template used to.
+		if err := c.content.UpsertDraftBlock(ctx, id, "main", "en",
+			content.KindHTML, "<p>what we believe</p>"); err != nil {
+			t.Fatalf("UpsertDraftBlock(main): %v", err)
+		}
+		if err := c.content.UpsertDraftBlock(ctx, id, "band", "en",
+			content.KindHTML, "<h1>zebracorn</h1>"); err != nil {
+			t.Fatalf("UpsertDraftBlock(band): %v", err)
+		}
+		if err := c.content.Publish(ctx, id); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+
+		body := get(t, c.Pages(), "http://example.test/beliefs").Body.String()
+		if strings.Contains(body, "zebracorn") {
+			t.Fatal("the orphaned region is on the page after all; the test proves nothing")
+		}
+		if !strings.Contains(body, "what we believe") {
+			t.Fatalf("the drawn region is missing from the page:\n%s", body)
+		}
+
+		results := get(t, c.Pages(), "http://example.test/search?q=zebracorn").Body.String()
+		if strings.Contains(results, "/beliefs") {
+			t.Errorf("a search found words that are on no page:\n%s", results)
+		}
+		// And the words that are on it are still findable.
+		results = get(t, c.Pages(), "http://example.test/search?q=believe").Body.String()
+		if !strings.Contains(results, "/beliefs") {
+			t.Errorf("filtering the index dropped the page's real content:\n%s", results)
+		}
+	})
+}

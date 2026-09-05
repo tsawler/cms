@@ -592,6 +592,15 @@ why. Nothing is re-checked when the index is queried, because anything a
 search could find has already passed that condition. That invariant, not
 a `WHERE` clause, is what keeps a draft out of a results page.
 
+What counts as a page's words is narrower than what counts as its rows.
+A region's blocks survive a template that stops declaring it — on purpose,
+so reworking a layout and changing it back destroys nothing — which leaves
+pages carrying published blocks that render nowhere. Those are not on the
+site, so `content.TemplateRegions` (which `cms.New` wires to the
+renderer's `Regions`/`Knows`) keeps them out of the index. A template the
+renderer does not know indexes everything: "no regions" and "no idea" are
+different answers, and only one is a reason to drop content.
+
 Reindexing happens **inside the transaction that caused it**, so the
 index and the content it describes become true at the same instant:
 `PublishAs` after the block copy, and `Unpublish`, `SetVisibility`,

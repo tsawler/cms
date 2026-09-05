@@ -39,6 +39,28 @@ type SearchResult struct {
 	Rank float64
 }
 
+// TemplateRegions reports the regions a page template declares, and
+// whether the renderer knows that template at all. It is how the search
+// index tells the words that are on a page from the words that merely sit
+// in its rows.
+//
+// The two are not the same. A region's blocks are left alone when a
+// template stops declaring it — deliberately, so that reworking a layout
+// and changing it back does not destroy content — which means a page can
+// carry published blocks that render nowhere. They are not on the site, so
+// they have no business being findable on it.
+//
+// known is false for a template the renderer has never heard of (a page
+// pointing at a file that has since been deleted). Everything is indexed
+// then, because "no regions" and "no idea" are different answers and only
+// one of them is a reason to leave content out.
+type TemplateRegions func(template string) (regions []string, known bool)
+
+// SetTemplateRegions gives the store the resolver above. Without one —
+// a Store built with no renderer to ask, which is every store in a test
+// that does not need this — every published block is indexed.
+func (s *Store) SetTemplateRegions(fn TemplateRegions) { s.templateRegions = fn }
+
 // SetLocales tells the store which locales the site serves, so that
 // publishing a page indexes it once per locale. Empty or nil leaves the
 // store indexing the default locale alone, which is what a single-language
@@ -98,6 +120,7 @@ func (s *Store) reindexPage(ctx context.Context, h handle, pageID int64) error {
 
 	var (
 		slug       string
+		template   string
 		status     Status
 		visibility Visibility
 		isSystem   bool
@@ -105,12 +128,12 @@ func (s *Store) reindexPage(ctx context.Context, h handle, pageID int64) error {
 		publishAt  *time.Time
 	)
 	err := h.QueryRow(ctx, `
-		SELECT p.slug, p.status, p.visibility, p.is_system,
+		SELECT p.slug, p.template_name, p.status, p.visibility, p.is_system,
 		       COALESCE(po.feed, ''), po.published_at
 		FROM cms_pages p
 		LEFT JOIN cms_posts po ON po.page_id = p.id
 		WHERE p.id = $1`, pageID).
-		Scan(&slug, &status, &visibility, &isSystem, &feed, &publishAt)
+		Scan(&slug, &template, &status, &visibility, &isSystem, &feed, &publishAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil // deleted under us; the cascade has already emptied the rows
 	}
@@ -128,7 +151,7 @@ func (s *Store) reindexPage(ctx context.Context, h handle, pageID int64) error {
 	if err != nil {
 		return err
 	}
-	blocks, err := publishedBlockText(ctx, h, pageID)
+	blocks, err := publishedBlockText(ctx, h, pageID, s.renderedRegions(template))
 	if err != nil {
 		return err
 	}
@@ -221,6 +244,24 @@ func (s *Store) SearchIndexEmpty(ctx context.Context) (bool, error) {
 	return any == 0, err
 }
 
+// renderedRegions is the set of regions this page's template actually
+// draws, or nil for "index everything" — no resolver, or a template the
+// renderer does not know. See TemplateRegions.
+func (s *Store) renderedRegions(template string) map[string]bool {
+	if s.templateRegions == nil {
+		return nil
+	}
+	names, known := s.templateRegions(template)
+	if !known {
+		return nil
+	}
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[n] = true
+	}
+	return out
+}
+
 // publishedMeta reads a page's published per-locale title and description.
 type localeMeta map[string][2]string
 
@@ -264,11 +305,15 @@ type localeBlocks map[string]map[string][]string
 // publishedBlockText reads a page's published blocks and renders each to
 // plain text, in the order a reader meets them.
 //
+// rendered names the regions the page's template draws; a nil map means
+// index them all. Blocks outside it are on no page and are skipped — see
+// TemplateRegions.
+//
 // Image blocks are skipped: their content is a URL, and a search that
 // matched it would be matching a file name nobody typed. Custom-code
 // blocks need no special handling — a page stores only the inert
 // placeholder for those (see 0032), and the placeholder has no text in it.
-func publishedBlockText(ctx context.Context, h handle, pageID int64) (localeBlocks, error) {
+func publishedBlockText(ctx context.Context, h handle, pageID int64, rendered map[string]bool) (localeBlocks, error) {
 	rows, err := h.Query(ctx, `
 		SELECT locale, region, kind, content
 		FROM cms_blocks
@@ -286,6 +331,9 @@ func publishedBlockText(ctx context.Context, h handle, pageID int64) (localeBloc
 			return struct{}{}, err
 		}
 		if kind == KindImage {
+			return struct{}{}, nil
+		}
+		if rendered != nil && !rendered[region] {
 			return struct{}{}, nil
 		}
 		text := SearchText(content)
