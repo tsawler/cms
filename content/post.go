@@ -221,6 +221,9 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 // The backing page's staged fields (title, description, template, per-page
 // code) go to the working copy and reach the site on the next Publish; the
 // slug and the cms_posts fields — feed, date, images — apply immediately.
+//
+// A zero PublishedAt means "leave the date as it is", not "no date": see
+// the statement below.
 func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -258,13 +261,31 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE cms_posts
-		SET feed = $1, published_at = $2, hide_author = $3,
-			thumbnail_media_id = $4, thumbnail_url = $5
-		WHERE id = $6`,
-		p.Feed, p.PublishedAt, p.HideAuthor, p.ThumbnailMediaID, p.ThumbnailURL,
-		p.PostID); err != nil {
+	// A zero PublishedAt leaves the stored date alone. InsertPost reads a
+	// zero as "published now" because a new post has no date yet; an
+	// update has one, and keeping it is the only reading that makes
+	// sense. Writing the zero is not an option the engines even agree
+	// on — MySQL rejects it outright, Postgres and MariaDB store year 1,
+	// which sorts the post under everything else forever — so the column
+	// is left out of the statement rather than set to a value.
+	if p.PublishedAt.IsZero() {
+		_, err = tx.Exec(ctx, `
+			UPDATE cms_posts
+			SET feed = $1, hide_author = $2,
+				thumbnail_media_id = $3, thumbnail_url = $4
+			WHERE id = $5`,
+			p.Feed, p.HideAuthor, p.ThumbnailMediaID, p.ThumbnailURL,
+			p.PostID)
+	} else {
+		_, err = tx.Exec(ctx, `
+			UPDATE cms_posts
+			SET feed = $1, published_at = $2, hide_author = $3,
+				thumbnail_media_id = $4, thumbnail_url = $5
+			WHERE id = $6`,
+			p.Feed, p.PublishedAt, p.HideAuthor, p.ThumbnailMediaID, p.ThumbnailURL,
+			p.PostID)
+	}
+	if err != nil {
 		return err
 	}
 	// Feed, date and slug apply at once, and a search result carries all

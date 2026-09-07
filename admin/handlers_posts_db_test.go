@@ -518,3 +518,106 @@ func TestPostPreviewRendersTheDraft(t *testing.T) {
 		}
 	})
 }
+
+// The date field is a datetime-local input, so it can be cleared, and a
+// cleared one submits an empty string. That must not be read as "no
+// date": the post has one, and the save keeps it. What made this worth
+// pinning is that getting it wrong looked different on every engine —
+// MySQL refused the save outright, Postgres and MariaDB stored year 1,
+// which sorts the post under everything else in every listing forever.
+func TestPostUpdateWithAnEmptyDateKeepsTheStoredOne(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := formServer(t, db)
+		u := formAdmin(t, s)
+		post := seedPost(t, s, content.FeedBlog, "Dated", "dated")
+		before := reloadPost(t, s, post.PostID).PublishedAt
+
+		form := postFormValues()
+		form.Set("title", "Still dated")
+		form.Set("slug", "dated")
+		form.Set("published_at", "")
+
+		rec := httptest.NewRecorder()
+		s.postUpdate(rec, formReq(t, s, u, form, idParams(post.PostID)))
+
+		wantRedirect(t, rec, "/admin/posts/"+itoa(post.PostID))
+		after := reloadPost(t, s, post.PostID)
+		if !after.PublishedAt.Equal(before) {
+			t.Errorf("published_at = %v, want the stored %v", after.PublishedAt, before)
+		}
+		// The rest of the save still landed.
+		if after.Title != "Still dated" {
+			t.Errorf("title = %q, want the submitted one", after.Title)
+		}
+	})
+}
+
+// The same emptied field on the way through the parser, which is where
+// the stored date is picked up — and on a create there is no stored date
+// to pick up, so the zero stands and InsertPost reads it as "now".
+func TestParsePostMetaFallsBackToTheStoredDate(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := formServer(t, db)
+		u := formAdmin(t, s)
+		existing := seedPost(t, s, content.FeedBlog, "Has a date", "has-a-date")
+
+		form := postFormValues()
+		form.Set("published_at", "")
+
+		got, errs := s.parsePostMeta(formReq(t, s, u, form, nil), existing)
+		if len(errs) > 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+		if !got.PublishedAt.Equal(existing.PublishedAt) {
+			t.Errorf("published_at = %v, want the existing %v", got.PublishedAt, existing.PublishedAt)
+		}
+
+		// Creating: nothing to fall back to, and the zero is what
+		// InsertPost turns into now.
+		got, errs = s.parsePostMeta(formReq(t, s, u, form, nil), nil)
+		if len(errs) > 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+		if !got.PublishedAt.IsZero() {
+			t.Errorf("published_at = %v, want the zero a create leaves to the store", got.PublishedAt)
+		}
+	})
+}
+
+// A date typed wrong is rejected, and the form that comes back has to
+// carry the post's real date rather than year 1 — the reader is being
+// asked to fix one field, not handed a second thing to fix.
+func TestPostUpdateWithABadDateReRendersTheRealDate(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := formServer(t, db)
+		u := formAdmin(t, s)
+		post := seedPost(t, s, content.FeedBlog, "Bad date", "bad-date")
+		stored := reloadPost(t, s, post.PostID).PublishedAt
+
+		form := postFormValues()
+		form.Set("title", "Bad date")
+		form.Set("slug", "bad-date")
+		form.Set("published_at", "last Tuesday")
+
+		rec := httptest.NewRecorder()
+		s.postUpdate(rec, formReq(t, s, u, form, idParams(post.PostID)))
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "valid date and time") {
+			t.Errorf("the form does not mark the bad date: %q", body)
+		}
+		if want := stored.Format(datetimeLocalFormat); !strings.Contains(body, want) {
+			t.Errorf("the re-rendered date field does not hold %q", want)
+		}
+		if strings.Contains(body, "0001-01-01") {
+			t.Error("the re-rendered form offers a year-1 date")
+		}
+		// Nothing was written.
+		if got := reloadPost(t, s, post.PostID).PublishedAt; !got.Equal(stored) {
+			t.Errorf("published_at = %v, want the rejected save to have changed nothing", got)
+		}
+	})
+}
