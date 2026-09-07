@@ -130,7 +130,7 @@ a startup error rather than a silent fallback.
 | `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |
 | `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: a space-separated argv with `{content}` and `{output}` placeholders (see [Generated CSS for content classes](../QUICKSTART.md#content-driven-tailwind-rebuilds) and `tailwind-content.sh`). |
 | `CMS_TAILWIND_DIR` | unset | Working directory for `CMS_TAILWIND_COMMAND`. |
-| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
+| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint: a host name, reached over https, or an `http://`/`https://` URL (`http://` for a local MinIO). Setting it enables the media library and makes the other `S3_*` variables relevant. |
 | `S3_BUCKET` | — | Bucket for uploaded media. |
 | `S3_ACCESS_KEY` | — | Object-store access key. |
 | `S3_SECRET` | — | Object-store secret key. |
