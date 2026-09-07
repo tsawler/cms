@@ -203,3 +203,32 @@ func TestSectionStyleAxesCoversEveryAxis(t *testing.T) {
 		}
 	}
 }
+
+// tail trims a build tool's output down to the end of it, which is where
+// the error is, for a log line. It must not cut a short message and must
+// not lose the tail of a long one.
+func TestTail(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"short", "no such file", 40, "no such file"},
+		{"exactly n", "abcde", 5, "abcde"},
+		{"trimmed first", "  \n error: bad config \n\n", 40, "error: bad config"},
+		// Trimming happens before the length check, so whitespace does
+		// not count towards the budget and cannot push a short message
+		// over it.
+		{"whitespace does not overflow", "   abcde   ", 5, "abcde"},
+		{"truncated", "0123456789", 4, "…6789"},
+		{"zero", "0123456789", 0, "…"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tail(c.in, c.n); got != c.want {
+				t.Errorf("tail(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+			}
+		})
+	}
+}
