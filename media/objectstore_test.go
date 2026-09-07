@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -96,3 +97,194 @@ func (dumbStore) Get(context.Context, string) (io.ReadCloser, string, error) {
 }
 func (dumbStore) Delete(context.Context, string) error { return nil }
 func (dumbStore) PublicURL(key string) string          { return "/" + key }
+
+// NewS3Store validates the config and builds a client without touching
+// the network, so all of this runs in the fast lane. The S3 calls
+// themselves are exercised against a real server in objectstore_s3_test.go.
+
+func TestNewS3StoreRequiresItsCredentials(t *testing.T) {
+	full := S3Config{Endpoint: "s3.example.com", Bucket: "b", AccessKey: "k", Secret: "s"}
+	if _, err := NewS3Store(full); err != nil {
+		t.Fatalf("a complete config was rejected: %v", err)
+	}
+
+	// Each of the four is required; leaving one out is a misconfiguration
+	// that should be reported at startup rather than on the first upload.
+	cases := map[string]func(*S3Config){
+		"no endpoint":   func(c *S3Config) { c.Endpoint = "" },
+		"no bucket":     func(c *S3Config) { c.Bucket = "" },
+		"no access key": func(c *S3Config) { c.AccessKey = "" },
+		"no secret":     func(c *S3Config) { c.Secret = "" },
+	}
+	for name, drop := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := full
+			drop(&cfg)
+			if _, err := NewS3Store(cfg); err == nil {
+				t.Error("NewS3Store accepted an incomplete config")
+			}
+		})
+	}
+}
+
+// The signing region is guessed from the endpoint, which is right for the
+// cluster-labelled endpoints S3-compatible providers use. A host that
+// names one explicitly keeps it — AWS is the case the guess gets wrong.
+func TestNewS3StoreRegion(t *testing.T) {
+	s, err := NewS3Store(S3Config{
+		Endpoint: "us-ord-10.linodeobjects.com", Bucket: "b", AccessKey: "k", Secret: "s",
+	})
+	if err != nil {
+		t.Fatalf("NewS3Store: %v", err)
+	}
+	if s.cfg.Region != "us-ord-10" {
+		t.Errorf("region = %q, want it taken from the endpoint", s.cfg.Region)
+	}
+
+	s, err = NewS3Store(S3Config{
+		Endpoint: "s3.us-east-2.amazonaws.com", Region: "us-east-2",
+		Bucket: "b", AccessKey: "k", Secret: "s",
+	})
+	if err != nil {
+		t.Fatalf("NewS3Store: %v", err)
+	}
+	if s.cfg.Region != "us-east-2" {
+		t.Errorf("region = %q, want the configured one", s.cfg.Region)
+	}
+}
+
+func TestRegionFromEndpoint(t *testing.T) {
+	cases := map[string]string{
+		"us-ord-10.linodeobjects.com": "us-ord-10",
+		"nyc3.digitaloceanspaces.com": "nyc3",
+		"s3.us-east-1.amazonaws.com":  "s3",
+		// Nothing to split on: fall back to the region every S3 client
+		// understands rather than to an empty one, which signs nothing.
+		"localhost": "us-east-1",
+		"":          "us-east-1",
+	}
+	for endpoint, want := range cases {
+		if got := regionFromEndpoint(endpoint); got != want {
+			t.Errorf("regionFromEndpoint(%q) = %q, want %q", endpoint, got, want)
+		}
+	}
+}
+
+// KeyPrefix is how the Manager learns to namespace a shared bucket, so a
+// store reports exactly what it was configured with — including nothing.
+func TestS3StoreKeyPrefixAccessor(t *testing.T) {
+	for _, want := range []string{"", "acme", "acme-hotel_2"} {
+		s, err := NewS3Store(S3Config{
+			Endpoint: "s3.example.com", Bucket: "b", AccessKey: "k", Secret: "s",
+			KeyPrefix: want,
+		})
+		if err != nil {
+			t.Fatalf("NewS3Store(%q): %v", want, err)
+		}
+		if got := s.KeyPrefix(); got != want {
+			t.Errorf("KeyPrefix() = %q, want %q", got, want)
+		}
+		// And the Manager picks it up through the KeyPrefixer interface.
+		var kp KeyPrefixer = s
+		if got := kp.KeyPrefix(); got != want {
+			t.Errorf("as a KeyPrefixer, KeyPrefix() = %q, want %q", got, want)
+		}
+	}
+}
+
+// An endpoint may carry a scheme, and http is the reason it may: a store
+// on the same machine or private network with no certificate — a MinIO in
+// Docker, most often — is unreachable over https and was unreachable
+// through this config at all until the scheme was allowed.
+func TestSplitEndpoint(t *testing.T) {
+	cases := map[string]struct {
+		scheme, host string
+		wantErr      bool
+	}{
+		// A bare host is https, which is what every hosted provider wants.
+		"s3.example.com":              {"https", "s3.example.com", false},
+		"https://s3.example.com":      {"https", "s3.example.com", false},
+		"http://localhost:9000":       {"http", "localhost:9000", false},
+		"https://s3.example.com:8443": {"https", "s3.example.com:8443", false},
+		// A trailing slash is what a pasted URL carries, and it would
+		// otherwise double up in every object URL.
+		"https://s3.example.com/": {"https", "s3.example.com", false},
+		// Anything past the host is not an endpoint. Silently keeping it
+		// would produce URLs with a path buried in the hostname.
+		"https://s3.example.com/media": {"", "", true},
+		"s3.example.com/media":         {"", "", true},
+		// A scheme that is neither is a typo, not a hostname.
+		"ftp://s3.example.com": {"", "", true},
+		"https://":             {"", "", true},
+	}
+	for endpoint, want := range cases {
+		scheme, host, err := splitEndpoint(endpoint)
+		switch {
+		case want.wantErr && err == nil:
+			t.Errorf("splitEndpoint(%q) = %q, %q; want an error", endpoint, scheme, host)
+		case !want.wantErr && err != nil:
+			t.Errorf("splitEndpoint(%q): %v", endpoint, err)
+		case !want.wantErr && (scheme != want.scheme || host != want.host):
+			t.Errorf("splitEndpoint(%q) = %q, %q; want %q, %q",
+				endpoint, scheme, host, want.scheme, want.host)
+		}
+	}
+}
+
+// The scheme has to reach both places an endpoint is used, or a store
+// configured for http would sign requests to one address and hand pages
+// links to another.
+func TestNewS3StoreCarriesTheEndpointScheme(t *testing.T) {
+	cases := map[string]struct {
+		endpoint, wantURL string
+	}{
+		"bare host":      {"s3.example.com", "https://s3.example.com/b/media/abc/web.jpg"},
+		"explicit https": {"https://s3.example.com", "https://s3.example.com/b/media/abc/web.jpg"},
+		"http":           {"http://localhost:9000", "http://localhost:9000/b/media/abc/web.jpg"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, err := NewS3Store(S3Config{
+				Endpoint: c.endpoint, Bucket: "b", AccessKey: "k", Secret: "s",
+				PublicRead: true, UsePathStyle: true,
+			})
+			if err != nil {
+				t.Fatalf("NewS3Store: %v", err)
+			}
+			// Endpoint is normalized to a bare host, which is what the
+			// signing region and the URL builders both read.
+			if strings.Contains(s.cfg.Endpoint, "://") {
+				t.Errorf("stored endpoint = %q, want the scheme taken off", s.cfg.Endpoint)
+			}
+			if got := s.PublicURL("media/abc/web.jpg"); got != c.wantURL {
+				t.Errorf("PublicURL = %q, want %q", got, c.wantURL)
+			}
+		})
+	}
+}
+
+// The region is guessed from the host, so a scheme must not become part
+// of the guess — "https:" would be signed as the region and every request
+// rejected.
+func TestNewS3StoreRegionIgnoresTheScheme(t *testing.T) {
+	s, err := NewS3Store(S3Config{
+		Endpoint: "https://us-ord-10.linodeobjects.com",
+		Bucket:   "b", AccessKey: "k", Secret: "s",
+	})
+	if err != nil {
+		t.Fatalf("NewS3Store: %v", err)
+	}
+	if s.cfg.Region != "us-ord-10" {
+		t.Errorf("region = %q, want it taken from the host alone", s.cfg.Region)
+	}
+}
+
+func TestNewS3StoreRejectsABadEndpoint(t *testing.T) {
+	for _, endpoint := range []string{"ftp://s3.example.com", "https://s3.example.com/media", "https://"} {
+		if _, err := NewS3Store(S3Config{
+			Endpoint: endpoint, Bucket: "b", AccessKey: "k", Secret: "s",
+		}); err == nil {
+			t.Errorf("NewS3Store accepted endpoint %q", endpoint)
+		}
+	}
+}

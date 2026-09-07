@@ -814,6 +814,11 @@ S3: &cms.S3Config{
 },
 ```
 
+The endpoint is a host name, reached over https. Prefix it with
+`http://` for a store that has no certificate — a MinIO in Docker for
+local development, typically; don't use it over the public internet,
+where the objects would travel in the clear.
+
 By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
 direct bucket/CDN URLs instead (for a bucket that wasn't created public,
@@ -1255,7 +1260,7 @@ Every variable it reads:
 | `CMS_POSTS_PER_PAGE` | `10` | Posts per page in a paginated `{{cmsFeed}}` listing. Invalid or non-positive is a startup error. |
 | `CMS_ADMIN_PER_PAGE` | `25` | Rows per page in the admin's Blog & News and Pages lists. Invalid or non-positive is a startup error. |
 | `CMS_PAGE_VERSIONS_KEPT` | `50` | How many published editions of each page the history keeps. Invalid or non-positive is a startup error. |
-| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible endpoint. Setting it enables the media library and makes the other `S3_*` variables relevant. |
+| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible endpoint: a host name, reached over https, or an `http://`/`https://` URL. Setting it enables the media library and makes the other `S3_*` variables relevant. |
 | `S3_BUCKET` | — | Bucket for uploaded media. |
 | `S3_ACCESS_KEY` | — | Object-store access key. |
 | `S3_SECRET` | — | Object-store secret key. |

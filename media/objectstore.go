@@ -124,8 +124,16 @@ func manifestRoot(prefix string) string {
 
 // S3Config configures the S3-compatible object store.
 type S3Config struct {
-	// Endpoint is the S3 API host, without scheme, e.g.
-	// "us-ord-10.linodeobjects.com" or "s3.us-east-1.amazonaws.com".
+	// Endpoint is the S3 API host, e.g. "us-ord-10.linodeobjects.com" or
+	// "s3.us-east-1.amazonaws.com". A bare host is reached over https,
+	// which is what every hosted provider wants.
+	//
+	// An "http://" or "https://" scheme may be given instead, and then it
+	// is used as written. http is there for a store on the same machine
+	// or private network with no certificate — a MinIO in Docker for
+	// local development, most often. Nothing over the public internet
+	// should use it: the credentials are signed, but the objects
+	// themselves travel in the clear.
 	Endpoint string
 	// Region for request signing. Defaults to the first label of
 	// Endpoint (correct for Linode/DO-style endpoints); set explicitly
@@ -186,6 +194,10 @@ type S3Config struct {
 type S3Store struct {
 	client *s3.Client
 	cfg    S3Config
+	// scheme is how the endpoint is reached, taken from Endpoint when it
+	// carries one. Empty means https — the default, and what a store
+	// built by hand (tests) gets.
+	scheme string
 }
 
 // NewS3Store validates cfg and returns a ready S3Store. It does not call
@@ -194,6 +206,14 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKey == "" || cfg.Secret == "" {
 		return nil, fmt.Errorf("media: S3 Endpoint, Bucket, AccessKey, and Secret are all required")
 	}
+	scheme, host, err := splitEndpoint(cfg.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	// Everything downstream — the signing region, the direct-bucket URLs
+	// — reads Endpoint as a bare host, so the scheme is taken off it here
+	// rather than handled in each place.
+	cfg.Endpoint = host
 	if !validKeyPrefix(cfg.KeyPrefix) {
 		return nil, fmt.Errorf("media: S3 KeyPrefix %q may only contain letters, digits, '.', '-', and '_'", cfg.KeyPrefix)
 	}
@@ -217,10 +237,31 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 	}
 
 	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String("https://" + cfg.Endpoint)
+		o.BaseEndpoint = aws.String(scheme + "://" + cfg.Endpoint)
 		o.UsePathStyle = cfg.UsePathStyle
 	})
-	return &S3Store{client: client, cfg: cfg}, nil
+	return &S3Store{client: client, cfg: cfg, scheme: scheme}, nil
+}
+
+// splitEndpoint separates an optional scheme from an S3 endpoint,
+// returning the scheme to reach it over and the bare host the rest of the
+// package expects. A bare host is https; anything but http or https is
+// refused rather than quietly treated as part of the hostname, which is
+// what an endpoint pasted with a typo would otherwise become.
+func splitEndpoint(endpoint string) (scheme, host string, err error) {
+	scheme, host = "https", endpoint
+	if rest, ok := strings.CutPrefix(endpoint, "http://"); ok {
+		scheme, host = "http", rest
+	} else if rest, ok := strings.CutPrefix(endpoint, "https://"); ok {
+		host = rest
+	} else if strings.Contains(endpoint, "://") {
+		return "", "", fmt.Errorf("media: S3 Endpoint %q must be a host name, optionally with an http:// or https:// scheme", endpoint)
+	}
+	host = strings.TrimRight(host, "/")
+	if host == "" || strings.ContainsAny(host, "/?#") {
+		return "", "", fmt.Errorf("media: S3 Endpoint %q must be a host name (and port), with no path", endpoint)
+	}
+	return scheme, host, nil
 }
 
 // validKeyPrefix reports whether p is safe to embed in object keys and
@@ -381,6 +422,16 @@ func (s *S3Store) KeyPrefix() string {
 	return s.cfg.KeyPrefix
 }
 
+// urlScheme is how a direct-bucket URL reaches the store: whatever the
+// endpoint was configured with, and https for a store built without going
+// through NewS3Store.
+func (s *S3Store) urlScheme() string {
+	if s.scheme == "" {
+		return "https"
+	}
+	return s.scheme
+}
+
 func (s *S3Store) PublicURL(key string) string {
 	switch {
 	case s.cfg.PublicBaseURL != "":
@@ -391,8 +442,8 @@ func (s *S3Store) PublicURL(key string) string {
 		// prefix never shows in page URLs.
 		return ProxyPathPrefix + strings.TrimPrefix(key, keyRoot(s.cfg.KeyPrefix))
 	case s.cfg.UsePathStyle:
-		return "https://" + s.cfg.Endpoint + "/" + s.cfg.Bucket + "/" + key
+		return s.urlScheme() + "://" + s.cfg.Endpoint + "/" + s.cfg.Bucket + "/" + key
 	default:
-		return "https://" + s.cfg.Bucket + "." + s.cfg.Endpoint + "/" + key
+		return s.urlScheme() + "://" + s.cfg.Bucket + "." + s.cfg.Endpoint + "/" + key
 	}
 }
