@@ -118,6 +118,53 @@ func TestPostDefaultsPublishedAt(t *testing.T) {
 	})
 }
 
+// The other half of the zero-date rule. An update has a date already, so
+// a zero means "leave it alone" rather than "now" — and writing the zero
+// instead is not something the engines even agree about: MySQL rejects
+// it, Postgres and MariaDB store year 1, which sorts the post under
+// everything else forever.
+//
+// The path into this is ordinary: a post's date field is a
+// datetime-local input, a datetime-local input can be cleared, and a
+// cleared one submits an empty string.
+func TestPostUpdateWithNoDateKeepsTheStoredOne(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+
+		when := time.Date(2026, 4, 5, 6, 7, 8, 0, time.UTC)
+		post := seedPost(t, s, content.Post{
+			Page:        content.Page{Slug: "blog/dated", Title: "Dated"},
+			Feed:        content.FeedBlog,
+			PublishedAt: when,
+		})
+
+		// Everything else moves; the date is simply not supplied.
+		post.Title = "Retitled"
+		post.HideAuthor = true
+		post.PublishedAt = time.Time{}
+		if err := s.UpdatePost(ctx, post, defaultLocale); err != nil {
+			t.Fatalf("UpdatePost: %v", err)
+		}
+
+		got, err := s.PostByID(ctx, post.PostID, defaultLocale)
+		if err != nil {
+			t.Fatalf("PostByID: %v", err)
+		}
+		if !got.PublishedAt.UTC().Equal(when) {
+			t.Errorf("published_at = %v, want the stored %v", got.PublishedAt.UTC(), when)
+		}
+		// The rest of the save still happened — the date is left out of
+		// the statement, not the whole update.
+		if got.Title != "Retitled" {
+			t.Errorf("title = %q, want %q", got.Title, "Retitled")
+		}
+		if !got.HideAuthor {
+			t.Error("hide_author = false, want the submitted value")
+		}
+	})
+}
+
 func TestPostNotFound(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()

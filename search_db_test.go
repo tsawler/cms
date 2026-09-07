@@ -257,3 +257,93 @@ func TestSearchIgnoresBlocksNoTemplateDraws(t *testing.T) {
 		}
 	})
 }
+
+// ReindexSearch is the exported entry point for the two moments the
+// index cannot maintain itself through: an upgrade that changes how text
+// is extracted, and a host that would rather rebuild on its own schedule.
+// The backfill that runs off first traffic covers the third — an install
+// that had content before it had an index — and is tested above.
+//
+// What matters here is that it is a rebuild and not a refresh: the whole
+// index is replaced, so a document for a page that has since stopped
+// qualifying goes away rather than lingering as a hit that leads nowhere.
+func TestReindexSearchRebuildsTheWholeIndex(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSearchTestCMS(t, db, true)
+		publishSearchable(t, c, "kraken", "The Kraken", "<p>a cephalopod of unusual size</p>")
+		publishSearchable(t, c, "squid", "The Squid", "<p>a cephalopod of ordinary size</p>")
+
+		found := func(term string) int {
+			t.Helper()
+			hits, err := c.content.Search(ctx, content.ParseSearchQuery(term), "en", 10, 0)
+			if err != nil {
+				t.Fatalf("Search(%q): %v", term, err)
+			}
+			return len(hits)
+		}
+		if got := found("cephalopod"); got != 2 {
+			t.Fatalf("%d hits before the rebuild, want 2", got)
+		}
+
+		// Unpublish one, then wipe the index behind the CMS's back — the
+		// state an upgrade arrives in, where the index on disk is not
+		// what the extraction would produce now.
+		page, err := c.content.GetBySlug(ctx, "squid", "en", false)
+		if err != nil {
+			t.Fatalf("GetBySlug: %v", err)
+		}
+		if err := c.content.Unpublish(ctx, page.ID); err != nil {
+			t.Fatalf("Unpublish: %v", err)
+		}
+		if _, err := db.SQL().ExecContext(ctx, "DELETE FROM cms_search_docs"); err != nil {
+			t.Fatalf("clearing the index: %v", err)
+		}
+		if got := found("cephalopod"); got != 0 {
+			t.Fatalf("%d hits with the index cleared, want 0", got)
+		}
+
+		n, err := c.ReindexSearch(ctx)
+		if err != nil {
+			t.Fatalf("ReindexSearch: %v", err)
+		}
+		// The count is every published page, which is what a host running
+		// this from a command reports: the seeded home page and the one
+		// article still live.
+		if n != 2 {
+			t.Errorf("ReindexSearch indexed %d pages, want 2", n)
+		}
+		if got := found("cephalopod"); got != 1 {
+			t.Errorf("%d hits after the rebuild, want the 1 still published", got)
+		}
+		if got := found("Kraken"); got != 1 {
+			t.Errorf("%d hits for the published page, want 1", got)
+		}
+	})
+}
+
+// Running it on a site with nothing published is not an error and not a
+// no-op to be avoided: it reports zero and leaves an empty index, which
+// is what makes "run it whenever you like" safe advice.
+func TestReindexSearchOnAnEmptySite(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSearchTestCMS(t, db, true)
+
+		n, err := c.ReindexSearch(ctx)
+		if err != nil {
+			t.Fatalf("ReindexSearch: %v", err)
+		}
+		// SeedHomePage published one page, and that is the whole site.
+		if n != 1 {
+			t.Errorf("ReindexSearch indexed %d pages, want the seeded home page", n)
+		}
+		empty, err := c.content.SearchIndexEmpty(ctx)
+		if err != nil {
+			t.Fatalf("SearchIndexEmpty: %v", err)
+		}
+		if empty {
+			t.Error("the index is empty after a rebuild of a site with a published page")
+		}
+	})
+}

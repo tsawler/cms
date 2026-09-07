@@ -277,7 +277,8 @@ func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
 // existing is the stored post when editing and nil when creating. It
 // supplies the fields the form did not offer: with no media library the
 // image pickers are absent, and a save must leave the post's images alone
-// rather than clearing them.
+// rather than clearing them. It also supplies the date behind an emptied
+// date field, for the same reason.
 func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*content.Post, map[string]string) {
 	errs := map[string]string{}
 
@@ -314,6 +315,15 @@ func (s *server) parsePostMeta(r *http.Request, existing *content.Post) (*conten
 	}
 	p.Slug = feed + "/" + tail
 
+	// The date field can be cleared in the browser, and a save that read
+	// an empty one as "no date" would be asking for a post dated year 1.
+	// An edit keeps the date the post already has; a new post has none to
+	// keep, and InsertPost fills one in. The fallback is set before the
+	// field is read so that a date typed wrong re-renders the form with
+	// the real date in it rather than with a zero.
+	if existing != nil {
+		p.PublishedAt = existing.PublishedAt
+	}
 	if v := strings.TrimSpace(r.PostFormValue("published_at")); v != "" {
 		t, err := time.ParseInLocation(datetimeLocalFormat, v, time.Local)
 		if err != nil {
