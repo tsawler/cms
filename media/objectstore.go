@@ -46,6 +46,11 @@ type ObjectStore interface {
 	Delete(ctx context.Context, key string) error
 	// PublicURL returns the browser-facing URL for key. It may be
 	// absolute (bucket or CDN) or app-relative (proxied through the CMS).
+	//
+	// Not consulted for SVG, whatever it would answer: an SVG opened at
+	// the top of a tab is a document that can run script, and the
+	// Content-Security-Policy that says otherwise is one the CMS's own
+	// proxy writes. See Manager.publicURL.
 	PublicURL(key string) string
 }
 
@@ -165,11 +170,15 @@ type S3Config struct {
 	// policy. Making a bucket public varies by provider: a bucket
 	// policy allowing s3:GetObject on AWS, the bucket Access setting on
 	// Linode/DO, or ApplyPublicReadPolicy where permitted.
+	//
+	// SVGs are the exception and stay on the CMS's proxy either way; see
+	// Manager.publicURL for why.
 	PublicRead bool
 
 	// PublicBaseURL overrides the generated object URL prefix, for
 	// serving through a CDN or custom domain. No trailing slash. Takes
-	// precedence over PublicRead.
+	// precedence over PublicRead. SVGs stay on the CMS's proxy, as with
+	// PublicRead.
 	PublicBaseURL string
 	// UsePathStyle addresses objects as endpoint/bucket/key instead of
 	// bucket.endpoint/key. Needed for MinIO and some self-hosted stores.

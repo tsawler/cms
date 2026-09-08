@@ -104,7 +104,12 @@ func TestImageForVectorsAndNonImages(t *testing.T) {
 	if svg.Srcset != "" {
 		t.Errorf("svg srcset = %q, want none", svg.Srcset)
 	}
-	if want := "/media/vec001/web.svg"; svg.URL != want {
+	// The CMS's own proxy, not whatever the store would answer — an SVG
+	// only meets a script-blocking CSP on a response the CMS writes. See
+	// Manager.publicURL. (This stub store addresses everything else as
+	// "/"+key, so the prefix here is the rule doing its job, not the
+	// store's convention showing through.)
+	if want := ProxyPathPrefix + "vec001/web.svg"; svg.URL != want {
 		t.Errorf("svg URL = %q, want %q", svg.URL, want)
 	}
 	if svg.Width != 48 || svg.Height != 48 {

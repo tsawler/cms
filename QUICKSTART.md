@@ -823,7 +823,10 @@ By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
 direct bucket/CDN URLs instead (for a bucket that wasn't created public,
 also set `ApplyPublicReadPolicy` and `Migrate` will apply a public-read
-bucket policy — one-time, idempotent setup). Images get an automatic ladder
+bucket policy — one-time, idempotent setup). SVGs are the one exception
+and stay on the proxy either way: an SVG opened directly is a document
+that can run script, and the policy that stops it is a header only the
+CMS's own response carries. Images get an automatic ladder
 of WebP renditions — full width, card, thumbnail — that post templates emit
 as a srcset (`MediaWebPQuality` tunes compression); videos up to
 `MediaMaxVideoMB` (default 512) are stored as uploaded. Without `S3` the

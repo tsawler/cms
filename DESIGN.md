@@ -747,6 +747,15 @@ depends on configuration:
   `ApplyPublicReadPolicy` can set it where the key is allowed to).
 - **`PublicBaseURL`:** pages embed CDN/custom-domain URLs.
 
+Both public modes carry one exception: SVGs keep their `/cms/media/…`
+addresses. An SVG is the only upload that is a document rather than a
+picture — opened at the top of a tab it can run script on whatever origin
+served it — and the two things that stop that are the upload scan and the
+`default-src 'none'` policy the proxy puts on every `image/svg+xml`
+response. That policy is a header the CMS writes, so handing out a bucket
+URL would quietly drop one of the two layers. Vectors are a rounding error
+of a site's bytes, so the CDN loses little.
+
 The `ObjectStore` interface (Put/Get/Delete/PublicURL) is an extension
 point — hosts can swap in local disk for development or anything else.
 

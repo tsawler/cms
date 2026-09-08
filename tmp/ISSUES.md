@@ -107,7 +107,7 @@ a deployment that serves media straight from a public bucket.
 
 ---
 
-### [ ] 23. An SVG served straight from a public bucket has no CSP behind it
+### [x] 23. An SVG served straight from a public bucket has no CSP behind it
 
 Split out of #2. The media proxy sets
 `Content-Security-Policy: default-src 'none'` on `image/svg+xml`
@@ -124,6 +124,40 @@ where a stored SVG would run as a document. Cheap, but it changes object
 metadata (so it applies to new uploads only) and makes the media
 library's "Copy link" download rather than display, so it wants a
 deliberate decision rather than being folded into #2.
+
+**Fixed**, but not the way sketched above. `Content-Disposition` would
+have needed an optional-interface dance around the exported
+`ObjectStore.Put`, would only have covered new uploads, and would have
+made "Copy link" download rather than display. Routing SVG through the
+proxy is smaller and stronger: all four public-URL calls already funnel
+through `Manager.URL`, so a single `Manager.publicURL` helper returns the
+`/cms/media/…` path for a ".svg" key and defers to the store for
+everything else. It applies to existing objects immediately, needs no
+interface change, and restores the CSP layer rather than substituting a
+different one.
+
+Keyed off the object key rather than the record, since the key is what the
+proxy resolves and ".svg" keys come from the SVG pipeline alone (`docTypes`
+has no `.svg`). Raster images, videos and documents keep their CDN URLs —
+moving all media off the CDN to fix SVG would be a much larger change than
+the problem.
+
+Residual: the object still exists at its bucket URL under `PublicRead`.
+Reaching it needs the key, which is 12 random bytes, is no longer emitted
+anywhere, and is not enumerable through the policy `ApplyPublicReadPolicy`
+writes (it grants `s3:GetObject` only, not `s3:ListBucket`).
+
+Tests: `TestURLKeepsSVGOnTheProxy` and
+`TestURLKeepsSVGOnTheProxyUnderAKeyPrefix` (unit, against a store that
+hands out CDN URLs) and `TestPublicStoreStillProxiesSVG` (end to end —
+upload to a public store, then fetch each rendition and assert the CSP is
+actually on the response). All verified to fail without the fix. Each
+asserts the other direction too: a PNG, video and PDF on the same store
+must keep their direct URLs.
+
+One existing test changed: `TestImageForVectorsAndNonImages` asserted
+`/media/vec001/web.svg`, which was the stub store's `"/"+key` convention
+rather than a CMS guarantee. It now asserts the proxy path and says why.
 
 ### [ ] 3. Login and 2FA throttles are keyed by IP, so neither caps an account
 

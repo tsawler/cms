@@ -616,6 +616,36 @@ func (m *Manager) OpenOriginal(ctx context.Context, md *Media) (io.ReadCloser, s
 	return m.objects.Get(ctx, key)
 }
 
+// publicURL is ObjectStore.PublicURL with one exception: an SVG is always
+// addressed through the CMS's own media proxy, even on a store that would
+// hand out a direct bucket or CDN URL.
+//
+// An SVG is the one upload that is a document rather than a picture:
+// opened at the top of a tab it can run script on whatever origin served
+// it. Two layers stop that — the upload scan (see svg.go), and the
+// script-blocking Content-Security-Policy the proxy puts on every
+// image/svg+xml response. The second is a header the CMS writes, so it
+// exists only on responses the CMS writes. Hand out a bucket URL and the
+// bytes are served by somebody else, under no policy at all, leaving a
+// single layer holding a file format whose whole problem is how much it
+// can be made to do.
+//
+// The cost is that SVGs give up CDN delivery. It is a small one — they
+// are logos and icons, they are a rounding error of the bytes a site
+// serves, and the proxy still marks them immutable — and it buys back
+// the layer that catches whatever the scan did not.
+//
+// Keyed off the object rather than the record: ".svg" keys are written
+// by the SVG pipeline alone (docTypes has no .svg, and isSVGFilename
+// routes the extension there), and the key is what the proxy will
+// actually resolve.
+func (m *Manager) publicURL(key string) string {
+	if strings.HasSuffix(key, ".svg") {
+		return ProxyPathPrefix + strings.TrimPrefix(key, m.keyRoot)
+	}
+	return m.objects.PublicURL(key)
+}
+
 // URL returns the public URL of one rendition: "original" or any rung of
 // the ladder ("web", "card", "thumb"). Files have a single rendition,
 // returned for any name. Videos have "original" (the video itself; also
@@ -623,11 +653,11 @@ func (m *Manager) OpenOriginal(ctx context.Context, md *Media) (io.ReadCloser, s
 // has no poster.
 func (m *Manager) URL(md *Media, rendition string) string {
 	original := func() string {
-		return m.objects.PublicURL(m.abs(md.StoreKey + "/original" + md.Ext))
+		return m.publicURL(m.abs(md.StoreKey + "/original" + md.Ext))
 	}
 	switch md.Kind {
 	case KindFile:
-		return m.objects.PublicURL(m.abs(md.StoreKey))
+		return m.publicURL(m.abs(md.StoreKey))
 	case KindVideo:
 		switch rendition {
 		case "poster", "thumb":
@@ -640,7 +670,7 @@ func (m *Manager) URL(md *Media, rendition string) string {
 			if rendition == "thumb" {
 				name = "thumb"
 			}
-			return m.objects.PublicURL(m.abs(md.StoreKey + "/" + name + md.VariantExt))
+			return m.publicURL(m.abs(md.StoreKey + "/" + name + md.VariantExt))
 		default:
 			return original()
 		}
@@ -648,7 +678,7 @@ func (m *Manager) URL(md *Media, rendition string) string {
 	if _, ok := variantSpecFor(rendition); !ok || md.VariantExt == "" {
 		return original()
 	}
-	return m.objects.PublicURL(m.abs(md.StoreKey + "/" + rendition + md.VariantExt))
+	return m.publicURL(m.abs(md.StoreKey + "/" + rendition + md.VariantExt))
 }
 
 // View is a Media with its URLs precomputed, for templates.

@@ -509,3 +509,60 @@ func TestMediaProxyIsUnclaimedWithoutAnObjectStore(t *testing.T) {
 		}
 	})
 }
+
+// publicProxyStore is a proxyStore that hands out direct CDN URLs, the
+// way a deployment with S3Config.PublicRead or PublicBaseURL does. It
+// still serves Get, because that is how a public bucket behaves: the CMS
+// keeps its credentials and can read the object whenever it wants to.
+type publicProxyStore struct{ *proxyStore }
+
+func (publicProxyStore) PublicURL(key string) string { return "https://cdn.example.com/" + key }
+
+// TestPublicStoreStillProxiesSVG is the end of the chain #23 is about.
+// The upload scan (media/svg.go) is one layer; the proxy's
+// script-blocking CSP is the other, and it is a header the CMS writes, so
+// it only exists on responses the CMS writes. A deployment configured for
+// direct bucket or CDN URLs would hand the browser an address the CMS
+// never sees — so an SVG has to stay on the proxy even there.
+//
+// The other kinds must not: moving every upload off the CDN to fix SVG
+// would be a much larger change than the problem.
+func TestPublicStoreStillProxiesSVG(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		store := publicProxyStore{newProxyStore()}
+		c := newProxyTestCMS(t, db, store)
+
+		svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8">` +
+			`<rect width="8" height="8" fill="red"/></svg>`)
+		md, err := c.media.Upload(context.Background(), "logo.svg", svg, 0, nil)
+		if err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+
+		for _, rendition := range []string{"original", "web", "thumb"} {
+			url := c.media.URL(md, rendition)
+			if !strings.HasPrefix(url, media.ProxyPathPrefix) {
+				t.Fatalf("URL(%q) = %q: an SVG on a public store must still be proxied", rendition, url)
+			}
+			// And the address resolves, under the policy that is the
+			// whole reason for keeping it here.
+			rec := proxyGet(t, c, http.MethodGet, url, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s: status = %d, want 200", url, rec.Code)
+			}
+			if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+				t.Errorf("GET %s: CSP = %q, want scripting blocked", url, csp)
+			}
+		}
+
+		// A raster image on the same store keeps its CDN URL: the rule is
+		// about the one format that is a document, not about the CDN.
+		raster, err := c.media.Upload(context.Background(), "photo.png", proxyPNG(t), 0, nil)
+		if err != nil {
+			t.Fatalf("Upload png: %v", err)
+		}
+		if url := c.media.URL(raster, "web"); !strings.HasPrefix(url, "https://cdn.example.com/") {
+			t.Errorf("URL(png, \"web\") = %q, want the store's own CDN URL", url)
+		}
+	})
+}
