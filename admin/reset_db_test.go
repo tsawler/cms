@@ -70,17 +70,23 @@ func (m *recordingMailer) count() int {
 }
 
 // resetTestServer is a full admin server over a real user store, with a
-// recording mailer standing in for delivery.
-func resetTestServer(t *testing.T, db *sqldb.DB, mailer Mailer) (*httptest.Server, *http.Client, *auth.Store) {
+// recording mailer standing in for delivery. tweak, when non-nil, adjusts
+// the Deps before the handler is built — the reset tests use it to set
+// Deps.SiteURL, which decides where an emailed link points.
+func resetTestServer(t *testing.T, db *sqldb.DB, mailer Mailer, tweak ...func(*Deps)) (*httptest.Server, *http.Client, *auth.Store) {
 	t.Helper()
 	users := auth.NewStore(db)
-	h := New(Deps{
+	deps := Deps{
 		Sessions:  scs.New(),
 		Users:     users,
 		Mailer:    mailer,
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AdminPath: "/admin",
-	})
+	}
+	for _, fn := range tweak {
+		fn(&deps)
+	}
+	h := New(deps)
 	// Mounted the way a host mounts it — under AdminPath with the prefix
 	// stripped — because the flow's redirects land on absolute admin
 	// paths and must resolve.
@@ -155,8 +161,13 @@ func TestResetFlowEndToEnd(t *testing.T) {
 		if link == "" {
 			t.Fatalf("no reset link in the email body:\n%s", mail.Text)
 		}
-		// The test server's URL, not a guessed host.
-		link = srv.URL + link[strings.Index(link, "/admin/reset-password"):]
+		// Followed as sent. Rewriting the host here would have made this
+		// test pass no matter where the link pointed, which is exactly
+		// the property the flow has to get right — see
+		// TestResetLinkIgnoresHostHeader.
+		if !strings.HasPrefix(link, srv.URL+"/admin/reset-password?token=") {
+			t.Fatalf("reset link does not address this server:\ngot  %s\nwant %s/admin/reset-password?token=...", link, srv.URL)
+		}
 
 		// The form behind the link, twice: looking is not spending.
 		for i := 0; i < 2; i++ {
@@ -341,4 +352,117 @@ func TestNoMailerNoRoutes(t *testing.T) {
 			t.Errorf("GET %s = %d with no Mailer, want 404", path, resp.StatusCode)
 		}
 	}
+}
+
+// postForgotAs submits the forgot-password form with a chosen Host
+// header, the way an attacker would: they load the real form to get a
+// session and a CSRF token that goes with it — both are theirs for the
+// asking, the page is public — and then send the form back claiming to be
+// a host of their choosing. The connection still goes to the test server;
+// only the name the request claims is different.
+//
+// The session cookie is attached by hand rather than left to the client's
+// jar. Go's Client looks jar cookies up under req.Host when it is set
+// (net/http/client.go, Client.send), so a spoofed Host means the jar
+// finds nothing, the request arrives with no session, and the CSRF check
+// rejects it before it can reach the code under test. That is browser
+// behaviour, not server behaviour, and an attacker writing raw requests
+// is under no such restriction.
+func postForgotAs(t *testing.T, srv *httptest.Server, client *http.Client, host, email string) string {
+	t.Helper()
+	csrf := csrfFrom(t, srv, client, "/admin/forgot-password")
+
+	body := strings.NewReader(url.Values{"csrf_token": {csrf}, "email": {email}}.Encode())
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/admin/forgot-password", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	srvURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range client.Jar.Cookies(srvURL) {
+		req.AddCookie(c)
+	}
+	req.Host = host // what the server sees in r.Host
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// A CSRF rejection here would mean the request never reached the
+	// handler, and every assertion downstream would be vacuous.
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("the spoofed request was rejected before reaching the handler: %s", page)
+	}
+	return string(page)
+}
+
+// TestResetLinkIgnoresHostHeader is the reason emailBaseURL exists. A
+// reset link is read by whoever owns the mailbox, not by whoever asked
+// for it, so a base taken from the request's Host would let anyone mail a
+// victim a genuine, working reset link pointing at a server of their
+// choosing. With no Config.SiteURL to fall back on, the CMS must send
+// nothing at all rather than send that.
+//
+// The confirmation page still has to look identical — a site that
+// answered differently when misconfigured would be a new oracle for which
+// addresses have accounts.
+func TestResetLinkIgnoresHostHeader(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		mailer := newRecordingMailer()
+		srv, client, users := resetTestServer(t, db, mailer) // no SiteURL configured
+		u := seedActiveUser(t, users, "pat@example.com", "password-123")
+
+		// A link Pat legitimately holds already, so the declined request
+		// below can be checked for not having revoked it.
+		live, err := users.MintReset(context.Background(), u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		page := postForgotAs(t, srv, client, "attacker.example", "pat@example.com")
+		if !strings.Contains(page, "Check your email") {
+			t.Fatalf("a spoofed Host changed the answer the visitor gets:\n%s", page)
+		}
+
+		// The send is a goroutine, so absence needs a moment to be real.
+		time.Sleep(250 * time.Millisecond)
+		if n := mailer.count(); n != 0 {
+			t.Fatalf("sent %d reset email(s) built from an attacker-chosen Host: %+v", n, mailer.sends)
+		}
+
+		// Nothing was minted either. Minting revokes the previous token,
+		// so a request the CMS declines to act on must not be a way to
+		// keep destroying somebody's live reset link.
+		if _, err := users.ResetUser(context.Background(), live); err != nil {
+			t.Fatalf("the declined request revoked a live reset token: %v", err)
+		}
+	})
+}
+
+// TestResetLinkUsesConfiguredSiteURL: once the host says what the site is
+// called, that is what the email says, whatever the request claims.
+func TestResetLinkUsesConfiguredSiteURL(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		mailer := newRecordingMailer()
+		srv, client, users := resetTestServer(t, db, mailer, func(d *Deps) {
+			d.SiteURL = "https://real.example"
+		})
+		seedActiveUser(t, users, "pat@example.com", "password-123")
+
+		postForgotAs(t, srv, client, "attacker.example", "pat@example.com")
+		mail := mailer.wait(t)
+
+		link := resetLinkRe.FindString(mail.Text)
+		if !strings.HasPrefix(link, "https://real.example/admin/reset-password?token=") {
+			t.Fatalf("reset link did not use the configured SiteURL:\n%s", link)
+		}
+		if strings.Contains(mail.Text, "attacker.example") || strings.Contains(mail.HTML, "attacker.example") {
+			t.Fatalf("the spoofed host reached the email body:\n%s", mail.Text)
+		}
+	})
 }

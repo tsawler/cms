@@ -1255,7 +1255,7 @@ Every variable it reads:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, and hreflang alternates. Set it when the request's `Host` would be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
+| `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, hreflang alternates, and password-reset emails. **Set it in production.** A reset link is read by someone other than whoever asked for it, so building one from the request's `Host` would let an attacker have the CMS mail a victim a working link pointing at the attacker; rather than do that, a site with no `CMS_SITE_URL` sends no reset email at all and logs why. Requests arriving over loopback are exempt, which is what keeps `go run .` working. Set it, too, whenever the request's `Host` would simply be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | Posts per page in a paginated `{{cmsFeed}}` listing. Invalid or non-positive is a startup error. |
 | `CMS_ADMIN_PER_PAGE` | `25` | Rows per page in the admin's Blog & News and Pages lists. Invalid or non-positive is a startup error. |
@@ -1297,6 +1297,12 @@ address comes from — is your program's business; the variables
   still carry the `X-Robots-Tag: noindex` header.
 - **Set `SecureCookies: true`** — you're serving over HTTPS, and the
   session cookie should say so.
+- **Set `SiteURL` (`CMS_SITE_URL`)** to the site's canonical address. If
+  you use the forgot-password flow this is required, not advisory: a reset
+  link goes to a mailbox rather than back to the browser that asked for
+  it, so the CMS refuses to build one from the request's `Host` header —
+  which the sender chooses — and sends nothing instead. The startup log
+  warns when a `Mailer` is configured and this is not.
 - **Seed a strong password**, or change the seeded one immediately; the
   first account is a superadmin.
 - **Keep `Migrate` in startup.** It's idempotent, concurrency-safe, and

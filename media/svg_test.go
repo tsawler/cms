@@ -62,6 +62,25 @@ func TestProcessSVGRejectsActiveContent(t *testing.T) {
 		"data html href":    `<svg xmlns="http://www.w3.org/2000/svg"><a href="data:text/html;base64,PHNjcmlwdD4="><text>x</text></a></svg>`,
 		"dtd subset":        `<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg"/>`,
 		"xml-stylesheet pi": `<?xml-stylesheet href="http://evil.example/x.xsl" type="text/xsl"?><svg xmlns="http://www.w3.org/2000/svg"/>`,
+
+		// SMIL. The animation element carries no URL of its own — it
+		// writes one into href while the image is on screen, so a scan
+		// that only looked at href let all of these through.
+		"set rewrites href":      `<svg xmlns="http://www.w3.org/2000/svg"><a href="#x"><set attributeName="href" to="javascript:alert(1)"/><text>go</text></a></svg>`,
+		"animate rewrites href":  `<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="href" values="javascript:alert(1)" begin="0s"/><text>go</text></a></svg>`,
+		"animate xlink:href":     `<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="xlink:href" to="javascript:alert(1)"/><text>go</text></a></svg>`,
+		"animate href uppercase": `<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="HREF" to="#ok"/><text>go</text></a></svg>`,
+		"js later in value list": `<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="fill" values="red;javascript:alert(1);blue"/><text>go</text></a></svg>`,
+		"js in from":             `<svg xmlns="http://www.w3.org/2000/svg"><a><set attributeName="fill" from="javascript:alert(1)" to="red"/><text>go</text></a></svg>`,
+		"sneaky animated value":  "<svg xmlns=\"http://www.w3.org/2000/svg\"><a><set attributeName=\"fill\" to=\"java\nscript:alert(1)\"/><text>go</text></a></svg>",
+
+		// XML Events, both halves of it.
+		"handler element":    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:ev="http://www.w3.org/2001/xml-events"><handler ev:event="load">alert(1)</handler></svg>`,
+		"ev:event attribute": `<svg xmlns="http://www.w3.org/2000/svg" xmlns:ev="http://www.w3.org/2001/xml-events"><rect ev:event="click" ev:handler="#h"/></svg>`,
+
+		// data:image/svg+xml says image and means document: another SVG,
+		// which this scan has not looked inside.
+		"data svg href": `<svg xmlns="http://www.w3.org/2000/svg"><use href="data:image/svg+xml;base64,PHN2Zz48c2NyaXB0Lz48L3N2Zz4="/></svg>`,
 	}
 	for name, src := range cases {
 		if _, err := processSVG([]byte(src)); !errors.Is(err, ErrUnsafeSVG) {
@@ -74,6 +93,18 @@ func TestProcessSVGAllowsPlainDoctypeAndDataImage(t *testing.T) {
 	ok := []string{
 		`<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,iVBORw0KGgo="/></svg>`,
+
+		// Ordinary animation has to keep working: the rules above are
+		// about what an animation *writes*, not about SMIL as such. An
+		// illustrator's spinning logo is the common case, and a scan
+		// that rejected it would be swapped out for no scan at all.
+		`<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite"/></circle></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"><animateTransform attributeName="transform" type="rotate" from="0 5 5" to="360 5 5" dur="1s"/></rect></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"><set attributeName="fill" to="red" begin="1s"/></circle></svg>`,
+		// A link to somewhere real, animated or not, is still a link.
+		`<svg xmlns="http://www.w3.org/2000/svg"><a href="https://example.com/"><text>go</text></a></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><a href="/about"><text>go</text></a></svg>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><use href="#shape"/></svg>`,
 	}
 	for _, src := range ok {
 		if _, err := processSVG([]byte(src)); err != nil {

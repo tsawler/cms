@@ -161,13 +161,25 @@ type Config struct {
 	// "https://example.com" — scheme and host, no trailing slash and no
 	// path. It is what the CMS uses wherever a link has to work outside
 	// this request: the media library's "Copy link" buttons, RSS feed
-	// links, and hreflang alternates.
+	// links, hreflang alternates, and password-reset emails.
 	//
-	// Optional. When empty each request's own scheme and Host header are
-	// used instead, which is right for development and for a site served
-	// under one name. Set it when that guess would be wrong — behind a
-	// proxy that rewrites Host, or when the admin is reached by a
-	// different name than the public site.
+	// Optional for the first three, which are looked at by the person
+	// who asked for them: when empty, each request's own scheme and Host
+	// header are used instead, which is right for development and for a
+	// site served under one name.
+	//
+	// Required in production for the fourth. A reset link is read by
+	// somebody other than whoever asked for it, so a base taken from the
+	// request would let an attacker post the forgot-password form with a
+	// Host header of their choosing and have the CMS mail a victim a
+	// working reset link pointing at the attacker. Rather than do that,
+	// a site with no SiteURL sends no reset email at all and logs why —
+	// except when it is being reached over loopback, which is a
+	// developer on their own machine. Everything else is unaffected.
+	//
+	// Set it, too, when the request's host would simply be wrong —
+	// behind a proxy that rewrites Host, or when the admin is reached by
+	// a different name than the public site.
 	//
 	// A value with no scheme is assumed to be https.
 	SiteURL string
@@ -690,6 +702,16 @@ func New(cfg Config) (*CMS, error) {
 		}
 	}
 
+	// Said at startup rather than at the first person who cannot get back
+	// into their account: without SiteURL the only address the CMS could
+	// put in a reset email is the one the sender asked for, so it sends
+	// none. Not an error, because this is exactly the shape of a
+	// development machine, where loopback covers it.
+	if cfg.Mailer != nil && cfg.SiteURL == "" {
+		cfg.Logger.Warn("cms: SiteURL is not set, so password-reset emails will only be sent " +
+			"to requests arriving over loopback — set Config.SiteURL (CMS_SITE_URL) before deploying")
+	}
+
 	sessions := scs.New()
 	if cfg.Redis != nil {
 		if cfg.Redis.Addr == "" {
@@ -807,27 +829,31 @@ func New(cfg Config) (*CMS, error) {
 		// login and session checks refuse everyone but superadmins while
 		// it is on. Same cached reading, so the admin and the door
 		// cannot disagree about whether the site is open.
-		SiteLocked:      c.SiteLocked,
-		Sessions:        sessions,
-		Users:           users,
-		Content:         contentStore,
-		Renderer:        renderer,
-		RequestFuncs:    cfg.RequestFuncs,
-		Media:           mediaManager,
-		Snippets:        snippets.NewStore(db),
-		CodeSnippets:    codeStore,
-		Captcha:         capClient,
-		Mailer:          cfg.Mailer,
-		ConfigSnippets:  cfg.Snippets,
-		SectionStyles:   cfg.SectionStyles,
-		PostTemplate:    cfg.PostTemplate,
-		SearchTemplate:  cfg.SearchTemplate,
-		Sections:        cfg.AdminSections,
-		Stylesheets:     cfg.AdminStylesheets,
-		Permissions:     permissions,
-		Logger:          cfg.Logger,
-		AdminPath:       cfg.AdminPath,
-		SiteBaseURL:     c.siteBaseURL,
+		SiteLocked:     c.SiteLocked,
+		Sessions:       sessions,
+		Users:          users,
+		Content:        contentStore,
+		Renderer:       renderer,
+		RequestFuncs:   cfg.RequestFuncs,
+		Media:          mediaManager,
+		Snippets:       snippets.NewStore(db),
+		CodeSnippets:   codeStore,
+		Captcha:        capClient,
+		Mailer:         cfg.Mailer,
+		ConfigSnippets: cfg.Snippets,
+		SectionStyles:  cfg.SectionStyles,
+		PostTemplate:   cfg.PostTemplate,
+		SearchTemplate: cfg.SearchTemplate,
+		Sections:       cfg.AdminSections,
+		Stylesheets:    cfg.AdminStylesheets,
+		Permissions:    permissions,
+		Logger:         cfg.Logger,
+		AdminPath:      cfg.AdminPath,
+		SiteBaseURL:    c.siteBaseURL,
+		// The configured base, unmixed with the request's — the reset
+		// email is the one link that must not come from a header the
+		// sender chose. See admin.Deps.SiteURL.
+		SiteURL:         cfg.SiteURL,
 		DefaultLocale:   cfg.Locales[0],
 		Locales:         cfg.Locales,
 		RememberFor:     cfg.RememberFor,

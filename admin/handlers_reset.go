@@ -14,7 +14,9 @@ import (
 	"context"
 	"errors"
 	"html"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -110,12 +112,25 @@ func (s *server) forgotRequest(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	default:
+		// Resolved before the token is minted, not after. Minting
+		// revokes whatever link the user already holds, so a request we
+		// are not going to act on must not mint one — otherwise anyone
+		// could keep invalidating a legitimate reset link in flight
+		// simply by asking for another and having it declined.
+		base, ok := s.emailBaseURL(r)
+		if !ok {
+			s.deps.Logger.Error("cms admin: refusing to send a password reset link — " +
+				"the site has no configured base URL, so the only address available is the " +
+				"request's own Host header, which the sender chooses. Set cms.Config.SiteURL " +
+				"(CMS_SITE_URL) to the site's canonical https:// address.")
+			break
+		}
 		token, err := s.deps.Users.MintReset(r.Context(), u.ID)
 		if err != nil {
 			s.serverError(w, err)
 			return
 		}
-		link := s.absoluteAdminURL(r, "/reset-password?token="+token)
+		link := base + s.deps.AdminPath + "/reset-password?token=" + token
 		subject, text, html := s.resetEmail(r, u.Name, link)
 
 		// Delivered off the request, for two reasons. The honest one is
@@ -216,23 +231,54 @@ func (s *server) renderResetInvalid(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusUnprocessableEntity, "reset_password", data)
 }
 
-// absoluteAdminURL builds a link into the admin that works away from this
-// request — in an email. Deps.SiteBaseURL when the host provided one;
-// otherwise the request's own scheme and host, honouring a proxy's
-// X-Forwarded-Proto, which is right for a site served under one name.
-func (s *server) absoluteAdminURL(r *http.Request, path string) string {
-	base := ""
-	if s.deps.SiteBaseURL != nil {
-		base = s.deps.SiteBaseURL(r)
+// emailBaseURL is the absolute base for a link the CMS is about to put in
+// an email, and the second return says whether there is one at all.
+//
+// It deliberately does not use Deps.SiteBaseURL, which falls back to the
+// request's Host header. That is fine for a link rendered back to the
+// person who sent the request — they chose the host they are looking at —
+// and wrong here, because the person who asks for a reset link is not the
+// person who receives it. Whoever posts the forgot-password form controls
+// Host (Go accepts nearly any value in it), so a base taken from the
+// request lets an attacker mail a victim a genuine, correctly-signed
+// reset link that points at the attacker's server. The victim clicks it
+// and hands over a live token.
+//
+// So the base comes from configuration, with one exception: a site being
+// reached over loopback is a developer running it on their own machine,
+// where Config.SiteURL is documented as unnecessary and there is no
+// third party to phish. Everything else with no SiteURL set gets nothing,
+// and forgotRequest declines to send.
+//
+// X-Forwarded-Proto is not consulted. It is another header the sender
+// controls, and the only case this branch serves — localhost — has no
+// proxy in front of it to set one honestly.
+func (s *server) emailBaseURL(r *http.Request) (string, bool) {
+	if s.deps.SiteURL != "" {
+		return s.deps.SiteURL, true
 	}
-	if base == "" {
+	if isLoopbackHost(r.Host) {
 		scheme := "http"
-		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		if r.TLS != nil {
 			scheme = "https"
 		}
-		base = scheme + "://" + r.Host
+		return scheme + "://" + r.Host, true
 	}
-	return base + s.deps.AdminPath + path
+	return "", false
+}
+
+// isLoopbackHost reports whether a Host header names this machine:
+// "localhost", 127.0.0.0/8, or ::1, with or without a port.
+func isLoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // resetEmail is the message itself: authored here, in the module, so
