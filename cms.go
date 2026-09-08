@@ -217,9 +217,24 @@ type Config struct {
 	// still bounds it server-side). Defaults to 30 days.
 	RememberFor time.Duration
 
-	// SecureCookies marks the session cookie Secure so it is only sent
-	// over HTTPS. Enable in production; leave off for local development
-	// over plain HTTP.
+	// SecureCookies marks the session cookie Secure, so a browser only
+	// ever sends it over HTTPS. Setting it forces the flag on.
+	//
+	// Leaving it alone does not mean "off": a site whose SiteURL is an
+	// https:// address is served over HTTPS by the host's own account, so
+	// its session cookie is marked Secure whatever this says. That
+	// derivation exists because this is the setting whose absence is
+	// silent — nothing looks wrong, the site works, and the admin session
+	// cookie is one plaintext request away from being readable. A site
+	// that has told the CMS it lives at an https:// address should not
+	// also have to remember this.
+	//
+	// So set it only for the case the derivation cannot see: HTTPS in
+	// front of an install that leaves SiteURL empty. There is no way to
+	// turn it off for an https:// SiteURL, and nothing legitimate wants
+	// to — Secure describes the browser's connection to the edge, not the
+	// edge's connection to this process, so terminating TLS at a proxy is
+	// not a reason to drop it.
 	SecureCookies bool
 
 	// ClientIPHeader names the header a trusted reverse proxy sets to the
@@ -557,6 +572,12 @@ type Config struct {
 	Logger *slog.Logger
 }
 
+// MinSeedPasswordLength is the shortest password SeedAdmin accepts — the
+// same floor the admin's own password forms enforce, applied here so the
+// account that is created without a form is not the weakest one on the
+// site.
+const MinSeedPasswordLength = 8
+
 // pageViewRetentionDays is how long the public site's daily page-view
 // counters are kept before Migrate prunes them: a season of history for
 // a dashboard that charts a week, at a negligible storage cost.
@@ -754,7 +775,7 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.Persist = false
 	sessions.Cookie.HttpOnly = true
 	sessions.Cookie.SameSite = http.SameSiteLaxMode
-	sessions.Cookie.Secure = cfg.SecureCookies
+	sessions.Cookie.Secure = secureCookies(cfg)
 
 	users := auth.NewStore(db)
 	users.SetLogger(cfg.Logger)
@@ -887,6 +908,15 @@ func New(cfg Config) (*CMS, error) {
 	return c, nil
 }
 
+// secureCookies decides whether the session cookie carries the Secure
+// flag: because the host asked for it, or because it has already said the
+// site lives at an https:// address, which is the same statement made
+// once instead of twice. SiteURL is normalized before this runs, so a
+// bare "example.com" has become https:// by now and counts.
+func secureCookies(cfg Config) bool {
+	return cfg.SecureCookies || strings.HasPrefix(cfg.SiteURL, "https://")
+}
+
 // collectPermissions merges the host's declared permissions with those
 // implied by its admin sections, validating keys as it goes. An explicit
 // Config.Permissions entry wins over a section-derived one, so a host
@@ -1006,7 +1036,18 @@ func (c *CMS) Migrate(ctx context.Context) error {
 // an upgrade quietly pull them out of search results — or claim a URL
 // their own app already answers — would be a far worse surprise than
 // having to flip a switch once.
+//
+// The password must be at least MinSeedPasswordLength characters. This is
+// the one door into the product that does not go through a form, so it is
+// the one place a site can be given a superadmin nobody chose the password
+// for — an empty string, or whatever a host left in a template. The check
+// happens before the account count, so a misconfigured deployment hears
+// about it on every boot rather than only on the one where it mattered.
 func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool, error) {
+	if len(password) < MinSeedPasswordLength {
+		return false, fmt.Errorf("cms: SeedAdmin needs a password of at least %d characters "+
+			"(got %d) — this account is a superadmin", MinSeedPasswordLength, len(password))
+	}
 	n, err := c.users.Count(ctx)
 	if err != nil {
 		return false, err

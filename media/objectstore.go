@@ -226,6 +226,17 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 	if !validKeyPrefix(cfg.KeyPrefix) {
 		return nil, fmt.Errorf("media: S3 KeyPrefix %q may only contain letters, digits, '.', '-', and '_'", cfg.KeyPrefix)
 	}
+	// ApplyPublicReadPolicy on its own is always a mistake, and a quiet
+	// one: it opens the bucket to the world and then nothing reads it
+	// that way, because PublicURL keeps handing out proxy paths. The site
+	// works, so nobody notices — which is the whole reason to refuse it
+	// here rather than let it sit.
+	if cfg.ApplyPublicReadPolicy && !cfg.PublicRead && cfg.PublicBaseURL == "" {
+		return nil, fmt.Errorf("media: S3 ApplyPublicReadPolicy opens the bucket to the world, " +
+			"but with neither PublicRead nor PublicBaseURL set nothing would ever use a direct " +
+			"bucket URL — set one of those to serve from the bucket, or drop " +
+			"ApplyPublicReadPolicy to keep it private and proxy through the CMS")
+	}
 	if cfg.Region == "" {
 		cfg.Region = regionFromEndpoint(cfg.Endpoint)
 	}

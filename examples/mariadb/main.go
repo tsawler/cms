@@ -9,7 +9,7 @@
 //	go run .
 //
 // — then open http://localhost:4200/admin/ and log in with
-// admin@example.com / password123.
+// admin@example.com, with a password generated and logged on the first run.
 //
 // See examples/basic for the fuller setup: Tailwind, the media library, a
 // login CAPTCHA, and a custom admin section.
@@ -17,8 +17,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -120,13 +122,29 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	// The first superadmin, created on the first run only. There is no
+	// fallback password written here: one would be the same on every
+	// checkout of this example, which is a published credential rather
+	// than a default. Set CMS_ADMIN_PASSWORD in .env to choose it, or let
+	// the first run generate and print one.
 	adminEmail := envOr("CMS_ADMIN_EMAIL", "admin@example.com")
-	adminPassword := envOr("CMS_ADMIN_PASSWORD", "password123")
-	created, err := c.SeedAdmin(ctx, adminEmail, "Site Admin", adminPassword)
-	if err != nil {
-		return err
+	adminPassword := os.Getenv("CMS_ADMIN_PASSWORD")
+	generated := adminPassword == ""
+	if generated {
+		var err error
+		if adminPassword, err = devPassword(); err != nil {
+			return err
+		}
 	}
-	if created {
+	if created, err := c.SeedAdmin(ctx, adminEmail, "Site Admin", adminPassword); err != nil {
+		return err
+	} else if created && generated {
+		// Printed exactly once, on the run that created the account. Set
+		// CMS_ADMIN_PASSWORD in .env to choose it yourself, or reset the
+		// database and start again if this scrolls past.
+		logger.Warn("created initial admin with a generated password",
+			"email", adminEmail, "password", adminPassword)
+	} else if created {
 		// Not the password: logs get shipped, tailed, and aggregated, so a
 		// credential written here outlives the terminal it appeared in.
 		// Whoever configured it already knows it.
@@ -160,4 +178,22 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// devPassword returns a password for the example's first-run superadmin
+// when none was configured.
+//
+// The generated sites this module writes put a per-project password in
+// their .env, so their main.go can simply refuse when the variable is
+// missing. An example checked out of a repository has nowhere for that to
+// have been written — .env here is the developer's own, gitignored file —
+// so it makes one instead, and prints it the once. A password written
+// into this file would be in the repository, which is the thing being
+// avoided.
+func devPassword() (string, error) {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

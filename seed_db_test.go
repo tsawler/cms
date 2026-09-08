@@ -189,3 +189,51 @@ func TestSeedHomePageNeedsATemplate(t *testing.T) {
 		}
 	})
 }
+
+// SeedAdmin is the one door into the product that does not go through a
+// form, so it is the one place a site can end up with a superadmin whose
+// password nobody chose — an empty string, or whatever a host left in a
+// template. It refuses rather than creating the account.
+func TestSeedAdminRefusesAWeakPassword(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSeedTestCMS(t, db)
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+
+		for _, password := range []string{"", "x", "short"} {
+			created, err := c.SeedAdmin(ctx, "boss@example.com", "Boss", password)
+			if err == nil {
+				t.Errorf("SeedAdmin accepted the password %q", password)
+			}
+			if created {
+				t.Errorf("SeedAdmin(%q) reported an account created", password)
+			}
+		}
+
+		// Nothing was written, so a corrected password still seeds.
+		n, err := c.users.Count(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("a refused SeedAdmin left %d user(s) behind", n)
+		}
+
+		created, err := c.SeedAdmin(ctx, "boss@example.com", "Boss", "correct horse battery")
+		if err != nil {
+			t.Fatalf("SeedAdmin with a real password: %v", err)
+		}
+		if !created {
+			t.Error("SeedAdmin did not create the account after the refusals")
+		}
+
+		// The refusal is about the password, not about the account count,
+		// so an established site hears about a bad one too rather than
+		// having it silently ignored as a no-op.
+		if _, err := c.SeedAdmin(ctx, "boss@example.com", "Boss", "short"); err == nil {
+			t.Error("SeedAdmin accepted a weak password once the site had users")
+		}
+	})
+}

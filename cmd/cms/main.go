@@ -266,7 +266,8 @@ func printNextSteps(dir string, tailwind, tidied, dryRun bool) {
 		fmt.Println("    go generate .             # compile static/site.css")
 	}
 	fmt.Println("    go run .")
-	fmt.Println("\nThen sign in at http://localhost:4000/admin/ with the credentials in .env.")
+	fmt.Println("\nThen sign in at http://localhost:4000/admin/ with the credentials in .env —")
+	fmt.Println("the admin password there was generated for this project alone.")
 	if tailwind {
 		fmt.Println("go generate needs the Tailwind CLI: brew install tailwindcss")
 	}

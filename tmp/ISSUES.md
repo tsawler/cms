@@ -268,7 +268,7 @@ exempt from non-exempt instead of passing on a technicality.
 its router", which is no longer true; that section now separates what the
 switch does by itself from what `Lockdown` adds.
 
-### [ ] 5. `SecureCookies` is the one production setting with no environment knob
+### [x] 5. `SecureCookies` is the one production setting with no environment knob
 
 `cms.go:713` — `sessions.Cookie.Secure = cfg.SecureCookies`, default
 `false`. `ConfigFromEnv` exposes ~15 variables and not this one; the
@@ -278,7 +278,43 @@ session cookie unless the developer finds QUICKSTART step 10 and edits Go
 source. Either add `CMS_SECURE_COOKIES`, or default to secure and let
 hosts opt out.
 
-### [ ] 6. `S3_APPLY_PUBLIC_POLICY` is all cost, no benefit from the environment
+**Fixed**, both ways, because the env variable alone would only have moved
+the remembering rather than removed it. The flag is now *derived*: an
+`https://` `SiteURL` means the site is served over HTTPS by the host's own
+account, so the cookie is marked Secure whether or not anyone also sets
+`SecureCookies`. This is the setting whose absence is silent — nothing
+looks broken, the site works, and the admin session cookie is one
+plaintext request away from being readable — so it should not depend on a
+second, separate act of memory. `#1` had just made `SiteURL` effectively
+required in production, which is what makes the signal reliable.
+
+`SecureCookies bool` keeps its meaning (force it on) rather than becoming
+a `*bool`, so nothing breaks; it now covers only the case the derivation
+cannot see, HTTPS in front of an install that leaves `SiteURL` empty.
+There is deliberately no way to turn the flag *off* for an `https://`
+site: Secure describes the browser's connection to the edge, not the
+edge's to this process, so terminating TLS at a proxy is not a reason to
+drop it.
+
+`CMS_SECURE_COOKIES` added as well, parsed like `CMS_SITE_LOCKED` — a
+malformed value is an error rather than a silent false, since
+`CMS_SECURE_COOKIES=yes` quietly meaning "no" is precisely this setting's
+failure mode.
+
+Tests: `secure_cookies_test.go` — a table over the derivation, and
+`TestNewMarksTheSessionCookieSecure`, which drives real `New()` calls and
+checks the flag reaches the cookie (a rule nothing applies is not a rule).
+`sql.Open` does not connect and `New` never queries, so both run without
+Docker. Plus `TestConfigFromEnvSecureCookies` for parsing, including the
+malformed case. All verified to fail against the pre-fix behaviour.
+
+Found and fixed in passing: `env_test.go`'s `envVars` list — which exists
+so a developer's real environment cannot leak into the tests — was missing
+`CMS_CLIENT_IP_HEADER`, which #3 had added. Both new variables are in it
+now.
+
+
+### [x] 6. `S3_APPLY_PUBLIC_POLICY` is all cost, no benefit from the environment
 
 `env.go` sets `ApplyPublicReadPolicy` but not `PublicRead` or
 `PublicBaseURL`. The field's own doc says "pair it with PublicRead or
@@ -287,11 +323,92 @@ impossible from env. An env-configured deployment that sets it makes the
 bucket world-readable *and* still proxies every byte through the app,
 gaining nothing and losing the SVG CSP from finding #2.
 
-### [ ] 7. Scaffolded sites default to `admin@example.com` / `password123`
+(The SVG half of that is already gone — #23 keeps SVGs on the proxy
+whatever the URL strategy. What was left is a bucket opened to the world
+for no benefit at all.)
+
+**Fixed** two ways, because the variable was both unusable and unpaired.
+
+*Made usable:* `S3_PUBLIC_READ`, `S3_PUBLIC_BASE_URL` and
+`S3_USE_PATH_STYLE` are now read from the environment, so the whole
+serving strategy is expressible there rather than only the half that opens
+the bucket. `S3_USE_PATH_STYLE` was the same class of gap and worth
+closing at the same time: MinIO is the store the docs point at for local
+development and it needs path-style addressing, which env-configured
+installs had no way to ask for.
+
+*Made loud:* `NewS3Store` now refuses `ApplyPublicReadPolicy` with neither
+`PublicRead` nor `PublicBaseURL`. That combination opens the bucket and
+then nothing reads it that way, because `PublicURL` goes on handing out
+proxy paths — the site works, so the mistake never announces itself, which
+is exactly why it earns a startup error rather than a shrug. Refusing
+rather than inferring `PublicRead`: inferring would silently change what
+URLs appear in every page's HTML on upgrade, which is a worse surprise
+than a message naming the two settings.
+
+Also fixed in passing: `S3_APPLY_PUBLIC_POLICY` was compared against the
+literal `"1"`, so `S3_APPLY_PUBLIC_POLICY=true` silently meant *false* —
+on the one variable whose job is opening a bucket. All the true/false
+variables now go through a shared `envBool` that reports a malformed value
+instead of reading it as false, which also removed three spellings of the
+same parse (`CMS_SECURE_COOKIES` included).
+
+Tests: `TestNewS3StoreRejectsAPointlessPublicPolicy` (refused alone,
+accepted with either pairing, and an ordinary private bucket still fine —
+the check is about the policy, not about being private) and
+`TestConfigFromEnvS3PublicSettings` (defaults stay private, the base URL
+is trimmed, each flag reads `true` and rejects nonsense). `envVars` in
+`env_test.go` gained the three new names so the suite stays hermetic. All
+verified to fail against the pre-fix code.
+
+
+### [x] 7. Scaffolded sites default to `admin@example.com` / `password123`
 
 `scaffold/files/main.go.tmpl:137`. It logs a warning, but an install
 deployed without `CMS_ADMIN_PASSWORD` has a guessable superadmin.
 Generating a random password and printing it once would cost nothing.
+
+**Fixed** in three places, because the credential came from three.
+
+*The scaffold* now generates a password per project (`Options.AdminPassword`
+pins it; empty generates) and writes it into `.env`. Four groups of five
+characters from an alphabet with the lookalikes removed — 0/O, 1/l/I —
+because it is typed by hand at the first login, and "0 or O?" at that
+moment is a support ticket.
+
+*The generated main.go* carries no fallback at all. `envOr` was the
+problem: a default written into the template is the same on every site
+ever generated from it, which is a published credential rather than a
+default. It now reads `os.Getenv` and, when unset, seeds nothing and says
+so — safe in both directions, since an established site boots normally
+(seeding is a no-op anyway) and a new one gets a loud warning naming the
+variable. It also no longer logs the password: logs travel further than
+configuration does, and whoever set it already knows it.
+
+*The examples* differ deliberately, and the comment says why. A checked-out
+example has nowhere a per-project password could have been written — `.env`
+there is the developer's own, gitignored file — so refusing would have
+broken the documented contributor workflow. They generate one at first run
+and print it once instead.
+
+*Also hardened the library.* `SeedAdmin` is the one door into the product
+that does not go through a form, so it is the one place a site can get a
+superadmin whose password nobody chose. It now rejects anything under
+`MinSeedPasswordLength` (8, the same floor the admin's forms use). The
+check runs before the account count, so a misconfigured deployment hears
+about it on every boot rather than only on the one where it mattered. The
+pre-fix behaviour was worse than it looked: `SeedAdmin(ctx, …, "")`
+happily created a superadmin whose password was the empty string, which
+the new test confirms ("accepted the password \"\"… left 1 user(s)
+behind").
+
+Tests: `scaffold/admin_password_test.go` (two projects never share a
+password; the shape is long enough and free of lookalikes; an explicit
+password is honoured; and main.go carries no password, no `envOr` fallback
+and no logging of it) and `TestSeedAdminRefusesAWeakPassword`. All
+verified to fail against the pre-fix files. Also generated a real project
+end to end and built it, to be sure the template still compiles.
+
 
 ### [ ] 8. The last superadmin can demote themselves, permanently
 

@@ -359,3 +359,38 @@ func TestURLKeepsSVGOnTheProxyUnderAKeyPrefix(t *testing.T) {
 type prefixedPublicStore struct{ publicStore }
 
 func (prefixedPublicStore) KeyPrefix() string { return "acme" }
+
+// ApplyPublicReadPolicy on its own opens the bucket to the world and then
+// nothing reads it that way, because PublicURL keeps handing out proxy
+// paths. The site works, so the mistake never announces itself — which is
+// why NewS3Store refuses the combination instead of leaving it to be
+// noticed.
+func TestNewS3StoreRejectsAPointlessPublicPolicy(t *testing.T) {
+	base := S3Config{Endpoint: "s3.example.com", Bucket: "b", AccessKey: "k", Secret: "s"}
+
+	withPolicy := base
+	withPolicy.ApplyPublicReadPolicy = true
+	if _, err := NewS3Store(withPolicy); err == nil {
+		t.Error("ApplyPublicReadPolicy with neither PublicRead nor PublicBaseURL was accepted")
+	} else if !strings.Contains(err.Error(), "ApplyPublicReadPolicy") {
+		t.Errorf("error does not name the offending setting: %v", err)
+	}
+
+	// Paired with either way of actually using the bucket, it is fine.
+	withRead := withPolicy
+	withRead.PublicRead = true
+	if _, err := NewS3Store(withRead); err != nil {
+		t.Errorf("ApplyPublicReadPolicy with PublicRead: %v", err)
+	}
+	withCDN := withPolicy
+	withCDN.PublicBaseURL = "https://cdn.example.com"
+	if _, err := NewS3Store(withCDN); err != nil {
+		t.Errorf("ApplyPublicReadPolicy with PublicBaseURL: %v", err)
+	}
+
+	// And the ordinary private setup is untouched: the check is about the
+	// policy, not about being private.
+	if _, err := NewS3Store(base); err != nil {
+		t.Errorf("a private bucket was rejected: %v", err)
+	}
+}

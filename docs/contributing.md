@@ -49,9 +49,19 @@ environment or `.env`. Without them the example runs without CAPTCHA.
 The challenge is solved invisibly by default; `CAP_WIDGET=visible` shows
 the checkbox widget instead.
 
-Then open <http://localhost:4000/admin/> and log in with
-`admin@example.com` / `password123` (development defaults; override with
-`CMS_ADMIN_EMAIL` and `CMS_ADMIN_PASSWORD`).
+Then open <http://localhost:4000/admin/> and log in as
+`admin@example.com`. The first run creates that account and prints a
+generated password:
+
+```
+level=WARN msg="created initial admin with a generated password" email=admin@example.com password=…
+```
+
+Set `CMS_ADMIN_PASSWORD` in `.env` to choose your own instead. There is no
+default password: one written into the example would be the same on every
+checkout of this repository, which is a published credential rather than a
+convenience. If the printed one scrolls past, `docker compose down -v` and
+start again.
 
 Login sessions end when the browser closes unless "Remember me" is
 ticked, which keeps the login for `cms.Config.RememberFor` — 30 days by
@@ -106,7 +116,7 @@ no `CMS_DIALECT`.
 | `DATABASE_URL` | Postgres: `postgres://cms:cms@localhost:5433/cms?sslmode=disable`; MySQL: `cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone='+00:00'&clientFoundRows=true` | Connection string, matching `docker-compose.yml`. A MySQL DSN you supply yourself must carry all four settings in the default. |
 | `ADDR` | `:4000` | HTTP listen address. |
 | `CMS_ADMIN_EMAIL` | `admin@example.com` | Email for the admin account seeded on first run. |
-| `CMS_ADMIN_PASSWORD` | `password123` | Password for that seeded admin account. |
+| `CMS_ADMIN_PASSWORD` | generated on the first run and logged once | Password for that seeded admin account. No default: the example generates one rather than carrying a credential in the repository. |
 
 #### Read by the module
 
@@ -122,6 +132,7 @@ a startup error rather than a silent fallback.
 | `CMS_SESSION_REDIS_DB` | `0` | Redis logical database number. An invalid or negative value is a startup error. |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, hreflang alternates, and password-reset emails. **Set it in production.** A reset link is read by someone other than whoever asked for it, so building one from the request's `Host` would let an attacker have the CMS mail a victim a working link pointing at the attacker; rather than do that, a site with no `CMS_SITE_URL` sends no reset email at all and logs why. Requests arriving over loopback are exempt, which is what keeps `go run .` working. Set it, too, whenever the request's `Host` would simply be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_CLIENT_IP_HEADER` | unset (the connection's own address) | The header a trusted reverse proxy sets to the real client address — `X-Forwarded-For`, `CF-Connecting-IP`, `True-Client-IP`. Read by the login throttle and nothing else, where it is wrong in both directions if it does not match the deployment: left unset behind a proxy, every visitor arrives from the same address, so a handful of deliberate failures against a known account shuts it for everybody; set without a proxy that overwrites the header, the value is one the client picks and an attacker varies it to draw a fresh allowance per request. Set it exactly when every request reaches the app through a proxy you control and that proxy replaces the header. For `X-Forwarded-For` the rightmost entry is used — the one the nearest proxy appended. |
+| `CMS_SECURE_COOKIES` | unset (derived from `CMS_SITE_URL`) | Forces the session cookie's `Secure` flag on, so a browser only ever sends it over HTTPS. Usually unnecessary: an `https://` `CMS_SITE_URL` already implies it, which is deliberate — this is the setting whose absence is silent, and a site that has said where it lives should not have to say it twice. Set it for HTTPS in front of an install that leaves `CMS_SITE_URL` empty. There is no way to turn it *off* for an `https://` site, and nothing legitimate wants one: `Secure` describes the browser's connection to the edge, not the edge's connection to this process, so terminating TLS at a proxy is not a reason to drop it. |
 | `CMS_SITE_LOCKED` | unset (the stored switch decides) | Forces the [site lock](production.md#closing-the-site-the-lock) on or off whatever the admin has saved. `false` reopens a site locked by someone who then lost the way in; `true` brings one up closed. It overrides the stored setting without changing it, so removing the variable hands the switch back to the admin. A non-boolean value is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | How many posts a paginated `{{cmsFeed}}` listing shows per page. An invalid or non-positive value is a startup error. A template can override it per listing with `{{cmsFeed "blog" 6}}`. |
 | `CMS_ADMIN_PER_PAGE` | `25` | How many rows a paginated admin list shows per page (Blog & News, and Pages). Separate from `CMS_POSTS_PER_PAGE`: an editor's table wants more rows than a public listing. An invalid or non-positive value is a startup error. |
@@ -137,7 +148,10 @@ a startup error rather than a silent fallback.
 | `S3_SECRET` | — | Object-store secret key. |
 | `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
 | `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. It also scopes media adoption and the public-read policy, so set it whenever the bucket is shared. |
-| `S3_APPLY_PUBLIC_POLICY` | unset | Set to `1` to apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). |
+| `S3_PUBLIC_READ` | `false` | Serve media straight from the bucket instead of proxying it through the CMS. The bucket must already allow public `s3:GetObject` — see `S3_APPLY_PUBLIC_POLICY`. SVGs stay on the proxy either way. |
+| `S3_PUBLIC_BASE_URL` | unset | Serve media from a CDN or custom domain, e.g. `https://cdn.example.com`. Takes precedence over `S3_PUBLIC_READ`. A trailing slash is trimmed. |
+| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO and some self-hosted stores. |
+| `S3_APPLY_PUBLIC_POLICY` | `false` | Apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). It only opens the bucket — pair it with `S3_PUBLIC_READ` or `S3_PUBLIC_BASE_URL`, or nothing will ever read a direct bucket URL and the CMS refuses to start rather than leave a bucket public for no reason. |
 | `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA and makes the other `CAP_*` variables relevant. |
 | `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |
 | `CAP_SECRET` | — | Secret for that site key. |

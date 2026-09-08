@@ -20,6 +20,7 @@ package scaffold
 
 import (
 	"bytes"
+	"crypto/rand"
 	"embed"
 	"fmt"
 	"go/format"
@@ -96,6 +97,12 @@ func Engines() []Engine { return []Engine{Postgres, MySQL, MariaDB} }
 // produces the smallest useful site: Postgres, no blog, no Tailwind, no
 // CAPTCHA. The cms init command turns Blog and Tailwind on by default.
 type Options struct {
+	// AdminPassword is the password written into the generated .env for
+	// the first superadmin account. Empty — the usual case — generates a
+	// fresh one per project, which is the point: a password living in the
+	// template would be the same on every site ever generated from it.
+	AdminPassword string
+
 	// SiteName is the human-readable name used in the page title, the
 	// brand in the header, and the generated README. Defaults to a
 	// title-cased form of the target directory's name.
@@ -239,9 +246,38 @@ type templateData struct {
 	// and so needs no assignment at all in the generated main.go.
 	NeedsDialect bool
 
+	// AdminPassword is the generated first-run password, written into
+	// .env and nowhere else — in particular not into main.go, which is
+	// committed.
+	AdminPassword string
+
 	Blog     bool
 	Tailwind bool
 	Captcha  bool
+}
+
+// adminPasswordAlphabet leaves out the characters that are read wrongly
+// off a screen — 0/O, 1/l/I — because this password is typed by hand at
+// least once, at the first login.
+const adminPasswordAlphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+
+// generateAdminPassword returns a fresh password for a new project's
+// .env: four groups of five characters, which is a shade over 95 bits and
+// still short enough to read off a terminal and type into a form.
+func generateAdminPassword() (string, error) {
+	const groups, size = 4, 5
+	b := make([]byte, groups*size)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("scaffold: generating an admin password: %w", err)
+	}
+	var sb strings.Builder
+	for i, v := range b {
+		if i > 0 && i%size == 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteByte(adminPasswordAlphabet[int(v)%len(adminPasswordAlphabet)])
+	}
+	return sb.String(), nil
 }
 
 // htmlLiteral escapes a value for HTML that is also sitting inside a Go
@@ -274,8 +310,17 @@ func Write(dir string, opts Options) ([]Result, error) {
 	}
 	program := filepath.Base(abs)
 
+	adminPassword := opts.AdminPassword
+	if adminPassword == "" {
+		var err error
+		if adminPassword, err = generateAdminPassword(); err != nil {
+			return nil, err
+		}
+	}
+
 	siteName := cmp(opts.SiteName, titleCase(program))
 	data := templateData{
+		AdminPassword:  adminPassword,
 		SiteName:       siteName,
 		SiteNameHTML:   htmlLiteral(siteName),
 		SiteNameArg:    strconv.Quote(siteName),
