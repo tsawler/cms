@@ -117,7 +117,23 @@ type Deps struct {
 	// admin can offer links that work when pasted somewhere else. Nil
 	// leaves such links site-relative, which is fine for tests and direct
 	// package use.
+	//
+	// It may fall back to the request's own Host, which makes it right
+	// for a link a signed-in user is about to look at and wrong for one
+	// the CMS puts in an email. See SiteURL.
 	SiteBaseURL func(*http.Request) string
+
+	// SiteURL is the host's *configured* canonical base
+	// (cms.Config.SiteURL), empty when the host configured none. Unlike
+	// SiteBaseURL it never falls back to the request, which is the whole
+	// point of it: the password-reset email is the one link the CMS
+	// sends somewhere it cannot see, so its base has to come from
+	// configuration rather than from a header the sender controls.
+	//
+	// Empty is not fatal — a site reached over loopback (development)
+	// still gets reset links — but a public deployment that leaves it
+	// unset sends none at all. See emailBaseURL.
+	SiteURL string
 
 	// SiteDevelopment reports whether the site is in development mode
 	// (content.SiteSettings.Mode), which the sidebar stamps so nobody
