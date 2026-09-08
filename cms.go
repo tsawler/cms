@@ -217,9 +217,24 @@ type Config struct {
 	// still bounds it server-side). Defaults to 30 days.
 	RememberFor time.Duration
 
-	// SecureCookies marks the session cookie Secure so it is only sent
-	// over HTTPS. Enable in production; leave off for local development
-	// over plain HTTP.
+	// SecureCookies marks the session cookie Secure, so a browser only
+	// ever sends it over HTTPS. Setting it forces the flag on.
+	//
+	// Leaving it alone does not mean "off": a site whose SiteURL is an
+	// https:// address is served over HTTPS by the host's own account, so
+	// its session cookie is marked Secure whatever this says. That
+	// derivation exists because this is the setting whose absence is
+	// silent — nothing looks wrong, the site works, and the admin session
+	// cookie is one plaintext request away from being readable. A site
+	// that has told the CMS it lives at an https:// address should not
+	// also have to remember this.
+	//
+	// So set it only for the case the derivation cannot see: HTTPS in
+	// front of an install that leaves SiteURL empty. There is no way to
+	// turn it off for an https:// SiteURL, and nothing legitimate wants
+	// to — Secure describes the browser's connection to the edge, not the
+	// edge's connection to this process, so terminating TLS at a proxy is
+	// not a reason to drop it.
 	SecureCookies bool
 
 	// ClientIPHeader names the header a trusted reverse proxy sets to the
@@ -557,6 +572,12 @@ type Config struct {
 	Logger *slog.Logger
 }
 
+// MinSeedPasswordLength is the shortest password SeedAdmin accepts — the
+// same floor the admin's own password forms enforce, applied here so the
+// account that is created without a form is not the weakest one on the
+// site.
+const MinSeedPasswordLength = 8
+
 // pageViewRetentionDays is how long the public site's daily page-view
 // counters are kept before Migrate prunes them: a season of history for
 // a dashboard that charts a week, at a negligible storage cost.
@@ -586,21 +607,29 @@ type CMS struct {
 	// See backfillSearchIndex.
 	searchOnce sync.Once
 
-	// The public-facing settings, cached together: every public response
-	// consults the site mode, including the media and asset routes that
-	// read no settings otherwise, and the rest come from the one read.
-	// See siteFlags.
-	siteMu  sync.Mutex
-	siteVal siteFacts
-	siteAt  time.Time
+	// What Close shuts down, and the guard that lets it be called twice.
+	closers   []func() error
+	closeOnce sync.Once
 
-	// The rendered sitemap, cached: it costs a query over every page, and
-	// nothing stops a client from asking for it in a loop. See
-	// serveSitemap.
-	sitemapMu   sync.Mutex
+	// The site settings, cached: every public response consults the site
+	// mode, including the media and asset routes that read no settings
+	// otherwise. See siteSettings.
+	siteMu  sync.Mutex
+	siteVal content.SiteSettings
+	siteAt  time.Time
+	siteOK  bool // whether siteVal is a reading rather than a zero value
+
+	// The sitemap, cached in two halves, because they cost differently
+	// and go stale for different reasons. See serveSitemap.
+	sitemapMu sync.Mutex
+	// sitemapPages is the query over every page — the expensive half, and
+	// the same rows whatever address the request arrived at.
+	sitemapPages []content.SitemapEntry
+	sitemapAt    time.Time
+	// sitemapBody is those rows rendered against one base URL, kept for
+	// the usual case of every request naming the same one.
 	sitemapBody []byte
-	sitemapBase string // the base URL sitemapBody was built for
-	sitemapAt   time.Time
+	sitemapBase string
 }
 
 // New validates cfg, applies defaults, and returns a ready CMS. It does not
@@ -735,17 +764,25 @@ func New(cfg Config) (*CMS, error) {
 	}
 
 	sessions := scs.New()
+	// What New starts, Close stops. Collected as it is created rather
+	// than rediscovered later, so a thing that outlives the CMS has to be
+	// added here to exist at all.
+	var closers []func() error
 	if cfg.Redis != nil {
 		if cfg.Redis.Addr == "" {
 			return nil, errors.New("cms: Config.Redis.Addr is required when Redis is set")
 		}
-		sessions.Store = redisstore.New(redis.NewClient(&redis.Options{
+		client := redis.NewClient(&redis.Options{
 			Addr:     cfg.Redis.Addr,
 			Password: cfg.Redis.Password,
 			DB:       cfg.Redis.DB,
-		}))
+		})
+		sessions.Store = redisstore.New(client)
+		closers = append(closers, client.Close)
 	} else {
-		sessions.Store = sessionstore.New(db)
+		store := sessionstore.New(db)
+		sessions.Store = store
+		closers = append(closers, func() error { store.StopCleanup(); return nil })
 	}
 	sessions.Lifetime = cfg.SessionLifetime
 	sessions.Cookie.Name = "cms_session"
@@ -754,7 +791,7 @@ func New(cfg Config) (*CMS, error) {
 	sessions.Cookie.Persist = false
 	sessions.Cookie.HttpOnly = true
 	sessions.Cookie.SameSite = http.SameSiteLaxMode
-	sessions.Cookie.Secure = cfg.SecureCookies
+	sessions.Cookie.Secure = secureCookies(cfg)
 
 	users := auth.NewStore(db)
 	users.SetLogger(cfg.Logger)
@@ -829,6 +866,7 @@ func New(cfg Config) (*CMS, error) {
 	c := &CMS{
 		cfg:      cfg,
 		db:       db,
+		closers:  closers,
 		sessions: sessions,
 		users:    users,
 		content:  contentStore,
@@ -885,6 +923,15 @@ func New(cfg Config) (*CMS, error) {
 		Version:         Version(),
 	})
 	return c, nil
+}
+
+// secureCookies decides whether the session cookie carries the Secure
+// flag: because the host asked for it, or because it has already said the
+// site lives at an https:// address, which is the same statement made
+// once instead of twice. SiteURL is normalized before this runs, so a
+// bare "example.com" has become https:// by now and counts.
+func secureCookies(cfg Config) bool {
+	return cfg.SecureCookies || strings.HasPrefix(cfg.SiteURL, "https://")
 }
 
 // collectPermissions merges the host's declared permissions with those
@@ -1006,7 +1053,18 @@ func (c *CMS) Migrate(ctx context.Context) error {
 // an upgrade quietly pull them out of search results — or claim a URL
 // their own app already answers — would be a far worse surprise than
 // having to flip a switch once.
+//
+// The password must be at least MinSeedPasswordLength characters. This is
+// the one door into the product that does not go through a form, so it is
+// the one place a site can be given a superadmin nobody chose the password
+// for — an empty string, or whatever a host left in a template. The check
+// happens before the account count, so a misconfigured deployment hears
+// about it on every boot rather than only on the one where it mattered.
 func (c *CMS) SeedAdmin(ctx context.Context, email, name, password string) (bool, error) {
+	if len(password) < MinSeedPasswordLength {
+		return false, fmt.Errorf("cms: SeedAdmin needs a password of at least %d characters "+
+			"(got %d) — this account is a superadmin", MinSeedPasswordLength, len(password))
+	}
 	n, err := c.users.Count(ctx)
 	if err != nil {
 		return false, err
@@ -1091,6 +1149,34 @@ func (c *CMS) SeedHomePage(ctx context.Context, templateName, title string) (boo
 	}
 	c.cfg.Logger.Info("cms: created initial home page", "template", templateName, "title", title)
 	return true, nil
+}
+
+// Close releases what New started in the background: the session store's
+// expiry sweep, and the Redis connection pool when sessions live there.
+// It is safe to call more than once, and safe not to call at all in a
+// process that is about to exit anyway — which is why nothing has needed
+// it until now.
+//
+// Where it does matter is a process that builds more than one CMS: tests,
+// and hosts that rebuild on reload. Each one used to leave a goroutine
+// ticking against a database it no longer served.
+//
+// Config.DB is deliberately untouched. The host opened it, may well be
+// using it for its own tables, and closing somebody else's pool is not
+// this function's business.
+//
+// Requests in flight are not waited for; shut the HTTP server down first
+// if that matters.
+func (c *CMS) Close() error {
+	var err error
+	c.closeOnce.Do(func() {
+		errs := make([]error, 0, len(c.closers))
+		for _, closer := range c.closers {
+			errs = append(errs, closer())
+		}
+		err = errors.Join(errs...)
+	})
+	return err
 }
 
 // Admin returns the handler for the admin area (login, dashboard, user
@@ -1188,8 +1274,8 @@ func (c *CMS) Pages() http.Handler {
 		// what covers the responses no <meta> tag can reach: the RSS
 		// feeds, and the media proxy serving images and PDFs that search
 		// engines index in their own right.
-		site := c.siteFlags(r.Context())
-		if site.dev {
+		site := c.siteSettings(r.Context())
+		if site.Development() {
 			w.Header().Set("X-Robots-Tag", robotsDirective)
 		}
 		if r.URL.Path == robotsPath {
@@ -1201,7 +1287,7 @@ func (c *CMS) Pages() http.Handler {
 		// A site in development publishes no sitemap: it is asking not to
 		// be crawled, and a list of every URL it has is the opposite of
 		// that.
-		if r.URL.Path == sitemapPath && site.sitemap && !site.dev {
+		if r.URL.Path == sitemapPath && site.Sitemap && !site.Development() {
 			c.serveSitemap(w, r)
 			return
 		}
@@ -1263,17 +1349,17 @@ const robotsTxt = "User-agent: *\nDisallow: /\n"
 // Development serves its own Disallow over anything stored: the stored
 // file is written for the live site, and a site that is being hidden must
 // not hand crawlers a file that invites them in.
-func (c *CMS) robotsBody(r *http.Request, site siteFacts) string {
-	if site.dev {
+func (c *CMS) robotsBody(r *http.Request, site content.SiteSettings) string {
+	if site.Development() {
 		return robotsTxt
 	}
-	if site.robots == "" {
+	if site.RobotsTxt == "" {
 		return ""
 	}
-	if !site.sitemap {
-		return site.robots
+	if !site.Sitemap {
+		return site.RobotsTxt
 	}
-	return withSitemapLine(site.robots, c.siteBaseURL(r)+sitemapPath)
+	return withSitemapLine(site.RobotsTxt, c.siteBaseURL(r)+sitemapPath)
 }
 
 // withSitemapLine adds a Sitemap: line for the generated sitemap to a
@@ -1313,55 +1399,51 @@ func (c *CMS) serveRobotsTxt(w http.ResponseWriter, body string) {
 // Short, because the whole point of the setting is the moment it changes.
 const siteModeCacheTTL = 5 * time.Second
 
-// siteFacts is the public face of the site settings: what the CMS needs
-// to answer a request from anyone who is not logged in.
-type siteFacts struct {
-	dev     bool   // the site is in development; keep it out of indexes
-	robots  string // the stored /robots.txt, "" for none
-	sitemap bool   // serve a generated /sitemap.xml
-	locked  bool   // the site is closed to everyone but superadmins
-}
-
-// siteFlags reports the site facts from a briefly-cached copy of the
-// settings.
+// siteSettings returns the stored site settings from a briefly-cached
+// copy — the one reading of them a public request makes.
 //
-// The mode is consulted on every public response, including media and
-// asset routes that touch the database for nothing else, so it cannot be
-// a query per request; the other two ride along on the same read. A read
-// that fails falls back to the last known answer; with no answer yet —
-// the database is unreachable at the first request — it says
-// development, because a site nobody can serve pages for has nothing to
-// gain from being crawled, and an unfinished site landing in an index is
-// the mistake that is hard to take back.
-func (c *CMS) siteFlags(ctx context.Context) siteFacts {
+// It caches the settings themselves rather than a summary of them. There
+// used to be both: a cached set of flags for the mode, the lock and the
+// robots body, and a separate uncached read of the whole record for
+// rendering a page. Two readings of one table, taken moments apart, which
+// bought nothing (the page path paid for the query anyway) and could
+// disagree inside a single response — the header saying noindex from the
+// cached copy while the freshly-read one rendered no meta tag to match.
+//
+// A read that fails falls back to the last good copy. With none yet — the
+// database is unreachable at the first request — it answers development,
+// because a site nobody can serve pages for has nothing to gain from
+// being crawled, and an unfinished site landing in an index is the
+// mistake that is hard to take back.
+func (c *CMS) siteSettings(ctx context.Context) content.SiteSettings {
 	if c.content == nil {
-		return siteFacts{} // no store to ask; only a hand-built CMS in a test
+		return content.SiteSettings{} // no store to ask; a hand-built CMS in a test
 	}
 	c.siteMu.Lock()
-	got, at := c.siteVal, c.siteAt
+	got, at, ok := c.siteVal, c.siteAt, c.siteOK
 	c.siteMu.Unlock()
-	if !at.IsZero() && time.Since(at) < siteModeCacheTTL {
+	if ok && time.Since(at) < siteModeCacheTTL {
 		return got
 	}
+
 	site, err := c.content.SiteSettings(ctx)
 	if err != nil {
-		c.cfg.Logger.Error("cms: reading the site mode", "err", err)
-		if at.IsZero() {
-			got.dev = true
+		c.cfg.Logger.Error("cms: reading the site settings", "err", err)
+		if ok {
+			return got
 		}
-		return got
+		return content.SiteSettings{Mode: content.ModeDevelopment}
 	}
-	got = siteFacts{dev: site.Development(), robots: site.RobotsTxt, sitemap: site.Sitemap, locked: site.Locked}
 	c.siteMu.Lock()
-	c.siteVal, c.siteAt = got, time.Now()
+	c.siteVal, c.siteAt, c.siteOK = site, time.Now(), true
 	c.siteMu.Unlock()
-	return got
+	return site
 }
 
 // developmentMode reports whether the site is in development; it is what
 // the renderer is handed to decide the robots <meta> tag.
 func (c *CMS) developmentMode(ctx context.Context) bool {
-	return c.siteFlags(ctx).dev
+	return c.siteSettings(ctx).Development()
 }
 
 // SiteLocked reports whether the site is closed to everyone but
@@ -1380,7 +1462,7 @@ func (c *CMS) SiteLocked(ctx context.Context) bool {
 	if c.cfg.LockOverride != nil {
 		return *c.cfg.LockOverride
 	}
-	return c.siteFlags(ctx).locked
+	return c.siteSettings(ctx).Locked
 }
 
 func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
@@ -1471,11 +1553,10 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 	menus := render.BuildMenus(menuItems, page.Slug, locale, c.cfg.Locales[0], editing)
 
-	site, err := c.content.SiteSettings(r.Context())
-	if err != nil {
-		// Like menus: settings failing shouldn't take the page down.
-		c.cfg.Logger.Error("cms: loading site settings", "err", err)
-	}
+	// The same cached reading the response headers were stamped from a
+	// moment ago, so a render and its headers cannot describe two
+	// different sites.
+	site := c.siteSettings(r.Context())
 
 	// When the page backs a blog/news post, hand the template its .Post.
 	var post *render.PostInfo

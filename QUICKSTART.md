@@ -472,13 +472,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Creates the first (superadmin) account — only if no users exist
-	// yet, so it is a no-op on every startup after the first.
-	created, err := c.SeedAdmin(ctx, "you@example.com", "Your Name", "change-this-password")
+	// yet, so it is a no-op on every startup after the first. The password
+	// comes from the environment rather than from this file: one written
+	// here would be the same on every copy of it, and SeedAdmin refuses
+	// anything under 8 characters for that reason.
+	created, err := c.SeedAdmin(ctx, "you@example.com", "Your Name", os.Getenv("CMS_ADMIN_PASSWORD"))
 	if err != nil {
 		return err
 	}
 	if created {
-		logger.Warn("created initial admin — change this password")
+		logger.Warn("created initial admin — sign in and change the password")
 	}
 
 	// Publishes a page at "/" so a brand-new site serves something instead
@@ -823,7 +826,11 @@ By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
 direct bucket/CDN URLs instead (for a bucket that wasn't created public,
 also set `ApplyPublicReadPolicy` and `Migrate` will apply a public-read
-bucket policy — one-time, idempotent setup). SVGs are the one exception
+bucket policy — one-time, idempotent setup). `ApplyPublicReadPolicy` on
+its own is refused at startup: it opens the bucket and, with no
+`PublicRead` or `PublicBaseURL` to go with it, nothing would ever read a
+direct URL — a public bucket for no benefit is worth a startup error
+rather than a shrug. SVGs are the one exception
 and stay on the proxy either way: an SVG opened directly is a document
 that can run script, and the policy that stops it is a header only the
 CMS's own response carries. Images get an automatic ladder
@@ -1260,6 +1267,7 @@ Every variable it reads:
 | --- | --- | --- |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, hreflang alternates, and password-reset emails. **Set it in production.** A reset link is read by someone other than whoever asked for it, so building one from the request's `Host` would let an attacker have the CMS mail a victim a working link pointing at the attacker; rather than do that, a site with no `CMS_SITE_URL` sends no reset email at all and logs why. Requests arriving over loopback are exempt, which is what keeps `go run .` working. Set it, too, whenever the request's `Host` would simply be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_CLIENT_IP_HEADER` | unset (the connection's own address) | The header a trusted reverse proxy sets to the real client address — `X-Forwarded-For`, `CF-Connecting-IP`, `True-Client-IP`. Read by the login throttle and nothing else, where it is wrong in both directions if it does not match the deployment: left unset behind a proxy, every visitor arrives from the same address, so a handful of deliberate failures against a known account shuts it for everybody; set without a proxy that overwrites the header, the value is one the client picks and an attacker varies it to draw a fresh allowance per request. Set it exactly when every request reaches the app through a proxy you control and that proxy replaces the header. For `X-Forwarded-For` the rightmost entry is used — the one the nearest proxy appended. |
+| `CMS_SECURE_COOKIES` | unset (derived from `CMS_SITE_URL`) | Forces the session cookie's `Secure` flag on, so a browser only ever sends it over HTTPS. Usually unnecessary: an `https://` `CMS_SITE_URL` already implies it, which is deliberate — this is the setting whose absence is silent, and a site that has said where it lives should not have to say it twice. Set it for HTTPS in front of an install that leaves `CMS_SITE_URL` empty. There is no way to turn it *off* for an `https://` site, and nothing legitimate wants one: `Secure` describes the browser's connection to the edge, not the edge's connection to this process, so terminating TLS at a proxy is not a reason to drop it. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | Posts per page in a paginated `{{cmsFeed}}` listing. Invalid or non-positive is a startup error. |
 | `CMS_ADMIN_PER_PAGE` | `25` | Rows per page in the admin's Blog & News and Pages lists. Invalid or non-positive is a startup error. |
@@ -1270,7 +1278,10 @@ Every variable it reads:
 | `S3_SECRET` | — | Object-store secret key. |
 | `S3_REGION` | derived from the endpoint | Region, if your provider needs it spelled out. |
 | `S3_KEY_PREFIX` | unset | Prefix namespacing this site's keys inside a shared bucket. Pick a stable slug; it also scopes media adoption, so set it whenever the bucket is shared. |
-| `S3_APPLY_PUBLIC_POLICY` | unset | `1` applies a public-read bucket policy during `Migrate` (one-time, idempotent). |
+| `S3_PUBLIC_READ` | `false` | Serve media straight from the bucket instead of proxying it through the CMS. The bucket must already allow public `s3:GetObject` — see `S3_APPLY_PUBLIC_POLICY`. SVGs stay on the proxy either way. |
+| `S3_PUBLIC_BASE_URL` | unset | Serve media from a CDN or custom domain, e.g. `https://cdn.example.com`. Takes precedence over `S3_PUBLIC_READ`. A trailing slash is trimmed. |
+| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO and some self-hosted stores. |
+| `S3_APPLY_PUBLIC_POLICY` | `false` | Apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). It only opens the bucket — pair it with `S3_PUBLIC_READ` or `S3_PUBLIC_BASE_URL`, or nothing will ever read a direct bucket URL and the CMS refuses to start rather than leave a bucket public for no reason. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. Non-numeric is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload cap in MB. Non-numeric is a startup error. |
 | `CMS_MEDIA_ADOPT` | `when-empty` | Rebuild the media library from the bucket: `when-empty` on a database with no media, `reconcile` on every startup, `off` never. See [Adopting a bucket that already has media](#adopting-a-bucket-that-already-has-media). |
@@ -1299,8 +1310,12 @@ address comes from — is your program's business; the variables
   changes; it decides whether the site may be indexed. If you cache
   `Pages()` at the edge, purge after the switch — cached responses can
   still carry the `X-Robots-Tag: noindex` header.
-- **Set `SecureCookies: true`** — you're serving over HTTPS, and the
-  session cookie should say so.
+- **The session cookie's `Secure` flag** looks after itself once
+  `SiteURL` is an `https://` address — a site that has said where it lives
+  should not have to say it twice, and this is the setting whose absence
+  is silent. Set `SecureCookies: true` (`CMS_SECURE_COOKIES`) only for the
+  case that derivation cannot see: HTTPS in front of an install that
+  leaves `SiteURL` empty.
 - **Set `ClientIPHeader` (`CMS_CLIENT_IP_HEADER`)** if anything sits in
   front of the app — a load balancer, nginx, Cloudflare. Without it every
   request looks like it came from the proxy, and the login throttle's

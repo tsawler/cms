@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/dbtest"
@@ -29,9 +30,14 @@ func setSitemap(t *testing.T, c *CMS, on bool) {
 
 // expireSitemapCache drops the rendered document, which would otherwise
 // outlive a content change by minutes.
+// expireSitemapCache drops both halves — the rows and the document
+// rendered from them. Clearing only the document would leave the next
+// request re-rendering rows read before the test changed anything, which
+// is exactly the staleness these tests are checking for.
 func expireSitemapCache(c *CMS) {
 	c.sitemapMu.Lock()
 	c.sitemapBody, c.sitemapBase = nil, ""
+	c.sitemapPages, c.sitemapAt = nil, time.Time{}
 	c.sitemapMu.Unlock()
 }
 
@@ -378,6 +384,112 @@ func TestSeedAdminEnablesSitemap(t *testing.T) {
 		}
 		if !site.Sitemap {
 			t.Error("a freshly seeded site does not publish a sitemap")
+		}
+	})
+}
+
+// An install without Config.SiteURL takes the sitemap's base from the
+// request, and the request's Host is chosen by whoever sent it. Keyed on
+// that alone, the cache is one an anonymous client empties on demand — a
+// fresh hostname per request, each one paying for a query over every page
+// on the site.
+//
+// The rows do not depend on the base, so they are cached apart from the
+// document rendered out of them. This test drives the attack and checks
+// the expensive half stayed put, while the cheap half still answers each
+// host correctly.
+func TestSitemapRowsAreNotRebuiltPerHost(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSeedTestCMS(t, db)
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		if _, err := c.SeedHomePage(ctx, "templates/pages/standard.gohtml", "Welcome"); err != nil {
+			t.Fatalf("SeedHomePage: %v", err)
+		}
+		setMode(t, c, content.ModeProduction)
+		setSitemap(t, c, true)
+
+		h := c.Pages()
+		body := func(host string) string {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://"+host+"/sitemap.xml", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: status %d, want 200", host, rec.Code)
+			}
+			return rec.Body.String()
+		}
+
+		body("first.test")
+
+		// Published between the first request and the rest. If a novel
+		// Host re-reads the rows, it shows up — which is the query this
+		// is meant to have made unreachable.
+		addPage(t, c, "published-later", true, content.VisibilityPublic)
+
+		c.sitemapMu.Lock()
+		readAt := c.sitemapAt
+		c.sitemapMu.Unlock()
+
+		for _, host := range []string{"a.test", "b.test", "c.test", "d.test", "e.test"} {
+			got := body(host)
+			if strings.Contains(got, "published-later") {
+				t.Fatalf("a request from %s re-read every page in the site — "+
+					"varying Host still costs a query each time", host)
+			}
+			// The document is still right for the host that asked: the
+			// fix is about what is recomputed, not about serving one
+			// host's URLs to another.
+			if !strings.Contains(got, "http://"+host+"/") {
+				t.Errorf("%s was served someone else's hostnames:\n%s", host, got)
+			}
+		}
+
+		c.sitemapMu.Lock()
+		stillAt := c.sitemapAt
+		c.sitemapMu.Unlock()
+		if !stillAt.Equal(readAt) {
+			t.Errorf("the page query ran again: read at %v, now %v", readAt, stillAt)
+		}
+
+		// And the rows do refresh on their own schedule, so this is a
+		// cache rather than a one-shot read.
+		expireSitemapCache(c)
+		if got := body("first.test"); !strings.Contains(got, "published-later") {
+			t.Errorf("the sitemap never picked up a page published earlier:\n%s", got)
+		}
+	})
+}
+
+// With Config.SiteURL set the base is constant, so every request — however
+// it addresses the site — is a cache hit and the sitemap names the
+// canonical host rather than whatever the request claimed.
+func TestSitemapWithSiteURLIgnoresTheRequestHost(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSeedTestCMS(t, db)
+		c.cfg.SiteURL = "https://canonical.example"
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		if _, err := c.SeedHomePage(ctx, "templates/pages/standard.gohtml", "Welcome"); err != nil {
+			t.Fatalf("SeedHomePage: %v", err)
+		}
+		setMode(t, c, content.ModeProduction)
+		setSitemap(t, c, true)
+
+		h := c.Pages()
+		for _, host := range []string{"canonical.example", "attacker.test"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://"+host+"/sitemap.xml", nil))
+			got := rec.Body.String()
+			if !strings.Contains(got, "https://canonical.example/") {
+				t.Errorf("request as %s: sitemap does not use the configured base:\n%s", host, got)
+			}
+			if strings.Contains(got, "attacker.test") {
+				t.Errorf("request as %s put the request's own host in the sitemap:\n%s", host, got)
+			}
 		}
 	})
 }

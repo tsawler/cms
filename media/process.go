@@ -20,6 +20,17 @@ import (
 // office formats, text/CSV, ZIP).
 var ErrUnsupportedType = errors.New("media: unsupported file type")
 
+// ErrUndecodable is returned for a file whose type is one this package
+// handles but whose bytes will not read as it: a truncated JPEG, an SVG
+// that is not well-formed XML.
+//
+// It is separate from ErrUnsupportedType because the two are different
+// news for whoever uploaded the file — "we don't take those" against
+// "that one is damaged" — and because callers need to tell an upload the
+// user can fix from a fault worth logging. Both are wrapped, so
+// errors.Is finds them under the detail.
+var ErrUndecodable = errors.New("media: file could not be read as its own type")
+
 const (
 	// webMaxWidth is the largest width served to pages: the rendition a
 	// header image or a full-width body image uses.
@@ -153,7 +164,7 @@ func processVariants(data []byte, mime string, quality float64, specs []variantS
 
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("media: decoding image: %w", err)
+		return nil, fmt.Errorf("%w: decoding image: %w", ErrUndecodable, err)
 	}
 	bounds := img.Bounds()
 	p := &processed{Width: bounds.Dx(), Height: bounds.Dy(), Ext: ext, VariantExt: ".webp"}

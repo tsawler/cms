@@ -17,13 +17,20 @@ import (
 //   - CMS_SITE_URL → SiteURL, the site's canonical public address
 //     ("https://example.com"). Leave it unset in development, where each
 //     request's own host is right.
+//   - CMS_SECURE_COOKIES (true/false) → SecureCookies, forcing the session
+//     cookie's Secure flag on. Usually unnecessary: an https:// CMS_SITE_URL
+//     already implies it.
 //   - CMS_CLIENT_IP_HEADER → ClientIPHeader, the header a trusted reverse
 //     proxy sets to the real client address ("X-Forwarded-For",
 //     "CF-Connecting-IP"). Unset reads the connection's own address. Set
 //     it only behind a proxy that overwrites the header — see the field.
 //   - S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET,
-//     S3_KEY_PREFIX, S3_APPLY_PUBLIC_POLICY (=1) → S3. Setting
-//     S3_ENDPOINT enables the media library.
+//     S3_KEY_PREFIX, S3_PUBLIC_READ, S3_PUBLIC_BASE_URL,
+//     S3_USE_PATH_STYLE, S3_APPLY_PUBLIC_POLICY → S3. Setting S3_ENDPOINT
+//     enables the media library; the last four are true/false except
+//     S3_PUBLIC_BASE_URL, which is a URL. S3_APPLY_PUBLIC_POLICY opens
+//     the bucket and needs S3_PUBLIC_READ or S3_PUBLIC_BASE_URL to be
+//     worth anything, so on its own it is refused rather than ignored.
 //   - CAP_URL, CAP_INTERNAL_URL, CAP_SITE_KEY, CAP_SECRET,
 //     CAP_WIDGET (=visible) → Captcha. Setting CAP_URL enables the
 //     login CAPTCHA.
@@ -62,12 +69,37 @@ import (
 //	cfg.DB = pool
 //	cfg.TemplateFS = templateFS
 //	c, err := cms.New(cfg)
+//
+// envBool reads a true/false variable into dst. An unset or empty
+// variable leaves dst alone; a malformed one is a configuration mistake
+// and is reported rather than read as false — "S3_PUBLIC_READ=yes"
+// quietly meaning "no" is the failure these variables are prone to.
+func envBool(key string, dst *bool) error {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fmt.Errorf("cms: %s %q is not a true/false value", key, v)
+	}
+	*dst = b
+	return nil
+}
+
 func ConfigFromEnv() (Config, error) {
 	var cfg Config
 
 	// The site's public address, for links that have to work off the page.
 	// Leave it unset in development, where the request's host is right.
 	cfg.SiteURL = os.Getenv("CMS_SITE_URL")
+
+	// Forcing the session cookie's Secure flag on. Rarely needed — an
+	// https:// site URL above already implies it — so this is for HTTPS
+	// in front of an install that leaves CMS_SITE_URL empty.
+	if err := envBool("CMS_SECURE_COOKIES", &cfg.SecureCookies); err != nil {
+		return Config{}, err
+	}
 
 	// Which header carries the real client address, when a trusted proxy
 	// sets one. Unset means the connection's own address; see
@@ -77,13 +109,29 @@ func ConfigFromEnv() (Config, error) {
 
 	if endpoint := os.Getenv("S3_ENDPOINT"); endpoint != "" {
 		cfg.S3 = &S3Config{
-			Endpoint:              endpoint,
-			Region:                os.Getenv("S3_REGION"),
-			Bucket:                os.Getenv("S3_BUCKET"),
-			AccessKey:             os.Getenv("S3_ACCESS_KEY"),
-			Secret:                os.Getenv("S3_SECRET"),
-			KeyPrefix:             os.Getenv("S3_KEY_PREFIX"),
-			ApplyPublicReadPolicy: os.Getenv("S3_APPLY_PUBLIC_POLICY") == "1",
+			Endpoint:      endpoint,
+			Region:        os.Getenv("S3_REGION"),
+			Bucket:        os.Getenv("S3_BUCKET"),
+			AccessKey:     os.Getenv("S3_ACCESS_KEY"),
+			Secret:        os.Getenv("S3_SECRET"),
+			KeyPrefix:     os.Getenv("S3_KEY_PREFIX"),
+			PublicBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("S3_PUBLIC_BASE_URL")), "/"),
+		}
+		// How media is addressed, and — separately — whether the bucket
+		// is opened up to allow it. Both belong here: applying the policy
+		// without a way to use it leaves a public bucket nothing reads,
+		// which NewS3Store refuses outright.
+		for _, v := range []struct {
+			key string
+			dst *bool
+		}{
+			{"S3_PUBLIC_READ", &cfg.S3.PublicRead},
+			{"S3_USE_PATH_STYLE", &cfg.S3.UsePathStyle},
+			{"S3_APPLY_PUBLIC_POLICY", &cfg.S3.ApplyPublicReadPolicy},
+		} {
+			if err := envBool(v.key, v.dst); err != nil {
+				return Config{}, err
+			}
 		}
 	}
 
@@ -156,18 +204,23 @@ func ConfigFromEnv() (Config, error) {
 		cfg.PageVersionsKept = n
 	}
 
+	// Both of these are range-checked here rather than left to the
+	// setters that consume them, which quietly ignore anything outside
+	// their bounds. A quality of 3 or a video cap of -1 would have been
+	// accepted, discarded, and replaced by the default, so the site ran
+	// on a number nobody chose and nothing said so.
 	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {
 		q, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return Config{}, fmt.Errorf("cms: CMS_MEDIA_WEBP_QUALITY %q is not a number: %w", v, err)
+		if err != nil || q <= 0 || q > 1 {
+			return Config{}, fmt.Errorf("cms: CMS_MEDIA_WEBP_QUALITY %q is not a quality between 0 and 1", v)
 		}
 		cfg.MediaWebPQuality = q
 	}
 
 	if v := os.Getenv("CMS_MEDIA_MAX_VIDEO_MB"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("cms: CMS_MEDIA_MAX_VIDEO_MB %q is not a number: %w", v, err)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("cms: CMS_MEDIA_MAX_VIDEO_MB %q is not a positive number of megabytes", v)
 		}
 		cfg.MediaMaxVideoMB = n
 	}

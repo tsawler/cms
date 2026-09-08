@@ -2,10 +2,13 @@ package cms
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/tsawler/cms/content"
@@ -229,4 +232,87 @@ func TestSeedAdminStartsSiteInDevelopment(t *testing.T) {
 			t.Error("SeedAdmin put a live site back into development")
 		}
 	})
+}
+
+// The settings used to be read twice on the way through a page render:
+// once from a short-lived cache, to stamp the response headers, and once
+// straight from the database, to render the page. Two readings of one
+// table moments apart, which bought nothing — the page path paid for the
+// query anyway — and could disagree inside a single response, the header
+// saying noindex from the cached copy while the freshly-read one rendered
+// no meta tag to match.
+//
+// This drives that window: change the mode without expiring the cache, so
+// the two readings would have come from different moments, and check the
+// response agrees with itself either way.
+func TestPageHeadersAndBodyAgreeOnTheSiteMode(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		// A base template that calls {{cmsHead}}, which is what emits the
+		// robots meta tag — the body half of the agreement.
+		fsys := fstest.MapFS{
+			"templates/base.gohtml": &fstest.MapFile{Data: []byte(
+				`{{define "base"}}<html><head>{{cmsHead}}</head><body>{{block "content" .}}{{end}}</body></html>{{end}}`)},
+			"templates/pages/standard.gohtml": &fstest.MapFile{Data: []byte(
+				`{{template "base" .}}{{define "content"}}<main>{{cmsRegion "main"}}</main>{{end}}`)},
+		}
+		c, err := New(Config{
+			DB:              db.SQL(),
+			Dialect:         db.Dialect().Name(),
+			Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+			TemplateFS:      fsys,
+			SharedTemplates: []string{"templates/base.gohtml"},
+			PageTemplates:   []PageTemplate{{File: "templates/pages/standard.gohtml", Label: "Standard"}},
+		})
+		if err != nil {
+			t.Fatalf("cms.New: %v", err)
+		}
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		if _, err := c.SeedHomePage(ctx, "templates/pages/standard.gohtml", "Welcome"); err != nil {
+			t.Fatalf("SeedHomePage: %v", err)
+		}
+		h := c.Pages()
+
+		// header says noindex, body carries the robots meta tag.
+		get := func() (bool, bool) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.test/", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", rec.Code)
+			}
+			return rec.Header().Get("X-Robots-Tag") == robotsDirective,
+				strings.Contains(rec.Body.String(), `name="robots"`)
+		}
+
+		setMode(t, c, content.ModeDevelopment)
+		if header, body := get(); !header || !body {
+			t.Fatalf("development: header says noindex = %v, body carries the meta tag = %v; want both", header, body)
+		}
+
+		// The window: the stored mode changes, the cached copy does not.
+		// Whichever answer the response settles on, both halves must give
+		// the same one.
+		setModeOnly(t, c, content.ModeProduction)
+		if header, body := get(); header != body {
+			t.Errorf("the response disagrees with itself: header says noindex = %v, body carries the meta tag = %v",
+				header, body)
+		}
+
+		// And once the cache turns over, both follow.
+		expireSiteCache(c)
+		if header, body := get(); header || body {
+			t.Errorf("production: still asking not to be indexed (header %v, meta %v)", header, body)
+		}
+	})
+}
+
+// setModeOnly changes the stored mode without expiring the cached copy,
+// so a test can stand inside the window where the two readings disagreed.
+func setModeOnly(t *testing.T, c *CMS, mode string) {
+	t.Helper()
+	if err := c.content.SetSiteMode(context.Background(), mode); err != nil {
+		t.Fatalf("SetSiteMode(%q): %v", mode, err)
+	}
 }

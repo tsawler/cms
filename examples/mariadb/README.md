@@ -17,7 +17,8 @@ go run .
 ```
 
 Then open <http://localhost:4200/admin/> and log in with
-`admin@example.com` / `password123`.
+`admin@example.com`, with the password the first run generates and logs
+(set `CMS_ADMIN_PASSWORD` to choose your own).
 
 There is no content yet: create a page from **Pages → New**, leaving the slug
 empty to make it the homepage. Then visit `/`, click **Edit** in the bar at

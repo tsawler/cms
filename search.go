@@ -113,12 +113,7 @@ func pageSlugURL(prefix, slug string) string {
 func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string) {
 	query := strings.TrimSpace(r.URL.Query().Get(render.SearchQueryParam))
 
-	site, err := c.content.SiteSettings(r.Context())
-	if err != nil {
-		// Like every other render: settings failing shouldn't take the
-		// page down.
-		c.cfg.Logger.Error("cms: loading site settings", "err", err)
-	}
+	site := c.siteSettings(r.Context())
 	menuItems, err := c.content.MenuItems(r.Context(), "")
 	if err != nil {
 		c.cfg.Logger.Error("cms: loading menus", "err", err)

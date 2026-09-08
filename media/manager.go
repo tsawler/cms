@@ -402,8 +402,6 @@ type ListOptions struct {
 	Unfiled  bool   // only items in no folder (ignored when FolderID set)
 }
 
-var ilikeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
 // All returns media records with alt text for locale, newest first,
 // filtered by opts.
 func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]Media, error) {
@@ -424,7 +422,7 @@ func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]M
 		// Postgres needs ILIKE; MySQL's default collations already compare
 		// case-insensitively, so the dialect picks the spelling.
 		where = append(where, m.db.Dialect().CaseInsensitiveLike(
-			"m.filename", arg("%"+ilikeEscaper.Replace(opts.Query)+"%")))
+			"m.filename", arg("%"+sqldb.EscapeLike(opts.Query)+"%")))
 	}
 	switch {
 	case opts.FolderID != nil:

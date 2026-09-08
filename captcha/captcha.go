@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -130,10 +131,42 @@ func (c *Client) Visible() bool {
 	return c.cfg.Visible
 }
 
-// Verify checks a widget token with the Cap server. It returns (false, nil)
-// when the server rejects the token and a non-nil error only when the
-// server could not be consulted at all — callers decide whether that fails
-// open or closed.
+// ErrUnavailable means no verdict was obtained because the Cap server
+// could not be consulted: the request never completed, or it answered 5xx.
+// This is the outage the fail-open path exists for.
+var ErrUnavailable = errors.New("captcha: siteverify could not be reached")
+
+// ErrBadResponse means no verdict was obtained even though something
+// answered: the body was not JSON, or was JSON without the "success" field
+// a Cap verdict carries. Almost always a deployment pointed at the wrong
+// place — a URL typo, a proxy's error page, some other service on the
+// port — rather than a passing fault.
+//
+// It is kept apart from ErrUnavailable because the two want different
+// things from an operator: one waits, the other fixes a setting. Both are
+// the absence of a verdict, so a caller that fails open on one usually
+// fails open on both.
+var ErrBadResponse = errors.New("captcha: siteverify did not return a verdict")
+
+// maxVerifyBody bounds what is read back from siteverify. A verdict is a
+// couple of dozen bytes; anything approaching this is not one, and
+// decoding straight from the connection would otherwise let a misbehaving
+// server hold the goroutine open for as long as it cared to keep writing.
+const maxVerifyBody = 64 << 10
+
+// Verify checks a widget token with the Cap server.
+//
+// It returns (true, nil) when the token is good and (false, nil) when the
+// server rejects it — both are verdicts. Every error means the opposite:
+// no verdict was reached, and the caller has to decide what to do about
+// that. See ErrUnavailable and ErrBadResponse for the two ways it happens;
+// errors.Is distinguishes them.
+//
+// Note what is *not* an error. Cap answers a bad token with a 4xx status
+// and {"success": false}, so a 4xx is a verdict and comes back as one. A
+// body with no "success" field, on the other hand, is not a rejection
+// however well-formed it is — nothing said no, something merely failed to
+// say yes — so it is ErrBadResponse rather than a quiet false.
 func (c *Client) Verify(ctx context.Context, token string) (bool, error) {
 	body, err := json.Marshal(map[string]string{
 		"secret":   c.cfg.Secret,
@@ -151,7 +184,7 @@ func (c *Client) Verify(ctx context.Context, token string) (bool, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 
@@ -159,13 +192,21 @@ func (c *Client) Verify(ctx context.Context, token string) (bool, error) {
 	// error string), and accepts them with 200 {"success": true} — so a
 	// 4xx is a verdict, not a fault. Only 5xx means we got no verdict.
 	if resp.StatusCode >= 500 {
-		return false, fmt.Errorf("captcha: siteverify returned status %d", resp.StatusCode)
+		return false, fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)
 	}
+	// A pointer, so "said false" and "did not say" stay apart. Decoded
+	// into a bool they would be the same value, and a stray JSON document
+	// from whatever else is listening on that port would read as a
+	// rejection — locking out the very people a wrong CAP_URL should
+	// merely stop protecting.
 	var out struct {
-		Success bool `json:"success"`
+		Success *bool `json:"success"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return false, fmt.Errorf("captcha: decoding siteverify response: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxVerifyBody)).Decode(&out); err != nil {
+		return false, fmt.Errorf("%w: status %d, undecodable body: %w", ErrBadResponse, resp.StatusCode, err)
 	}
-	return out.Success, nil
+	if out.Success == nil {
+		return false, fmt.Errorf("%w: status %d, no \"success\" field", ErrBadResponse, resp.StatusCode)
+	}
+	return *out.Success, nil
 }

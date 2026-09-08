@@ -3,8 +3,10 @@ package captcha
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +144,129 @@ func TestVerifyErrors(t *testing.T) {
 	srv.Close() // now unreachable
 	if _, err := c.Verify(context.Background(), "tok"); err == nil {
 		t.Error("Verify() with dead server: want error, got nil")
+	}
+}
+
+// Every error out of Verify means the same thing — no verdict — but the
+// two kinds want different things from whoever reads the log, so they
+// have to be told apart. And the ways a misconfigured deployment can
+// produce a non-verdict must not resolve into a quiet "no": a stray JSON
+// document from whatever else is on that port would then read as a
+// rejection and lock people out, where an HTML error page would let them
+// through. Same misconfiguration, opposite outcomes, is the bug.
+func TestVerifyNoVerdictKinds(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   error
+	}{
+		{"server error", 500, `{"success":true}`, ErrUnavailable},
+		{"gateway error", 502, "upstream gone", ErrUnavailable},
+
+		// Something answered, but not with a verdict.
+		{"html error page", 200, "<html><body>404 not found</body></html>", ErrBadResponse},
+		{"proxy error page with a 4xx", 404, "<html>no such route</html>", ErrBadResponse},
+		{"empty body", 200, "", ErrBadResponse},
+		{"json without a verdict", 200, `{"error":"unknown site key"}`, ErrBadResponse},
+		{"json array", 200, `[1,2,3]`, ErrBadResponse},
+		{"json null", 200, `null`, ErrBadResponse},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c, err := New(Config{URL: srv.URL, SiteKey: "site1", Secret: "s"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := c.Verify(context.Background(), "tok")
+			if ok {
+				t.Error("a non-verdict was read as a passing token")
+			}
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Verify() error = %v, want one matching %v", err, tc.want)
+			}
+			// The two kinds must stay distinguishable, or the caller
+			// cannot say anything useful about either.
+			other := ErrBadResponse
+			if tc.want == ErrBadResponse {
+				other = ErrUnavailable
+			}
+			if errors.Is(err, other) {
+				t.Errorf("Verify() error matches both kinds: %v", err)
+			}
+		})
+	}
+}
+
+// A real verdict is still a verdict, whichever way it goes, and neither
+// is an error.
+func TestVerifyVerdictsAreNotErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"accepted", 200, `{"success":true}`, true},
+		{"rejected", 200, `{"success":false}`, false},
+		{"rejected with a 4xx", 400, `{"success":false,"error":"Token not found"}`, false},
+		// Extra fields are Cap's business, not ours.
+		{"accepted with extras", 200, `{"success":true,"challenge":{"c":1}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c, err := New(Config{URL: srv.URL, SiteKey: "site1", Secret: "s"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := c.Verify(context.Background(), "tok")
+			if err != nil {
+				t.Fatalf("Verify() = %v, want a verdict", err)
+			}
+			if ok != tc.want {
+				t.Errorf("Verify() = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
+// A server that keeps writing must not keep the goroutine with it.
+func TestVerifyBoundsTheResponseBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"success":true,"junk":"`))
+		chunk := strings.Repeat("x", 4096)
+		for range 1000 { // ~4MB, far past the cap
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return
+			}
+		}
+		w.Write([]byte(`"}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{URL: srv.URL, SiteKey: "site1", Secret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Truncated mid-value, so it decodes to nothing usable — the point is
+	// that it returns at all rather than reading everything offered.
+	ok, err := c.Verify(context.Background(), "tok")
+	if ok {
+		t.Error("a truncated body was read as a passing token")
+	}
+	if !errors.Is(err, ErrBadResponse) {
+		t.Errorf("Verify() error = %v, want ErrBadResponse", err)
 	}
 }

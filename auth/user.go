@@ -161,10 +161,6 @@ type UserFilter struct {
 	Active *bool
 }
 
-// likeEscaper neutralizes LIKE's wildcards in a user-typed search, so a
-// "%" in the box means a percent sign rather than everything.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
 // filterWhere renders f as a WHERE clause ("" when f is empty) plus its
 // arguments. Shared by Filtered and CountFiltered so the count always
 // describes the same list the window is read from.
@@ -172,7 +168,7 @@ func (s *Store) filterWhere(f UserFilter) (string, []any) {
 	var where []string
 	var args []any
 	if f.Query != "" {
-		args = append(args, "%"+likeEscaper.Replace(f.Query)+"%")
+		args = append(args, "%"+sqldb.EscapeLike(f.Query)+"%")
 		p := "$" + strconv.Itoa(len(args))
 		d := s.db.Dialect()
 		where = append(where, "("+d.CaseInsensitiveLike("name", p)+" OR "+d.CaseInsensitiveLike("email", p)+")")
@@ -214,6 +210,22 @@ func (s *Store) CountFiltered(ctx context.Context, f UserFilter) (int, error) {
 	where, args := s.filterWhere(f)
 	var n int
 	err := s.db.QueryRow(ctx, "SELECT count(*) FROM cms_users"+where, args...).Scan(&n)
+	return n, err
+}
+
+// CountOtherActiveSuperadmins returns how many active superadmins the
+// site has besides the account with excludeID.
+//
+// It answers one question: would this change leave nobody able to do the
+// superadmin-only things? Snippets, the Pages section, masquerade, and
+// the site lock are all superadmin-gated, and only a superadmin can grant
+// the role — so a site that reaches zero has no way back except an edit
+// straight to the database. See admin.server.lastActiveSuperadmin.
+func (s *Store) CountOtherActiveSuperadmins(ctx context.Context, excludeID int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(ctx,
+		"SELECT count(*) FROM cms_users WHERE role = $1 AND active AND id <> $2",
+		RoleSuperadmin, excludeID).Scan(&n)
 	return n, err
 }
 

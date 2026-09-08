@@ -157,6 +157,27 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// And the site keeps at least one superadmin, whoever is doing the
+	// editing. Guarded by the cheap half first: lastActiveSuperadmin runs
+	// a query, and only a change that actually ends somebody's superadmin
+	// standing is worth asking about.
+	//
+	// The message lands on whichever field caused it, and only where
+	// nothing more specific has already spoken — deactivating your own
+	// account is refused for its own reason, and that reason is the more
+	// useful thing to read.
+	if form.Role != auth.RoleSuperadmin || !form.Active {
+		if s.lastActiveSuperadmin(r, existing) {
+			msg := s.tr(r, "This is the only superadministrator left. Give somebody else the role first — a site with none cannot get one back.")
+			if form.Role != auth.RoleSuperadmin && errs["role"] == "" {
+				errs["role"] = msg
+			}
+			if !form.Active && errs["active"] == "" {
+				errs["active"] = msg
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		s.renderUserForm(w, r, form, false, errs)
 		return
@@ -224,6 +245,15 @@ func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if actor.ID == target.ID {
 		s.flash(r, s.tr(r, "You cannot delete your own account."))
+		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+		return
+	}
+	// The same invariant as the edit form. Unreachable as the rules
+	// currently stand — deleting a superadmin takes another superadmin,
+	// who is therefore still there — but that is two other rules holding
+	// it up rather than the rule itself, so it is stated here too.
+	if s.lastActiveSuperadmin(r, target) {
+		s.flash(r, s.tr(r, "This is the only superadministrator left. Give somebody else the role first — a site with none cannot get one back."))
 		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 		return
 	}
@@ -331,6 +361,39 @@ func (s *server) masqueradeExit(w http.ResponseWriter, r *http.Request) {
 // wide open: set the superadmin's password, then log in as them.
 func (s *server) canManage(r *http.Request, target *auth.User) bool {
 	return canManageUser(s.currentUser(r), target)
+}
+
+// lastActiveSuperadmin reports whether target is the only active
+// superadmin left, so a change that ends their superadmin-ness would
+// leave the site with none.
+//
+// That state has no way out from inside the product. Only a superadmin
+// can grant the role (parseUserForm), and SeedAdmin is a no-op the moment
+// any account exists — so a site that reaches zero needs an edit straight
+// to the database to get anybody back in. Snippets, the Pages section,
+// masquerade and the site lock all go with it.
+//
+// The reachable way in was a superadmin demoting *themselves*: the
+// self-edit guard below asks whether the admin role is being dropped, and
+// superadmin to admin keeps it, so the check waved it through. Rather
+// than special-case that one path, this asks the question the invariant
+// actually cares about — will anyone be left — which also covers the
+// roundabout routes, like a superadmin masquerading as another superadmin
+// and demoting the account they came from.
+//
+// An error reading the count is reported as "yes, they are the last",
+// because refusing a role change on a database that is not answering is
+// the recoverable way to be wrong.
+func (s *server) lastActiveSuperadmin(r *http.Request, target *auth.User) bool {
+	if target == nil || target.Role != auth.RoleSuperadmin || !target.Active {
+		return false
+	}
+	others, err := s.deps.Users.CountOtherActiveSuperadmins(r.Context(), target.ID)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: counting superadmins", "err", err)
+		return true
+	}
+	return others == 0
 }
 
 // canManageUser is the rule canManage applies, written against the two

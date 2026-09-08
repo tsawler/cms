@@ -209,7 +209,7 @@ func (s *server) sectionHandler(sec Section) http.Handler {
 		if sec.AdminsNeedGrant {
 			h = s.requireGrant(auth.Permission(sec.Permission))(h)
 		} else {
-			h = s.requirePerm(auth.Permission(sec.Permission))(h)
+			h = s.requireAnyPerm(auth.Permission(sec.Permission))(h)
 		}
 	}
 	if sec.AdminOnly {

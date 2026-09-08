@@ -20,7 +20,8 @@ var envVars = []string{
 	"CMS_PAGE_VERSIONS_KEPT",
 	"CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
-	"CMS_SITE_URL",
+	"CMS_SITE_URL", "CMS_SECURE_COOKIES", "CMS_CLIENT_IP_HEADER",
+	"S3_PUBLIC_READ", "S3_PUBLIC_BASE_URL", "S3_USE_PATH_STYLE",
 }
 
 func clearEnv(t *testing.T) {
@@ -80,6 +81,9 @@ func TestConfigFromEnvFull(t *testing.T) {
 		"S3_ACCESS_KEY":              "key",
 		"S3_SECRET":                  "secret",
 		"S3_KEY_PREFIX":              "prod",
+		"S3_PUBLIC_READ":             "true",
+		"S3_PUBLIC_BASE_URL":         "https://cdn.example.com/",
+		"S3_USE_PATH_STYLE":          "1",
 		"S3_APPLY_PUBLIC_POLICY":     "1",
 		"CAP_URL":                    "http://localhost:3300",
 		"CAP_INTERNAL_URL":           "http://cap:3000",
@@ -112,7 +116,8 @@ func TestConfigFromEnvFull(t *testing.T) {
 	if cfg.S3.Endpoint != "s3.example.com" || cfg.S3.Region != "us-east-1" ||
 		cfg.S3.Bucket != "my-site" || cfg.S3.AccessKey != "key" ||
 		cfg.S3.Secret != "secret" || cfg.S3.KeyPrefix != "prod" ||
-		!cfg.S3.ApplyPublicReadPolicy {
+		!cfg.S3.ApplyPublicReadPolicy || !cfg.S3.PublicRead || !cfg.S3.UsePathStyle ||
+		cfg.S3.PublicBaseURL != "https://cdn.example.com" {
 		t.Errorf("S3 = %+v", cfg.S3)
 	}
 	if cfg.Captcha == nil {
@@ -220,6 +225,87 @@ func TestConfigFromEnvSiteURL(t *testing.T) {
 	}
 }
 
+// CMS_SECURE_COOKIES is the escape hatch for HTTPS in front of an install
+// that leaves CMS_SITE_URL empty. It is a true/false value, and a
+// misspelled one is a configuration mistake rather than a silent false —
+// "CMS_SECURE_COOKIES=yes" quietly meaning "no" is exactly the failure
+// this whole setting is prone to.
+func TestConfigFromEnvSecureCookies(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"true", true}, {"1", true}, {"TRUE", true},
+		{"false", false}, {"0", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("CMS_SECURE_COOKIES", tc.value)
+			cfg, err := ConfigFromEnv()
+			if err != nil {
+				t.Fatalf("CMS_SECURE_COOKIES=%s: %v", tc.value, err)
+			}
+			if cfg.SecureCookies != tc.want {
+				t.Errorf("CMS_SECURE_COOKIES=%s gave SecureCookies=%v, want %v", tc.value, cfg.SecureCookies, tc.want)
+			}
+		})
+	}
+
+	t.Run("unset leaves it alone", func(t *testing.T) {
+		clearEnv(t)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SecureCookies {
+			t.Error("an unset CMS_SECURE_COOKIES forced the flag on")
+		}
+	})
+
+	t.Run("malformed is an error", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("CMS_SECURE_COOKIES", "yes-please")
+		if _, err := ConfigFromEnv(); err == nil {
+			t.Error("a malformed CMS_SECURE_COOKIES was accepted")
+		}
+	})
+}
+
+// Both of these used to check only that the value parsed, then hand it to
+// a setter that silently ignores anything out of range — so a quality of
+// 3 or a video cap of -1 was accepted, discarded, and replaced by the
+// default. The site then ran on a number nobody chose, with nothing said.
+func TestConfigFromEnvMediaTuningRanges(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string
+		ok         bool
+	}{
+		{"CMS_MEDIA_WEBP_QUALITY", "0.8", true},
+		{"CMS_MEDIA_WEBP_QUALITY", "1", true},
+		{"CMS_MEDIA_WEBP_QUALITY", "0", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "-0.5", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "3", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "high", false},
+
+		{"CMS_MEDIA_MAX_VIDEO_MB", "512", true},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "0", false},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "-1", false},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "lots", false},
+	} {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv(tc.key, tc.value)
+			_, err := ConfigFromEnv()
+			if tc.ok && err != nil {
+				t.Errorf("%s=%s: %v", tc.key, tc.value, err)
+			}
+			if !tc.ok && err == nil {
+				t.Errorf("%s=%s was accepted", tc.key, tc.value)
+			}
+		})
+	}
+}
+
 func TestNormalizeSiteURL(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"", ""},
@@ -277,5 +363,73 @@ func TestSiteBaseURL(t *testing.T) {
 		if got := derived.siteBaseURL(req(c.tls, c.proto)); got != c.want {
 			t.Errorf("%s: siteBaseURL = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// The S3 variables that decide how media is addressed. Before these
+// existed, S3_APPLY_PUBLIC_POLICY was the only one of the group reachable
+// from the environment — so an env-configured deployment could open its
+// bucket to the world and get nothing for it, because PublicURL went on
+// handing out proxy paths.
+func TestConfigFromEnvS3PublicSettings(t *testing.T) {
+	t.Run("defaults are private", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("S3_ENDPOINT", "s3.example.com")
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.PublicRead || cfg.S3.UsePathStyle || cfg.S3.ApplyPublicReadPolicy ||
+			cfg.S3.PublicBaseURL != "" {
+			t.Errorf("a bare S3_ENDPOINT opened something up: %+v", cfg.S3)
+		}
+	})
+
+	// A trailing slash on the base URL would double up with the "/" the
+	// key is joined with.
+	t.Run("public base url is trimmed", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("S3_ENDPOINT", "s3.example.com")
+		t.Setenv("S3_PUBLIC_BASE_URL", "  https://cdn.example.com/  ")
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.S3.PublicBaseURL != "https://cdn.example.com" {
+			t.Errorf("PublicBaseURL = %q, want it trimmed", cfg.S3.PublicBaseURL)
+		}
+	})
+
+	// Every one of these is true/false, and a value that is neither is a
+	// configuration mistake rather than a silent false. S3_APPLY_PUBLIC_POLICY
+	// used to be compared against "1", so "true" meant false — on a
+	// variable whose whole job is opening a bucket.
+	for _, key := range []string{"S3_PUBLIC_READ", "S3_USE_PATH_STYLE", "S3_APPLY_PUBLIC_POLICY"} {
+		t.Run(key+" accepts true", func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("S3_ENDPOINT", "s3.example.com")
+			t.Setenv("S3_PUBLIC_READ", "true") // so the policy has something to pair with
+			t.Setenv(key, "true")
+			cfg, err := ConfigFromEnv()
+			if err != nil {
+				t.Fatalf("%s=true: %v", key, err)
+			}
+			got := map[string]bool{
+				"S3_PUBLIC_READ":         cfg.S3.PublicRead,
+				"S3_USE_PATH_STYLE":      cfg.S3.UsePathStyle,
+				"S3_APPLY_PUBLIC_POLICY": cfg.S3.ApplyPublicReadPolicy,
+			}[key]
+			if !got {
+				t.Errorf("%s=true was not read as true", key)
+			}
+		})
+		t.Run(key+" rejects nonsense", func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("S3_ENDPOINT", "s3.example.com")
+			t.Setenv(key, "yes-please")
+			if _, err := ConfigFromEnv(); err == nil {
+				t.Errorf("%s=yes-please was accepted", key)
+			}
+		})
 	}
 }

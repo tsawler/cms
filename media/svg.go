@@ -61,7 +61,7 @@ func processSVG(data []byte) (*processed, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("media: parsing svg: %w", err)
+			return nil, fmt.Errorf("%w: parsing svg: %w", ErrUndecodable, err)
 		}
 		switch t := tok.(type) {
 		case xml.Directive:

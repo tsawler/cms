@@ -28,6 +28,7 @@ package cms
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -310,7 +311,13 @@ func (c *CMS) loadContentCSS(ctx context.Context) (hash, css string, err error) 
 	row := c.db.QueryRow(ctx,
 		`SELECT class_hash, css FROM cms_content_css WHERE singleton`)
 	if err := row.Scan(&hash, &css); err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		// No row yet is the ordinary state of a site that has never
+		// built one, not a failure. Matched on the sentinel rather than
+		// on the words in the message: a driver that phrased it
+		// differently would have turned every build into "loading
+		// stored css failed", and the stylesheet would have quietly
+		// stopped rebuilding.
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", nil
 		}
 		return "", "", err

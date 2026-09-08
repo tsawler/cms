@@ -203,7 +203,11 @@ func (s *server) backToMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, s.uploadLimit())
+	// No ceiling set here: the CSRF middleware bounded the body before
+	// anything read it, which is the only place a limit can still take
+	// effect (see readToken). What is over the *upload* limit rather
+	// than the request limit is caught by the manager, from the
+	// multipart header's declared size, on either path.
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		var maxErr *http.MaxBytesError
@@ -225,8 +229,7 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):
 			s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, unsafeSVGMsg))
-		case errors.Is(err, media.ErrUnsupportedType) || strings.Contains(err.Error(), "decoding image") ||
-			strings.Contains(err.Error(), "parsing svg"):
+		case errors.Is(err, media.ErrUnsupportedType), errors.Is(err, media.ErrUndecodable):
 			s.renderMediaList(w, r, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.serverError(w, err)

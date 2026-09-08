@@ -204,7 +204,13 @@ option added to the CMS itself.
   script-blocking `Content-Security-Policy`. If you serve media straight
   from a public bucket/CDN instead of the proxy, that header is in your
   hands — configure it there if SVG uploads concern you.
-- Set `Config.SecureCookies = true` in production (HTTPS).
+- Call `defer c.Close()` after `cms.New`. It stops the background work the
+  CMS starts — the session store's expiry sweep, and the Redis pool when
+  sessions live there — and deliberately leaves `Config.DB` alone, since
+  the host opened it. A process that builds one CMS and exits does not
+  need it; one that builds several (tests, reload-on-change) leaks a
+  goroutine per CMS without it.
+- The session cookie is marked `Secure` automatically once `Config.SiteURL` is an `https://` address. Set `Config.SecureCookies = true` only when serving HTTPS with `SiteURL` left empty.
 - `Config.AdminPath` (default `/admin`) is where `Handler()` serves the
   admin area. If you wire `Admin()` yourself instead, the mount point
   must match it.

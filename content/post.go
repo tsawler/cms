@@ -180,26 +180,11 @@ func (s *Store) InsertPost(ctx context.Context, p *Post, locale string) (int64, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	p.ID, err = tx.InsertID(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, head_css, body_js)
-		VALUES ($1, $2, 'draft', $3, $4)`,
-		p.Slug, p.TemplateName, p.HeadCSS, p.BodyJS)
-	if dberr.IsUniqueViolation(err) {
-		return 0, ErrDuplicateSlug
-	}
-	if err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
-		VALUES ($1, $2, $3, $4)`,
-		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
-		VALUES ($1, $2, $3, $4, $5, 'draft')`,
-		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
+	// The backing page, written by the same code an ordinary page is: a
+	// post's page is a page, and the two used to be separate copies of
+	// these three statements that had already drifted apart over
+	// visibility.
+	if err := insertPage(ctx, tx, &p.Page, locale); err != nil {
 		return 0, err
 	}
 	p.PostID, err = tx.InsertID(ctx, `
@@ -231,6 +216,13 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Visibility is deliberately absent, which is the one place this
+	// differs from Page.Update. A post has no visibility control of its
+	// own, so p.Visibility is whatever was last read — or nothing at all
+	// on the API path — and writing it back would quietly re-publish a
+	// backing page somebody had made private through the editor
+	// (apiSetVisibility reaches post pages too). Not touching the column
+	// is how the setting survives an edit to the post around it.
 	tag, err := tx.Exec(ctx, `
 		UPDATE cms_pages SET slug = $1, updated_at = now() WHERE id = $2`,
 		p.Slug, p.ID)
@@ -243,22 +235,7 @@ func (s *Store) UpdatePost(ctx context.Context, p *Post, locale string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (page_id)
-		DO UPDATE SET template_name = EXCLUDED.template_name,
-			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
-		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
-		VALUES ($1, $2, $3, $4, $5, 'draft')
-		ON CONFLICT (page_id, locale, status)
-		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
-			meta_description = EXCLUDED.meta_description`,
-		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
+	if err := saveStagedPage(ctx, tx, &p.Page, locale); err != nil {
 		return err
 	}
 	// A zero PublishedAt leaves the stored date alone. InsertPost reads a

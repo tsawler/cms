@@ -946,6 +946,11 @@ func (s *server) apiSavePageCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// maxPosterBytes caps a video's poster frame — a still image captured in
+// the browser, so a few hundred KB in practice. Decorative either way:
+// past this it is dropped rather than failing the upload.
+const maxPosterBytes = 8 << 20
+
 // maxMetaBody bounds a page-metadata save. A title and a description are
 // a line of text each; the room above that is slack, not an invitation.
 const maxMetaBody = 8192
@@ -1193,7 +1198,7 @@ func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 // POST /api/media  (multipart field "file"; optional "poster", a
 // client-captured still for video uploads)
 func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, s.uploadLimit())
+	// Bounded by the CSRF middleware; see mediaUpload.
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		var maxErr *http.MaxBytesError
@@ -1210,7 +1215,7 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	// it is decorative, never worth failing the upload over.
 	var poster []byte
 	if pf, _, err := r.FormFile("poster"); err == nil {
-		poster, err = io.ReadAll(io.LimitReader(pf, 8<<20))
+		poster, err = io.ReadAll(io.LimitReader(pf, maxPosterBytes))
 		pf.Close()
 		if err != nil {
 			poster = nil
@@ -1225,7 +1230,7 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):
 			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, unsafeSVGMsg))
-		case errors.Is(err, media.ErrUnsupportedType), strings.Contains(err.Error(), "parsing svg"):
+		case errors.Is(err, media.ErrUnsupportedType), errors.Is(err, media.ErrUndecodable):
 			jsonError(w, http.StatusUnprocessableEntity, s.tr(r, unsupportedTypeMsg))
 		default:
 			s.deps.Logger.Error("cms admin: api media upload", "err", err)
@@ -1255,15 +1260,17 @@ func (s *server) apiMediaSetPoster(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Same cap a poster riding along with an upload gets.
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
 	pf, _, err := r.FormFile("poster")
 	if err != nil {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
 		return
 	}
 	defer pf.Close()
-	poster, err := io.ReadAll(pf)
+	// The same cap a poster riding along with an upload gets, applied to
+	// the part rather than to the request: a limit on r.Body only bites
+	// when this handler is the first thing to read it, which it is on one
+	// of the two ways a request can arrive here and not the other.
+	poster, err := io.ReadAll(io.LimitReader(pf, maxPosterBytes))
 	if err != nil {
 		jsonError(w, http.StatusUnprocessableEntity, s.tr(r, "That file could not be processed."))
 		return

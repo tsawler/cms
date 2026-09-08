@@ -330,6 +330,75 @@ func (s *Store) Counts(ctx context.Context) (pages, posts int, err error) {
 	return pages, posts, err
 }
 
+// Every page in the CMS is written through the three statements below,
+// whether it is an ordinary page or the page behind a blog post. They
+// live here, once, because a post's backing page *is* a page: it has the
+// same working copy and the same per-locale metadata, and a rule that
+// held for one and not the other would be a bug rather than a feature.
+//
+// They were duplicated in post.go until the two had drifted — the page
+// insert named visibility and the post insert left it to the column
+// default — which is the shape this kind of copy always goes.
+
+// insertPage writes the three rows a new page is made of: the row itself,
+// the working copy that starts out matching it, and its metadata for one
+// locale. Every page starts as a draft.
+//
+// It sets p.ID. A duplicate slug comes back as ErrDuplicateSlug.
+func insertPage(ctx context.Context, h handle, p *Page, locale string) error {
+	id, err := h.InsertID(ctx, `
+		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
+		VALUES ($1, $2, 'draft', $3, $4, $5)`,
+		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS)
+	if dberr.IsUniqueViolation(err) {
+		return ErrDuplicateSlug
+	}
+	if err != nil {
+		return err
+	}
+	p.ID = id
+
+	// The working copy starts out matching the row just written; edits to
+	// the staged fields land here and only reach cms_pages on Publish.
+	if _, err := h.Exec(ctx, `
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
+		VALUES ($1, $2, $3, $4)`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return err
+	}
+	_, err = h.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription)
+	return err
+}
+
+// saveStagedPage upserts the staged half of a page: the working copy and
+// the metadata for one locale. Both reach the site on the next Publish.
+//
+// The unstaged fields — the slug, and for an ordinary page its visibility
+// — are the caller's, because that is the one place pages and posts
+// genuinely differ. See Update and UpdatePost.
+func saveStagedPage(ctx context.Context, h handle, p *Page, locale string) error {
+	if _, err := h.Exec(ctx, `
+		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (page_id)
+		DO UPDATE SET template_name = EXCLUDED.template_name,
+			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
+		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
+		return err
+	}
+	_, err := h.Exec(ctx, `
+		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
+		VALUES ($1, $2, $3, $4, $5, 'draft')
+		ON CONFLICT (page_id, locale, status)
+		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
+			meta_description = EXCLUDED.meta_description`,
+		p.ID, locale, p.Title, p.Description, p.MetaDescription)
+	return err
+}
+
 // Insert stores a new page and its metadata for locale, returning its id.
 // New pages always start as drafts.
 func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, error) {
@@ -339,28 +408,7 @@ func (s *Store) Insert(ctx context.Context, p *Page, locale string) (int64, erro
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	p.ID, err = tx.InsertID(ctx, `
-		INSERT INTO cms_pages (slug, template_name, status, visibility, head_css, body_js)
-		VALUES ($1, $2, 'draft', $3, $4, $5)`,
-		p.Slug, p.TemplateName, p.Visibility.orPublic(), p.HeadCSS, p.BodyJS)
-	if dberr.IsUniqueViolation(err) {
-		return 0, ErrDuplicateSlug
-	}
-	if err != nil {
-		return 0, err
-	}
-	// The working copy starts out matching the row just written; edits to
-	// the staged fields land here and only reach cms_pages on Publish.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
-		VALUES ($1, $2, $3, $4)`,
-		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
-		VALUES ($1, $2, $3, $4, $5, 'draft')`,
-		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
+	if err := insertPage(ctx, tx, p, locale); err != nil {
 		return 0, err
 	}
 	return p.ID, tx.Commit(ctx)
@@ -468,22 +516,7 @@ func (s *Store) Update(ctx context.Context, p *Page, locale string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (page_id)
-		DO UPDATE SET template_name = EXCLUDED.template_name,
-			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
-		p.ID, p.TemplateName, p.HeadCSS, p.BodyJS); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cms_page_meta (page_id, locale, title, description, meta_description, status)
-		VALUES ($1, $2, $3, $4, $5, 'draft')
-		ON CONFLICT (page_id, locale, status)
-		DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
-			meta_description = EXCLUDED.meta_description`,
-		p.ID, locale, p.Title, p.Description, p.MetaDescription); err != nil {
+	if err := saveStagedPage(ctx, tx, p, locale); err != nil {
 		return err
 	}
 	// Slug and visibility are the two fields here that are not staged, and

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/render"
 )
 
@@ -58,37 +59,12 @@ const (
 
 // serveSitemap answers /sitemap.xml with every published, publicly
 // visible page, in every locale.
-//
-// The document is built from the site's base URL, which for an install
-// without Config.SiteURL is the requesting host — so the cache is keyed
-// by that base and a request arriving under another name rebuilds rather
-// than being served someone else's hostnames.
 func (c *CMS) serveSitemap(w http.ResponseWriter, r *http.Request) {
-	base := c.siteBaseURL(r)
-
-	c.sitemapMu.Lock()
-	body, at := c.sitemapBody, c.sitemapAt
-	if c.sitemapBase != base {
-		body = nil
-	}
-	c.sitemapMu.Unlock()
-
-	if body == nil || time.Since(at) >= sitemapCacheTTL {
-		built, err := c.buildSitemap(r.Context(), base)
-		if err != nil {
-			c.cfg.Logger.Error("cms: building the sitemap", "err", err)
-			// A stale copy beats an error page: the URLs in it are still
-			// real, and a crawler that gets a 500 may back off for days.
-			if body == nil {
-				http.Error(w, "Something went wrong.", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			body = built
-			c.sitemapMu.Lock()
-			c.sitemapBody, c.sitemapBase, c.sitemapAt = built, base, time.Now()
-			c.sitemapMu.Unlock()
-		}
+	body, err := c.sitemapFor(r.Context(), c.siteBaseURL(r))
+	if err != nil {
+		c.cfg.Logger.Error("cms: building the sitemap", "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
@@ -99,26 +75,93 @@ func (c *CMS) serveSitemap(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// buildSitemap renders the whole document. It is built in memory rather
-// than streamed: it has to be complete to be cached, and 50,000 URLs of
-// the shape this emits stay comfortably inside the protocol's size cap.
-func (c *CMS) buildSitemap(ctx context.Context, base string) ([]byte, error) {
-	locales := c.cfg.Locales
-	if len(locales) == 0 {
-		locales = []string{""} // a CMS built without locales serves one
+// sitemapFor returns the document for one base URL, rebuilding as little
+// as it can.
+//
+// The base is where the trouble is. An install without Config.SiteURL
+// takes it from the request, and the request's Host is chosen by whoever
+// sent it — so a cache keyed on the base alone is one an anonymous client
+// empties on demand, a fresh hostname per request, each one paying for a
+// query over every page on the site.
+//
+// So the halves are cached separately. The rows are the expensive part
+// and they do not depend on the base at all, which puts them out of
+// reach: vary the Host all you like and the query still runs once per
+// TTL. What is left host-dependent is turning rows into XML, which is
+// arithmetic on data already in hand. The rendered copy is kept too, for
+// the ordinary case where every request names the same base and this is a
+// map lookup with one entry.
+//
+// The whole thing runs under the mutex on purpose. Concurrent misses then
+// queue behind one rebuild instead of each starting their own, which is
+// the other half of not letting a client multiply work by asking twice.
+func (c *CMS) sitemapFor(ctx context.Context, base string) ([]byte, error) {
+	c.sitemapMu.Lock()
+	defer c.sitemapMu.Unlock()
+
+	if c.sitemapPages == nil || time.Since(c.sitemapAt) >= sitemapCacheTTL {
+		pages, err := c.sitemapEntries(ctx)
+		if err != nil {
+			// A stale copy beats an error page: the URLs in it are still
+			// real, and a crawler that gets a 500 may back off for days.
+			if c.sitemapBody != nil && c.sitemapBase == base {
+				c.cfg.Logger.Error("cms: refreshing the sitemap, serving the previous one", "err", err)
+				return c.sitemapBody, nil
+			}
+			return nil, err
+		}
+		// New rows make the rendered copy stale whatever base it was for.
+		c.sitemapPages, c.sitemapAt = pages, time.Now()
+		c.sitemapBody, c.sitemapBase = nil, ""
 	}
+
+	if c.sitemapBody != nil && c.sitemapBase == base {
+		return c.sitemapBody, nil
+	}
+	body, err := c.renderSitemap(c.sitemapPages, base)
+	if err != nil {
+		return nil, err
+	}
+	c.sitemapBody, c.sitemapBase = body, base
+	return body, nil
+}
+
+// sitemapLocales is the locale list the document is built over; a CMS
+// built without any serves one unprefixed set of URLs.
+func (c *CMS) sitemapLocales() []string {
+	if len(c.cfg.Locales) == 0 {
+		return []string{""}
+	}
+	return c.cfg.Locales
+}
+
+// sitemapEntries reads the pages a search engine may be pointed at.
+func (c *CMS) sitemapEntries(ctx context.Context) ([]content.SitemapEntry, error) {
 	// Every page is listed once per locale, so the page ceiling is the
 	// URL ceiling divided among them.
-	maxPages := sitemapMaxURLs / len(locales)
+	maxPages := sitemapMaxURLs / len(c.sitemapLocales())
 	entries, err := c.content.SitemapPages(ctx, maxPages)
 	if err != nil {
 		return nil, err
 	}
 	if len(entries) == maxPages {
 		c.cfg.Logger.Warn("cms: sitemap truncated at the protocol's URL limit — pages beyond it are not listed",
-			"pages", maxPages, "locales", len(locales), "urls", sitemapMaxURLs)
+			"pages", maxPages, "locales", len(c.sitemapLocales()), "urls", sitemapMaxURLs)
 	}
+	// Never nil on success, so an empty site still caches an answer
+	// rather than re-querying on every request.
+	if entries == nil {
+		entries = []content.SitemapEntry{}
+	}
+	return entries, nil
+}
 
+// renderSitemap turns rows into the document for one base URL. It is
+// built in memory rather than streamed: it has to be complete to be
+// cached, and 50,000 URLs of the shape this emits stay comfortably inside
+// the protocol's size cap.
+func (c *CMS) renderSitemap(entries []content.SitemapEntry, base string) ([]byte, error) {
+	locales := c.sitemapLocales()
 	def := locales[0]
 	doc := sitemapDoc{NS: sitemapNS, URLs: make([]sitemapURL, 0, len(entries)*len(locales))}
 	if len(locales) > 1 {
