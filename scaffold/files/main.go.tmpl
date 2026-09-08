@@ -156,9 +156,18 @@ func run(logger *slog.Logger) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.Handle("/", c.Handler())
 
+	// The site lock — thrown by a superadmin in the editor's Site settings
+	// dialog — closes everything the CMS serves on its own. Lockdown
+	// extends that to the routes above that the CMS knows nothing about,
+	// like the stylesheet. Name any address that must keep answering while
+	// the site is shut, such as a health check:
+	//
+	//	cms.Lockdown(mux, "/healthz")
+	handler := c.Lockdown(mux)
+
 	addr := envOr("ADDR", ":4000")
 	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, handler)
 }
 
 func envOr(key, fallback string) string {

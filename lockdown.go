@@ -5,20 +5,27 @@ package cms
 //
 // The setting behind it is content.SiteSettings.Locked, thrown from the
 // editor's Site settings dialog by a superadmin (or forced from the
-// environment with CMS_SITE_LOCKED). Enforcing it takes two doors, and
-// this file is the outer one:
+// environment with CMS_SITE_LOCKED). Enforcing it takes three doors:
 //
-//   - Here, in front of the host's whole router: every public address
-//     answers 503 unless the request carries a superadmin's session.
+//   - In Pages, on everything the CMS itself serves — site pages, feeds,
+//     the sitemap, proxied media, the editor bundle. This one needs no
+//     wiring, which is the point of it: the switch is in the product's own
+//     UI, so it cannot be left depending on whether the host remembered to
+//     mount something in main().
 //
 //   - In the admin package, at login and on every signed-in request: an
 //     admin or editor is refused the panel too, so a locked site does not
 //     merely hide its pages from the people who edit them.
 //
-// The admin path itself is never refused here. It has to stay reachable
-// or a superadmin could not sign in to lift the lock — which is the
-// difference between this and stopping the process, and the whole reason
-// the switch exists.
+//   - Here, in front of the host's whole router — the outer one, and the
+//     only one that can close routes the CMS knows nothing about. It also
+//     holds the exempt list, since only the host knows which addresses
+//     must keep answering.
+//
+// The admin path itself is never refused. It has to stay reachable or a
+// superadmin could not sign in to lift the lock — which is the difference
+// between this and stopping the process, and the whole reason the switch
+// exists.
 
 import (
 	"context"
@@ -39,6 +46,12 @@ const lockedRetryAfter = "3600"
 // Lockdown wraps the host's router with the site lock: while the site is
 // locked, every request that is not exempt, not under AdminPath, and not
 // carrying a superadmin's session is refused with 503.
+//
+// It is not what makes the switch work — Pages enforces the lock on
+// everything the CMS itself serves, so throwing the switch closes the
+// site's pages, feeds, sitemap and media whether or not this is mounted.
+// What Lockdown adds is the two things the CMS cannot do from inside its
+// own handler: closing the host's own routes, and holding an exempt list.
 //
 // Mount it outermost, in front of the host's own middleware:
 //
@@ -74,21 +87,35 @@ const lockedRetryAfter = "3600"
 // An exempt address is served to the public in full while the site is
 // closed. That is the trade: name the ones that must keep answering, and
 // know that each is a window into a site everyone else is told is shut.
+//
+// Exempting works on CMS addresses too — a feed at /blog/rss.xml, say.
+// Pages would otherwise refuse it on its own account, so a request this
+// wrapper passes is marked as already judged and is not weighed a second
+// time further down.
 func (c *CMS) Lockdown(next http.Handler, exempt ...string) http.Handler {
 	adminPath := c.cfg.AdminPath // normalized by New: leading slash, no trailing slash
+	// Every path through here that calls next has already decided this
+	// request may proceed, and says so in the context. Pages enforces the
+	// lock on its own account (see lockCleared), and without the mark it
+	// would re-adjudicate — costing a second session read on every
+	// request to a locked site, and, worse, refusing the exempt paths
+	// this wrapper was just told to let through.
+	pass := func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(withLockCleared(r.Context())))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !c.SiteLocked(r.Context()) {
-			next.ServeHTTP(w, r)
+			pass(w, r)
 			return
 		}
 		path := r.URL.Path
 		if path == adminPath || strings.HasPrefix(path, adminPath+"/") {
-			next.ServeHTTP(w, r)
+			pass(w, r)
 			return
 		}
 		for _, e := range exempt {
 			if path == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(path, e)) {
-				next.ServeHTTP(w, r)
+				pass(w, r)
 				return
 			}
 		}
@@ -102,8 +129,47 @@ func (c *CMS) Lockdown(next http.Handler, exempt ...string) http.Handler {
 		// The loaded session rides along, so the handler underneath —
 		// the CMS's own page handler, in the usual mounting — finds it
 		// already in the context instead of fetching it a second time.
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(withLockCleared(ctx)))
 	})
+}
+
+// lockClearedKey marks a request some outer layer has already judged
+// against the site lock.
+type lockClearedKey struct{}
+
+func withLockCleared(ctx context.Context) context.Context {
+	return context.WithValue(ctx, lockClearedKey{}, true)
+}
+
+// lockCleared reports whether Lockdown has already passed this request.
+// Only Lockdown sets it, and only on a request it decided to forward, so
+// it means "somebody with the exempt list in hand said yes" rather than
+// "unlocked".
+func lockCleared(r *http.Request) bool {
+	cleared, _ := r.Context().Value(lockClearedKey{}).(bool)
+	return cleared
+}
+
+// refuseLocked reports whether the public handler should answer this
+// request with the closed-site notice, and otherwise returns the request
+// to carry on with — which may have a loaded session riding on it.
+//
+// This is the lock enforced by the CMS on its own surface, rather than by
+// Lockdown on the host's. It exists because the switch is in the product:
+// a superadmin throws it in the editor's Site settings dialog, and if the
+// public pages kept serving until somebody also wired Lockdown into
+// main(), the setting would be a no-op on most installs and there would
+// be no way to tell from the UI. Lockdown is still the outer door, and
+// still the only thing that can close routes the CMS does not serve.
+func (c *CMS) refuseLocked(r *http.Request) (*http.Request, bool) {
+	if lockCleared(r) || !c.SiteLocked(r.Context()) {
+		return r, false
+	}
+	ctx, ok := c.superadminContext(r)
+	if !ok {
+		return r, true
+	}
+	return r.WithContext(ctx), false
 }
 
 // superadminContext loads the CMS session for a request and reports

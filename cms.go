@@ -222,6 +222,28 @@ type Config struct {
 	// over plain HTTP.
 	SecureCookies bool
 
+	// ClientIPHeader names the header a trusted reverse proxy sets to the
+	// address the request really came from — "X-Forwarded-For",
+	// "CF-Connecting-IP", "True-Client-IP". Empty, the default, takes the
+	// address off the connection, which is right when the app is reached
+	// directly.
+	//
+	// The login throttle is what reads it, and it is wrong in both
+	// directions if this does not match the deployment. Left unset behind
+	// a proxy, every visitor arrives from the same address, so the
+	// per-source counter stops separating anyone: a few deliberate
+	// failures against a known address shut that account for everybody.
+	// Set without a proxy that overwrites the header, the value is one
+	// the client chooses, and an attacker varies it to draw a fresh
+	// allowance for every request.
+	//
+	// So set it exactly when every request reaches the app through a
+	// proxy you control, and that proxy replaces the header rather than
+	// appending to whatever arrived. For X-Forwarded-For the rightmost
+	// entry is used — the one the nearest proxy appended, and the only
+	// one it vouches for.
+	ClientIPHeader string
+
 	// Redis moves session storage from the cms_sessions table to Redis.
 	// When set, sessions live under cms_session: keys — the prefix keeps
 	// them distinct in an instance shared with the host application — and
@@ -854,6 +876,7 @@ func New(cfg Config) (*CMS, error) {
 		// email is the one link that must not come from a header the
 		// sender chose. See admin.Deps.SiteURL.
 		SiteURL:         cfg.SiteURL,
+		ClientIPHeader:  cfg.ClientIPHeader,
 		DefaultLocale:   cfg.Locales[0],
 		Locales:         cfg.Locales,
 		RememberFor:     cfg.RememberFor,
@@ -1133,6 +1156,12 @@ func (c *CMS) Handler() http.Handler {
 // the in-place editor injected. The handler also serves proxied media and
 // the editor script under /cms/. When no TemplateFS is configured it serves
 // a placeholder instead.
+//
+// While the site lock is on (SiteSettings.Locked, or Config.LockOverride)
+// everything here answers 503 to everyone but a superadmin, so the switch
+// in the editor's Site settings dialog closes the site without the host
+// having to wire anything up. Routes the host serves itself are its own
+// to close: see Lockdown, which also carries the exempt list.
 func (c *CMS) Pages() http.Handler {
 	editorAssets := editor.Handler()
 	withSession := c.sessions.LoadAndSave(http.HandlerFunc(c.servePage))
@@ -1140,6 +1169,18 @@ func (c *CMS) Pages() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// The site lock, on the surface the CMS actually serves: pages,
+		// feeds, the sitemap, proxied media, the editor bundle. First,
+		// because a closed site should not be answering with any of them.
+		//
+		// A host that also wraps its router in Lockdown has already
+		// settled this — including which paths it exempted — and the
+		// request says so, so nothing is decided twice.
+		r, refused := c.refuseLocked(r)
+		if refused {
+			c.serveLocked(w, r)
 			return
 		}
 		// A site in development says so on everything it serves, before

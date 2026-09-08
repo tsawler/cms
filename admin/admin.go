@@ -123,6 +123,24 @@ type Deps struct {
 	// the CMS puts in an email. See SiteURL.
 	SiteBaseURL func(*http.Request) string
 
+	// ClientIPHeader names the header a trusted reverse proxy sets to the
+	// address the request really came from — "X-Forwarded-For",
+	// "CF-Connecting-IP", "True-Client-IP". Empty, the default, takes
+	// the address off the connection.
+	//
+	// It is read by the login throttle and nothing else, but there it
+	// matters in both directions: unset behind a proxy, every visitor
+	// shares one key and a handful of failures shuts an account for
+	// everybody; set without a proxy that overwrites it, the value is
+	// one the *client* picks, and an attacker varies it to get a fresh
+	// allowance per request. So set it exactly when every request
+	// reaches the app through a proxy you control and that proxy
+	// replaces the header rather than appending to what arrived.
+	//
+	// For X-Forwarded-For the rightmost entry is used: it is the one the
+	// nearest proxy appended, and the only one it vouches for.
+	ClientIPHeader string
+
 	// SiteURL is the host's *configured* canonical base
 	// (cms.Config.SiteURL), empty when the host configured none. Unlike
 	// SiteBaseURL it never falls back to the request, which is the whole
@@ -213,7 +231,12 @@ func (s *server) contentChanged() {
 type server struct {
 	deps      Deps
 	templates map[string]*template.Template
-	throttle  *auth.Throttle
+
+	// Three counters, because "too many attempts" is three different
+	// questions and one key cannot answer them all. See throttleLimits.
+	throttle    *auth.Throttle // per account *and* source
+	acctAttempt *auth.Throttle // per account, any source: passwords
+	acctCode    *auth.Throttle // per account, any source: two-factor codes
 }
 
 // New returns the admin http.Handler. The host mounts it under
@@ -229,8 +252,10 @@ func New(d Deps) http.Handler {
 		d.Locales = []string{d.DefaultLocale}
 	}
 	s := &server{
-		deps:     d,
-		throttle: auth.NewThrottle(5, 15*time.Minute),
+		deps:        d,
+		throttle:    auth.NewThrottle(perSourceLimit, throttleWindow),
+		acctAttempt: auth.NewThrottle(perAccountPasswordLimit, throttleWindow),
+		acctCode:    auth.NewThrottle(perAccountCodeLimit, throttleWindow),
 	}
 	s.templates = parseTemplates()
 

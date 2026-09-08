@@ -203,10 +203,15 @@ comes back from an afternoon's maintenance with its rankings gone.
 
 ### Mounting it
 
-The setting does nothing until the host wraps its router. The lock has
-to sit in front of the host's own routes — an app's API, feeds, and form
-posts are not the CMS's to refuse — so mounting it is one line, and
-outermost:
+Throwing the switch closes everything the CMS serves — site pages, the
+feeds, the sitemap, `robots.txt`, proxied media, the editor bundle —
+without any wiring at all. That much is not optional and cannot be
+forgotten: the switch is in the product's own UI, so it does what it says
+on a stock install.
+
+What it cannot reach on its own is the host's routes. An app's API, its
+form posts, its own static files: those are not the CMS's to refuse, and
+closing them is one line, mounted outermost:
 
 ```go
 func (a *app) routes() http.Handler {
@@ -220,6 +225,11 @@ Outermost, because a refused request should cost nothing underneath it —
 no visitor session, no rate-limit bookkeeping, no query for a page nobody
 is going to see. While the site is open the wrapper is one cached boolean
 and a call through; only a closed site pays for the session lookup.
+
+The two layers do not fight. A request `Lockdown` passes is marked as
+already judged, so the CMS's own handlers do not weigh it again — which
+is what lets the exempt list below cover CMS addresses as well as the
+host's.
 
 **The exempt list is the important argument.** Each entry matches the
 request path exactly, or as a prefix when it ends in `/`. Two kinds of

@@ -146,9 +146,13 @@ func run(logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", c.Handler())
 
+	// Extends the site lock to anything the host serves itself; the CMS's
+	// own pages are closed by the switch either way.
+	handler := c.Lockdown(mux)
+
 	addr := envOr("ADDR", ":4200")
 	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, handler)
 }
 
 func envOr(key, fallback string) string {

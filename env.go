@@ -17,6 +17,10 @@ import (
 //   - CMS_SITE_URL → SiteURL, the site's canonical public address
 //     ("https://example.com"). Leave it unset in development, where each
 //     request's own host is right.
+//   - CMS_CLIENT_IP_HEADER → ClientIPHeader, the header a trusted reverse
+//     proxy sets to the real client address ("X-Forwarded-For",
+//     "CF-Connecting-IP"). Unset reads the connection's own address. Set
+//     it only behind a proxy that overwrites the header — see the field.
 //   - S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET,
 //     S3_KEY_PREFIX, S3_APPLY_PUBLIC_POLICY (=1) → S3. Setting
 //     S3_ENDPOINT enables the media library.
@@ -64,6 +68,12 @@ func ConfigFromEnv() (Config, error) {
 	// The site's public address, for links that have to work off the page.
 	// Leave it unset in development, where the request's host is right.
 	cfg.SiteURL = os.Getenv("CMS_SITE_URL")
+
+	// Which header carries the real client address, when a trusted proxy
+	// sets one. Unset means the connection's own address; see
+	// Config.ClientIPHeader for why setting it wrongly is worse than
+	// leaving it alone.
+	cfg.ClientIPHeader = strings.TrimSpace(os.Getenv("CMS_CLIENT_IP_HEADER"))
 
 	if endpoint := os.Getenv("S3_ENDPOINT"); endpoint != "" {
 		cfg.S3 = &S3Config{

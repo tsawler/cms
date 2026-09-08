@@ -57,8 +57,11 @@ func (s *server) forgotRequest(w http.ResponseWriter, r *http.Request) {
 	// Its own throttle namespace: a locked-out password guesser should
 	// not arrive here pre-blocked, nor spend reset attempts to block
 	// somebody's login.
-	throttleKey := "reset|" + strings.ToLower(email) + "|" + remoteIP(r)
-	if s.throttle.Blocked(throttleKey) {
+	// Counted per source and per account, like login: this is the other
+	// door into the same account, and an email-sending one at that.
+	account := "reset|" + strings.ToLower(email)
+	throttleKey := account + "|" + s.clientIP(r)
+	if s.throttle.Blocked(throttleKey) || s.acctAttempt.Blocked(account) {
 		fail(http.StatusTooManyRequests, s.tr(r, "Too many requests. Please wait a few minutes and try again."))
 		return
 	}
@@ -72,6 +75,7 @@ func (s *server) forgotRequest(w http.ResponseWriter, r *http.Request) {
 	// nothing — but no email moves.
 	if r.PostFormValue("website") != "" {
 		s.throttle.Fail(throttleKey)
+		s.acctAttempt.Fail(account)
 		s.renderForgotSent(w, r)
 		return
 	}
@@ -98,6 +102,7 @@ func (s *server) forgotRequest(w http.ResponseWriter, r *http.Request) {
 	// an email-sending endpoint, and five sends in fifteen minutes is
 	// already generous for a human who cannot find their inbox.
 	s.throttle.Fail(throttleKey)
+	s.acctAttempt.Fail(account)
 
 	// From here the answer is already decided: the confirmation page,
 	// whatever we find. The lookup and send happen after the decision so
