@@ -472,3 +472,115 @@ func TestSettingsAndChallengeRequireTheirStates(t *testing.T) {
 		t.Errorf("GET /login/2fa with no pending login = %d → %q, want redirect to login", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
+
+// rotatingSourceTestServer is settingsTestServer reading the client
+// address from a header, so a test can be a different source per request
+// — the shape of an attacker with a range of addresses to spend.
+func rotatingSourceTestServer(t *testing.T, db *sqldb.DB) (*httptest.Server, *auth.Store) {
+	t.Helper()
+	users := auth.NewStore(db)
+	h := New(Deps{
+		Sessions:       scs.New(),
+		Users:          users,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		AdminPath:      "/admin",
+		ClientIPHeader: "X-Forwarded-For",
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/admin/", http.StripPrefix("/admin", h))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, users
+}
+
+// postFormFrom is postForm claiming to come from source.
+func postFormFrom(t *testing.T, srv *httptest.Server, client *http.Client, source, path string, form url.Values) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-For", source)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestTwoFactorCodeLimitSurvivesRotatingSources is the sharp end of the
+// throttle change. A six-digit code has a million values and three are
+// live at once, so a guess lands with probability 3e-6 and even odds
+// arrive after ~231,000 tries. A counter keyed on the source is no
+// counter at all against anyone holding a range of addresses — the whole
+// space is a few days of traffic. Only a per-account counter turns that
+// back into months, and it is the one thing standing between a stolen
+// password and a finished login.
+func TestTwoFactorCodeLimitSurvivesRotatingSources(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		srv, users := rotatingSourceTestServer(t, db)
+		u := seedActiveUser(t, users, "pat@example.com", "password-123")
+		const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+		if err := users.EnableTOTP(context.Background(), u.ID, secret, 0); err != nil {
+			t.Fatal(err)
+		}
+
+		client := newClient(t)
+		logIn(t, srv, client, "pat@example.com", "password-123")
+		csrf := csrfFrom(t, srv, client, "/admin/login/2fa")
+		wrong := url.Values{"csrf_token": {csrf}, "code": {"000000"}}
+
+		// A different source every time, so the per-source counter never
+		// sees a second attempt from anywhere.
+		for i := range perAccountCodeLimit {
+			source := "198.51.100." + strconv.Itoa(i%250+1)
+			if code := postFormFrom(t, srv, client, source, "/admin/login/2fa", wrong); code != http.StatusUnprocessableEntity {
+				t.Fatalf("guess %d from %s: status = %d, want 422", i+1, source, code)
+			}
+		}
+		if code := postFormFrom(t, srv, client, "203.0.113.99", "/admin/login/2fa", wrong); code != http.StatusTooManyRequests {
+			t.Errorf("guess %d from a fresh source: status = %d, want 429 — "+
+				"code guessing is unmetered to anyone who can vary their address", perAccountCodeLimit+1, code)
+		}
+	})
+}
+
+// TestTwoFactorCodeLimitSurvivesReLogin closes the obvious way around the
+// counter above. Whoever is guessing codes has the password — that is how
+// they reached the challenge — so if a successful password step cleared
+// the code counter, they could buy a fresh allowance any time they liked
+// by logging in again, and the limit would mean nothing.
+func TestTwoFactorCodeLimitSurvivesReLogin(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		srv, users := rotatingSourceTestServer(t, db)
+		u := seedActiveUser(t, users, "pat@example.com", "password-123")
+		const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+		if err := users.EnableTOTP(context.Background(), u.ID, secret, 0); err != nil {
+			t.Fatal(err)
+		}
+
+		client := newClient(t)
+		logIn(t, srv, client, "pat@example.com", "password-123")
+		csrf := csrfFrom(t, srv, client, "/admin/login/2fa")
+		wrong := url.Values{"csrf_token": {csrf}, "code": {"000000"}}
+
+		for i := range perAccountCodeLimit {
+			postFormFrom(t, srv, client, "198.51.100."+strconv.Itoa(i%250+1), "/admin/login/2fa", wrong)
+		}
+		if code := postFormFrom(t, srv, client, "203.0.113.99", "/admin/login/2fa", wrong); code != http.StatusTooManyRequests {
+			t.Fatalf("the code counter should be exhausted: status = %d, want 429", code)
+		}
+
+		// Now do the thing the password gets you: log in again, cleanly.
+		logIn(t, srv, client, "pat@example.com", "password-123")
+		csrf = csrfFrom(t, srv, client, "/admin/login/2fa")
+		wrong = url.Values{"csrf_token": {csrf}, "code": {"000000"}}
+		if code := postFormFrom(t, srv, client, "203.0.113.98", "/admin/login/2fa", wrong); code != http.StatusTooManyRequests {
+			t.Errorf("after a fresh password step: status = %d, want 429 — a correct "+
+				"password must not refill the code allowance", code)
+		}
+	})
+}

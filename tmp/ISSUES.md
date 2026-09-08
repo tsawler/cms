@@ -107,7 +107,7 @@ a deployment that serves media straight from a public bucket.
 
 ---
 
-### [ ] 23. An SVG served straight from a public bucket has no CSP behind it
+### [x] 23. An SVG served straight from a public bucket has no CSP behind it
 
 Split out of #2. The media proxy sets
 `Content-Security-Policy: default-src 'none'` on `image/svg+xml`
@@ -125,7 +125,41 @@ metadata (so it applies to new uploads only) and makes the media
 library's "Copy link" download rather than display, so it wants a
 deliberate decision rather than being folded into #2.
 
-### [ ] 3. Login and 2FA throttles are keyed by IP, so neither caps an account
+**Fixed**, but not the way sketched above. `Content-Disposition` would
+have needed an optional-interface dance around the exported
+`ObjectStore.Put`, would only have covered new uploads, and would have
+made "Copy link" download rather than display. Routing SVG through the
+proxy is smaller and stronger: all four public-URL calls already funnel
+through `Manager.URL`, so a single `Manager.publicURL` helper returns the
+`/cms/media/…` path for a ".svg" key and defers to the store for
+everything else. It applies to existing objects immediately, needs no
+interface change, and restores the CSP layer rather than substituting a
+different one.
+
+Keyed off the object key rather than the record, since the key is what the
+proxy resolves and ".svg" keys come from the SVG pipeline alone (`docTypes`
+has no `.svg`). Raster images, videos and documents keep their CDN URLs —
+moving all media off the CDN to fix SVG would be a much larger change than
+the problem.
+
+Residual: the object still exists at its bucket URL under `PublicRead`.
+Reaching it needs the key, which is 12 random bytes, is no longer emitted
+anywhere, and is not enumerable through the policy `ApplyPublicReadPolicy`
+writes (it grants `s3:GetObject` only, not `s3:ListBucket`).
+
+Tests: `TestURLKeepsSVGOnTheProxy` and
+`TestURLKeepsSVGOnTheProxyUnderAKeyPrefix` (unit, against a store that
+hands out CDN URLs) and `TestPublicStoreStillProxiesSVG` (end to end —
+upload to a public store, then fetch each rendition and assert the CSP is
+actually on the response). All verified to fail without the fix. Each
+asserts the other direction too: a PNG, video and PDF on the same store
+must keep their direct URLs.
+
+One existing test changed: `TestImageForVectorsAndNonImages` asserted
+`/media/vec001/web.svg`, which was the stub store's `"/"+key` convention
+rather than a CMS guarantee. It now asserts the proxy path and says why.
+
+### [x] 3. Login and 2FA throttles are keyed by IP, so neither caps an account
 
 `admin/handlers_auth.go:33` (`email|ip`) and `:203` (`2fa|userID|ip`).
 
@@ -140,7 +174,53 @@ proxy's address for everyone, which collapses the key — five failed
 logins lock a known admin email out for everybody. Consider a second,
 IP-independent per-account counter alongside the existing one.
 
-### [ ] 4. The site lock isn't wired up in anything the project generates
+**Fixed.** Three counters now, because "too many attempts" was three
+questions being asked with one key (`throttleLimits` in
+`admin/middleware.go` carries the reasoning and the arithmetic):
+
+- per account **and** source, 5 per 15 min — unchanged, still the tight
+  leash on any one origin.
+- per account, any source, **25** per 15 min — passwords (login and
+  forgot-password). Deliberately loose: any per-account limit is also a
+  lockout lever, so it sits where no human lands on it and an attacker
+  must sustain 100 failures an hour against one named account to hold it.
+  This one is a trade, not a free win, and says so in the comment.
+- per account, any source, **10** per 15 min — two-factor codes. The
+  strict one, and the reason the change exists: 3-in-10^6 per guess and
+  ~231,000 guesses for even odds means an unmetered attacker walks the
+  space in days, where 960/day is ~8 months of continuously logged
+  failure. The lockout objection barely applies, since anyone able to
+  trip it already has the password.
+
+A correct password clears both password counters and deliberately does
+*not* touch the code counters — otherwise whoever is guessing codes (who
+by definition has the password) could refill their allowance at will.
+
+The proxy half is a new `Config.ClientIPHeader` / `CMS_CLIENT_IP_HEADER`,
+consumed by `server.clientIP`. Unset behind a proxy the per-source counter
+was not merely imprecise but inverted — every visitor shared one key, so
+five failures shut an account for everyone. It has to be explicit
+configuration: trusting a header by default would let an attacker draw a
+fresh allowance per request, which is worse than the bug. For
+X-Forwarded-For the rightmost entry is used; an absent header falls back
+to the connection rather than to a blank key.
+
+Tests: `admin/clientip_test.go` (13 cases — a client prepending entries to
+XFF must not move the answer; absent/empty/whitespace/trailing-comma fall
+back to the connection), `admin/throttle_scope_test.go` (rotating source
+still hits the account limit; one account's lockout does not spread; the
+per-source limit still bites), and `TestTwoFactorCodeLimitSurvivesRotatingSources`
+/ `TestTwoFactorCodeLimitSurvivesReLogin` in `admin/twofactor_db_test.go`.
+The attack is spelled by varying `ClientIPHeader` input rather than by
+opening sockets from different addresses, which is the same thing as far
+as `clientIP` — the one place a source is decided — is concerned.
+
+All verified to fail with the per-account counters removed. The re-login
+test was additionally verified against a deliberately introduced
+`acctCode.Reset` in the password path, which is the specific bypass it
+exists to catch.
+
+### [x] 4. The site lock isn't wired up in anything the project generates
 
 `Lockdown` is the outer door for `SiteSettings.Locked` — but
 `scaffold/files/main.go.tmpl` and both `examples/*/main.go` do
@@ -149,6 +229,44 @@ itself does no lock check. So a superadmin who throws the switch in the
 editor's Site settings dialog gets the admin locked down and the public
 site still fully served. It's documented in `docs/production.md:215`, but
 the switch is in the UI and the generated app doesn't honour it.
+
+**Fixed**, and not only in the generated files. Wiring `Lockdown` into the
+scaffold would have left the same trap for every hand-written host, so the
+enforcement moved to where it cannot be forgotten: `Pages()` now refuses
+on its own account, via `refuseLocked`. The switch is in the product's own
+UI, so it closes the site's pages, feeds, sitemap, robots.txt, proxied
+media and editor bundle on a stock install, with nothing mounted.
+
+`Lockdown` keeps the two jobs the CMS cannot do from inside its own
+handler: closing routes the CMS does not serve, and holding the exempt
+list. The scaffold and both examples now wrap with it, so the generated
+app is complete and the API is demonstrated where someone will see it.
+
+The two layers had to be made not to fight. `Lockdown` now marks every
+request it passes as already judged (`withLockCleared`), and
+`refuseLocked` honours the mark. Without it the inner check would
+re-adjudicate — a second session read per request on a locked site, and,
+worse, it would refuse the very addresses the host had just exempted. An
+exempt CMS address (a partner's feed at /blog/rss.xml) is exactly the case
+that would have broken.
+
+Tests: `TestPagesEnforceTheLockWithoutLockdown` (no wrapper anywhere —
+pages, robots.txt, sitemap and media all 503 with Retry-After and
+no-store; editor refused, superadmin served),
+`TestHandlerEnforcesTheLockAndKeepsTheAdminOpen` (the way back in stays
+open), and `TestLockdownExemptSurvivesPagesEnforcement`. All verified to
+fail with `refuseLocked` removed; the exempt test additionally verified
+against a `Lockdown` that forwards without marking, which is the specific
+regression it guards.
+
+One test bug found and fixed while writing them: exempting `"/"` matches
+the whole site, because the exempt rule reads a trailing slash as a
+prefix. The test now names a distinct published page, so it distinguishes
+exempt from non-exempt instead of passing on a technicality.
+
+`docs/production.md` said "The setting does nothing until the host wraps
+its router", which is no longer true; that section now separates what the
+switch does by itself from what `Lockdown` adds.
 
 ### [ ] 5. `SecureCookies` is the one production setting with no environment knob
 

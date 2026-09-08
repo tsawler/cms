@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/internal/sessiondata"
@@ -38,6 +39,80 @@ const (
 	// sessionKeyUserID and needs no say in who the session really is.
 	sessionKeyMasqueradeFrom = "cmsMasqueradeFrom"
 )
+
+// throttleLimits: what the three counters allow, and why.
+//
+// The per-source counter is the tight one, and on its own it is not a cap
+// on anything. Its key names an account *and* where the attempt came
+// from, so an attacker with a range of addresses to spend — a /64 of IPv6
+// is free — gets the whole allowance again from each one. That is fine
+// as far as it goes: most guessing comes from somewhere, and five tries
+// is a short leash. It is just not a limit on how often an account can be
+// guessed at, which is the thing the two account counters supply.
+//
+// perAccountPasswordLimit is deliberately loose. Any per-account limit is
+// also a way to lock somebody out — an attacker who knows an admin's
+// address can hold the account shut by failing on purpose — so this is
+// set where no human lands on it (nobody mistypes a password 25 times in
+// a quarter of an hour) and an attacker has to keep up 100 failures an
+// hour, against one named account, to hold the lock. That is a trade, not
+// a free win: it buys a brake on distributed guessing and it sells a
+// nuisance. The CAPTCHA, when configured, is the better answer to the
+// same attack and does not sell anything.
+//
+// perAccountCodeLimit is the strict one, and it is the reason this whole
+// change exists. A six-digit code has a million values and three of them
+// are live at any moment, so a guess lands with probability 3e-6 and it
+// takes about 231,000 of them to reach even odds. Unmetered — which is
+// what a per-source counter is, to anyone with addresses to spend — that
+// is a few days of traffic. At ten an hour... at ten per window, which is
+// 960 a day, it is about eight months of sustained, continuously logged
+// failure against an account whose password the attacker must already
+// know. The lockout objection barely applies here for that same reason:
+// anyone in a position to trip this limit has the password already, and
+// shutting the account is the right answer rather than the harm.
+const (
+	throttleWindow = 15 * time.Minute
+
+	perSourceLimit          = 5
+	perAccountPasswordLimit = 25
+	perAccountCodeLimit     = 10
+)
+
+// clientIP is where the request came from, for the throttle counters that
+// key on a source.
+//
+// Deps.ClientIPHeader names the header a trusted proxy sets; without it
+// the address comes off the connection, which behind a proxy is the
+// proxy. That case is not merely imprecise, it inverts the counter: every
+// visitor shares one key, so five failures against a known address lock
+// that account out for everybody, and meanwhile a real attacker gets no
+// separation at all. Naming the header is how a deployment says which
+// answer to believe.
+//
+// An absent or empty header falls back to the connection rather than to a
+// blank key, so a proxy that is misconfigured (or a health check that
+// bypasses it) degrades to the old behaviour instead of collapsing every
+// source into one bucket.
+func (s *server) clientIP(r *http.Request) string {
+	if h := s.deps.ClientIPHeader; h != "" {
+		if v := r.Header.Get(h); v != "" {
+			// X-Forwarded-For is a list, appended to hop by hop. The
+			// rightmost entry is the one the nearest proxy wrote and is
+			// the only one it vouches for; everything left of it is
+			// whatever the client claimed. Single-value headers
+			// (CF-Connecting-IP and friends) have no comma and fall
+			// through unchanged.
+			if i := strings.LastIndexByte(v, ','); i >= 0 {
+				v = v[i+1:]
+			}
+			if ip := strings.TrimSpace(v); ip != "" {
+				return ip
+			}
+		}
+	}
+	return remoteIP(r)
+}
 
 // currentUser returns the logged-in, active user for the request, or nil.
 func (s *server) currentUser(r *http.Request) *auth.User {

@@ -288,3 +288,74 @@ func TestNewS3StoreRejectsABadEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// publicStore is a stub ObjectStore that hands out direct bucket URLs,
+// the way a PublicRead or PublicBaseURL deployment does.
+type publicStore struct{}
+
+func (publicStore) Put(context.Context, string, string, io.Reader) error { return nil }
+func (publicStore) Get(context.Context, string) (io.ReadCloser, string, error) {
+	return nil, "", ErrObjectNotFound
+}
+func (publicStore) Delete(context.Context, string) error { return nil }
+func (publicStore) PublicURL(key string) string          { return "https://cdn.example.com/" + key }
+
+// TestURLKeepsSVGOnTheProxy: the script-blocking CSP that backs up the
+// upload scan is a header the CMS writes, so it only exists on responses
+// the CMS writes. An SVG addressed at a bucket or CDN is served by
+// somebody else, under no policy — so it stays on the proxy whatever the
+// store would say. Everything else takes the direct URL as before.
+func TestURLKeepsSVGOnTheProxy(t *testing.T) {
+	m := NewManager(nil, publicStore{}, nil)
+
+	svg := &Media{Kind: KindImage, StoreKey: "abc", Ext: ".svg", VariantExt: ".svg"}
+	for _, rendition := range []string{"original", "web", "card", "thumb"} {
+		got := m.URL(svg, rendition)
+		if !strings.HasPrefix(got, ProxyPathPrefix) {
+			t.Errorf("URL(svg, %q) = %q, want a %s… proxy path", rendition, got, ProxyPathPrefix)
+		}
+		if strings.Contains(got, "cdn.example.com") {
+			t.Errorf("URL(svg, %q) = %q: an SVG must not be addressed at the bucket", rendition, got)
+		}
+	}
+	// The exact address, so the proxy can actually resolve it.
+	if got, want := m.URL(svg, "web"), "/cms/media/abc/web.svg"; got != want {
+		t.Errorf("URL(svg, \"web\") = %q, want %q", got, want)
+	}
+
+	// Not a blanket move to the proxy: raster images, videos and
+	// documents keep their direct URLs, which is the point of a CDN.
+	raster := &Media{Kind: KindImage, StoreKey: "def", Ext: ".jpg", VariantExt: ".webp"}
+	if got, want := m.URL(raster, "web"), "https://cdn.example.com/media/def/web.webp"; got != want {
+		t.Errorf("URL(jpeg, \"web\") = %q, want %q", got, want)
+	}
+	if got, want := m.URL(raster, "original"), "https://cdn.example.com/media/def/original.jpg"; got != want {
+		t.Errorf("URL(jpeg, \"original\") = %q, want %q", got, want)
+	}
+	video := &Media{Kind: KindVideo, StoreKey: "ghi", Ext: ".mp4", VariantExt: ".webp"}
+	if got, want := m.URL(video, "original"), "https://cdn.example.com/media/ghi/original.mp4"; got != want {
+		t.Errorf("URL(video, \"original\") = %q, want %q", got, want)
+	}
+	if got, want := m.URL(video, "poster"), "https://cdn.example.com/media/ghi/web.webp"; got != want {
+		t.Errorf("URL(video, \"poster\") = %q, want %q", got, want)
+	}
+	doc := &Media{Kind: KindFile, StoreKey: "jkl/report.pdf", Ext: ".pdf"}
+	if got, want := m.URL(doc, "original"), "https://cdn.example.com/media/jkl/report.pdf"; got != want {
+		t.Errorf("URL(pdf, \"original\") = %q, want %q", got, want)
+	}
+}
+
+// The proxy re-adds the key root, so a deployment prefix must not appear
+// in the path the page links — the same contract S3Store.PublicURL keeps
+// for a private bucket.
+func TestURLKeepsSVGOnTheProxyUnderAKeyPrefix(t *testing.T) {
+	m := NewManager(nil, prefixedPublicStore{}, nil)
+	svg := &Media{Kind: KindImage, StoreKey: "abc", Ext: ".svg", VariantExt: ".svg"}
+	if got, want := m.URL(svg, "web"), "/cms/media/abc/web.svg"; got != want {
+		t.Errorf("URL(svg, \"web\") = %q, want %q", got, want)
+	}
+}
+
+type prefixedPublicStore struct{ publicStore }
+
+func (prefixedPublicStore) KeyPrefix() string { return "acme" }

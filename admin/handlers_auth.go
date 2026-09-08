@@ -30,8 +30,19 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		s.render(w, status, "login", data)
 	}
 
-	throttleKey := strings.ToLower(email) + "|" + remoteIP(r)
-	if s.throttle.Blocked(throttleKey) {
+	// Two counters, failed together and checked together: one for this
+	// account from this source, one for this account from anywhere. The
+	// second is what makes the limit a limit — see throttleLimits.
+	account := strings.ToLower(email)
+	throttleKey := account + "|" + s.clientIP(r)
+	tooMany := func() bool {
+		return s.throttle.Blocked(throttleKey) || s.acctAttempt.Blocked(account)
+	}
+	countFailure := func() {
+		s.throttle.Fail(throttleKey)
+		s.acctAttempt.Fail(account)
+	}
+	if tooMany() {
 		fail(http.StatusTooManyRequests, s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."))
 		return
 	}
@@ -39,7 +50,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	// Honeypot: the field is visually hidden, so a value means a bot
 	// filled the form. Answer exactly like a wrong password would.
 	if r.PostFormValue("website") != "" {
-		s.throttle.Fail(throttleKey)
+		countFailure()
 		fail(http.StatusUnprocessableEntity, s.tr(r, "That email and password combination didn't work."))
 		return
 	}
@@ -64,7 +75,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 
 	u, err := s.deps.Users.Authenticate(r.Context(), email, password)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
-		s.throttle.Fail(throttleKey)
+		countFailure()
 		fail(http.StatusUnprocessableEntity, s.tr(r, "That email and password combination didn't work."))
 		return
 	}
@@ -73,7 +84,13 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both password counters clear on a correct password — but nothing
+	// here touches the two-factor counters. They are what a caller who
+	// already has the password is up against, so letting the password
+	// step reset them would hand the attacker an unlimited supply of
+	// code guesses for the price of re-submitting a password they know.
 	s.throttle.Reset(throttleKey)
+	s.acctAttempt.Reset(account)
 
 	// The password was right and the site is shut. Refused here, before
 	// the two-factor branch below: an account that cannot sign in should
@@ -197,11 +214,15 @@ func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, status, "login_2fa", data)
 	}
 
-	// Its own throttle namespace, keyed by the account under challenge:
-	// a six-digit code has a million values, so five tries per fifteen
-	// minutes is what makes guessing not a strategy.
-	throttleKey := "2fa|" + strconv.FormatInt(u.ID, 10) + "|" + remoteIP(r)
-	if s.throttle.Blocked(throttleKey) {
+	// Its own throttle namespace, keyed by the account under challenge —
+	// and counted twice, per source and per account. The per-account half
+	// is the one that matters here: a six-digit code is a small enough
+	// space that an attacker who can spend addresses will simply walk it,
+	// and only a counter that ignores where the attempt came from turns
+	// that back into years. See throttleLimits.
+	account := strconv.FormatInt(u.ID, 10)
+	throttleKey := "2fa|" + account + "|" + s.clientIP(r)
+	if s.throttle.Blocked(throttleKey) || s.acctCode.Blocked(account) {
 		fail(http.StatusTooManyRequests, s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."))
 		return
 	}
@@ -220,11 +241,13 @@ func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.throttle.Fail(throttleKey)
+		s.acctCode.Fail(account)
 		fail(http.StatusUnprocessableEntity, s.tr(r, "That code didn't work. Enter the current code from your authenticator app."))
 		return
 	}
 
 	s.throttle.Reset(throttleKey)
+	s.acctCode.Reset(account)
 	remember := s.deps.Sessions.GetBool(r.Context(), sessionKey2FARemember)
 	s.clearTwoFactorPending(r)
 	// A fresh token again on the pending → logged-in promotion, same as

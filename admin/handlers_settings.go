@@ -82,7 +82,7 @@ func (s *server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if emailChanged {
-		throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + remoteIP(r)
+		throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + s.clientIP(r)
 		if s.throttle.Blocked(throttleKey) {
 			errs["profile_password"] = s.tr(r, "Too many failed attempts. Please wait a few minutes and try again.")
 			s.renderSettings(w, r, http.StatusTooManyRequests, errs, &form)
@@ -132,7 +132,7 @@ func (s *server) settingsPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Guessing the current password out of a stolen session gets the
 	// same throttle a login gets; "pw|" keeps the namespaces apart.
-	throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + remoteIP(r)
+	throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + s.clientIP(r)
 	if s.throttle.Blocked(throttleKey) {
 		s.renderSettings(w, r, http.StatusTooManyRequests, map[string]string{
 			"current_password": s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."),
@@ -244,7 +244,7 @@ func (s *server) totpDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + remoteIP(r)
+	throttleKey := "pw|" + strconv.FormatInt(u.ID, 10) + "|" + s.clientIP(r)
 	if s.throttle.Blocked(throttleKey) {
 		s.renderSettings(w, r, http.StatusTooManyRequests, map[string]string{
 			"disable": s.tr(r, "Too many failed attempts. Please wait a few minutes and try again."),

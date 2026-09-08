@@ -157,9 +157,14 @@ func run(logger *slog.Logger) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.Handle("/", c.Handler())
 
+	// The site lock closes everything the CMS serves without any help;
+	// Lockdown extends it to the routes above that the CMS does not serve,
+	// and is where a health check or a partner feed would be exempted.
+	handler := c.Lockdown(mux)
+
 	addr := envOr("ADDR", ":4000")
 	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, handler)
 }
 
 // reportsSection is a deployment-specific admin page, registered through
