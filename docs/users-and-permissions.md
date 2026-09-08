@@ -18,6 +18,13 @@ Accounts have one of three **roles**, which encode trust:
   feature is available; the admin list is the superadmin's index of
   pages that aren't linked anywhere).
 
+A site always keeps at least one active superadmin. The last one cannot
+demote or deactivate themselves, and cannot be deleted — the form says so
+rather than doing it. This is not tidiness: only a superadmin can grant
+the role, and the first-run seed is a no-op once any account exists, so a
+site that reached zero could only get somebody back in by editing the
+database directly. Step down by giving the role to somebody else first.
+
 What an *editor* may work on is a set of per-user **permissions**,
 toggled on their page under Users:
 

@@ -771,3 +771,91 @@ func TestDeletingMediaClearsPostImages(t *testing.T) {
 		}
 	})
 }
+
+// A post's backing page is a page: the same three rows, written by the
+// same code. These two pin the parts of that which are easy to get wrong
+// when the two paths are one.
+
+// InsertPost writes visibility rather than leaving it to the column
+// default, so the row says what it means. A new post is public, like a
+// new page.
+func TestPostBackingPageIsPublicLikeAnyPage(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+
+		post := seedPost(t, s, content.Post{Page: content.Page{Slug: "blog/hello", Title: "Hello"}})
+		page, err := s.GetByID(ctx, post.ID, defaultLocale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Visibility != content.VisibilityPublic {
+			t.Errorf("a new post's page visibility = %q, want %q", page.Visibility, content.VisibilityPublic)
+		}
+
+		// And the same fields land as they do for an ordinary page.
+		if page.Slug != "blog/hello" || page.TemplateName != "post.gohtml" {
+			t.Errorf("page = {slug %q, template %q}, want the values the post was given",
+				page.Slug, page.TemplateName)
+		}
+		if page.Status != content.StatusDraft {
+			t.Errorf("status = %q, want draft", page.Status)
+		}
+	})
+}
+
+// UpdatePost deliberately does not write visibility, and that is the one
+// place it differs from Page.Update. A post carries no visibility control
+// of its own, so p.Visibility is whatever was last read — or nothing at
+// all on the API path — and writing it back would quietly re-publish a
+// backing page somebody had made private through the editor.
+//
+// This is the test that stops the difference being tidied away: the two
+// update paths look like they should be identical, and unifying them
+// would break this without touching anything named "visibility".
+func TestUpdatePostKeepsAPrivateBackingPagePrivate(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+
+		post := seedPost(t, s, content.Post{Page: content.Page{Slug: "blog/secret", Title: "Secret"}})
+		if err := s.SetVisibility(ctx, post.ID, content.VisibilityPrivate); err != nil {
+			t.Fatal(err)
+		}
+
+		// An edit to the post around it, built the way the admin form
+		// builds one: a fresh Post carrying the submitted fields and
+		// nothing else. That matters — parsePostMeta starts from
+		// &content.Post{}, so Visibility arrives as the zero value, and
+		// a zero value is exactly what orPublic() turns into "public".
+		// Reading the post back first would carry the private setting
+		// along and prove nothing.
+		edited := &content.Post{
+			Page: content.Page{
+				ID:           post.ID,
+				Slug:         post.Slug,
+				TemplateName: post.TemplateName,
+				Title:        "Still secret",
+			},
+			PostID: post.PostID,
+			Feed:   post.Feed,
+		}
+		if err := s.UpdatePost(ctx, edited, defaultLocale); err != nil {
+			t.Fatal(err)
+		}
+
+		page, err := s.GetByID(ctx, post.ID, defaultLocale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Visibility != content.VisibilityPrivate {
+			t.Errorf("visibility = %q after editing the post, want it left private", page.Visibility)
+		}
+
+		// The edit itself still landed, so this is not passing because
+		// nothing was written.
+		if page.Title != "Still secret" {
+			t.Errorf("title = %q, want the edit to have been saved", page.Title)
+		}
+	})
+}

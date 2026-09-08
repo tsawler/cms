@@ -115,6 +115,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close() // stops the CMS's background work; leaves db alone
 
 	// Creates the schema on first run and upgrades it afterwards; safe to
 	// call on every startup.

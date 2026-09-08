@@ -63,10 +63,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		}
 		ok, err := s.deps.Captcha.Verify(r.Context(), token)
 		if err != nil {
-			// No verdict (Cap server unreachable): fail open so a Cap
-			// outage cannot lock admins out — the login throttle still
-			// blunts password guessing.
-			s.deps.Logger.Warn("cms admin: captcha unavailable, skipping check", "err", err)
+			s.captchaNoVerdict(r, err)
 		} else if !ok {
 			fail(http.StatusUnprocessableEntity, s.tr(r, "Verification failed. Please try again."))
 			return
@@ -273,4 +270,33 @@ func remoteIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// captchaNoVerdict handles a Verify that came back with neither a yes nor
+// a no, and it is where the decision to fail open is actually made.
+//
+// Open, because the alternative locks every account out of a site over a
+// dependency that is not the site: an admin who needs to get in and fix
+// something should not be held out by the thing that was meant to keep
+// other people out. What still stands in the way of guessing is the
+// throttle — and since it gained per-account counters it is a real limit
+// rather than a per-address one.
+//
+// The two ways to get here want different things from whoever reads the
+// log, so they are logged differently. ErrUnavailable is an outage: wait,
+// or look at the Cap server. ErrBadResponse means something answered and
+// it was not Cap — a URL typo, a proxy's error page, another service on
+// the port — which will never fix itself, and until it is fixed the
+// challenge on this form is decorative. That is worth an error rather
+// than the warning the whole thing used to share, because it is a
+// standing hole rather than a passing one.
+func (s *server) captchaNoVerdict(r *http.Request, err error) {
+	if errors.Is(err, captcha.ErrBadResponse) {
+		s.deps.Logger.Error("cms admin: the CAPTCHA server answered with something that is not a verdict, "+
+			"so the challenge is not being enforced — check CAP_URL/CAP_INTERNAL_URL and the site key",
+			"err", err, "path", r.URL.Path)
+		return
+	}
+	s.deps.Logger.Warn("cms admin: no CAPTCHA verdict, allowing the request through",
+		"err", err, "path", r.URL.Path)
 }

@@ -271,6 +271,8 @@ func New(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(d.Sessions.LoadAndSave)
+	// Before anything that asks who is signed in — which is most things.
+	r.Use(s.withUserCache)
 	r.Use(s.csrf)
 	r.Use(secureHeaders(capOrigin))
 
@@ -346,12 +348,12 @@ func New(d Deps) http.Handler {
 			// the handlers by the page's slug — a post's backing
 			// page answers to its feed permission, not to pages.
 			r.Get("/api/pages", s.apiListPages)
-			r.With(s.requirePerm(auth.PermPages)).Post("/api/pages", s.apiCreatePage)
+			r.With(s.requireAnyPerm(auth.PermPages)).Post("/api/pages", s.apiCreatePage)
 			r.Delete("/api/pages/{id}", s.apiDeletePage)
 			r.Get("/api/menu", s.apiGetMenu)
-			r.With(s.requirePerm(auth.PermPages)).Put("/api/menu", s.apiSaveMenu)
+			r.With(s.requireAnyPerm(auth.PermPages)).Put("/api/menu", s.apiSaveMenu)
 			r.Get("/api/settings", s.apiGetSettings)
-			r.With(s.requirePerm(auth.PermPages)).Put("/api/settings", s.apiSaveSettings)
+			r.With(s.requireAnyPerm(auth.PermPages)).Put("/api/settings", s.apiSaveSettings)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
@@ -454,7 +456,7 @@ func New(d Deps) http.Handler {
 		}
 
 		r.Group(func(r chi.Router) {
-			r.Use(s.requirePerm(auth.PermUsers))
+			r.Use(s.requireAnyPerm(auth.PermUsers))
 			r.Get("/users", s.usersList)
 			r.Get("/users/new", s.userNew)
 			r.Post("/users/new", s.userCreate)

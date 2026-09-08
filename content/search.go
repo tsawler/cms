@@ -419,7 +419,7 @@ func (s *Store) searchWhere(terms []SearchTerm, locale string) (where, rank stri
 		rank = r
 	}
 	for _, t := range short {
-		ph := next("%" + escapeLike(t.Text) + "%")
+		ph := next("%" + sqldb.EscapeLike(t.Text) + "%")
 		c := "(" + d.CaseInsensitiveLike("title", ph) +
 			" OR " + d.CaseInsensitiveLike("summary", ph) +
 			" OR " + d.CaseInsensitiveLike("body", ph) + ")"
@@ -444,14 +444,6 @@ func longestWord(s string) int {
 		best = max(best, n)
 	}
 	return best
-}
-
-// escapeLike neutralizes the LIKE wildcards in a literal string, so a
-// visitor searching for "100%" is not handed every page on the site.
-// Backslash is the default escape character on both engines.
-func escapeLike(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return r.Replace(s)
 }
 
 // CountSearch is how many documents match, for sizing a results pager. It

@@ -88,10 +88,7 @@ func (s *server) forgotRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		ok, err := s.deps.Captcha.Verify(r.Context(), token)
 		if err != nil {
-			// Fail open, as login does: a Cap outage should not strand
-			// somebody who has genuinely lost their password. The
-			// throttle still bounds abuse.
-			s.deps.Logger.Warn("cms admin: captcha unavailable, skipping check", "err", err)
+			s.captchaNoVerdict(r, err)
 		} else if !ok {
 			fail(http.StatusUnprocessableEntity, s.tr(r, "Verification failed. Please try again."))
 			return

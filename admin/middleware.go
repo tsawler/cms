@@ -114,12 +114,69 @@ func (s *server) clientIP(r *http.Request) string {
 	return remoteIP(r)
 }
 
+// userCacheKey types the request-context slot holding the memo below.
+type userCacheKey struct{}
+
+// userCache is one request's answer to "who is this?", so that asking
+// repeatedly costs one lookup rather than one each.
+//
+// loaded is separate from user because nil is a real answer — a session
+// naming an account that has been deleted or deactivated — and re-asking
+// the database to be told nil again is the case worth avoiding most.
+//
+// id records which session user the answer belongs to, so a request that
+// changes who it is signed in as does not keep the old one. Nothing does
+// that and then renders today (masquerade, login and logout all redirect),
+// but the memo should not be the reason that has to stay true.
+//
+// One request is one goroutine, so there is no lock here. A handler that
+// wants the user from a goroutine of its own should read it before
+// starting one.
+type userCache struct {
+	id     int64
+	user   *auth.User
+	loaded bool
+}
+
+// withUserCache installs the memo. It sits at the top of the admin chain,
+// so every route — including the ones outside requireUser, like the login
+// and password-reset forms — gets one.
+func (s *server) withUserCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCacheKey{}, &userCache{})))
+	})
+}
+
 // currentUser returns the logged-in, active user for the request, or nil.
+//
+// It is asked several times over one request — by the middleware that
+// gates the route, by the handler, by the template data, by whatever
+// checks a permission along the way — and each answer used to be a pair
+// of queries: the row, then its grants. A page behind two middleware
+// layers spent ten queries establishing one fact. The answer is now
+// remembered for the request that asked for it.
 func (s *server) currentUser(r *http.Request) *auth.User {
 	id := s.deps.Sessions.GetInt64(r.Context(), sessionKeyUserID)
 	if id == 0 {
 		return nil
 	}
+	// The session read above is in memory and has to happen anyway, so
+	// checking it against the memo costs nothing and keeps the memo from
+	// outliving the session state it describes.
+	cache, _ := r.Context().Value(userCacheKey{}).(*userCache)
+	if cache != nil && cache.loaded && cache.id == id {
+		return cache.user
+	}
+	u := s.loadSessionUser(r, id)
+	if cache != nil {
+		cache.id, cache.user, cache.loaded = id, u, true
+	}
+	return u
+}
+
+// loadSessionUser reads the account a session names, or nil when there is
+// no usable one: no such row, or an account that has been switched off.
+func (s *server) loadSessionUser(r *http.Request, id int64) *auth.User {
 	u, err := s.deps.Users.GetByID(r.Context(), id)
 	if err != nil {
 		if !errors.Is(err, auth.ErrNotFound) {
@@ -218,14 +275,7 @@ func (s *server) requireSuperadmin(next http.Handler) http.Handler {
 	})
 }
 
-// requirePerm builds middleware that responds 403 unless the logged-in
-// user holds the permission (admin roles hold every permission). It must
-// be nested inside requireUser.
-func (s *server) requirePerm(p auth.Permission) func(http.Handler) http.Handler {
-	return s.requireAnyPerm(p)
-}
-
-// requireGrant is requirePerm without the admin shortcut: the permission
+// requireGrant is requireAnyPerm without the admin shortcut: the permission
 // must be granted explicitly whatever the role, and only superadmin
 // passes for free. It gates the sections that declare AdminsNeedGrant.
 func (s *server) requireGrant(p auth.Permission) func(http.Handler) http.Handler {
@@ -276,8 +326,13 @@ func (s *server) requireMedia(next http.Handler) http.Handler {
 	})
 }
 
-// requireAnyPerm is requirePerm for handlers that several permissions
-// unlock — the shared Blog & News area needs either feed, not both.
+// requireAnyPerm builds middleware that responds 403 unless the logged-in
+// user holds at least one of the permissions (admin roles hold every
+// permission). It must be nested inside requireUser.
+//
+// Variadic because some areas are unlocked by more than one grant — the
+// shared Blog & News section needs either feed, not both — and naming one
+// permission is the ordinary case rather than a different function.
 func (s *server) requireAnyPerm(perms ...auth.Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -356,14 +411,17 @@ func (s *server) maxRequestBytes(r *http.Request) int64 {
 // "invalid or missing CSRF token" it would otherwise collect, since the
 // token was neither.
 func (s *server) readToken(w http.ResponseWriter, r *http.Request) (string, bool) {
+	// Capped first, and on every path. The header path does not read the
+	// body here — that is left to the handler — but it still leaves with
+	// a bounded one, so the ceiling is a property of the request rather
+	// than of which way the token happened to arrive. Handlers used to
+	// set their own, which worked for the header path and was inert for
+	// the form path, since by then the body had already been read.
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestBytes(r))
+
 	if sent := r.Header.Get("X-CSRF-Token"); sent != "" {
-		// The body is untouched on this path, so a handler's own
-		// MaxBytesReader still governs it. This is how the JS uploaders
-		// post, and why they were never affected.
 		return sent, true
 	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestBytes(r))
 
 	var err error
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {

@@ -584,23 +584,50 @@ func validImageURL(v string) bool {
 		strings.HasPrefix(v, "https://") || strings.HasPrefix(v, "http://")
 }
 
+// finishContentAction is the tail every delete, discard and unpublish
+// shares: run the mutation, and on success tell the stylesheet builder
+// that stored content moved, flash the result, and send the editor back
+// where they were.
+//
+// The point is not the eight lines. It is that contentChanged is easy to
+// leave out of a new handler and impossible to notice missing — the site
+// keeps working, and classes typed into content quietly stop being
+// compiled — so the notification belongs in the shared path rather than
+// in six places that each have to remember it.
+//
+// done is passed already translated: the messages differ by more than a
+// noun ("this page hasn't been published yet" against "this post…"), and
+// building them here from parts would put them beyond the reach of the
+// translation catalogue.
+func (s *server) finishContentAction(w http.ResponseWriter, r *http.Request, back, done string, err error) {
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.contentChanged()
+	s.flash(r, done)
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// refuse sends the editor back with a message and no change made — the
+// home page that cannot be deleted, the draft that has nothing published
+// to revert to.
+func (s *server) refuse(w http.ResponseWriter, r *http.Request, back, why string) {
+	s.flash(r, why)
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
 func (s *server) pageDelete(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
 	}
 	if page.Slug == "" {
-		s.flash(r, s.tr(r, "The home page can't be deleted."))
-		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+		s.refuse(w, r, s.pageBase(page), s.tr(r, "The home page can't be deleted."))
 		return
 	}
-	if err := s.deps.Content.Delete(r.Context(), page.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Page deleted."))
-	http.Redirect(w, r, s.deps.AdminPath+"/pages", http.StatusSeeOther)
+	s.finishContentAction(w, r, s.deps.AdminPath+"/pages", s.tr(r, "Page deleted."),
+		s.deps.Content.Delete(r.Context(), page.ID))
 }
 
 // pageDiscard throws away the page's unpublished draft edits, reverting its
@@ -611,17 +638,13 @@ func (s *server) pageDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Status != content.StatusPublished {
-		s.flash(r, s.tr(r, "There are no published changes to revert to — this page hasn't been published yet."))
-		http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+		s.refuse(w, r, s.pageBase(page),
+			s.tr(r, "There are no published changes to revert to — this page hasn't been published yet."))
 		return
 	}
-	if err := s.deps.Content.DiscardDraft(r.Context(), page.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Draft changes discarded — the editor now matches the published page."))
-	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+	s.finishContentAction(w, r, s.pageBase(page),
+		s.tr(r, "Draft changes discarded — the editor now matches the published page."),
+		s.deps.Content.DiscardDraft(r.Context(), page.ID))
 }
 
 // pageUnpublish takes the page off the public site. Content is untouched:
@@ -632,13 +655,9 @@ func (s *server) pageUnpublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.deps.Content.Unpublish(r.Context(), page.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Page unpublished — it is no longer visible on the site."))
-	http.Redirect(w, r, s.deps.AdminPath+"/pages/"+strconv.FormatInt(page.ID, 10), http.StatusSeeOther)
+	s.finishContentAction(w, r, s.pageBase(page),
+		s.tr(r, "Page unpublished — it is no longer visible on the site."),
+		s.deps.Content.Unpublish(r.Context(), page.ID))
 }
 
 // pagePreview renders the page's draft content with the real site

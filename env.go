@@ -204,18 +204,23 @@ func ConfigFromEnv() (Config, error) {
 		cfg.PageVersionsKept = n
 	}
 
+	// Both of these are range-checked here rather than left to the
+	// setters that consume them, which quietly ignore anything outside
+	// their bounds. A quality of 3 or a video cap of -1 would have been
+	// accepted, discarded, and replaced by the default, so the site ran
+	// on a number nobody chose and nothing said so.
 	if v := os.Getenv("CMS_MEDIA_WEBP_QUALITY"); v != "" {
 		q, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return Config{}, fmt.Errorf("cms: CMS_MEDIA_WEBP_QUALITY %q is not a number: %w", v, err)
+		if err != nil || q <= 0 || q > 1 {
+			return Config{}, fmt.Errorf("cms: CMS_MEDIA_WEBP_QUALITY %q is not a quality between 0 and 1", v)
 		}
 		cfg.MediaWebPQuality = q
 	}
 
 	if v := os.Getenv("CMS_MEDIA_MAX_VIDEO_MB"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("cms: CMS_MEDIA_MAX_VIDEO_MB %q is not a number: %w", v, err)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf("cms: CMS_MEDIA_MAX_VIDEO_MB %q is not a positive number of megabytes", v)
 		}
 		cfg.MediaMaxVideoMB = n
 	}

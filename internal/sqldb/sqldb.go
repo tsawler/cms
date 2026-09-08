@@ -14,6 +14,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tsawler/cms/internal/dialect"
 )
@@ -205,6 +206,20 @@ func CollectRows[T any](rows *sql.Rows, fn func(Scanner) (T, error)) ([]T, error
 	}
 	return out, nil
 }
+
+// likeEscaper neutralizes LIKE's wildcards, so a "%" typed into a search
+// box means a percent sign rather than everything. Backslash is the
+// default escape character on both engines.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// EscapeLike makes a user-typed string safe to drop between the "%"s of a
+// LIKE pattern: without it, a visitor searching for "100%" is handed every
+// row on the site and one typing "_" matches any character.
+//
+// Here rather than in each store because the rule is the engines', not any
+// one table's — and because two copies of it had already grown, one of
+// which rebuilt the replacer on every call.
+func EscapeLike(s string) string { return likeEscaper.Replace(s) }
 
 // JSON binds m to a JSON column. A nil map is stored as NULL, which the
 // snippet store uses to mean "a plain block rather than a section preset".

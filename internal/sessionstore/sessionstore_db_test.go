@@ -1,6 +1,8 @@
 package sessionstore_test
 
 import (
+	"context"
+	"github.com/alexedwards/scs/v2"
 	"testing"
 	"time"
 
@@ -123,6 +125,119 @@ func TestSessionBinaryDataRoundTrip(t *testing.T) {
 		}
 		if string(got) != string(want) {
 			t.Errorf("data = %v, want %v", got, want)
+		}
+	})
+}
+
+// The cleanup goroutine has to actually stop when asked, or every CMS a
+// process builds leaves one ticking against a database it no longer
+// serves. StopCleanup returns once it has, so this needs no sleeping.
+func TestStopCleanupEndsTheGoroutine(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := sessionstore.NewWithCleanupInterval(db, time.Millisecond)
+		done := make(chan struct{})
+		go func() {
+			s.StopCleanup()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("StopCleanup did not return: the cleanup goroutine is still running")
+		}
+
+		// And again — a shutdown path that can be reached twice must not
+		// panic on a closed channel.
+		s.StopCleanup()
+		s.StopCleanup()
+	})
+}
+
+// A store built with cleanup disabled has no goroutine to stop, and
+// stopping it must not block or panic either.
+func TestStopCleanupWithoutACleanupLoop(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := sessionstore.NewWithCleanupInterval(db, 0)
+		s.StopCleanup()
+		s.StopCleanup()
+	})
+}
+
+// Every session read and write used to run on context.Background(): no
+// deadline, and no notice when the client went away, so a slow database
+// turned each abandoned request into a query nothing would stop. The
+// store now implements scs.CtxStore, and these are the two halves of what
+// that has to mean.
+
+// A read carries the caller's cancellation: a lookup for a visitor who is
+// no longer there stops with them.
+func TestFindCtxHonoursCancellation(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := sessionstore.NewWithCleanupInterval(db, 0)
+		if err := s.Commit("tok", []byte("data"), time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, _, err := s.FindCtx(ctx, "tok"); err == nil {
+			t.Error("FindCtx on a cancelled context succeeded — the read is not cancellable")
+		}
+
+		// And an uncancelled one still works, so the plumbing did not
+		// simply break reads.
+		data, found, err := s.FindCtx(context.Background(), "tok")
+		if err != nil || !found || string(data) != "data" {
+			t.Errorf("FindCtx = %q, %v, %v; want the stored data", data, found, err)
+		}
+	})
+}
+
+// A write does not. It happens because something has already been decided
+// — a login granted, a session destroyed on logout — and a client that
+// hangs up in the moment between the decision and the write must not undo
+// it. A logout that did not land because the browser went away would
+// leave a session that still works.
+func TestWritesOutliveACancelledRequest(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := sessionstore.NewWithCleanupInterval(db, 0)
+
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if err := s.CommitCtx(cancelled, "tok", []byte("data"), time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("CommitCtx on a cancelled context: %v", err)
+		}
+		if _, found, err := s.FindCtx(context.Background(), "tok"); err != nil || !found {
+			t.Fatalf("the session was not committed: found = %v, err = %v", found, err)
+		}
+
+		if err := s.DeleteCtx(cancelled, "tok"); err != nil {
+			t.Fatalf("DeleteCtx on a cancelled context: %v", err)
+		}
+		if _, found, err := s.FindCtx(context.Background(), "tok"); err != nil || found {
+			t.Errorf("the session survived a logout whose request was cancelled: found = %v, err = %v", found, err)
+		}
+	})
+}
+
+// The context-less three are the same three queries, for anyone holding
+// the store through the narrower scs.Store interface.
+func TestPlainMethodsStillWork(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		var s scs.Store = sessionstore.NewWithCleanupInterval(db, 0)
+		if err := s.Commit("plain", []byte("v"), time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		data, found, err := s.Find("plain")
+		if err != nil || !found || string(data) != "v" {
+			t.Fatalf("Find = %q, %v, %v", data, found, err)
+		}
+		if err := s.Delete("plain"); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, _ := s.Find("plain"); found {
+			t.Error("Delete did not remove the session")
 		}
 	})
 }

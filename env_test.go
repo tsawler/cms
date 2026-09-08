@@ -271,6 +271,41 @@ func TestConfigFromEnvSecureCookies(t *testing.T) {
 	})
 }
 
+// Both of these used to check only that the value parsed, then hand it to
+// a setter that silently ignores anything out of range — so a quality of
+// 3 or a video cap of -1 was accepted, discarded, and replaced by the
+// default. The site then ran on a number nobody chose, with nothing said.
+func TestConfigFromEnvMediaTuningRanges(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string
+		ok         bool
+	}{
+		{"CMS_MEDIA_WEBP_QUALITY", "0.8", true},
+		{"CMS_MEDIA_WEBP_QUALITY", "1", true},
+		{"CMS_MEDIA_WEBP_QUALITY", "0", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "-0.5", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "3", false},
+		{"CMS_MEDIA_WEBP_QUALITY", "high", false},
+
+		{"CMS_MEDIA_MAX_VIDEO_MB", "512", true},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "0", false},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "-1", false},
+		{"CMS_MEDIA_MAX_VIDEO_MB", "lots", false},
+	} {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv(tc.key, tc.value)
+			_, err := ConfigFromEnv()
+			if tc.ok && err != nil {
+				t.Errorf("%s=%s: %v", tc.key, tc.value, err)
+			}
+			if !tc.ok && err == nil {
+				t.Errorf("%s=%s was accepted", tc.key, tc.value)
+			}
+		})
+	}
+}
+
 func TestNormalizeSiteURL(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"", ""},

@@ -164,3 +164,41 @@ func TestSessionBinaryDataRoundTrip(t *testing.T) {
 		t.Errorf("data = %v, want %v", got, want)
 	}
 }
+
+// The same two halves as the SQL store: a read carries the caller's
+// cancellation, a write outlives it.
+func TestRedisFindCtxHonoursCancellation(t *testing.T) {
+	s := newStore(t)
+	if err := s.Commit("tok", []byte("data"), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := s.FindCtx(ctx, "tok"); err == nil {
+		t.Error("FindCtx on a cancelled context succeeded — the read is not cancellable")
+	}
+	if _, found, err := s.FindCtx(context.Background(), "tok"); err != nil || !found {
+		t.Errorf("FindCtx on a live context: found = %v, err = %v", found, err)
+	}
+}
+
+func TestRedisWritesOutliveACancelledRequest(t *testing.T) {
+	s := newStore(t)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := s.CommitCtx(cancelled, "tok", []byte("data"), time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CommitCtx on a cancelled context: %v", err)
+	}
+	if _, found, err := s.FindCtx(context.Background(), "tok"); err != nil || !found {
+		t.Fatalf("the session was not committed: found = %v, err = %v", found, err)
+	}
+	if err := s.DeleteCtx(cancelled, "tok"); err != nil {
+		t.Fatalf("DeleteCtx on a cancelled context: %v", err)
+	}
+	if _, found, err := s.FindCtx(context.Background(), "tok"); err != nil || found {
+		t.Errorf("the session survived a cancelled logout: found = %v, err = %v", found, err)
+	}
+}

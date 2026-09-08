@@ -186,13 +186,8 @@ func (s *server) postDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Deleting the backing page cascades to the post row and its blocks.
-	if err := s.deps.Content.Delete(r.Context(), post.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Post deleted."))
-	http.Redirect(w, r, s.deps.AdminPath+"/posts", http.StatusSeeOther)
+	s.finishContentAction(w, r, s.deps.AdminPath+"/posts", s.tr(r, "Post deleted."),
+		s.deps.Content.Delete(r.Context(), post.ID))
 }
 
 func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
@@ -201,17 +196,13 @@ func (s *server) postDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if post.Status != content.StatusPublished {
-		s.flash(r, s.tr(r, "There are no published changes to revert to — this post hasn't been published yet."))
-		http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
+		s.refuse(w, r, s.postBase(post),
+			s.tr(r, "There are no published changes to revert to — this post hasn't been published yet."))
 		return
 	}
-	if err := s.deps.Content.DiscardDraft(r.Context(), post.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Draft changes discarded — the editor now matches the published post."))
-	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
+	s.finishContentAction(w, r, s.postBase(post),
+		s.tr(r, "Draft changes discarded — the editor now matches the published post."),
+		s.deps.Content.DiscardDraft(r.Context(), post.ID))
 }
 
 // postUnpublish takes the post off the public site — out of the feed and
@@ -222,13 +213,9 @@ func (s *server) postUnpublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.deps.Content.Unpublish(r.Context(), post.ID); err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.contentChanged()
-	s.flash(r, s.tr(r, "Post unpublished — it is no longer visible on the site."))
-	http.Redirect(w, r, s.deps.AdminPath+"/posts/"+strconv.FormatInt(post.PostID, 10), http.StatusSeeOther)
+	s.finishContentAction(w, r, s.postBase(post),
+		s.tr(r, "Post unpublished — it is no longer visible on the site."),
+		s.deps.Content.Unpublish(r.Context(), post.ID))
 }
 
 // postPreview renders the post's draft content with the real site

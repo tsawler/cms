@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -178,5 +179,39 @@ func TestProcessQualityAffectsSize(t *testing.T) {
 	if len(low.Variants[0].Data) >= len(high.Variants[0].Data) {
 		t.Errorf("web variant at q=0.1 (%d bytes) not smaller than q=0.9 (%d bytes)",
 			len(low.Variants[0].Data), len(high.Variants[0].Data))
+	}
+}
+
+// The two ways a file can fail to be read as its own type are told apart
+// from "we don't take those", and both are findable with errors.Is. The
+// admin used to pick the message by searching the error text for
+// "decoding image" and "parsing svg", which is a coupling nothing
+// enforces: rewording either message would have turned a bad upload into
+// a 500.
+func TestUndecodableFilesAreDistinguishable(t *testing.T) {
+	// A PNG header with nothing behind it: the type is one we handle,
+	// the bytes are not that type.
+	truncated := append([]byte("\x89PNG\r\n\x1a\n"), 0, 1, 2, 3)
+	if _, err := process(truncated, "image/png", DefaultWebPQuality); !errors.Is(err, ErrUndecodable) {
+		t.Errorf("truncated png: err = %v, want ErrUndecodable", err)
+	} else if errors.Is(err, ErrUnsupportedType) {
+		t.Error("a damaged file of a supported type reads as an unsupported one")
+	}
+
+	if _, err := processSVG([]byte(`<svg><unclosed>`)); !errors.Is(err, ErrUndecodable) {
+		t.Errorf("malformed svg: err = %v, want ErrUndecodable", err)
+	}
+
+	// And a type we genuinely do not handle stays its own answer.
+	if _, err := process([]byte("whatever"), "application/x-tar", DefaultWebPQuality); !errors.Is(err, ErrUnsupportedType) {
+		t.Errorf("unsupported mime: err = %v, want ErrUnsupportedType", err)
+	} else if errors.Is(err, ErrUndecodable) {
+		t.Error("an unsupported type reads as a damaged one")
+	}
+
+	// The detail survives, so a log line still says which file and why.
+	_, err := process(truncated, "image/png", DefaultWebPQuality)
+	if !strings.Contains(err.Error(), "decoding image") {
+		t.Errorf("the wrapped detail was lost: %v", err)
 	}
 }

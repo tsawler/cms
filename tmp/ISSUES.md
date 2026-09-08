@@ -410,7 +410,7 @@ verified to fail against the pre-fix files. Also generated a real project
 end to end and built it, to be sure the template still compiles.
 
 
-### [ ] 8. The last superadmin can demote themselves, permanently
+### [x] 8. The last superadmin can demote themselves, permanently
 
 `admin/handlers_users.go:150` guards only
 `self.Role.IsAdmin() && !form.Role.IsAdmin()` — superadmin → admin passes
@@ -419,14 +419,89 @@ both sides. Only a superadmin can *assign* superadmin
 (`cms.go:961`). So the site loses snippets, the Pages section, masquerade
 and the lock override with no in-app recovery — only a direct DB edit.
 
-### [ ] 9. Sitemap cache is keyed on the attacker-controlled `Host`
+**Fixed** by enforcing the invariant rather than patching the one path.
+The reachable bug was self-demotion, but writing the guard as "a
+superadmin may not set their own role to admin" would have left the
+roundabout routes open, so `lastActiveSuperadmin` asks the question the
+invariant actually cares about: would this change leave nobody?
+
+That turned out to matter. A superadmin can masquerade as *another*
+superadmin, demote the account they came from, and then demote the one
+they are wearing — every step of which is one superadmin managing
+another, which every role rule allows. There is a test for it, and it
+fails against the pre-fix code.
+
+Backed by `auth.Store.CountOtherActiveSuperadmins`, which counts *active*
+ones: an account that cannot log in is not the somebody left behind.
+Enforced on update and, redundantly, on delete — deleting a superadmin
+currently takes another superadmin, who is therefore still there, but that
+is two other rules holding the invariant up rather than the invariant
+itself. A failed count reads as "yes, they are the last", since refusing a
+role change on a database that is not answering is the recoverable way to
+be wrong.
+
+The message lands on whichever field caused it and only where nothing more
+specific has already spoken — deactivating your own account is refused for
+its own reason, and that reason reads better.
+
+Tests: `admin/last_superadmin_db_test.go` — self-demotion refused and *not
+applied*; the masquerade route; a deactivated superadmin not counting; and
+`TestSuperadminCanStepDownOnceAnotherExists`, which pins the other
+direction so this does not become "superadmins are frozen". Plus a direct
+test of the count query. The three blocking tests fail against the pre-fix
+code; the step-down test passes both ways, which is what makes it worth
+having.
+
+Not addressed: a site *already* at zero superadmins still needs a database
+edit. A recovery hatch (an env var that promotes an account) would be a
+new feature and a new risk, so it is deliberately not here.
+
+
+### [x] 9. Sitemap cache is keyed on the attacker-controlled `Host`
 
 `sitemap.go:67` — `c.sitemapBase != base` invalidates the cache, so one
 unauthenticated request per distinct `Host` header forces a full rebuild
 (up to 50k rows plus XML marshal) *and* evicts the cached copy. Cheap to
 send, expensive to serve.
 
-### [ ] 10. CAPTCHA fail-open is wider than the comment claims
+**Fixed** by splitting the cache along the line the cost actually falls
+on. The rows — a query over every page on the site — do not depend on the
+base at all, so they are now cached on their own and are simply out of
+reach: vary the Host all you like and the query still runs once per TTL.
+What stays host-dependent is turning rows into XML, which is arithmetic on
+data already in hand. The rendered document is still cached too, for the
+ordinary case where every request names the same base.
+
+Rejected alternatives, since they look tempting: *latching the first base
+seen* would let a spoofed first request fix the wrong hostname for the
+life of the process, and a sitemap full of another host's URLs is ignored
+by crawlers — a self-inflicted SEO outage, worse than the thrash.
+*Refusing unfamiliar bases* would break a legitimate install that has not
+set `SiteURL`, which the docs still permit.
+
+The rebuild also now happens under the mutex, so concurrent misses queue
+behind one build instead of each starting their own — the other half of
+not letting a client multiply work by asking twice.
+
+With `SiteURL` set (which #1 made the production norm) the base is
+constant and every request is a plain cache hit, so production is
+unaffected either way.
+
+Tests: `TestSitemapRowsAreNotRebuiltPerHost` drives the attack — five
+novel hosts after a page is published mid-flight — and proves the rows
+stayed put *behaviourally* (the new page must not appear) as well as by
+the timestamp, while checking each host still gets its own URLs, since the
+fix is about what is recomputed and not about serving one host's URLs to
+another. `TestSitemapWithSiteURLIgnoresTheRequestHost` pins the
+configured-base case. Verified to fail against the pre-fix keying.
+
+One test helper corrected: `expireSitemapCache` cleared only the rendered
+document, so after the split it would have left the next request
+re-rendering rows read before the test changed anything — the exact
+staleness the surrounding test was checking for. It now drops both halves.
+
+
+### [x] 10. CAPTCHA fail-open is wider than the comment claims
 
 `captcha/captcha.go:154`. The comment says it fails open on outage, but
 `Verify` also returns an error on a JSON decode failure, and both call
@@ -434,11 +509,51 @@ sites (`handlers_auth.go:54`, `handlers_reset.go:84`) treat any error as
 "skip the check". A 200 with a malformed body is a received response, not
 an unreachable server, and arguably should be a rejection.
 
+**Fixed**, and the investigation turned up something worse than the filed
+issue. A body that is JSON but *not Cap's* — `{"error":"unknown site
+key"}`, or `null` — decoded cleanly into `struct{Success bool}` and came
+back as `Success=false`, which the callers read as a rejection. So the
+same misconfiguration failed **closed** when the wrong thing on the other
+end spoke JSON and **open** when it served an HTML error page. A wrong
+site key locked every admin out of the site; a wrong URL silently switched
+the CAPTCHA off. Confirmed by test against the pre-fix code.
+
+`Verify` now decodes into a `*bool`, so "said false" and "did not say"
+stay apart, and returns typed errors: `ErrUnavailable` (transport failure
+or 5xx — the outage the fail-open path exists for) and `ErrBadResponse`
+(something answered, but not with a verdict). Every error now means the
+same thing — no verdict — which is what the doc comment always claimed and
+the code did not do. The response body is also bounded, so a server that
+keeps writing cannot hold the goroutine with it.
+
+The callers keep failing open, deliberately: the alternative locks every
+account out of a site over a dependency that is not the site, and #3's
+per-account throttle means guessing is now genuinely capped without it.
+That decision moved into one shared `captchaNoVerdict` instead of being
+made twice, and it logs the two kinds differently — `ErrBadResponse` at
+Error, saying plainly that the challenge is not being enforced, because
+that one never fixes itself.
+
+Tests: `TestVerifyNoVerdictKinds` (eight shapes, each asserted to match
+one error kind and *not* the other), `TestVerifyVerdictsAreNotErrors`,
+`TestVerifyBoundsTheResponseBody`, and
+`admin/captcha_verdict_db_test.go` for the call-site behaviour. All
+verified against the pre-fix code.
+
+One test of mine was thrown away and rewritten. The first version drove
+the login form with the honeypot filled, to stand in for a credential
+check without a database — but the honeypot is checked *before* the
+CAPTCHA, so it short-circuited and never consulted Cap at all. It passed
+against the broken code, which is how it was caught. The replacement runs
+against a real database and asserts a valid user actually reaches the
+dashboard.
+
+
 ---
 
 ## Robustness and efficiency
 
-### [ ] 11. `currentUser` is unmemoized — 47 call sites, 2 queries each
+### [x] 11. `currentUser` is unmemoized — 47 call sites, 2 queries each
 
 `admin/middleware.go:43` does `GetByID` + `loadPermissions` on every call,
 with no request-scoped cache. A `GET /users` runs it in `requireUser`,
@@ -447,7 +562,32 @@ calls, ten queries, for one page. (The users list itself is fine;
 `canManageUser` was correctly hoisted out of the row loop.) One
 `context.WithValue` in `requireUser` would collapse this.
 
-### [ ] 12. Site settings are read twice per public page render, and can disagree
+**Fixed** with a request-scoped memo installed by `withUserCache`, mounted
+at the top of the admin chain — above `csrf`, so the routes outside
+`requireUser` (login, the reset forms) get one too. `GET /users` now costs
+one lookup instead of five.
+
+Two details the obvious version would have got wrong. The memo records
+*nil* as an answer, because a session naming a deleted or deactivated
+account is the case where re-asking is most wasteful — every check in the
+chain asks, and every one is told nothing. And it is keyed by the session
+user id, re-read from the (in-memory) session on each call, so a request
+that changes who it is signed in as does not keep the old answer.
+Masquerade, login and logout all redirect rather than render, so nothing
+needs that today; the memo should not be the reason that stays true.
+
+Tests: `admin/user_cache_db_test.go`. Queries cannot be counted from a
+test — `Deps.Users` is a concrete `*auth.Store`, so nothing can be wrapped
+around it — so the memo is tested by what it *means*: change the stored
+row mid-request and see whether the same request notices. Also that it is
+per request and not process-wide (a deactivated account must not stay
+signed in), that a nil answer is recorded, that a session swap is
+followed, and — separately — that the middleware is actually mounted on
+the real chain, which a unit test of `currentUser` alone would never
+catch. Verified against both failure modes: memo removed, and middleware
+un-mounted.
+
+### [x] 12. Site settings are read twice per public page render, and can disagree
 
 `siteFlags` (`cms.go:1269`) exists specifically so the mode isn't a query
 per request — then `servePage:1406` calls `c.content.SiteSettings()`
@@ -456,7 +596,32 @@ page path, and within one response `site.dev` from the 5s cache can set
 `X-Robots-Tag: noindex` while the fresh read renders no `<meta robots>`.
 `siteFacts` is a subset of `SiteSettings` — cache the whole struct once.
 
-### [ ] 13. All session I/O runs on `context.Background()`
+**Fixed.** `siteFlags`/`siteFacts` are gone; `siteSettings` caches
+`content.SiteSettings` itself and everything reads through it —
+`developmentMode`, `SiteLocked`, `robotsBody`, `Pages`, `servePage` and
+`serveSearch`. The duplicate type went with it, which was the other half
+of the finding: a summary struct whose fields were a subset of the record
+it summarised.
+
+The failure path improved on the way: a read that fails now falls back to
+the last good copy rather than to a partially-populated struct. The
+previous code returned `out, rows.Err()` from `SiteSettings`, and the
+callers that logged and carried on were carrying on with whatever half of
+the settings had been scanned before the error.
+
+Tests: `TestPageHeadersAndBodyAgreeOnTheSiteMode` stands inside the window
+— it changes the stored mode *without* expiring the cache, so the two
+readings would have come from different moments — and asserts the header
+and the `<meta robots>` tag agree either way. Verified to fail against the
+pre-fix code with exactly the reported symptom: "header says noindex =
+true, body carries the meta tag = false".
+
+The first version of that test was wrong and passed for the wrong reason:
+it used the shared seed template, which never calls `{{cmsHead}}`, so the
+meta tag could not appear whatever the mode was. It now builds a template
+that emits one.
+
+### [x] 13. All session I/O runs on `context.Background()`
 
 `internal/sessionstore/sessionstore.go:40,55,64` and
 `internal/redisstore/redisstore.go:32,48,53` implement scs's non-context
@@ -465,7 +630,41 @@ and prefers it when present. As written, a session read has no deadline
 and ignores client disconnects — under DB stress those queries pile up
 unbounded.
 
-### [ ] 14. No `CMS.Close()`
+**Fixed**, but not by passing the context through everywhere, which is
+what "implement CtxStore" sounds like and would have been a regression in
+one place.
+
+Reads take the request's context unchanged: a lookup for a visitor who is
+no longer there stops with them, which is the pile-up the finding is
+about.
+
+Writes deliberately do not. A session write happens because something has
+already been decided — a login granted, a session destroyed on logout, a
+token renewed against fixation — and a client that hangs up between the
+decision and the write must not undo it. A logout that did not delete the
+session because the browser went away leaves a session that still works,
+and passing the request context straight through would have introduced
+exactly that. So writes drop the cancellation and take a deadline instead
+(`sessiondata.WriteContext`): they survive the disconnect and still cannot
+run forever, where before they could.
+
+The context-less three remain, delegating, for anyone holding a store
+through the narrower `scs.Store`.
+
+Both stores now carry `var _ scs.CtxStore = (*Store)(nil)`. That is not
+decoration: scs picks the `*Ctx` methods by asserting on each signature
+one at a time, so a method whose signature drifted would be silently
+skipped and the store would go back to `context.Background()` with nothing
+to say it had. The assertion is what notices.
+
+Tests: `TestFindCtxHonoursCancellation` and
+`TestWritesOutliveACancelledRequest` in both stores, plus
+`TestPlainMethodsStillWork` for the narrower interface. Verified against
+an implementation that has the `*Ctx` methods but ignores the context —
+the pre-fix behaviour wearing the new interface, which the compile-time
+assertion alone would not catch.
+
+### [x] 14. No `CMS.Close()`
 
 `sessionstore.New` starts an hourly cleanup goroutine and exposes
 `StopCleanup`, but `cms.New` (`cms.go:706`) neither keeps a reference nor
@@ -473,7 +672,25 @@ offers a shutdown method. Same for the Redis client. Every `cms.New`
 leaks a goroutine — invisible in production, but it accumulates in tests
 and in hosts that rebuild the CMS.
 
-### [ ] 15. Error classification by substring match
+**Fixed.** `New` collects what it starts into `closers` as it creates it,
+and `Close` runs them: the session store's sweep, and the Redis pool when
+sessions live there. Idempotent via `sync.Once`, since a shutdown path
+reachable from both a defer and a signal handler is reachable twice.
+`Config.DB` is deliberately untouched — the host opened it and may be
+using it for its own tables.
+
+`sessionstore.StopCleanup` was itself a latent panic: it closed the stop
+channel unguarded, so a second call would have crashed. It now uses a
+`sync.Once` and *waits* for the goroutine to return, which is what makes
+the test deterministic rather than a sleep. `defer c.Close()` added to the
+scaffold and both examples, and to the host-integration checklist.
+
+Tests: `TestCloseStopsTheSessionSweep` (returns, and twice is not a
+panic), `TestCloseLeavesTheHostsDatabaseOpen` (a query on the host's pool
+still works afterwards), and `TestStopCleanupEndsTheGoroutine` /
+`TestStopCleanupWithoutACleanupLoop` in the session store.
+
+### [x] 15. Error classification by substring match
 
 `tailwind.go:313` — `strings.Contains(err.Error(), "no rows")` instead of
 `errors.Is(err, sql.ErrNoRows)`. If it ever stops matching,
@@ -482,7 +699,22 @@ silently stops rebuilding. Same pattern at `admin/handlers_media.go:228-229`
 and `handlers_api.go:1228` (`"decoding image"`, `"parsing svg"`) — those
 should be sentinel errors from the `media` package.
 
-### [ ] 16. Upload `MaxBytesReader` calls are dead on the form path
+**Fixed.** `tailwind.go` uses `errors.Is(err, sql.ErrNoRows)`. The media
+package gained `ErrUndecodable` — a file whose type is one it handles but
+whose bytes will not read as it — wrapped around both the image-decode and
+SVG-parse failures, so the detail survives for the log while the kind is
+findable with `errors.Is`. It is separate from `ErrUnsupportedType`
+because the two are different news for whoever uploaded the file: "we
+don't take those" against "that one is damaged".
+
+No `strings.Contains(err.Error(), …)` remains in non-test code.
+
+Tests: `TestUndecodableFilesAreDistinguishable` — a truncated PNG and a
+malformed SVG are `ErrUndecodable` and *not* `ErrUnsupportedType`, an
+unhandled MIME type is the reverse, and the wrapped detail is still in the
+message. Verified to fail against the unwrapped errors.
+
+### [x] 16. Upload `MaxBytesReader` calls are dead on the form path
 
 `handlers_media.go:206`, `handlers_api.go:1196,1258` set
 `r.Body = http.MaxBytesReader(...)` — but `readToken`
@@ -492,18 +724,49 @@ code that reads as if it works." These are live only for the JS uploader's
 header path. Either drop them or comment why they're conditional; as
 written they read as the enforcement and aren't.
 
-### [ ] 17. Two env parsers silently ignore bad values
+**Fixed** by making the ceiling uniform rather than by deleting the
+readers, which would have been a regression: on the header path they were
+the *only* bound. `readToken` now applies `http.MaxBytesReader` before it
+looks for the header, so the limit is a property of the request rather
+than of how the token happened to arrive, and the handler-level readers
+are genuinely redundant and gone.
+
+`apiMediaSetPoster`'s narrower 8 MB cap moved from `r.Body` onto the
+multipart part (`io.LimitReader`), which bounds it on both paths; the
+duplicated literal became `maxPosterBytes`. Oversized *uploads* (as
+opposed to oversized requests) were already caught by the manager from the
+multipart header's declared size, on either path.
+
+Tests: `TestBodyCeilingAppliesToBothCSRFPaths` drives a host section that
+reads its own body, so the limit is observed directly rather than inferred
+from a status code. Verified to fail with the ceiling back on the form
+path only: "the handler read 16384 bytes of a 16384-byte body with no
+error".
+
+The first version of that test asserted on status codes at `/login`, and
+passed against the broken code — the nil user store panicked before any
+status distinguished the two cases. Replaced.
+
+### [x] 17. Two env parsers silently ignore bad values
 
 `CMS_MEDIA_MAX_VIDEO_MB` and `CMS_MEDIA_WEBP_QUALITY` (`env.go:150,158`)
 check only the parse error; negative/out-of-range values pass through and
 are then discarded by `SetMaxVideoBytes`/`SetWebPQuality`. Every other
 variable in that file rejects out-of-range values with a clear message.
 
+**Fixed**: both are range-checked where they are read, like every other
+variable in the file. A quality of 3 or a video cap of -1 was previously
+accepted, discarded by the setter, and replaced by the default — so the
+site ran on a number nobody chose and nothing said so.
+
+Tests: `TestConfigFromEnvMediaTuningRanges`, ten cases across both
+variables. Verified to fail against the parse-only checks.
+
 ---
 
 ## Duplication
 
-### [ ] 18. Page-write logic is forked between `page.go` and `post.go`
+### [x] 18. Page-write logic is forked between `page.go` and `post.go`
 
 `content.InsertPost` (`post.go:173`) reimplements `Insert`'s
 (`page.go:334`) three statements — `cms_pages`, `cms_page_drafts`,
@@ -513,26 +776,84 @@ divergence is already there: `Insert` writes `visibility` explicitly,
 duplication most likely to bite; a shared `insertPageRows(tx, …)` would
 fix it.
 
-### [ ] 19. `requirePerm` is a pure alias
+**Fixed**, but only the parts that were genuinely the same — which turned
+out to be most, not all, of it.
+
+`insertPage` and `saveStagedPage` in `page.go` now write the rows both
+paths share: the page row, the working copy, and the per-locale metadata.
+`InsertPost` and `UpdatePost` call them. The insert also writes visibility
+explicitly now instead of leaning on the column default, which is what had
+drifted; no caller sets a non-public visibility on a new post, so the
+behaviour is unchanged and the row simply says what it means.
+
+The update path keeps one difference, and it is not an oversight:
+`UpdatePost` must *not* write visibility. A post carries no visibility
+control of its own, so `parsePostMeta` builds a fresh `&content.Post{}`
+with the field left zero — and `orPublic()` turns a zero into "public".
+Unifying the two updates would therefore silently re-publish a backing
+page somebody had made private through the editor, which `apiSetVisibility`
+can reach. That difference is now stated in a comment and pinned by a test
+instead of reading like a missed line.
+
+Tests: `TestPostBackingPageIsPublicLikeAnyPage` and
+`TestUpdatePostKeepsAPrivateBackingPagePrivate`.
+
+Two things worth recording about getting here. First, I transposed
+`template_name` and `visibility` while writing the shared insert; the
+existing suite caught it immediately on all three engines via the
+visibility CHECK constraint, which I confirmed by reintroducing the swap
+on purpose. Second, the first version of the visibility test read the post
+back before re-saving it — which carries the private setting along, so it
+passed against a deliberately unified `UpdatePost` and proved nothing. It
+now builds the Post the way the admin form does, and fails against that
+unification on every engine.
+
+### [x] 19. `requirePerm` is a pure alias
 
 `admin/middleware.go:149-151` — `return s.requireAnyPerm(p)`. Either drop
 it and call `requireAnyPerm` at the ~4 sites, or keep it and delete the
 doc comment that describes it as a distinct thing.
 
-### [ ] 20. `escapeLike` vs `likeEscaper`
+**Fixed** by dropping it. Five call sites (four in `admin.go`, one in
+`sections.go`) now call `requireAnyPerm` directly, and its doc says what
+it does rather than deferring to a function that no longer exists.
+Naming one permission was never a different operation from naming two.
+
+### [x] 20. `escapeLike` vs `likeEscaper`
 
 `content/search.go:452` and `auth/user.go:166` — identical `\`/`%`/`_`
 replacer, written twice. The `content` copy also allocates a fresh
 `strings.NewReplacer` on every call instead of using a package-level var.
 
-### [ ] 21. `absoluteAdminURL` reimplements `requestBaseURL`
+**Fixed**: one `sqldb.EscapeLike`, since the rule is the engines' rather
+than any one table's, and both stores already import `sqldb`.
+
+There were **three** copies, not two — `media/manager.go` had an
+`ilikeEscaper` the original review missed, which is a fair illustration of
+how this kind of duplicate spreads. All three call sites now share one
+package-level replacer, so nothing rebuilds it per call.
+
+Tests: `internal/sqldb/escapelike_test.go`, including that the backslash
+is escaped first (or an escape the caller typed would become an escape of
+ours) and that nothing else is touched — this is a LIKE escaper, not a
+sanitiser, and the value still reaches the driver as a bound parameter.
+
+### [x] 21. `absoluteAdminURL` reimplements `requestBaseURL`
 
 `admin/handlers_reset.go:228-233` vs `posts.go:187` — same `r.TLS` /
 `X-Forwarded-Proto` / `r.Host` logic in two packages. The admin already
 receives `Deps.SiteBaseURL`; the fallback branch is the duplicate, and
 it's the branch that carries finding #1.
 
-### [ ] 22. Page/post handler triples
+**Resolved by #1**, and deliberately not merged further. `absoluteAdminURL`
+became `emailBaseURL`, which now requires a loopback host and ignores
+`X-Forwarded-Proto` — while `requestBaseURL` trusts it. What is left in
+common is three lines of scheme-picking, and the difference between them
+*is* the security distinction #1 drew. Folding them back together would
+re-couple exactly what that fix separated, so this one is closed as
+already-addressed rather than by writing more code.
+
+### [x] 22. Page/post handler triples
 
 `handlers_pages.go:587-643` vs `handlers_posts.go:183-232` —
 `pageDelete`/`pageDiscard`/`pageUnpublish` and their post equivalents are
@@ -541,6 +862,22 @@ flash, and the redirect base. `handlers_versions.go` already shows the
 shared shape works (`renderVersions`, `restoreVersion` take a
 `base string`). Lower value than #18 — the messages genuinely differ —
 but it's the largest remaining copy-paste in the admin.
+
+**Fixed** with `finishContentAction` and `refuse`, which the six handlers
+now end in. The messages stay whole translated literals passed in, because
+they differ by more than a noun and building them from parts would put
+them beyond the translation catalogue.
+
+The value is not the lines saved. It is `contentChanged`: leaving it out
+of a handler breaks nothing visible — the site keeps working and classes
+typed into content quietly stop being compiled, surfacing much later as a
+style that "just doesn't apply" — so the notification belongs in the
+shared path rather than in six places that each have to remember it.
+
+Tests: `TestContentActionsNotifyContentChanged`, which had no coverage
+at all before (nothing in the admin tests referenced `ContentChanged`).
+Verified by removing the notification from the shared tail: all three
+actions fail.
 
 ---
 

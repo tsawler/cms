@@ -127,6 +127,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close() // stops the CMS's background work; leaves db alone
 
 	if err := c.Migrate(ctx); err != nil {
 		return err

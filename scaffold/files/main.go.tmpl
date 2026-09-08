@@ -127,6 +127,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Stops the background work the CMS starts — the session store's
+	// expiry sweep, and the Redis pool when sessions live there. It does
+	// not touch the database above; that one is ours.
+	defer c.Close()
 
 	// Safe on every startup, including from several instances at once.
 	if err := c.Migrate(ctx); err != nil {
