@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"image"
@@ -10,7 +11,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -124,4 +127,106 @@ func TestMediaDownloadServesTheOriginalAsAnAttachment(t *testing.T) {
 			t.Errorf("downloading a missing item: status = %d, want 404", rec.Code)
 		}
 	})
+}
+
+// Several selected files come down as one zip holding each original
+// under its own name, with a duplicate name told apart rather than
+// overwritten, an id nobody uploaded left out, and a selection with
+// nothing real in it refused before any archive is started.
+func TestMediaBulkDownloadZipsTheOriginals(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s, _ := mediaServerWithStore(t, db)
+		u := formAdmin(t, s)
+		png := smallPNG(t)
+
+		a := uploadPNG(t, s, u, "zip-a.png")
+		b := uploadPNG(t, s, u, "zip-b.png")
+		// Same name as a: the archive must still hold both.
+		rec := httptest.NewRecorder()
+		s.mediaUpload(rec, uploadReq(t, s, u, "zip-a.png", png, nil))
+		var c *media.Media
+		items, err := s.deps.Media.All(context.Background(), "en", media.ListOptions{})
+		if err != nil {
+			t.Fatalf("listing media: %v", err)
+		}
+		for i := range items {
+			if items[i].ID != a.ID && items[i].ID != b.ID {
+				c = &items[i]
+			}
+		}
+		if c == nil {
+			t.Fatal("the duplicate-named upload is not in the library")
+		}
+
+		rec = httptest.NewRecorder()
+		r := formReq(t, s, u, url.Values{"id": {itoa(a.ID), itoa(b.ID), itoa(c.ID), "999999"}}, nil)
+		s.mediaBulkDownload(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %q)", rec.Code, rec.Body.String())
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/zip" {
+			t.Errorf("Content-Type = %q, want application/zip", ct)
+		}
+		if cd := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, `attachment; filename="media-`) ||
+			!strings.Contains(cd, `.zip"`) {
+			t.Errorf("Content-Disposition = %q, want an attachment named media-<stamp>.zip", cd)
+		}
+
+		body := rec.Body.Bytes()
+		zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+		if err != nil {
+			t.Fatalf("the body is not a zip: %v", err)
+		}
+		got := map[string][]byte{}
+		for _, f := range zr.File {
+			if f.Method != zip.Store {
+				t.Errorf("%s is compressed with method %d, want stored", f.Name, f.Method)
+			}
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatalf("opening %s: %v", f.Name, err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("reading %s: %v", f.Name, err)
+			}
+			got[f.Name] = data
+		}
+		for _, name := range []string{"zip-a.png", "zip-b.png", "zip-a (2).png"} {
+			if data, ok := got[name]; !ok {
+				t.Errorf("zip is missing %q (has %v)", name, names(zr))
+			} else if !bytes.Equal(data, png) {
+				t.Errorf("%s is %d bytes, want the %d uploaded", name, len(data), len(png))
+			}
+		}
+		if len(zr.File) != 3 {
+			t.Errorf("zip holds %d entries, want 3: %v", len(zr.File), names(zr))
+		}
+
+		// Nothing real selected: a 404, not an empty archive.
+		rec = httptest.NewRecorder()
+		s.mediaBulkDownload(rec, formReq(t, s, u, url.Values{"id": {"999999"}}, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("downloading only missing ids: status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func names(zr *zip.Reader) []string {
+	out := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func TestUniqueZipName(t *testing.T) {
+	taken := map[string]bool{}
+	want := []string{"a.png", "a (2).png", "A (3).png", "b", "b (2)", "a (2) (2).png"}
+	for i, in := range []string{"a.png", "a.png", "A.png", "b", "b", "a (2).png"} {
+		if got := uniqueZipName(taken, in); got != want[i] {
+			t.Errorf("uniqueZipName(%q) #%d = %q, want %q", in, i, got, want[i])
+		}
+	}
 }

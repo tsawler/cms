@@ -1,14 +1,17 @@
 package admin
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/media"
@@ -469,6 +472,99 @@ func (s *server) mediaBulkDelete(w http.ResponseWriter, r *http.Request) {
 		s.flash(r, fmt.Sprintf(s.tr(r, "%d files deleted."), deleted))
 	}
 	s.backToMedia(w, r)
+}
+
+// mediaBulkDownload streams the selected items' originals as one zip,
+// the multi-file counterpart of mediaDownload. The archive is written
+// straight to the response as each object is read, so a selection of
+// any size costs the server one object's buffer at a time and the save
+// dialog appears before the last byte has been fetched.
+//
+// Entries are stored, not deflated: images, videos, and PDFs are already
+// compressed, and deflating them again would spend CPU to make the file
+// a few bytes larger. Two uploads with the same name are told apart by a
+// numeric suffix, the way a desktop does it, so nothing is silently
+// overwritten inside the archive.
+//
+// The rows are resolved before the first byte is written, so a selection
+// with nothing behind it is still an honest 404. An object the bucket
+// has lost after that point is skipped and logged — the status code has
+// already gone out, and the other files are still worth having.
+func (s *server) mediaBulkDownload(w http.ResponseWriter, r *http.Request) {
+	ids := selectedIDs(r)
+	items := make([]*media.Media, 0, len(ids))
+	for _, id := range ids {
+		md, err := s.deps.Media.GetByID(r.Context(), id, s.deps.DefaultLocale)
+		if errors.Is(err, media.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		items = append(items, md)
+	}
+	if len(items) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", attachmentDisposition(zipFilename(time.Now())))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, no-store")
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	zw := zip.NewWriter(w)
+	names := map[string]bool{}
+	for _, md := range items {
+		body, _, err := s.deps.Media.OpenOriginal(r.Context(), md)
+		if err != nil {
+			s.deps.Logger.Warn("cms admin: media bulk download skipped an item", "id", md.ID, "err", err)
+			continue
+		}
+		entry, err := zw.CreateHeader(&zip.FileHeader{
+			Name:     uniqueZipName(names, sanitizeFilename(md.Filename)),
+			Method:   zip.Store,
+			Modified: md.CreatedAt,
+		})
+		if err == nil {
+			_, err = io.Copy(entry, body)
+		}
+		body.Close()
+		if err != nil {
+			// Nothing more can reach a client that has gone away, and a
+			// half-written entry cannot be taken back from one that hasn't.
+			s.deps.Logger.Debug("cms admin: media bulk download interrupted", "id", md.ID, "err", err)
+			return
+		}
+	}
+	if err := zw.Close(); err != nil {
+		s.deps.Logger.Debug("cms admin: media bulk download interrupted", "err", err)
+	}
+}
+
+// zipFilename names a bulk download by when it was made, so two saved
+// on the same day still land as different files.
+func zipFilename(now time.Time) string {
+	return "media-" + now.Format("2006-01-02-150405") + ".zip"
+}
+
+// uniqueZipName returns name, or name with " (2)", " (3)", ... before the
+// extension when an earlier entry already took it, recording the result
+// in taken. Compared case-insensitively: the archive may be unpacked on
+// a filesystem that would otherwise fold two entries into one file.
+func uniqueZipName(taken map[string]bool, name string) string {
+	ext := path.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	candidate := name
+	for n := 2; taken[strings.ToLower(candidate)]; n++ {
+		candidate = fmt.Sprintf("%s (%d)%s", stem, n, ext)
+	}
+	taken[strings.ToLower(candidate)] = true
+	return candidate
 }
 
 // mediaFolderCreate adds a folder from the admin media page, in the kind
