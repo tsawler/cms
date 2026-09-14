@@ -484,6 +484,7 @@ function captureFrame(src, crossOrigin) {
     var upBtn = selbar.querySelector("[data-sel-up]"); // rendered only inside a folder
     var copyBtn = selbar.querySelector("[data-sel-copy]");
     var downloadLink = selbar.querySelector("[data-sel-download]");
+    var downloadMany = selbar.querySelector("[data-sel-download-many]");
     var clearBtn = selbar.querySelector("[data-sel-clear]");
     // Both delete forms carry data-confirm, so each is found by its own
     // marker rather than by having the only confirmation in the bar.
@@ -619,6 +620,61 @@ function captureFrame(src, crossOrigin) {
             say("failed", name);
         }).then(function () {
             delete downloadLink.dataset.busy;
+        });
+    });
+
+    // Several files arrive as one zip, and the same bargain applies:
+    // fetched when the total is small enough to say "saved", otherwise
+    // left to the browser with a note that it started. Either way the
+    // toast goes up at once — a zip is built as it is sent, so nothing
+    // visible happens until the first file has been read from the store.
+    function sayMany(key, n) {
+        var toast = window.cmsToast;
+        if (!toast || !downloadMany) return;
+        var text = downloadMany.getAttribute("data-t-" + key) || "";
+        toast(text.replace("{n}", n), key === "failed" ? "error" : "ok");
+    }
+
+    // The name the server chose, read back from Content-Disposition so
+    // the saved zip matches what a plain form submission would have
+    // been called. Missing or unreadable, a plain name still saves.
+    function attachmentName(header) {
+        var m = /filename\*=UTF-8''([^;]+)/i.exec(header || "");
+        if (m) { try { return decodeURIComponent(m[1]); } catch (e) { /* fall through */ } }
+        m = /filename="([^"]*)"/i.exec(header || "");
+        return m ? m[1] : "media.zip";
+    }
+
+    if (downloadMany) downloadMany.addEventListener("submit", function (e) {
+        var files = selected().filter(function (x) { return x.getAttribute("data-id"); });
+        if (files.length < 2) { e.preventDefault(); return; }
+        if (downloadMany.dataset.busy) { e.preventDefault(); return; }
+
+        var total = files.reduce(function (sum, x) {
+            return sum + Number(x.getAttribute("data-size") || 0);
+        }, 0);
+        sayMany("started", files.length);
+        if (total > maxFetchedBytes) return; // the form does the work
+
+        e.preventDefault();
+        downloadMany.dataset.busy = "1";
+        // This runs before the shared [data-sel-form] listener on the
+        // document, so the ids are written in here rather than waited for.
+        fillSelection(downloadMany);
+        window.fetch(downloadMany.action, {
+            method: "POST",
+            body: new FormData(downloadMany),
+            credentials: "same-origin"
+        }).then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            var name = attachmentName(res.headers.get("Content-Disposition"));
+            return res.blob().then(function (blob) { saveBlob(blob, name); });
+        }).then(function () {
+            sayMany("done", files.length);
+        }).catch(function () {
+            sayMany("failed", files.length);
+        }).then(function () {
+            delete downloadMany.dataset.busy;
         });
     });
 
@@ -767,10 +823,13 @@ function captureFrame(src, crossOrigin) {
         if (single) copyBtn.setAttribute("data-copy", single);
         else copyBtn.removeAttribute("data-copy");
 
-        // Same rule as Copy link: one file names one thing to download.
-        // A folder has no object of its own behind it, and several files
-        // would have to be zipped to be one download.
+        // One file is downloaded as itself, by the link; several are
+        // zipped, by the form, which takes the link's place in the bar. A
+        // folder has no object of its own behind it and counts for neither.
+        var many = files.length > 1;
         setDownload(downloadLink, files.length === 1 ? files[0] : null);
+        if (downloadLink) downloadLink.hidden = many;
+        if (downloadMany) downloadMany.hidden = !many;
 
         renderInspector(files);
     }
@@ -950,9 +1009,7 @@ function captureFrame(src, crossOrigin) {
 
     // Bulk forms carry the selection as repeated id fields, rebuilt at
     // submit time so they can never describe a stale selection.
-    document.addEventListener("submit", function (e) {
-        var form = e.target.closest && e.target.closest("[data-sel-form]");
-        if (!form) return;
+    function fillSelection(form) {
         form.querySelectorAll('input[name="id"]').forEach(function (n) { n.remove(); });
         selected().forEach(function (el) {
             var id = el.getAttribute("data-id");
@@ -963,6 +1020,10 @@ function captureFrame(src, crossOrigin) {
             input.value = id;
             form.appendChild(input);
         });
+    }
+    document.addEventListener("submit", function (e) {
+        var form = e.target.closest && e.target.closest("[data-sel-form]");
+        if (form) fillSelection(form);
     });
 
     // ---------------------------------------------------------------

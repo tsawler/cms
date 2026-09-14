@@ -152,6 +152,18 @@
            data-t-started="{{.T "Downloading {name} — see your browser's downloads."}}"
            data-t-failed="{{.T "That file could not be downloaded."}}"
            aria-disabled="true">{{.T "Download"}}</a>
+        {{- /* Several files are one download too — a zip, streamed by the
+               admin. A form rather than a link because the selection is
+               posted like every other bulk action, and it takes the link's
+               place in the bar the moment more than one file is selected,
+               so "Download" stays where the hand expects it. */}}
+        <form method="post" action="{{.AdminPath}}/media/bulk/download" data-sel-form data-sel-download-many hidden
+              data-t-started="{{.T "Downloading {n} files…"}}"
+              data-t-done="{{.T "{n} files saved to your downloads."}}"
+              data-t-failed="{{.T "Those files could not be downloaded."}}">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="cms-btn cms-btn-ghost cms-btn-sm">{{.T "Download"}}</button>
+        </form>
         <form method="post" action="{{.AdminPath}}/media/bulk/delete" data-sel-form data-sel-delete
               data-confirm="{{.T "Delete the selected files? Pages still using them will break."}}">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

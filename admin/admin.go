@@ -438,6 +438,7 @@ func New(d Deps) http.Handler {
 				r.Post("/media/{id}/move", s.mediaMove)
 				r.Post("/media/bulk/move", s.mediaBulkMove)
 				r.Post("/media/bulk/delete", s.mediaBulkDelete)
+				r.Post("/media/bulk/download", s.mediaBulkDownload)
 				r.Post("/media/folders/new", s.mediaFolderCreate)
 				r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
 
