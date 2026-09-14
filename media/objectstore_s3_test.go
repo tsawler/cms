@@ -54,7 +54,10 @@ func startMinIO(t *testing.T) string {
 
 	minioOnce.Do(func() {
 		ctx := context.Background()
-		container, err := testcontainers.Run(ctx, "minio/minio:RELEASE.2025-04-22T22-12-26Z",
+		// MinIO's own registry: the Docker Hub mirror (minio/minio) was
+		// taken down in September 2026, and a fresh CI runner could no
+		// longer pull it. Same pinned release, same digest.
+		container, err := testcontainers.Run(ctx, "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z",
 			testcontainers.WithExposedPorts("9000/tcp"),
 			testcontainers.WithEnv(map[string]string{
 				"MINIO_ROOT_USER":     minioUser,
