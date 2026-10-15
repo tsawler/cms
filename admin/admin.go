@@ -220,6 +220,17 @@ func (s *server) localeSlugCollision(slug string) bool {
 	return false
 }
 
+// adminSlugCollision reports whether a page slug falls at or under
+// AdminPath, which would make the page unreachable: Handler sends those
+// addresses to the admin before the public site sees them.
+func (s *server) adminSlugCollision(slug string) bool {
+	adminSlug := strings.TrimPrefix(s.deps.AdminPath, "/")
+	if adminSlug == "" {
+		return false
+	}
+	return slug == adminSlug || strings.HasPrefix(slug, adminSlug+"/")
+}
+
 // contentChanged notifies the host that stored content changed; safe to
 // call whether or not a listener is configured.
 func (s *server) contentChanged() {

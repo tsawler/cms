@@ -145,8 +145,9 @@ func (s *server) apiCreatePage(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "page"
 	}
-	// A slug that starts like a locale prefix would be unreachable.
-	if s.localeSlugCollision(base) {
+	// A slug that starts like a locale prefix or the admin path would be
+	// unreachable.
+	if s.localeSlugCollision(base) || s.adminSlugCollision(base) {
 		base += "-page"
 	}
 	page := &content.Page{Title: title, TemplateName: body.Template, Slug: base}
@@ -221,8 +222,9 @@ func (s *server) apiDuplicatePage(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "page"
 	}
-	// A slug that starts like a locale prefix would be unreachable.
-	if s.localeSlugCollision(base) {
+	// A slug that starts like a locale prefix or the admin path would be
+	// unreachable.
+	if s.localeSlugCollision(base) || s.adminSlugCollision(base) {
 		base += "-page"
 	}
 	slug := base

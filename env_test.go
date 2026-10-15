@@ -20,7 +20,7 @@ var envVars = []string{
 	"CMS_PAGE_VERSIONS_KEPT",
 	"CMS_MEDIA_WEBP_QUALITY", "CMS_MEDIA_MAX_VIDEO_MB",
 	"CMS_MEDIA_ADOPT", "CMS_TAILWIND_COMMAND", "CMS_TAILWIND_DIR",
-	"CMS_SITE_URL", "CMS_SECURE_COOKIES", "CMS_CLIENT_IP_HEADER",
+	"CMS_SITE_URL", "CMS_ADMIN_PATH", "CMS_SECURE_COOKIES", "CMS_CLIENT_IP_HEADER",
 	"S3_PUBLIC_READ", "S3_PUBLIC_BASE_URL", "S3_USE_PATH_STYLE",
 }
 
@@ -96,6 +96,7 @@ func TestConfigFromEnvFull(t *testing.T) {
 		"CMS_REMEMBER_DAYS":          "14",
 		"CMS_POSTS_PER_PAGE":         "6",
 		"CMS_ADMIN_PER_PAGE":         "40",
+		"CMS_ADMIN_PATH":             "/cms-admin",
 		"CMS_PAGE_VERSIONS_KEPT":     "12",
 		"CMS_MEDIA_WEBP_QUALITY":     "0.5",
 		"CMS_MEDIA_MAX_VIDEO_MB":     "128",
@@ -135,6 +136,9 @@ func TestConfigFromEnvFull(t *testing.T) {
 	}
 	if cfg.RememberFor != 14*24*time.Hour {
 		t.Errorf("RememberFor = %v, want 336h", cfg.RememberFor)
+	}
+	if cfg.AdminPath != "/cms-admin" {
+		t.Errorf("AdminPath = %q, want /cms-admin", cfg.AdminPath)
 	}
 	if cfg.PostsPerPage != 6 {
 		t.Errorf("PostsPerPage = %v, want 6", cfg.PostsPerPage)

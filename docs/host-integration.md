@@ -83,6 +83,9 @@ specificity:
 AdminStylesheets: []string{"/admin/x/registrations/adminassets/nav.css"},
 ```
 
+The URLs are linked as given, so on a site with a custom `AdminPath` they
+carry that prefix instead of `/admin`.
+
 Serve the file from a section's own asset route. The usual reason is a
 `NavCount` that means something other than "how many": every built-in
 count is a total, so a count of what is *outstanding* reads wrong as a
@@ -161,6 +164,60 @@ existing configuration knobs (`Snippets`, `EditorStyles`,
 `SectionStyles`, ...) — and when those don't cover a need, a config
 option added to the CMS itself.
 
+## Moving the admin
+
+The admin lives at `/admin` unless you say otherwise. A site that already
+uses `/admin` for something of its own sets `Config.AdminPath` (or
+`CMS_ADMIN_PATH` with `ConfigFromEnv`):
+
+```go
+cfg.AdminPath = "/cms-admin"
+```
+
+Nothing else changes. `Handler()` routes the new prefix, and every link,
+form, redirect, and password-reset email the admin produces is built from
+it, as are the in-place editor's API calls and its "Admin" link and the
+public site's login link. `/admin` becomes an ordinary address, served by
+your mux or by a CMS page. Sites that leave `AdminPath` unset keep
+`/admin` exactly as before.
+
+The path may have more than one segment (`/site/manage`), made of
+letters, digits, `-`, `.`, `_`, and `~`. `cms.New` refuses one that would
+hide an address the CMS serves on the public side, because routing hands
+everything under the admin path to the admin first:
+
+- anything under `/cms/` — the media proxy, the editor bundle, and the
+  generated content CSS live there, so `/cms` itself is taken
+  (`/cms-admin` is fine);
+- `/robots.txt` and `/sitemap.xml`;
+- `/blog/…` and `/news/…`, when `PostTemplate` is set;
+- a non-default locale prefix such as `/fr/…`;
+- the search page, when `SearchTemplate` is set.
+
+Your own routes are yours to keep apart: the CMS cannot see them. Editors
+cannot create a page at or under the admin path; the page form refuses the
+address, and pages added from the in-place editor get a different one.
+
+In host code, link to the admin with `c.AdminPath()`, the normalized
+value, rather than a literal. `AdminStylesheets` and anything else you
+write by hand need the new prefix too.
+
+### Moving it on a live site
+
+Changing the path on a site already in use has a few consequences worth
+planning for:
+
+- Bookmarks to the old path stop working, and so do password-reset links
+  emailed before the change. If you don't need the old prefix, redirect
+  it to the new one from your own mux.
+- A page an editor created at the new address before the move is hidden
+  by the admin. Rename it first.
+- A `robots.txt` saved in site settings still disallows the old path. The
+  starting text offered for a site that has never saved one uses the new
+  path; a saved one needs editing by hand.
+- Sessions survive: the session cookie is scoped to `/`, not to the admin
+  path, so nobody is signed out.
+
 ## Notes for host applications
 
 - **Style your rich regions.** The CMS never injects styles into your
@@ -213,4 +270,4 @@ option added to the CMS itself.
 - The session cookie is marked `Secure` automatically once `Config.SiteURL` is an `https://` address. Set `Config.SecureCookies = true` only when serving HTTPS with `SiteURL` left empty.
 - `Config.AdminPath` (default `/admin`) is where `Handler()` serves the
   admin area. If you wire `Admin()` yourself instead, the mount point
-  must match it.
+  must match it. See [Moving the admin](#moving-the-admin).

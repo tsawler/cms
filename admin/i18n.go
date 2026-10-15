@@ -422,6 +422,7 @@ var frStrings = map[string]string{
 	"Draft changes discarded — the editor now matches the published page.":               "Modifications du brouillon abandonnées — l'éditeur correspond maintenant à la page publiée.",
 	"Use only lowercase letters, numbers, and hyphens, e.g. about-us.":                   "Utilisez seulement des lettres minuscules, des chiffres et des traits d'union, p. ex. a-propos.",
 	"That address starts with a language code, which is reserved for translated pages.":  "Cette adresse commence par un code de langue, réservé aux pages traduites.",
+	"That address is reserved for the admin area.":                                       "Cette adresse est réservée à l'espace d'administration.",
 	"Choose a template.": "Choisissez un gabarit.",
 
 	// Posts list.
