@@ -722,6 +722,8 @@ func (s *server) parsePageMeta(r *http.Request) (*content.Page, map[string]strin
 		errs["slug"] = s.tr(r, "Use only lowercase letters, numbers, and hyphens, e.g. about-us.")
 	} else if s.localeSlugCollision(p.Slug) {
 		errs["slug"] = s.tr(r, "That address starts with a language code, which is reserved for translated pages.")
+	} else if s.adminSlugCollision(p.Slug) {
+		errs["slug"] = s.tr(r, "That address is reserved for the admin area.")
 	} else if !s.currentUser(r).Can(auth.PermissionForSlug(p.Slug)) {
 		// Only the blog/ and news/ prefixes can trip this (any user
 		// here holds the pages permission): a page may not be renamed

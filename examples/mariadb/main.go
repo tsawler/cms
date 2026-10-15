@@ -170,7 +170,7 @@ func run(logger *slog.Logger) error {
 	handler := c.Lockdown(mux)
 
 	addr := envOr("ADDR", ":4200")
-	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+"/admin/")
+	logger.Info("listening", "addr", addr, "admin", "http://localhost"+addr+c.AdminPath()+"/")
 	return http.ListenAndServe(addr, handler)
 }
 

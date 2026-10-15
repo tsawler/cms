@@ -17,6 +17,8 @@ import (
 //   - CMS_SITE_URL → SiteURL, the site's canonical public address
 //     ("https://example.com"). Leave it unset in development, where each
 //     request's own host is right.
+//   - CMS_ADMIN_PATH → AdminPath, where the admin area lives ("/cms-admin").
+//     Unset keeps the default, /admin.
 //   - CMS_SECURE_COOKIES (true/false) → SecureCookies, forcing the session
 //     cookie's Secure flag on. Usually unnecessary: an https:// CMS_SITE_URL
 //     already implies it.
@@ -93,6 +95,10 @@ func ConfigFromEnv() (Config, error) {
 	// The site's public address, for links that have to work off the page.
 	// Leave it unset in development, where the request's host is right.
 	cfg.SiteURL = os.Getenv("CMS_SITE_URL")
+
+	// Where the admin area lives. New normalizes and validates it, and an
+	// empty value keeps /admin.
+	cfg.AdminPath = strings.TrimSpace(os.Getenv("CMS_ADMIN_PATH"))
 
 	// Forcing the session cookie's Secure flag on. Rarely needed — an
 	// https:// site URL above already implies it — so this is for HTTPS

@@ -153,8 +153,22 @@ type Config struct {
 	// []string{"en"}.
 	Locales []string
 
-	// AdminPath is the URL prefix the host application mounts Admin()
-	// under, used when the admin UI generates links. Defaults to "/admin".
+	// AdminPath is the URL prefix the admin area lives under: Handler
+	// routes it, and every link, redirect, and form the admin and the
+	// in-place editor generate is built from it. Defaults to "/admin";
+	// set it to move the admin, e.g. "/cms-admin" when the host already
+	// uses /admin. Hosts mounting Admin() themselves must mount it here.
+	//
+	// It may have several segments ("/site/manage"), of letters, digits,
+	// "-", ".", "_", and "~". New refuses a path that would shadow an
+	// address the CMS serves publicly: anything under /cms/ (media and
+	// editor assets), /robots.txt, /sitemap.xml, /blog/ and /news/ when
+	// posts are on, a non-default locale prefix, or the search page.
+	// Editors cannot give a page an address under it.
+	//
+	// Moving the admin on a live site breaks bookmarks and reset links
+	// already emailed, and a robots.txt saved in site settings still names
+	// the old path; redirect the old prefix from the host if that matters.
 	AdminPath string
 
 	// SiteURL is the site's canonical public base URL, e.g.
@@ -553,6 +567,9 @@ type Config struct {
 	//
 	//	AdminStylesheets: []string{"/admin/x/registrations/adminassets/nav.css"},
 	//
+	// They are linked exactly as given, so a host that sets AdminPath
+	// writes its own prefix into them ("/cms-admin/x/…").
+	//
 	// They are linked last, so their rules win at equal specificity.
 	// Nothing validates them beyond the layout escaping the attribute:
 	// they are the host's own URLs, not user input.
@@ -649,10 +666,7 @@ func New(cfg Config) (*CMS, error) {
 	if err := validateLocales(cfg.Locales); err != nil {
 		return nil, err
 	}
-	if cfg.AdminPath == "" {
-		cfg.AdminPath = "/admin"
-	}
-	cfg.AdminPath = "/" + strings.Trim(cfg.AdminPath, "/")
+	cfg.AdminPath = normalizeAdminPath(cfg.AdminPath)
 	cfg.SiteURL = normalizeSiteURL(cfg.SiteURL)
 	if cfg.SessionLifetime <= 0 {
 		cfg.SessionLifetime = 24 * time.Hour
@@ -678,6 +692,9 @@ func New(cfg Config) (*CMS, error) {
 	}
 	if !content.ValidSlug(cfg.SearchPath) {
 		return nil, fmt.Errorf("cms: SearchPath %q is not a usable page address", cfg.SearchPath)
+	}
+	if err := validateAdminPath(cfg); err != nil {
+		return nil, err
 	}
 	if cfg.AdminPerPage < 0 {
 		return nil, fmt.Errorf("cms: AdminPerPage must not be negative, got %d", cfg.AdminPerPage)
@@ -1177,6 +1194,14 @@ func (c *CMS) Close() error {
 		err = errors.Join(errs...)
 	})
 	return err
+}
+
+// AdminPath is where the admin area lives: Config.AdminPath, normalized
+// ("/admin" unless configured otherwise, never with a trailing slash). Use
+// it for links to the admin from host code — a login link, a startup log
+// line, an AdminStylesheets entry — so they follow the admin if it moves.
+func (c *CMS) AdminPath() string {
+	return c.cfg.AdminPath
 }
 
 // Admin returns the handler for the admin area (login, dashboard, user

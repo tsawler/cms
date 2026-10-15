@@ -60,3 +60,50 @@ func TestHandlerRouting(t *testing.T) {
 		}
 	}
 }
+
+// A moved admin is routed exactly like the default one, and the old
+// /admin prefix becomes an ordinary public address — the host may have
+// its own thing there, which is why it moved.
+func TestHandlerRoutingCustomAdminPath(t *testing.T) {
+	for _, adminPath := range []string{"/cms-admin", "/site/manage"} {
+		adminSaw := ""
+		c := &CMS{
+			cfg:      Config{AdminPath: adminPath},
+			sessions: scs.New(),
+			admin: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				adminSaw = r.URL.Path
+				w.WriteHeader(http.StatusTeapot)
+			}),
+		}
+		h := c.Handler()
+
+		for reqPath, want := range map[string]string{
+			adminPath + "/":               "/",
+			adminPath + "/users":          "/users",
+			adminPath + "/x/reports/ping": "/x/reports/ping",
+		} {
+			adminSaw = ""
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, reqPath, nil))
+			if rec.Code != http.StatusTeapot || adminSaw != want {
+				t.Errorf("%s: request %s: status %d, admin saw %q; want admin handler seeing %q",
+					adminPath, reqPath, rec.Code, adminSaw, want)
+			}
+		}
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+		if loc := rec.Header().Get("Location"); rec.Code != http.StatusMovedPermanently || loc != adminPath+"/" {
+			t.Errorf("%s: bare admin path: status %d to %q, want 301 to %s/", adminPath, rec.Code, loc, adminPath)
+		}
+
+		for _, reqPath := range []string{"/admin", "/admin/", "/admin/users", adminPath + "-old"} {
+			adminSaw = ""
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, reqPath, nil))
+			if adminSaw != "" || rec.Code == http.StatusMovedPermanently {
+				t.Errorf("%s: request %s reached the admin (status %d, saw %q)", adminPath, reqPath, rec.Code, adminSaw)
+			}
+		}
+	}
+}

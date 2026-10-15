@@ -495,7 +495,7 @@ func run(logger *slog.Logger) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.Handle("/", c.Handler())
 
-	logger.Info("listening", "addr", ":4000", "admin", "http://localhost:4000/admin/")
+	logger.Info("listening", "addr", ":4000", "admin", "http://localhost:4000"+c.AdminPath()+"/")
 	return http.ListenAndServe(":4000", mux)
 }
 ```
@@ -1237,7 +1237,9 @@ for the shared-theme-file pattern and what it prevents.
   storage you already run. When set, `S3` is ignored.
 - `SessionLifetime` (default 24h), `RememberFor` (default 30 days) — login
   session durations.
-- `AdminPath` — serve the admin somewhere other than `/admin`.
+- `AdminPath` — serve the admin somewhere other than `/admin`, e.g.
+  `/cms-admin`. See
+  [Moving the admin](docs/host-integration.md#moving-the-admin).
 - `Logger` — a `*slog.Logger`; defaults to `slog.Default()`.
 - `SecureCookies` — see [step 10](#10-going-to-production).
 
@@ -1267,6 +1269,7 @@ Every variable it reads:
 | --- | --- | --- |
 | `CMS_SITE_URL` | unset (each request's own host) | The site's canonical public address, e.g. `https://example.com`. Used wherever a link has to work away from the page it was made on: the media library's **Copy link**, RSS item links, hreflang alternates, and password-reset emails. **Set it in production.** A reset link is read by someone other than whoever asked for it, so building one from the request's `Host` would let an attacker have the CMS mail a victim a working link pointing at the attacker; rather than do that, a site with no `CMS_SITE_URL` sends no reset email at all and logs why. Requests arriving over loopback are exempt, which is what keeps `go run .` working. Set it, too, whenever the request's `Host` would simply be wrong — behind a proxy that rewrites it, or when the admin is reached by a different name than the public site. A value with no scheme is taken as `https`. |
 | `CMS_CLIENT_IP_HEADER` | unset (the connection's own address) | The header a trusted reverse proxy sets to the real client address — `X-Forwarded-For`, `CF-Connecting-IP`, `True-Client-IP`. Read by the login throttle and nothing else, where it is wrong in both directions if it does not match the deployment: left unset behind a proxy, every visitor arrives from the same address, so a handful of deliberate failures against a known account shuts it for everybody; set without a proxy that overwrites the header, the value is one the client picks and an attacker varies it to draw a fresh allowance per request. Set it exactly when every request reaches the app through a proxy you control and that proxy replaces the header. For `X-Forwarded-For` the rightmost entry is used — the one the nearest proxy appended. |
+| `CMS_ADMIN_PATH` | `/admin` | Where the admin area lives, e.g. `/cms-admin` for a site that needs `/admin` for something else. Links, redirects, reset emails, and the in-place editor all follow it. A path that would shadow an address the site serves itself — anything under `/cms/`, `/robots.txt`, `/sitemap.xml`, `/blog/` or `/news/` with posts on, a translation prefix, or the search page — is a startup error. See [Moving the admin](docs/host-integration.md#moving-the-admin). |
 | `CMS_SECURE_COOKIES` | unset (derived from `CMS_SITE_URL`) | Forces the session cookie's `Secure` flag on, so a browser only ever sends it over HTTPS. Usually unnecessary: an `https://` `CMS_SITE_URL` already implies it, which is deliberate — this is the setting whose absence is silent, and a site that has said where it lives should not have to say it twice. Set it for HTTPS in front of an install that leaves `CMS_SITE_URL` empty. There is no way to turn it *off* for an `https://` site, and nothing legitimate wants one: `Secure` describes the browser's connection to the edge, not the edge's connection to this process, so terminating TLS at a proxy is not a reason to drop it. |
 | `CMS_REMEMBER_DAYS` | `30` | How long a "Remember me" login lasts, in days. Invalid or non-positive is a startup error. |
 | `CMS_POSTS_PER_PAGE` | `10` | Posts per page in a paginated `{{cmsFeed}}` listing. Invalid or non-positive is a startup error. |
