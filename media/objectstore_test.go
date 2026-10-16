@@ -193,8 +193,8 @@ func TestS3StoreKeyPrefixAccessor(t *testing.T) {
 }
 
 // An endpoint may carry a scheme, and http is the reason it may: a store
-// on the same machine or private network with no certificate — a MinIO in
-// Docker, most often — is unreachable over https and was unreachable
+// on the same machine or private network with no certificate — a RustFS
+// or MinIO in Docker, most often — is unreachable over https and was unreachable
 // through this config at all until the scheme was allowed.
 func TestSplitEndpoint(t *testing.T) {
 	cases := map[string]struct {
