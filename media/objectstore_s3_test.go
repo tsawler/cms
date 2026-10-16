@@ -7,7 +7,7 @@ package media
 // it turns into ErrObjectNotFound or ErrInvalidRange rather than a bare
 // error. A stub store would only restate the code.
 //
-// MinIO stands in for the bucket, reached over plain HTTP through the
+// RustFS stands in for the bucket, reached over plain HTTP through the
 // real NewS3Store. The container is started lazily, once per test process
 // and shared by every test here, the way dbtest shares its databases;
 // without Docker these skip, so `go test ./...` still passes.
@@ -33,63 +33,64 @@ import (
 )
 
 const (
-	minioUser = "cmsroot"
-	minioPass = "cmsrootsecret"
+	s3User = "cmsroot"
+	s3Pass = "cmsrootsecret"
 )
 
 var (
-	minioOnce     sync.Once
-	minioEndpoint string // "host:port", no scheme
-	minioErr      error
+	s3Once     sync.Once
+	s3Endpoint string // "host:port", no scheme
+	s3Err      error
 )
 
-// startMinIO brings up one MinIO for the whole package and returns its
+// startS3Server brings up one S3 server for the whole package and returns its
 // endpoint.
-func startMinIO(t *testing.T) string {
+func startS3Server(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("media: skipping the S3 container test in -short mode")
 	}
 	dbtest.SkipWithoutDocker(t)
 
-	minioOnce.Do(func() {
+	s3Once.Do(func() {
 		ctx := context.Background()
-		// MinIO's own registry: the Docker Hub mirror (minio/minio) was
-		// taken down in September 2026, and a fresh CI runner could no
-		// longer pull it. Same pinned release, same digest.
-		container, err := testcontainers.Run(ctx, "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z",
+		// RustFS, not MinIO: MinIO no longer publishes images anywhere —
+		// Docker Hub's minio/minio is gone and quay.io/minio/minio
+		// answers 401 — so no machine without a cached copy could run
+		// these. RustFS speaks the same S3 dialect, bucket policies
+		// included, and serves from /data by default.
+		container, err := testcontainers.Run(ctx, "rustfs/rustfs:1.0.0",
 			testcontainers.WithExposedPorts("9000/tcp"),
 			testcontainers.WithEnv(map[string]string{
-				"MINIO_ROOT_USER":     minioUser,
-				"MINIO_ROOT_PASSWORD": minioPass,
+				"RUSTFS_ACCESS_KEY": s3User,
+				"RUSTFS_SECRET_KEY": s3Pass,
 			}),
-			testcontainers.WithCmd("server", "/data"),
 			testcontainers.WithWaitStrategy(
-				wait.ForHTTP("/minio/health/live").
+				wait.ForHTTP("/health").
 					WithPort("9000/tcp").
 					WithStartupTimeout(90*time.Second),
 			),
 		)
 		if err != nil {
-			minioErr = fmt.Errorf("starting container: %w", err)
+			s3Err = fmt.Errorf("starting container: %w", err)
 			return
 		}
 		host, err := container.Host(ctx)
 		if err != nil {
-			minioErr = fmt.Errorf("container host: %w", err)
+			s3Err = fmt.Errorf("container host: %w", err)
 			return
 		}
 		port, err := container.MappedPort(ctx, "9000/tcp")
 		if err != nil {
-			minioErr = fmt.Errorf("mapped port: %w", err)
+			s3Err = fmt.Errorf("mapped port: %w", err)
 			return
 		}
-		minioEndpoint = host + ":" + port.Port()
+		s3Endpoint = host + ":" + port.Port()
 	})
-	if minioErr != nil {
-		t.Fatalf("media: starting MinIO: %v", minioErr)
+	if s3Err != nil {
+		t.Fatalf("media: starting the S3 server: %v", s3Err)
 	}
-	return minioEndpoint
+	return s3Endpoint
 }
 
 // newS3TestStore returns an S3Store on a bucket of its own, so tests never
@@ -97,11 +98,11 @@ func startMinIO(t *testing.T) string {
 // container speaks plain HTTP, which is what the http:// endpoint is for.
 func newS3TestStore(t *testing.T, cfg S3Config) *S3Store {
 	t.Helper()
-	endpoint := startMinIO(t)
+	endpoint := startS3Server(t)
 
 	cfg.Endpoint = "http://" + endpoint
-	cfg.AccessKey, cfg.Secret = minioUser, minioPass
-	cfg.UsePathStyle = true // MinIO addresses buckets by path
+	cfg.AccessKey, cfg.Secret = s3User, s3Pass
+	cfg.UsePathStyle = true // the container addresses buckets by path
 	if cfg.Region == "" {
 		cfg.Region = "us-east-1"
 	}
@@ -281,6 +282,21 @@ func TestS3GetRange(t *testing.T) {
 	// matters is that it is not mistaken for a partial response.
 	t.Run("an unparseable range", func(t *testing.T) {
 		body, _, contentRange, _, err := s.GetRange(ctx, "media/abc/original.mp4", "kilometres=0-3")
+		if err != nil {
+			t.Fatalf("GetRange: %v", err)
+		}
+		if got := read(t, body); got != full {
+			t.Errorf("body = %q, want the whole object", got)
+		}
+		if contentRange != "" {
+			t.Errorf("content range = %q, want none for a whole-object response", contentRange)
+		}
+	})
+
+	// S3 serves one range at a time; a multi-range request gets the
+	// whole object the same way.
+	t.Run("a multi-range request", func(t *testing.T) {
+		body, _, contentRange, _, err := s.GetRange(ctx, "media/abc/original.mp4", "bytes=0-1,4-5")
 		if err != nil {
 			t.Fatalf("GetRange: %v", err)
 		}

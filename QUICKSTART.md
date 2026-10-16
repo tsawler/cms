@@ -818,9 +818,21 @@ S3: &cms.S3Config{
 ```
 
 The endpoint is a host name, reached over https. Prefix it with
-`http://` for a store that has no certificate — a MinIO in Docker for
-local development, typically; don't use it over the public internet,
-where the objects would travel in the clear.
+`http://` for a store that has no certificate — a local S3 server in
+Docker for development, typically; don't use it over the public internet,
+where the objects would travel in the clear. MinIO no longer publishes
+Docker images, so for local development use RustFS, which speaks the same
+S3 dialect (the CMS's own S3 tests run against it):
+
+```sh
+docker run -d -p 9000:9000 \
+  -e RUSTFS_ACCESS_KEY=devkey -e RUSTFS_SECRET_KEY=devsecret \
+  rustfs/rustfs:1.0.0
+```
+
+Point the config at `http://localhost:9000` with `UsePathStyle: true`,
+and create the bucket with any S3 client first — the CMS fails against a
+bucket that isn't there rather than creating one.
 
 By default media is **proxied** through the CMS (`/cms/media/…`), so a
 private bucket just works; set `PublicRead` or `PublicBaseURL` to embed
@@ -1283,7 +1295,7 @@ Every variable it reads:
 | `S3_KEY_PREFIX` | unset | Prefix namespacing this site's keys inside a shared bucket. Pick a stable slug; it also scopes media adoption, so set it whenever the bucket is shared. |
 | `S3_PUBLIC_READ` | `false` | Serve media straight from the bucket instead of proxying it through the CMS. The bucket must already allow public `s3:GetObject` — see `S3_APPLY_PUBLIC_POLICY`. SVGs stay on the proxy either way. |
 | `S3_PUBLIC_BASE_URL` | unset | Serve media from a CDN or custom domain, e.g. `https://cdn.example.com`. Takes precedence over `S3_PUBLIC_READ`. A trailing slash is trimmed. |
-| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO and some self-hosted stores. |
+| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO, RustFS and some self-hosted stores. |
 | `S3_APPLY_PUBLIC_POLICY` | `false` | Apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). It only opens the bucket — pair it with `S3_PUBLIC_READ` or `S3_PUBLIC_BASE_URL`, or nothing will ever read a direct bucket URL and the CMS refuses to start rather than leave a bucket public for no reason. |
 | `CMS_MEDIA_WEBP_QUALITY` | `0.3` | Lossy WebP quality for image variants, in (0, 1]. Non-numeric is a startup error. |
 | `CMS_MEDIA_MAX_VIDEO_MB` | `512` | Video upload cap in MB. Non-numeric is a startup error. |

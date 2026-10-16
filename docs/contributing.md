@@ -143,7 +143,7 @@ a startup error rather than a silent fallback.
 | `CMS_MEDIA_ADOPT` | `when-empty` | Whether `Migrate` rebuilds the media library from the object store: `when-empty` (only when the database holds no media), `reconcile` (check every startup), or `off`. Any other value is a startup error. |
 | `CMS_TAILWIND_COMMAND` | unset (rebuilds disabled) | Content-driven Tailwind rebuild command: a space-separated argv with `{content}` and `{output}` placeholders (see [Generated CSS for content classes](../QUICKSTART.md#content-driven-tailwind-rebuilds) and `tailwind-content.sh`). |
 | `CMS_TAILWIND_DIR` | unset | Working directory for `CMS_TAILWIND_COMMAND`. |
-| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint: a host name, reached over https, or an `http://`/`https://` URL (`http://` for a local MinIO). Setting it enables the media library and makes the other `S3_*` variables relevant. |
+| `S3_ENDPOINT` | unset (media library disabled) | S3-compatible object-store endpoint: a host name, reached over https, or an `http://`/`https://` URL (`http://` for a local RustFS or MinIO). Setting it enables the media library and makes the other `S3_*` variables relevant. |
 | `S3_BUCKET` | — | Bucket for uploaded media. |
 | `S3_ACCESS_KEY` | — | Object-store access key. |
 | `S3_SECRET` | — | Object-store secret key. |
@@ -151,7 +151,7 @@ a startup error rather than a silent fallback.
 | `S3_KEY_PREFIX` | unset | Prefix that namespaces this site's keys inside a shared bucket. It also scopes media adoption and the public-read policy, so set it whenever the bucket is shared. |
 | `S3_PUBLIC_READ` | `false` | Serve media straight from the bucket instead of proxying it through the CMS. The bucket must already allow public `s3:GetObject` — see `S3_APPLY_PUBLIC_POLICY`. SVGs stay on the proxy either way. |
 | `S3_PUBLIC_BASE_URL` | unset | Serve media from a CDN or custom domain, e.g. `https://cdn.example.com`. Takes precedence over `S3_PUBLIC_READ`. A trailing slash is trimmed. |
-| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO and some self-hosted stores. |
+| `S3_USE_PATH_STYLE` | `false` | Address objects as `endpoint/bucket/key` rather than `bucket.endpoint/key`. Needed for MinIO, RustFS and some self-hosted stores. |
 | `S3_APPLY_PUBLIC_POLICY` | `false` | Apply a public-read bucket policy during `Migrate` (one-time setup; idempotent). It only opens the bucket — pair it with `S3_PUBLIC_READ` or `S3_PUBLIC_BASE_URL`, or nothing will ever read a direct bucket URL and the CMS refuses to start rather than leave a bucket public for no reason. |
 | `CAP_URL` | unset (CAPTCHA disabled) | Browser-facing URL of the Cap server. Setting it enables the login CAPTCHA and makes the other `CAP_*` variables relevant. |
 | `CAP_SITE_KEY` | — | Site key created in the Cap dashboard. |

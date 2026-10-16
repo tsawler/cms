@@ -402,12 +402,20 @@ func (s *S3Store) Get(ctx context.Context, key string) (io.ReadCloser, string, e
 }
 
 // GetRange implements RangeGetter by forwarding the Range header to S3.
+// Only a single byte range is forwarded; anything else is dropped and the
+// whole object comes back, which is what HTTP says to do with a Range it
+// cannot use. AWS ignores such a header itself, but some S3-compatible
+// stores (RustFS among them) reject it with a 400, which the proxy would
+// turn into a 500.
 func (s *S3Store) GetRange(ctx context.Context, key, rangeSpec string) (io.ReadCloser, string, string, int64, error) {
-	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+	in := &s3.GetObjectInput{
 		Bucket: aws.String(s.cfg.Bucket),
 		Key:    aws.String(key),
-		Range:  aws.String(rangeSpec),
-	})
+	}
+	if isSingleByteRange(rangeSpec) {
+		in.Range = aws.String(rangeSpec)
+	}
+	out, err := s.client.GetObject(ctx, in)
 	if err != nil {
 		var noKey *types.NoSuchKey
 		if errors.As(err, &noKey) {
@@ -420,6 +428,29 @@ func (s *S3Store) GetRange(ctx context.Context, key, rangeSpec string) (io.ReadC
 		return nil, "", "", 0, fmt.Errorf("media: getting %s: %w", key, err)
 	}
 	return out.Body, aws.ToString(out.ContentType), aws.ToString(out.ContentRange), aws.ToInt64(out.ContentLength), nil
+}
+
+// isSingleByteRange reports whether spec is one "bytes=first-last",
+// "bytes=first-" or "bytes=-suffix" range: the only form S3 honors.
+func isSingleByteRange(spec string) bool {
+	r, ok := strings.CutPrefix(spec, "bytes=")
+	if !ok {
+		return false
+	}
+	first, last, ok := strings.Cut(strings.TrimSpace(r), "-")
+	if !ok || (first == "" && last == "") {
+		return false
+	}
+	return allDigits(first) && allDigits(last)
+}
+
+func allDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *S3Store) Delete(ctx context.Context, key string) error {
