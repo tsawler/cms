@@ -324,8 +324,9 @@ var frStrings = map[string]string{
 	"Choose a role.":                                "Choisissez un rôle.",
 	"Password is required.":                         "Le mot de passe est obligatoire.",
 	"Password must be at least 8 characters.":       "Le mot de passe doit contenir au moins 8 caractères.",
-	"Reset two-factor authentication — for someone locked out of their authenticator app": "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
-	"They'll log in with just their password until they set it up again.":                 "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
+	"Reset two-factor authentication — for someone locked out of their authenticator app":                                                   "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
+	"They'll log in with just their password until they set it up again.":                                                                   "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
+	"This account holds permissions you don't, so only someone who holds them can change its email, password or two-factor authentication.": "Ce compte détient des permissions que vous n'avez pas : seule une personne qui les détient peut modifier son courriel, son mot de passe ou son authentification à deux facteurs.",
 
 	// Permission grants (user form) and permission-denied messages.
 	// "News" is translated with the posts strings further down.
@@ -361,6 +362,8 @@ var frStrings = map[string]string{
 	"Version restored and published — it is live on the site again.":                                                                                                     "Version restaurée et publiée — elle est de nouveau en ligne sur le site.",
 	"Custom-code blocks this version used had been deleted and were put back:":                                                                                           "Des blocs de code personnalisé utilisés par cette version avaient été supprimés et ont été rétablis :",
 	"These custom-code blocks have changed since and were left as they are:":                                                                                             "Ces blocs de code personnalisé ont changé depuis et ont été laissés tels quels :",
+	"Custom-code blocks this version used have been deleted, and only an administrator can put them back:":                                                               "Des blocs de code personnalisé utilisés par cette version ont été supprimés, et seul un administrateur peut les rétablir :",
+	"The page's custom CSS and JavaScript were kept as they are — only an administrator can restore them.":                                                               "Le CSS et le JavaScript personnalisés de la page ont été conservés tels quels — seul un administrateur peut les restaurer.",
 
 	// Pages list.
 	"New page":   "Nouvelle page",
@@ -590,6 +593,7 @@ var frStrings = map[string]string{
 
 	// Media handlers.
 	"That file is too large — images and documents must be under %d MB, videos under %d MB.":                                               "Ce fichier est trop volumineux — les images et documents doivent faire moins de %d Mo, les vidéos moins de %d Mo.",
+	"That image's dimensions are too large to process — it must be under %d megapixels. Resize it and try again.":                          "Les dimensions de cette image sont trop grandes pour être traitées — elle doit faire moins de %d mégapixels. Redimensionnez-la et réessayez.",
 	"That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP.": "Ce type de fichier n'est pas pris en charge. Utilisez une image (JPEG, PNG, GIF, WebP, SVG), une vidéo (MP4, WebM), un PDF, un document bureautique, du texte/CSV ou un ZIP.",
 	"That SVG can't be used — it contains scripts or other active content.":                                                                "Ce SVG ne peut pas être utilisé — il contient des scripts ou d'autres contenus actifs.",
 	"Choose a file to upload.":                "Choisissez un fichier à téléverser.",

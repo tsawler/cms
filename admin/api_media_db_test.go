@@ -168,6 +168,15 @@ func TestAPIMediaUploadRejectionsAreJSON(t *testing.T) {
 		if out := decodeAPI(t, rec); out["error"] == nil {
 			t.Errorf("body = %v, want an error message", out)
 		}
+
+		rec = httptest.NewRecorder()
+		s.apiMediaUpload(rec, uploadReq(t, s, u, "bomb.png", pngDeclaring(60000, 60000), nil))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d for an image over the pixel cap, want 413", rec.Code)
+		}
+		if msg, _ := decodeAPI(t, rec)["error"].(string); !strings.Contains(msg, "megapixels") {
+			t.Errorf("error = %q, want it to explain the pixel cap", msg)
+		}
 	})
 }
 

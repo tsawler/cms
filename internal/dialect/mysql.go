@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MySQL is the dialect for MySQL 8.0.31+ and MariaDB 10.6+.
@@ -140,3 +141,75 @@ func (MySQL) SearchConfig(locale string) string { return "" }
 // that ships a schema cannot count on that having been done, and reading
 // it per query to find out would cost more than the LIKE it saves.
 func (MySQL) SearchMinWordLen() int { return 3 }
+
+// RequiredDSN is the query string every MySQL or MariaDB DSN the CMS uses
+// must carry; see CheckSession for what each setting is for.
+const RequiredDSN = "parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true"
+
+// CheckSession reports the DSN settings the connection is missing. They
+// live in the host's DSN, which the CMS never sees — database/sql keeps
+// it inside the driver — so the only way to know is to ask the server how
+// the connection behaves:
+//
+//   - parseTime: without it a DATETIME will not scan into time.Time.
+//   - loc=UTC: the driver otherwise reads timestamps as local time.
+//   - time_zone='+00:00': otherwise SQL now() is the server's local time
+//     while Go writes UTC, so session expiry and publish dates drift by
+//     the server's offset.
+//   - clientFoundRows: otherwise an UPDATE reports rows changed rather
+//     than rows matched, and the stores read "0 rows" as ErrNotFound — a
+//     save that changes nothing fails.
+//
+// The clientFoundRows probe is a no-op UPDATE of one cms_schema_migrations
+// row, so it needs the migrations to have run. It returns nil when every
+// setting is in place, and an error naming each missing one otherwise.
+func (MySQL) CheckSession(ctx context.Context, ex Execer) error {
+	var missing []string
+
+	// A winter and a summer date, so a zone that only sits at UTC for
+	// part of the year (Europe/London) is caught whatever the season.
+	var winter, summer time.Time
+	err := ex.QueryRowContext(ctx, `SELECT CAST('2000-01-01 00:00:00' AS DATETIME),
+		CAST('2000-07-01 00:00:00' AS DATETIME)`).Scan(&winter, &summer)
+	switch {
+	case err != nil && strings.Contains(err.Error(), "unsupported Scan"):
+		missing = append(missing, "parseTime=true (timestamps do not scan into time.Time)")
+	case err != nil:
+		return fmt.Errorf("checking the MySQL connection: %w", err)
+	case !isUTC(winter) || !isUTC(summer):
+		missing = append(missing, "loc=UTC (the driver reads timestamps as "+winter.Location().String()+")")
+	}
+
+	var offset int64
+	if err := ex.QueryRowContext(ctx,
+		"SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())").Scan(&offset); err != nil {
+		return fmt.Errorf("checking the MySQL connection: %w", err)
+	}
+	if offset != 0 {
+		missing = append(missing, fmt.Sprintf(
+			"time_zone='+00:00' (the session's now() is %+d seconds from UTC)", offset))
+	}
+
+	res, err := ex.ExecContext(ctx,
+		"UPDATE cms_schema_migrations SET version = version ORDER BY version LIMIT 1")
+	if err != nil {
+		return fmt.Errorf("checking the MySQL connection: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("checking the MySQL connection: %w", err)
+	} else if n == 0 {
+		missing = append(missing, "clientFoundRows=true (an UPDATE that changes nothing reports no rows, which reads as not found)")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("the MySQL DSN is missing settings the CMS depends on: %s; add ?%s to it",
+			strings.Join(missing, "; "), RequiredDSN)
+	}
+	return nil
+}
+
+// isUTC reports whether t is at UTC's offset, whatever its zone is called.
+func isUTC(t time.Time) bool {
+	_, offset := t.Zone()
+	return offset == 0
+}

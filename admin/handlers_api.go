@@ -1228,6 +1228,8 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, poster, s.currentUser(r).ID, folderID)
 	if err != nil {
 		switch {
+		case errors.Is(err, media.ErrTooManyPixels):
+			jsonError(w, http.StatusRequestEntityTooLarge, s.tooManyPixelsMsg(r))
 		case errors.Is(err, media.ErrTooLarge):
 			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):

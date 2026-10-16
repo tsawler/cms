@@ -49,8 +49,15 @@ an upgrade changes nothing until you start unticking boxes.
 editor with that grant manages editor accounts only: admin accounts are
 out of reach entirely (including their passwords and two-factor
 resets), the role select offers only "editor", and they can neither
-grant nor revoke a permission they don't hold themselves. Escalation by
-way of the users page is a dead end.
+grant nor revoke a permission they don't hold themselves. Nor can they
+change the email, password or two-factor enrollment of an account that
+holds a permission they don't: signing in as that account would hand
+them the permission anyway. They can still rename or deactivate it.
+Escalation by way of the users page is a dead end.
+
+The same credential rule binds admins over grants marked
+`AdminsNeedGrant`: an admin who doesn't hold such a grant can't reset
+the password of an account that does.
 
 Deployments can declare **custom permissions** for functionality they
 gate themselves — either implicitly through an admin section's

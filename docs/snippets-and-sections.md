@@ -52,6 +52,14 @@ it. One that still exists but has been rewritten is left alone and
 mentioned instead — the library is shared, and restoring one page should
 not rewrite a widget other pages are showing.
 
+A restore is held to the same rules as any other save by the person who
+runs it. Only admins may restore a page's custom CSS and JavaScript or
+put deleted code blocks back in the library. When an editor restores a
+version, the page keeps its current code, deleted blocks are named
+rather than recreated, and the version's HTML is sanitized the way the
+editor's own edits are. An old version therefore can't bring back a
+script an admin has since removed.
+
 Media and shared regions like the footer are not part of a version: they
 are stored outside the page and stay as they are now. Shared regions keep
 a history of their own, since they belong to the site rather than to any

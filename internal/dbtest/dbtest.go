@@ -68,6 +68,7 @@ const (
 type pool struct {
 	once sync.Once
 	db   *sqldb.DB
+	dsn  string // the MySQL/MariaDB container's DSN with no parameters
 	err  error
 }
 
@@ -109,7 +110,7 @@ func Each(t *testing.T, fn func(t *testing.T, db *sqldb.DB)) {
 func connect(t *testing.T, engine Engine) *sqldb.DB {
 	t.Helper()
 	p := pools[engine]
-	p.once.Do(func() { p.db, p.err = start(engine) })
+	p.once.Do(func() { p.db, p.dsn, p.err = start(engine) })
 	if p.err != nil {
 		t.Fatalf("dbtest: starting %s: %v", engine, p.err)
 	}
@@ -119,7 +120,7 @@ func connect(t *testing.T, engine Engine) *sqldb.DB {
 // start boots a container for engine, waits for it to accept connections, and
 // applies the CMS migrations. The container is reaped by testcontainers' Ryuk
 // sidecar when the test process exits, so there is no teardown to forget.
-func start(engine Engine) (*sqldb.DB, error) {
+func start(engine Engine) (*sqldb.DB, string, error) {
 	ctx := context.Background()
 
 	switch engine {
@@ -135,13 +136,14 @@ func start(engine Engine) (*sqldb.DB, error) {
 			),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("starting container: %w", err)
+			return nil, "", fmt.Errorf("starting container: %w", err)
 		}
 		dsn, err := container.ConnectionString(ctx, "sslmode=disable")
 		if err != nil {
-			return nil, fmt.Errorf("connection string: %w", err)
+			return nil, "", fmt.Errorf("connection string: %w", err)
 		}
-		return open(ctx, "pgx", dsn, dialect.Postgres{})
+		db, err := open(ctx, "pgx", dsn, dialect.Postgres{})
+		return db, "", err
 
 	case MySQL:
 		container, err := tcmysql.Run(ctx, "mysql:8.4",
@@ -150,13 +152,14 @@ func start(engine Engine) (*sqldb.DB, error) {
 			tcmysql.WithPassword(dbPass),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("starting container: %w", err)
+			return nil, "", fmt.Errorf("starting container: %w", err)
 		}
-		dsn, err := container.ConnectionString(ctx, mysqlParams...)
+		dsn, err := container.ConnectionString(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("connection string: %w", err)
+			return nil, "", fmt.Errorf("connection string: %w", err)
 		}
-		return open(ctx, "mysql", dsn, dialect.MySQL{})
+		db, err := open(ctx, "mysql", withParams(dsn, mysqlParams), dialect.MySQL{})
+		return db, dsn, err
 
 	case MariaDB:
 		container, err := tcmariadb.Run(ctx, "mariadb:11.4",
@@ -165,15 +168,16 @@ func start(engine Engine) (*sqldb.DB, error) {
 			tcmariadb.WithPassword(dbPass),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("starting container: %w", err)
+			return nil, "", fmt.Errorf("starting container: %w", err)
 		}
-		dsn, err := container.ConnectionString(ctx, mysqlParams...)
+		dsn, err := container.ConnectionString(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("connection string: %w", err)
+			return nil, "", fmt.Errorf("connection string: %w", err)
 		}
-		return open(ctx, "mysql", dsn, dialect.MySQL{})
+		db, err := open(ctx, "mysql", withParams(dsn, mysqlParams), dialect.MySQL{})
+		return db, dsn, err
 	}
-	return nil, fmt.Errorf("unknown engine %q", engine)
+	return nil, "", fmt.Errorf("unknown engine %q", engine)
 }
 
 // mysqlParams are the DSN settings the CMS requires of a MySQL or MariaDB
@@ -192,6 +196,44 @@ var mysqlParams = []string{
 	"time_zone=%27%2B00%3A00%27",
 	"clientFoundRows=true",
 }
+
+// withParams appends DSN parameters to a container's bare DSN.
+func withParams(dsn string, params []string) string {
+	if len(params) == 0 {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + strings.Join(params, "&")
+}
+
+// MySQLEngines are the engines that speak the MySQL dialect.
+var MySQLEngines = []Engine{MySQL, MariaDB}
+
+// OpenMySQL opens a second pool on engine's container — MySQL or MariaDB —
+// with exactly the DSN parameters given, for tests of what the CMS does
+// with a DSN that lacks some of mysqlParams. The schema is the shared
+// pool's, already migrated. The pool closes when the test ends.
+func OpenMySQL(t *testing.T, engine Engine, params ...string) *sqldb.DB {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("dbtest: skipping database test in -short mode")
+	}
+	SkipWithoutDocker(t)
+	connect(t, engine)
+	raw, err := sql.Open("mysql", withParams(pools[engine].dsn, params))
+	if err != nil {
+		t.Fatalf("dbtest: opening %s: %v", engine, err)
+	}
+	t.Cleanup(func() { raw.Close() })
+	return sqldb.New(raw, dialect.MySQL{})
+}
+
+// RequiredMySQLParams returns a copy of the DSN parameters every MySQL
+// pool the CMS uses must carry, for a test to drop one of.
+func RequiredMySQLParams() []string { return append([]string(nil), mysqlParams...) }
 
 // open connects, applies the schema, and wraps the pool in its dialect.
 func open(ctx context.Context, driver, dsn string, d dialect.Dialect) (*sqldb.DB, error) {

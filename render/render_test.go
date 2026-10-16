@@ -99,6 +99,82 @@ func TestRenderMissingContentIsEmptyNotError(t *testing.T) {
 	}
 }
 
+// cmsRegion and cmsShared emit their content unescaped, so only HTML
+// blocks — the kind that is sanitized on save — may reach them. A text or
+// image block can still sit under an HTML region's name: text is stored
+// raw, and a page switched to a template that reuses the name keeps it.
+func TestRawRegionsEmitOnlyHTMLBlocks(t *testing.T) {
+	r := newTestRenderer(t)
+	page := &content.Page{ID: 1, TemplateName: "pages/home.gohtml", Title: "Home"}
+	blocks := []content.Block{
+		{Region: "main", Kind: content.KindText, Content: `<img src=x onerror=alert(1)>`},
+		{Region: "main", Kind: content.KindImage, Content: `/"><script>alert(2)</script>`},
+		{Region: "main", Kind: content.KindHTML, Content: `<p>kept</p>`},
+	}
+	shared := []content.Block{
+		{Region: "footer", Kind: content.KindText, Content: `<script>alert(3)</script>`},
+	}
+
+	for _, edit := range []*EditInfo{nil, {PageID: 1, AdminPath: "/admin", Locale: "en"}} {
+		var buf bytes.Buffer
+		if err := r.Render(&buf, Input{Page: page, Blocks: blocks, Shared: shared, Locale: "en", Edit: edit}); err != nil {
+			t.Fatalf("Render (edit=%v): %v", edit != nil, err)
+		}
+		out := buf.String()
+		for _, bad := range []string{"onerror=alert(1)", "alert(2)", "alert(3)"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("edit=%v: non-HTML block content %q reached the page:\n%s", edit != nil, bad, out)
+			}
+		}
+		if !strings.Contains(out, "<p>kept</p>") {
+			t.Errorf("edit=%v: HTML block missing from region:\n%s", edit != nil, out)
+		}
+		// A shared region holding nothing renderable falls back as if empty.
+		if !strings.Contains(out, "<p>&copy; Acme</p>") {
+			t.Errorf("edit=%v: shared region with no HTML blocks did not fall back:\n%s", edit != nil, out)
+		}
+	}
+}
+
+// The first declaration of a region decides how it is saved, so one name
+// under two kinds would store raw text for a region rendered unescaped.
+// New refuses the template rather than guessing.
+func TestNewRejectsRegionDeclaredUnderTwoKinds(t *testing.T) {
+	fsys := fstest.MapFS{
+		"base.gohtml": &fstest.MapFile{Data: []byte(
+			`{{define "base"}}<html><head><meta name="description" content="{{cmsText "intro"}}"></head>` +
+				`<body>{{block "content" .}}{{end}}</body></html>{{end}}`)},
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(
+			`{{template "base" .}}{{define "content"}}{{cmsRegion "intro"}}{{end}}`)},
+	}
+	_, err := New(fsys, []string{"base.gohtml"}, []PageTemplate{{File: "pages/home.gohtml", Label: "Home"}}, nil)
+	if err == nil {
+		t.Fatal("New accepted a region declared as both text and html")
+	}
+	if !strings.Contains(err.Error(), `"intro"`) || !strings.Contains(err.Error(), "pages/home.gohtml") {
+		t.Errorf("error should name the region and template, got: %v", err)
+	}
+}
+
+// A shared region is stored on the site, not the page, so it may share a
+// name with a page region: both are declared, and neither hides the other.
+func TestSharedAndPageRegionMayShareAName(t *testing.T) {
+	fsys := fstest.MapFS{
+		"pages/home.gohtml": &fstest.MapFile{Data: []byte(
+			`{{define "home.gohtml"}}{{cmsShared "footer"}}{{cmsRegion "footer"}}{{end}}`)},
+	}
+	r, err := New(fsys, nil, []PageTemplate{{File: "pages/home.gohtml", Label: "Home"}}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := r.Regions("pages/home.gohtml"); !slices.Equal(got, []Region{{Name: "footer", Kind: "html"}}) {
+		t.Errorf("Regions: got %v, want the page's html footer", got)
+	}
+	if !slices.Contains(r.SharedRegions(), Region{Name: "footer", Kind: KindShared}) {
+		t.Errorf("SharedRegions: got %v, want it to include the shared footer", r.SharedRegions())
+	}
+}
+
 func TestRenderEditModeMarksRegionsAndInjectsScript(t *testing.T) {
 	r := newTestRenderer(t)
 	page := &content.Page{ID: 7, TemplateName: "pages/home.gohtml", Title: "Home"}

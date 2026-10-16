@@ -1,6 +1,8 @@
 package render
 
 import (
+	"fmt"
+	"html/template"
 	"path"
 	"sort"
 	"text/template/parse"
@@ -76,18 +78,41 @@ func (r *Renderer) declaredRegions(templateFile string) []Region {
 	if !ok {
 		return nil
 	}
+	out, _ := scanRegions(set, path.Base(templateFile))
+	return out
+}
 
+// scanRegions walks the named template of set, and everything it invokes,
+// for region declarations. The error reports a page region declared under
+// two kinds: the first declaration decides how the region is saved, so
+// {{cmsText "intro"}} followed by {{cmsRegion "intro"}} would store raw
+// text and then emit it unescaped. New refuses such a template outright.
+//
+// Shared regions live in a namespace of their own — they are stored on
+// the site, not the page — so {{cmsShared "footer"}} beside
+// {{cmsRegion "footer"}} is two regions, not a conflict.
+func scanRegions(set *template.Template, root string) ([]Region, error) {
 	var out []Region
-	seenRegion := map[string]bool{}
+	var conflict error
+	seenKind := map[string]string{}
 	visited := map[string]bool{}
 
 	var visit func(name string)
 	var walk func(node parse.Node)
 
 	record := func(kind, name string) {
-		if !seenRegion[name] {
-			seenRegion[name] = true
+		key := "page:" + name
+		if kind == KindShared {
+			key = "shared:" + name
+		}
+		prev, seen := seenKind[key]
+		if !seen {
+			seenKind[key] = kind
 			out = append(out, Region{Name: name, Kind: kind})
+			return
+		}
+		if prev != kind && conflict == nil {
+			conflict = fmt.Errorf("region %q is declared as both %s and %s", name, prev, kind)
 		}
 	}
 
@@ -164,6 +189,6 @@ func (r *Renderer) declaredRegions(templateFile string) []Region {
 		walk(t.Tree.Root)
 	}
 
-	visit(path.Base(templateFile))
-	return out
+	visit(root)
+	return out, conflict
 }

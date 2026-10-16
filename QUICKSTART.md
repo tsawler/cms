@@ -217,6 +217,11 @@ Written out (note `'+00:00'` is URL-encoded):
 cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true
 ```
 
+`Migrate` checks the connection for all four and refuses to start without
+them, naming whichever are missing. A server whose own time zone is UTC
+already passes the `time_zone` check, but set it anyway: the check only
+sees the server as it is today.
+
 **One operational difference to know now:** on MySQL and MariaDB, DDL commits
 as it goes. Postgres runs each migration in a transaction and rolls back on
 failure; these engines can leave a migration half-applied, needing manual

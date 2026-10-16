@@ -32,6 +32,14 @@ func (s *server) uploadTooLargeMsg(r *http.Request) string {
 		media.MaxImageDocBytes>>20, s.deps.Media.MaxVideoBytes()>>20)
 }
 
+// tooManyPixelsMsg is uploadTooLargeMsg for an image whose bytes are
+// within the cap but whose dimensions are not: the fix is resizing it,
+// which the byte-size message would never suggest.
+func (s *server) tooManyPixelsMsg(r *http.Request) string {
+	return fmt.Sprintf(s.tr(r, "That image's dimensions are too large to process — it must be under %d megapixels. Resize it and try again."),
+		media.MaxImagePixels/1_000_000)
+}
+
 const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP."
 
 const unsafeSVGMsg = "That SVG can't be used — it contains scripts or other active content."
@@ -228,6 +236,8 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, nil, user.ID, folderID)
 	if err != nil {
 		switch {
+		case errors.Is(err, media.ErrTooManyPixels):
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.tooManyPixelsMsg(r))
 		case errors.Is(err, media.ErrTooLarge):
 			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):

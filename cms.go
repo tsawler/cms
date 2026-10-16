@@ -144,8 +144,12 @@ type Config struct {
 	// driver DB was opened with — database/sql does not expose that, so it
 	// cannot be detected.
 	//
-	// MySQL DSNs must set parseTime=true so timestamps scan into time.Time;
-	// the CMS sets the session time zone to UTC itself.
+	// A MySQL or MariaDB DSN must carry
+	// parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true:
+	// timestamps scanning into time.Time as UTC, a server session that
+	// agrees with them, and UPDATEs that report rows matched rather than
+	// rows changed. The CMS cannot set these itself, so Migrate checks
+	// for them and fails, naming whichever are missing.
 	Dialect string
 
 	// Locales lists the content locales the site supports, e.g.
@@ -1025,6 +1029,14 @@ func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]Pe
 func (c *CMS) Migrate(ctx context.Context) error {
 	if err := migrations.Run(ctx, c.db, c.cfg.Logger); err != nil {
 		return err
+	}
+	// MySQL's correctness hangs on DSN settings only the host can make;
+	// a missing one fails here, at startup, rather than as sessions that
+	// expire hours early or saves that report "not found".
+	if sc, ok := c.db.Dialect().(dialect.SessionChecker); ok {
+		if err := sc.CheckSession(ctx, c.db.Execer()); err != nil {
+			return fmt.Errorf("cms: %w", err)
+		}
 	}
 	// Traffic counters past their retention. Startup is the one moment
 	// every deployment reliably has, and a miss just waits for the next

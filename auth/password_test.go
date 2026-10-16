@@ -1,8 +1,11 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHashAndVerifyPassword(t *testing.T) {
@@ -119,5 +122,55 @@ func TestDummyHashIsWellFormed(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("dummyHash unexpectedly matches a password")
+	}
+}
+
+// Every argon2id derivation holds 64 MiB while it runs, so they share a
+// fixed number of slots. With every slot taken, a check waits — and gives
+// up when its request does, rather than piling up behind the others.
+func TestPasswordChecksWaitForASlot(t *testing.T) {
+	hash, err := HashPassword("correct horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range cap(argonSlots) {
+		argonSlots <- struct{}{}
+	}
+	held := cap(argonSlots)
+	release := func() {
+		for ; held > 0; held-- {
+			<-argonSlots
+		}
+	}
+	t.Cleanup(release)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := verifyPassword(ctx, "correct horse", hash); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("verify with every slot held: err = %v, want context.DeadlineExceeded", err)
+	}
+	if _, err := hashPassword(ctx, "correct horse"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("hash with every slot held: err = %v, want context.DeadlineExceeded", err)
+	}
+
+	// A freed slot lets the waiting check through, and it gives the slot
+	// back when done.
+	done := make(chan bool)
+	go func() {
+		ok, _ := VerifyPassword("correct horse", hash)
+		done <- ok
+	}()
+	select {
+	case <-done:
+		t.Fatal("a check ran with every slot held")
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-argonSlots
+	held--
+	if ok := <-done; !ok {
+		t.Error("the check that waited for a slot got the wrong answer")
+	}
+	if len(argonSlots) != held {
+		t.Errorf("%d slots held after the check finished, want %d", len(argonSlots), held)
 	}
 }

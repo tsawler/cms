@@ -29,6 +29,13 @@ type Row interface {
 	Scan(dest ...any) error
 }
 
+// SessionChecker is implemented by a dialect whose correctness depends on
+// connection settings the CMS cannot apply itself. CheckSession runs once
+// the migrations have, and reports what is missing.
+type SessionChecker interface {
+	CheckSession(ctx context.Context, ex Execer) error
+}
+
 // Dialect translates canonical (Postgres-flavoured) SQL for one engine.
 type Dialect interface {
 	// Name identifies the engine, e.g. "postgres" or "mysql".

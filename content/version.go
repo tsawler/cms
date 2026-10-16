@@ -542,6 +542,33 @@ type RestoreResult struct {
 	// other pages show — so this is the list to tell someone about rather
 	// than to act on.
 	CodeChanged []string
+	// CodeMissing names the blocks the library no longer holds that a
+	// restore under RestoreOptions.KeepCode declined to put back. The
+	// restored page still carries their placeholders, which render as
+	// nothing until someone allowed to edit the library recreates them.
+	CodeMissing []string
+	// PageCodeKept reports that a restore under RestoreOptions.KeepCode
+	// left the page's own CSS and JavaScript as they were, although the
+	// edition had them different.
+	PageCodeKept bool
+}
+
+// RestoreOptions narrows a restore to what the person running it may
+// write. The zero value restores everything, which is right for anyone
+// allowed to edit page code and the code library directly.
+//
+// A restore is a write by whoever clicks it: rolling back to an edition an
+// administrator authored must not let somebody else put back a script,
+// a page stylesheet or a code block that an administrator has since
+// removed — which is what an edition that predates the removal holds.
+type RestoreOptions struct {
+	// KeepCode leaves the page's CSS and JavaScript as the draft has them,
+	// and reports custom-code blocks the library has lost (CodeMissing)
+	// instead of recreating them.
+	KeepCode bool
+	// SanitizeHTML, when set, is applied to the content of every HTML
+	// block before it is written, the way the caller's own saves are.
+	SanitizeHTML func(string) string
 }
 
 // RestoreVersion replaces a page's draft content with the edition
@@ -565,7 +592,10 @@ type RestoreResult struct {
 // it still has them under some other body. Everything else the page points
 // at — media, palette snippets, the site's shared regions — belongs to
 // somebody else and is not touched at all.
-func (s *Store) RestoreVersion(ctx context.Context, pageID, versionID int64) (*RestoreResult, error) {
+//
+// opts narrows the restore for a caller who may not write all of it; see
+// RestoreOptions.
+func (s *Store) RestoreVersion(ctx context.Context, pageID, versionID int64, opts RestoreOptions) (*RestoreResult, error) {
 	_, snap, err := s.VersionSnapshot(ctx, pageID, versionID)
 	if err != nil {
 		return nil, err
@@ -582,10 +612,14 @@ func (s *Store) RestoreVersion(ctx context.Context, pageID, versionID int64) (*R
 		return nil, err
 	}
 	for _, b := range snap.Blocks {
+		body := b.Content
+		if b.Kind == KindHTML && opts.SanitizeHTML != nil {
+			body = opts.SanitizeHTML(body)
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cms_blocks (page_id, region, locale, status, sort, kind, snippet_key, content, settings)
 			VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8)`,
-			pageID, b.Region, b.Locale, b.Sort, b.Kind, b.SnippetKey, b.Content,
+			pageID, b.Region, b.Locale, b.Sort, b.Kind, b.SnippetKey, body,
 			sqldb.JSON(settingsOrEmpty(b.Settings))); err != nil {
 			return nil, err
 		}
@@ -604,30 +638,43 @@ func (s *Store) RestoreVersion(ctx context.Context, pageID, versionID int64) (*R
 		}
 	}
 
+	headCSS, bodyJS := snap.Page.HeadCSS, snap.Page.BodyJS
+	if opts.KeepCode {
+		// The working copy's code, whichever side holds it: a staged
+		// draft row, or the published page when nothing is staged.
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(d.head_css, p.head_css), COALESCE(d.body_js, p.body_js)
+			FROM cms_pages p LEFT JOIN cms_page_drafts d ON d.page_id = p.id
+			WHERE p.id = $1`, pageID).Scan(&headCSS, &bodyJS); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO cms_page_drafts (page_id, template_name, head_css, body_js)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (page_id)
 		DO UPDATE SET template_name = EXCLUDED.template_name,
 			head_css = EXCLUDED.head_css, body_js = EXCLUDED.body_js`,
-		pageID, snap.Page.TemplateName, snap.Page.HeadCSS, snap.Page.BodyJS); err != nil {
+		pageID, snap.Page.TemplateName, headCSS, bodyJS); err != nil {
 		return nil, err
 	}
 
-	out, err := restoreCode(ctx, tx, snap.Code)
+	out, err := restoreCode(ctx, tx, snap.Code, !opts.KeepCode)
 	if err != nil {
 		return nil, err
 	}
+	out.PageCodeKept = headCSS != snap.Page.HeadCSS || bodyJS != snap.Page.BodyJS
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// restoreCode puts back the custom-code blocks the library has lost and
-// reports the ones it still holds differently. See RestoreResult for why
-// the second group is reported rather than rewritten.
-func restoreCode(ctx context.Context, h handle, code []SnapshotCode) (*RestoreResult, error) {
+// restoreCode puts back the custom-code blocks the library has lost —
+// or, without recreate, only reports them — and reports the ones it still
+// holds differently. See RestoreResult for why the second group is
+// reported rather than rewritten.
+func restoreCode(ctx context.Context, h handle, code []SnapshotCode, recreate bool) (*RestoreResult, error) {
 	out := &RestoreResult{}
 	for _, c := range code {
 		var live string
@@ -635,6 +682,10 @@ func restoreCode(ctx context.Context, h handle, code []SnapshotCode) (*RestoreRe
 			"SELECT html FROM cms_code_snippets WHERE code_key = $1", c.Key).Scan(&live)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
+		}
+		if errors.Is(err, sql.ErrNoRows) && !recreate {
+			out.CodeMissing = append(out.CodeMissing, c.Key)
+			continue
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			if _, err := h.Exec(ctx,

@@ -135,6 +135,13 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form, password, errs := s.parseUserForm(r, false)
+	// The form doesn't offer these fields when they are locked, so a
+	// request carrying them was built by hand.
+	if s.credentialsLocked(r, existing) &&
+		(password != "" || r.PostFormValue("reset_totp") == "on" || !strings.EqualFold(form.Email, existing.Email)) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	form.ID = existing.ID
 	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, existing.Permissions, s.gatedPermissions())
 	// Carried over so an error re-render still shows the two-factor
@@ -413,6 +420,36 @@ func canManageUser(actor, target *auth.User) bool {
 	return actor.Role.IsAdmin() || target.Role == auth.RoleEditor
 }
 
+// mayResetCredentials reports whether actor may change target's email,
+// password, or two-factor enrollment — anything that would let them sign
+// in as target. That takes more than canManageUser: signing in as an
+// account is holding every permission it holds, so a manager may do it
+// only to an account whose grants are all ones mergeGrants would let them
+// change. Otherwise an editor holding just the users grant could reset
+// the password of an editor holding pages, log in as them, and have the
+// pages they could never grant themselves.
+//
+// Grants for permissions the deployment no longer declares are skipped:
+// they confer nothing, so they are no reason to lock an account.
+func mayResetCredentials(actor, target *auth.User, known, gated map[auth.Permission]bool) bool {
+	if !canManageUser(actor, target) {
+		return false
+	}
+	for _, p := range target.Permissions {
+		if known[p] && !mayChangeGrant(actor, p, gated) {
+			return false
+		}
+	}
+	return true
+}
+
+// credentialsLocked is mayResetCredentials, negated, for the request's
+// user: true when the user form must keep target's credentials as they
+// are.
+func (s *server) credentialsLocked(r *http.Request, target *auth.User) bool {
+	return !mayResetCredentials(s.currentUser(r), target, s.knownPermissions(), s.gatedPermissions())
+}
+
 // userRow is one line of the users table: the account, plus whether the
 // viewer may open it. Computing this in the handler keeps the table and
 // the route reading from the same rule.
@@ -432,24 +469,29 @@ func mergeGrants(actor *auth.User, submitted, existing []auth.Permission, gated 
 	if actor != nil && actor.Role.IsSuperadmin() {
 		return submitted
 	}
-	mayChange := func(p auth.Permission) bool {
-		if gated[p] {
-			return actor.HasGrant(p)
-		}
-		return actor.Can(p)
-	}
 	var out []auth.Permission
 	for _, p := range submitted {
-		if mayChange(p) {
+		if mayChangeGrant(actor, p, gated) {
 			out = append(out, p)
 		}
 	}
 	for _, p := range existing {
-		if !mayChange(p) {
+		if !mayChangeGrant(actor, p, gated) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// mayChangeGrant is mergeGrants' rule for a single permission: an actor
+// may give or take what they hold, and for a grant that binds admins too,
+// holding means the explicit grant. Superadmins hold everything either
+// way.
+func mayChangeGrant(actor *auth.User, p auth.Permission, gated map[auth.Permission]bool) bool {
+	if gated[p] {
+		return actor.HasGrant(p)
+	}
+	return actor.Can(p)
 }
 
 // gatedPermissions is the set of declared permissions that bind admins
@@ -543,6 +585,10 @@ func (s *server) renderUserForm(w http.ResponseWriter, r *http.Request, u *auth.
 	data.IsNew = isNew
 	data.FormErrors = errs
 	data.Permissions = s.deps.Permissions
+	// On a re-render u is the submitted form, whose grants mergeGrants
+	// has already filled back in with everything the actor may not
+	// change — so it locks exactly when the stored account would.
+	data.CredentialsLocked = !isNew && s.credentialsLocked(r, u)
 	s.render(w, status, "user_form", data)
 }
 

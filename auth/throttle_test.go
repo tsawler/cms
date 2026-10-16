@@ -2,6 +2,8 @@ package auth
 
 import (
 	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -168,4 +170,60 @@ func TestThrottleConcurrentUse(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// Keys are built from a submitted email, which a signed-out request can
+// make a megabyte long. An entry must cost the same whatever the key, or
+// a few thousand such requests hold gigabytes for the length of a window.
+func TestThrottleEntriesDoNotGrowWithTheKey(t *testing.T) {
+	tr := NewThrottle(1, time.Hour)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := range 64 {
+		tr.Fail(strings.Repeat("x", 1<<20) + fmt.Sprint(i) + "|10.0.0.1")
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	// 64 one-megabyte keys kept as-is would be 64 MiB; hashed, a few KiB.
+	if grown := int64(after.HeapAlloc) - int64(before.HeapAlloc); grown > 8<<20 {
+		t.Errorf("64 failures with 1 MiB keys grew the heap by %d MiB, want the keys not kept", grown>>20)
+	}
+
+	// Hashing must not merge keys: two long keys that differ only at the
+	// very end are counted apart.
+	long := strings.Repeat("y", 1<<20)
+	tr.Fail(long + "a")
+	if !tr.Blocked(long + "a") {
+		t.Error("a long key is not blocked after its failure")
+	}
+	if tr.Blocked(long + "b") {
+		t.Error("a different long key shares the first one's count")
+	}
+}
+
+// Past sweepAbove entries, a spray of fresh keys leaves nothing stale to
+// sweep. Sweeping anyway on every Fail made each failed attempt a full
+// scan of the map under the lock; once a minute is enough to bound it.
+func TestThrottleSweepsAtMostOnceAMinute(t *testing.T) {
+	tr := NewThrottle(1, time.Hour)
+	for i := range sweepAbove + 1 {
+		tr.Fail(fmt.Sprintf("spray-%d", i))
+	}
+	tr.Fail("trips-the-sweep")
+	tr.mu.Lock()
+	first := tr.lastSweep
+	tr.mu.Unlock()
+	if first.IsZero() {
+		t.Fatal("no sweep ran with the map past sweepAbove")
+	}
+
+	tr.Fail("another")
+	tr.mu.Lock()
+	again := tr.lastSweep
+	tr.mu.Unlock()
+	if !again.Equal(first) {
+		t.Error("a second sweep ran within the minute")
+	}
 }

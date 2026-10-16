@@ -573,6 +573,10 @@ type templateData struct {
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
+	// CredentialsLocked keeps the user form's email, password and
+	// two-factor reset out of the viewer's hands: the account holds a
+	// permission the viewer may not change (see mayResetCredentials).
+	CredentialsLocked bool
 	// Permissions lists the host-declared custom permissions, for the
 	// user form's grant checkboxes (built-ins are rendered literally).
 	Permissions []PermissionDef

@@ -99,9 +99,10 @@ type Manager struct {
 	logger        *slog.Logger
 
 	// Rebuilding renditions the ladder gained after an upload; see
-	// regenerate.go.
-	rebuilds  singleflight.Group
-	rebuildOK chan struct{}
+	// regenerate.go. imageSlots bounds every image decode, not just
+	// rebuilds (see imageSlotCount).
+	rebuilds   singleflight.Group
+	imageSlots chan struct{}
 }
 
 // NewManager returns a Manager storing binaries in objects and metadata in
@@ -115,7 +116,7 @@ func NewManager(db *sqldb.DB, objects ObjectStore, logger *slog.Logger) *Manager
 	return &Manager{db: db, objects: objects,
 		keyRoot: keyRoot(prefix), manifestRoot: manifestRoot(prefix),
 		webpQuality: DefaultWebPQuality, maxVideoBytes: DefaultMaxVideoBytes, logger: logger,
-		rebuildOK: make(chan struct{}, rebuildSlots())}
+		imageSlots: make(chan struct{}, imageSlotCount())}
 }
 
 // SetWebPQuality overrides the lossy WebP quality used for image variants.
@@ -231,7 +232,7 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		// The poster is decorative; a bad one downgrades the video to
 		// posterless rather than failing the upload.
 		if len(poster) > 0 {
-			p, err := processPoster(poster, http.DetectContentType(poster), m.webpQuality)
+			p, err := m.slottedPoster(ctx, poster)
 			if err != nil {
 				m.logger.Warn("cms media: dropping undecodable video poster", "filename", filename, "err", err)
 			} else {
@@ -284,7 +285,12 @@ func (m *Manager) UploadFrom(ctx context.Context, filename string, src io.ReadSe
 		if err != nil {
 			return nil, err
 		}
+		release, err := m.acquireImageSlot(ctx)
+		if err != nil {
+			return nil, err
+		}
 		p, err := process(data, sniffed, m.webpQuality)
+		release()
 		if err != nil {
 			return nil, err
 		}
@@ -470,7 +476,7 @@ func (m *Manager) SetPoster(ctx context.Context, id int64, locale string, poster
 	if md.Kind != KindVideo {
 		return nil, ErrUnsupportedType
 	}
-	p, err := processPoster(poster, http.DetectContentType(poster), m.webpQuality)
+	p, err := m.slottedPoster(ctx, poster)
 	if err != nil {
 		return nil, err
 	}
@@ -489,6 +495,17 @@ func (m *Manager) SetPoster(ctx context.Context, id int64, locale string, poster
 	}
 	m.syncManifest(ctx, md.ID)
 	return md, nil
+}
+
+// slottedPoster runs processPoster under one of the image slots: a
+// poster frame is client-supplied and decoded like any other upload.
+func (m *Manager) slottedPoster(ctx context.Context, poster []byte) (*processed, error) {
+	release, err := m.acquireImageSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return processPoster(poster, http.DetectContentType(poster), m.webpQuality)
 }
 
 // Rename changes a media item's display name. Purely a metadata change:

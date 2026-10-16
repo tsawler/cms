@@ -1119,6 +1119,9 @@ func NewWithFuncs(fsys fs.FS, shared []string, pages []PageTemplate, sections *S
 		if set.Lookup(path.Base(pt.File)) == nil {
 			return nil, fmt.Errorf("render: page template %s did not define %q", pt.File, path.Base(pt.File))
 		}
+		if _, err := scanRegions(set, path.Base(pt.File)); err != nil {
+			return nil, fmt.Errorf("render: page template %s: %w", pt.File, err)
+		}
 		r.sets[pt.File] = set
 	}
 	return r, nil
@@ -1300,10 +1303,17 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		}
 		return ""
 	}
+	// Only HTML blocks are emitted raw. A region's blocks need not be of
+	// the kind its current template declares — a page switched from a
+	// template with {{cmsText "intro"}} to one with {{cmsRegion "intro"}}
+	// keeps its unsanitized text block — and anything else written here
+	// would bypass the escaping text and image content relies on.
 	region := func(key string) string {
 		var sb strings.Builder
 		for _, b := range byRegion[key] {
-			sb.WriteString(b.Content)
+			if b.Kind == content.KindHTML {
+				sb.WriteString(b.Content)
+			}
 		}
 		return sb.String()
 	}
@@ -1321,7 +1331,9 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	sharedRegion := func(key string, fallback []string) string {
 		var sb strings.Builder
 		for _, b := range bySharedRegion[key] {
-			sb.WriteString(b.Content)
+			if b.Kind == content.KindHTML {
+				sb.WriteString(b.Content)
+			}
 		}
 		if sb.Len() == 0 && len(fallback) > 0 {
 			return fallback[0]

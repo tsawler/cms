@@ -76,6 +76,12 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnprocessableEntity, s.tr(r, "That email and password combination didn't work."))
 		return
 	}
+	// The client went away while waiting for a password check (see
+	// auth's argonSlots). Nobody is left to answer, and under a flood of
+	// abandoned logins a server-error log line apiece is just noise.
+	if r.Context().Err() != nil {
+		return
+	}
 	if err != nil {
 		s.serverError(w, err)
 		return

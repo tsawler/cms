@@ -12,6 +12,8 @@ package content_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tsawler/cms/auth"
@@ -627,7 +629,7 @@ func TestRestoreVersionWritesTheDraftOnly(t *testing.T) {
 		}
 		oldest := list[1]
 
-		if _, err := s.RestoreVersion(ctx, p.ID, oldest.ID); err != nil {
+		if _, err := s.RestoreVersion(ctx, p.ID, oldest.ID, content.RestoreOptions{}); err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
 
@@ -736,7 +738,7 @@ func TestRestoreVersionBringsBackEverything(t *testing.T) {
 			t.Fatalf("Publish(second): %v", err)
 		}
 
-		if _, err := s.RestoreVersion(ctx, p.ID, original.ID); err != nil {
+		if _, err := s.RestoreVersion(ctx, p.ID, original.ID, content.RestoreOptions{}); err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
 
@@ -806,7 +808,7 @@ func TestRestoreVersionReplacesTheDraft(t *testing.T) {
 		if err := s.UpsertDraftBlock(ctx, p.ID, "aside", defaultLocale, content.KindHTML, "<p>new</p>"); err != nil {
 			t.Fatalf("UpsertDraftBlock: %v", err)
 		}
-		if _, err := s.RestoreVersion(ctx, p.ID, edition.ID); err != nil {
+		if _, err := s.RestoreVersion(ctx, p.ID, edition.ID, content.RestoreOptions{}); err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
 		blocks, err := s.BlocksFor(ctx, p.ID, defaultLocale, content.StatusDraft)
@@ -831,7 +833,7 @@ func TestRestoreVersionIsScopedToItsPage(t *testing.T) {
 			t.Fatalf("Versions: %v", err)
 		}
 
-		if _, err := s.RestoreVersion(ctx, theirs.ID, list[0].ID); !errors.Is(err, content.ErrNotFound) {
+		if _, err := s.RestoreVersion(ctx, theirs.ID, list[0].ID, content.RestoreOptions{}); !errors.Is(err, content.ErrNotFound) {
 			t.Fatalf("RestoreVersion across pages = %v, want ErrNotFound", err)
 		}
 		// And nothing was written on the way to refusing.
@@ -1043,7 +1045,7 @@ func TestRestoreVersionPutsBackDeletedCode(t *testing.T) {
 		}
 		republish(t, s, p.ID, "<p>no widget any more</p>")
 
-		res, err := s.RestoreVersion(ctx, p.ID, edition.ID)
+		res, err := s.RestoreVersion(ctx, p.ID, edition.ID, content.RestoreOptions{})
 		if err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
@@ -1096,7 +1098,7 @@ func TestRestoreVersionLeavesChangedCodeAlone(t *testing.T) {
 		}
 		republish(t, s, p.ID, "<p>moved on</p>")
 
-		res, err := s.RestoreVersion(ctx, p.ID, edition.ID)
+		res, err := s.RestoreVersion(ctx, p.ID, edition.ID, content.RestoreOptions{})
 		if err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
@@ -1142,7 +1144,7 @@ func TestRestoreVersionSaysNothingAboutUnchangedCode(t *testing.T) {
 		}
 		republish(t, s, p.ID, codeBlock("signup")+"<p>two</p>")
 
-		res, err := s.RestoreVersion(ctx, p.ID, list[0].ID)
+		res, err := s.RestoreVersion(ctx, p.ID, list[0].ID, content.RestoreOptions{})
 		if err != nil {
 			t.Fatalf("RestoreVersion: %v", err)
 		}
@@ -1205,6 +1207,108 @@ func TestCodeChangeMakesTheNextPublishAnEdition(t *testing.T) {
 		}
 		if len(snap.Code) != 1 || snap.Code[0].HTML != "<form>v2</form>" {
 			t.Errorf("newest edition froze %+v, want the block's new body", snap.Code)
+		}
+	})
+}
+
+// A restore run by someone who may not write page code or the code
+// library leaves both as they are and says so, and passes HTML blocks
+// through that person's sanitizer — an edition from before an
+// administrator removed a script must not bring the script back.
+func TestRestoreVersionKeepCode(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		code := snippets.NewCodeStore(db)
+
+		seeded := snippets.CodeSnippet{Key: "signup", Name: "Signup form", HTML: "<script>v1()</script>"}
+		if _, err := code.Insert(ctx, &seeded); err != nil {
+			t.Fatalf("seeding: %v", err)
+		}
+		p := seedPage(t, s, content.Page{Slug: "guarded", Title: "Guarded",
+			HeadCSS: "body{background:url(//evil/x)}", BodyJS: "evil()"}, defaultLocale)
+		if err := s.UpsertDraftBlock(ctx, p.ID, "body", defaultLocale, content.KindHTML,
+			codeBlock("signup")+"<script>evil()</script>"); err != nil {
+			t.Fatalf("UpsertDraftBlock: %v", err)
+		}
+		if err := s.UpsertDraftBlock(ctx, p.ID, "intro", defaultLocale, content.KindText, "<script>text</script>"); err != nil {
+			t.Fatalf("UpsertDraftBlock: %v", err)
+		}
+		if err := s.Publish(ctx, p.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		list, err := s.Versions(ctx, p.ID)
+		if err != nil {
+			t.Fatalf("Versions: %v", err)
+		}
+		edition := list[0]
+
+		// An administrator cleans the page up: code block, page code and
+		// the raw script all go.
+		if err := code.Delete(ctx, "signup"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		clean, err := s.GetByID(ctx, p.ID, defaultLocale)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		clean.HeadCSS, clean.BodyJS = "", ""
+		if err := s.Update(ctx, clean, defaultLocale); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		republish(t, s, p.ID, "<p>clean</p>")
+
+		stripScript := func(h string) string { return strings.ReplaceAll(h, "<script>evil()</script>", "") }
+		res, err := s.RestoreVersion(ctx, p.ID, edition.ID, content.RestoreOptions{KeepCode: true, SanitizeHTML: stripScript})
+		if err != nil {
+			t.Fatalf("RestoreVersion: %v", err)
+		}
+		if !slices.Equal(res.CodeMissing, []string{"signup"}) || len(res.CodeRecreated) != 0 {
+			t.Errorf("CodeMissing = %v, CodeRecreated = %v; want [signup] and none", res.CodeMissing, res.CodeRecreated)
+		}
+		if !res.PageCodeKept {
+			t.Error("PageCodeKept = false, though the edition's page code differed and was not restored")
+		}
+		if _, err := code.ByKey(ctx, "signup"); !errors.Is(err, snippets.ErrNotFound) {
+			t.Errorf("ByKey after restore = %v, want the deleted block to stay deleted", err)
+		}
+		draft, err := s.GetByID(ctx, p.ID, defaultLocale)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if draft.HeadCSS != "" || draft.BodyJS != "" {
+			t.Errorf("draft code = %q / %q, want the cleaned-up page's empty code kept", draft.HeadCSS, draft.BodyJS)
+		}
+		blocks, err := s.BlocksFor(ctx, p.ID, defaultLocale, content.StatusDraft)
+		if err != nil {
+			t.Fatalf("BlocksFor: %v", err)
+		}
+		got := map[string]string{}
+		for _, b := range blocks {
+			got[b.Region] = b.Content
+		}
+		// HTML goes through the sanitizer; the placeholder is content and
+		// stays. Text is escaped when rendered, so it is left exactly as
+		// it was written.
+		if got["body"] != codeBlock("signup") {
+			t.Errorf("restored body = %q, want the sanitized HTML with its placeholder", got["body"])
+		}
+		if got["intro"] != "<script>text</script>" {
+			t.Errorf("restored intro = %q, want the text block untouched", got["intro"])
+		}
+
+		// Restoring an edition whose page code is what the page has now
+		// keeps nothing worth mentioning.
+		list, err = s.Versions(ctx, p.ID)
+		if err != nil {
+			t.Fatalf("Versions: %v", err)
+		}
+		res, err = s.RestoreVersion(ctx, p.ID, list[0].ID, content.RestoreOptions{KeepCode: true})
+		if err != nil {
+			t.Fatalf("RestoreVersion (latest): %v", err)
+		}
+		if res.PageCodeKept {
+			t.Error("PageCodeKept = true for an edition with the page's current code")
 		}
 	})
 }

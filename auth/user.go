@@ -308,13 +308,22 @@ func (s *Store) UpdatePassword(ctx context.Context, id int64, passwordHash strin
 func (s *Store) Authenticate(ctx context.Context, email, password string) (*User, error) {
 	u, err := s.GetByEmail(ctx, email)
 	if errors.Is(err, ErrNotFound) {
-		_, _ = VerifyPassword(password, dummyHash)
+		// The dummy only buys time; its answer is ignored. A request
+		// that gave up waiting for a derivation slot reports that
+		// rather than a wrong password.
+		_, _ = verifyPassword(ctx, password, dummyHash)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
 		return nil, err
 	}
-	ok, err := VerifyPassword(password, u.PasswordHash)
+	ok, err := verifyPassword(ctx, password, u.PasswordHash)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil || !ok || !u.Active {
 		return nil, ErrInvalidCredentials
 	}
@@ -336,7 +345,7 @@ func (s *Store) rehash(ctx context.Context, u *User, password string) {
 	if !NeedsRehash(u.PasswordHash) {
 		return
 	}
-	hash, err := HashPassword(password)
+	hash, err := hashPassword(ctx, password)
 	if err != nil {
 		s.logger.Error("auth: rehashing password", "user", u.Email, "err", err)
 		return
