@@ -13,7 +13,6 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
-	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 	"github.com/tsawler/cms/snippets"
 )
@@ -143,6 +142,72 @@ var editorHTMLPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("rel").Matching(regexp.MustCompile(`^noopener( noreferrer)?$`)).OnElements("a")
 	return p
 }()
+
+// editorSanitizer returns the sanitizer for a non-admin's HTML going into
+// pageID: editorHTMLPolicy, then a pass over class attributes.
+//
+// The policy lets class through untouched, so framework-styled markup
+// survives — but a class in Tailwind's arbitrary-value form is not a name,
+// it is CSS. The site's stylesheet is compiled from every class in stored
+// content, so an editor typing [background:url(//elsewhere/x)] or a
+// [body:has(&)_…] variant puts a rule on every page, past the narrow
+// inline styles the policy allows. Such a token is kept only when it is
+// already vouched for: one the host's snippets, editor styles or section
+// styles carry, or the snippet library holds (Deps.VouchedClasses), or
+// one already in this page's stored content — so an editor can re-save
+// markup an administrator wrote, but cannot introduce a rule of their own.
+//
+// Built once per save, since the vouched set takes a query or two.
+func (s *server) editorSanitizer(ctx context.Context, pageID int64) (func(string) string, error) {
+	vouched := map[string]bool{}
+	if s.deps.VouchedClasses != nil {
+		host, err := s.deps.VouchedClasses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for tok := range host {
+			vouched[html.UnescapeString(tok)] = true
+		}
+	}
+	stored, err := s.deps.Content.PageHTML(ctx, pageID)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range stored {
+		for _, tok := range render.ClassTokens(h) {
+			vouched[html.UnescapeString(tok)] = true
+		}
+	}
+	return func(h string) string {
+		return dropArbitraryClasses(editorHTMLPolicy.Sanitize(h), vouched)
+	}, nil
+}
+
+// sanitizedClassRe finds class attributes in editorHTMLPolicy's output.
+// The policy serializes every attribute it keeps as name="escaped value",
+// and escapes a quote in text to an entity, so in its output this
+// sequence occurs inside tags and nowhere else.
+var sanitizedClassRe = regexp.MustCompile(`\sclass="([^"]*)"`)
+
+// dropArbitraryClasses removes, from sanitized markup, every arbitrary-
+// value class token not in vouched (compared unescaped), and any class
+// attribute left empty by it.
+func dropArbitraryClasses(sanitized string, vouched map[string]bool) string {
+	return sanitizedClassRe.ReplaceAllStringFunc(sanitized, func(attr string) string {
+		value := sanitizedClassRe.FindStringSubmatch(attr)[1]
+		toks := strings.Fields(value)
+		kept := toks[:0]
+		for _, tok := range toks {
+			if !render.IsArbitraryClass(html.UnescapeString(tok)) || vouched[html.UnescapeString(tok)] {
+				kept = append(kept, tok)
+			}
+		}
+		if len(kept) == 0 {
+			return ""
+		}
+		return ` class="` + strings.Join(kept, " ") + `"`
+	})
+}
 
 func (s *server) pagesList(w http.ResponseWriter, r *http.Request) {
 	// Posts' backing pages are managed under Blog & News, not here — so
@@ -466,6 +531,13 @@ func (s *server) saveRegionContent(r *http.Request, page *content.Page, locale s
 // non-admins is sanitized. Shared by the page form and the in-place editor
 // API.
 func (s *server) saveRegions(ctx context.Context, pageID int64, templateName string, values map[string]string, isAdmin bool, locale string) error {
+	var sanitize func(string) string
+	if !isAdmin {
+		var err error
+		if sanitize, err = s.editorSanitizer(ctx, pageID); err != nil {
+			return err
+		}
+	}
 	for _, region := range s.deps.Renderer.Regions(templateName) {
 		value, ok := values[region.Name]
 		if !ok {
@@ -485,7 +557,7 @@ func (s *server) saveRegions(ctx context.Context, pageID int64, templateName str
 				continue
 			}
 		case !isAdmin:
-			value = editorHTMLPolicy.Sanitize(value)
+			value = sanitize(value)
 		}
 		if kind == content.KindHTML {
 			// A custom-code block stores only its placeholder; whatever
@@ -532,14 +604,22 @@ func (s *server) saveSharedRegions(ctx context.Context, values map[string]string
 	if len(values) == 0 {
 		return nil
 	}
+	sanitize := func(v string) string { return v }
+	if !isAdmin {
+		siteID, err := s.deps.Content.SitePageID(ctx)
+		if err != nil {
+			return err
+		}
+		if sanitize, err = s.editorSanitizer(ctx, siteID); err != nil {
+			return err
+		}
+	}
 	for _, region := range s.deps.Renderer.SharedRegions() {
 		value, ok := values[region.Name]
 		if !ok {
 			continue
 		}
-		if !isAdmin {
-			value = editorHTMLPolicy.Sanitize(value)
-		}
+		value = sanitize(value)
 		value = render.CollapseCodePlaceholders(value)
 		if err := s.deps.Content.UpsertSharedBlock(ctx, region.Name, locale,
 			content.KindHTML, value); err != nil {
@@ -663,6 +743,7 @@ func (s *server) pageUnpublish(w http.ResponseWriter, r *http.Request) {
 // pagePreview renders the page's draft content with the real site
 // templates, so editors can see unpublished work exactly as it will appear.
 func (s *server) pagePreview(w http.ResponseWriter, r *http.Request) {
+	allowSiteAssets(w)
 	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
@@ -778,12 +859,14 @@ func (s *server) renderPageForm(w http.ResponseWriter, r *http.Request, page *co
 		if s.deps.Media != nil {
 			for _, region := range data.Regions {
 				if region.Kind == "image" {
-					items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{Kind: media.KindImage})
+					// A region holds an address, not a library id; the
+					// template keeps one the list does not show.
+					views, more, err := s.imageChoices(r.Context(), 0)
 					if err != nil {
 						s.serverError(w, err)
 						return
 					}
-					data.Media = s.deps.Media.Views(items)
+					data.Media, data.MoreImages = views, more
 					break
 				}
 			}

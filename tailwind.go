@@ -113,10 +113,7 @@ const contentCSSCurrentPath = "/cms/content-css"
 // for renders on instances that didn't run the rebuild themselves.
 const contentCSSCacheTTL = 5 * time.Second
 
-var (
-	tailwindClassAttrRe = regexp.MustCompile(`class\s*=\s*(?:"([^"]*)"|'([^']*)')`)
-	contentCSSHashRe    = regexp.MustCompile(`^[0-9a-f]{16}$`)
-)
+var contentCSSHashRe = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 func validateTailwindConfig(tc *TailwindConfig) error {
 	if tc == nil {
@@ -147,6 +144,34 @@ func sectionStyleAxes(ss *render.SectionStyles) [][]render.SectionOption {
 	return [][]render.SectionOption{ss.Backgrounds, ss.Widths, ss.Corners, ss.Paddings, ss.Sizes}
 }
 
+// tailwindWaitDelay is how long a build that has been told to stop gets
+// to wind down — and how long its output is read for once it has — before
+// it is killed outright. A variable so tests need not wait it out.
+var tailwindWaitDelay = 5 * time.Second
+
+// runTailwind runs one build command, returning its combined output.
+//
+// The command is usually a wrapper script that starts the Tailwind CLI as
+// a child, and a timeout used to kill only the script. The child lived on
+// holding the output pipe, so reading the output blocked until it exited
+// on its own — and if it hung, the build never returned, the builder
+// never marked itself idle, and the stylesheet stopped updating until the
+// process restarted. Now the command runs in a process group of its own
+// and a timeout stops the whole group (see stopGroup); WaitDelay bounds
+// the read even when something in the group ignores that, and whatever is
+// left is killed once the command has returned.
+func runTailwind(ctx context.Context, argv []string, dir string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.WaitDelay = tailwindWaitDelay
+	stopGroup(cmd)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		killGroup(cmd)
+	}
+	return out, err
+}
+
 // tailwindArgv resolves the {content} and {output} placeholders.
 func tailwindArgv(command []string, contentPath, outputPath string) []string {
 	argv := make([]string, len(command))
@@ -158,18 +183,13 @@ func tailwindArgv(command []string, contentPath, outputPath string) []string {
 	return argv
 }
 
-// classTokens extracts the class attribute tokens from an HTML fragment.
+// classTokens adds the class attribute tokens of an HTML fragment to a
+// collection, skipping ones already seen.
 func classTokens(html string, seen map[string]bool, out *[]string) {
-	for _, m := range tailwindClassAttrRe.FindAllStringSubmatch(html, -1) {
-		list := m[1]
-		if list == "" {
-			list = m[2]
-		}
-		for _, tok := range strings.Fields(list) {
-			if !seen[tok] {
-				seen[tok] = true
-				*out = append(*out, tok)
-			}
+	for _, tok := range render.ClassTokens(html) {
+		if !seen[tok] {
+			seen[tok] = true
+			*out = append(*out, tok)
 		}
 	}
 }
@@ -182,14 +202,6 @@ func classTokens(html string, seen map[string]bool, out *[]string) {
 func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
-	addList := func(list string) {
-		for _, tok := range strings.Fields(list) {
-			if !seen[tok] {
-				seen[tok] = true
-				out = append(out, tok)
-			}
-		}
-	}
 
 	rows, err := c.db.Query(ctx, `SELECT content FROM cms_blocks WHERE kind = 'html'`)
 	if err != nil {
@@ -206,25 +218,61 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := c.addVouchedClassTokens(ctx, seen, &out); err != nil {
+		return nil, err
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+// vouchedClasses is the set of class tokens something other than stored
+// content puts on the page: the host's snippets and editor styles, the
+// superadmin-curated snippet library, section styles, and the classes the
+// editor applies itself. The admin lets a non-admin's content keep an
+// arbitrary-value class (bg-[url(...)], [&_p]:hidden) only when it is one
+// of these — typed by an editor, such a class compiles into the site-wide
+// stylesheet and reaches beyond their block; carried in by a snippet, it
+// is the host's own markup.
+func (c *CMS) vouchedClasses(ctx context.Context) (map[string]bool, error) {
+	seen := map[string]bool{}
+	var out []string
+	if err := c.addVouchedClassTokens(ctx, seen, &out); err != nil {
+		return nil, err
+	}
+	return seen, nil
+}
+
+// addVouchedClassTokens adds the vouchedClasses sources to a token
+// collection.
+func (c *CMS) addVouchedClassTokens(ctx context.Context, seen map[string]bool, out *[]string) error {
+	addList := func(list string) {
+		for _, tok := range strings.Fields(list) {
+			if !seen[tok] {
+				seen[tok] = true
+				*out = append(*out, tok)
+			}
+		}
+	}
 
 	snips, err := c.db.Query(ctx, `SELECT html FROM cms_snippets`)
 	if err != nil {
-		return nil, fmt.Errorf("cms: reading snippets for tailwind: %w", err)
+		return fmt.Errorf("cms: reading snippets: %w", err)
 	}
 	defer snips.Close()
 	for snips.Next() {
 		var html string
 		if err := snips.Scan(&html); err != nil {
-			return nil, err
+			return err
 		}
-		classTokens(html, seen, &out)
+		classTokens(html, seen, out)
 	}
 	if err := snips.Err(); err != nil {
-		return nil, err
+		return err
 	}
 
 	for _, sn := range c.cfg.Snippets {
-		classTokens(sn.HTML, seen, &out)
+		classTokens(sn.HTML, seen, out)
 	}
 	for _, st := range c.cfg.EditorStyles {
 		addList(st.Class)
@@ -243,9 +291,7 @@ func (c *CMS) collectClassTokens(ctx context.Context) ([]string, error) {
 			}
 		}
 	}
-
-	sort.Strings(out)
-	return out, nil
+	return nil
 }
 
 // buildHash is the content address of a build: the class set, the command
@@ -389,15 +435,15 @@ func (b *cssRebuilder) schedule() {
 		b.rerun = true
 		return
 	}
-	b.running = true
-	go b.run()
+	b.running = b.c.background(b.run)
 }
 
-func (b *cssRebuilder) run() {
+// run builds until no rebuild is queued, or until Close cancels ctx.
+func (b *cssRebuilder) run(ctx context.Context) {
 	for {
-		b.buildOnce()
+		b.buildOnce(ctx)
 		b.mu.Lock()
-		if !b.rerun {
+		if !b.rerun || ctx.Err() != nil {
 			b.running = false
 			b.mu.Unlock()
 			return
@@ -411,14 +457,14 @@ func (b *cssRebuilder) run() {
 // stored artifact's, runs the host's Tailwind command and stores the
 // result. A build failure keeps the previous stylesheet — saves must
 // never be held hostage by the CSS toolchain.
-func (b *cssRebuilder) buildOnce() {
+func (b *cssRebuilder) buildOnce(parent context.Context) {
 	tc := b.c.cfg.Tailwind
 	log := b.c.cfg.Logger
 	timeout := tc.Timeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	started := time.Now()
 
@@ -467,9 +513,7 @@ func (b *cssRebuilder) buildOnce() {
 	defer os.Remove(outputFile.Name())
 
 	argv := tailwindArgv(tc.Command, contentFile.Name(), outputFile.Name())
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir = tc.Dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runTailwind(ctx, argv, tc.Dir); err != nil {
 		log.Error("cms tailwind: build failed — keeping the previous stylesheet",
 			"err", err, "output", tail(string(out), 2000))
 		return
@@ -513,8 +557,13 @@ func (b *cssRebuilder) setCache(css string) {
 // deployments converge on a rebuild done elsewhere without a database
 // read per request.
 func (b *cssRebuilder) current(ctx context.Context) (hash, css string) {
+	// Fresh means read recently — whatever was read. "No stylesheet yet"
+	// is an answer too, and the usual one on a site whose build has not
+	// run or keeps failing: counting only a non-empty copy as fresh sent
+	// every render, and every poll of the stylesheet route, to the
+	// database to be told so again.
 	b.cacheMu.Lock()
-	fresh := time.Since(b.cachedAt) < contentCSSCacheTTL && b.cachedHash != ""
+	fresh := !b.cachedAt.IsZero() && time.Since(b.cachedAt) < contentCSSCacheTTL
 	hash, css = b.cachedHash, b.cachedCSS
 	b.cacheMu.Unlock()
 	if fresh {

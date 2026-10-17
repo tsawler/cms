@@ -18,6 +18,7 @@ const (
 	sessionKeyUserID = sessiondata.KeyUserID
 	sessionKeyCSRF   = sessiondata.KeyCSRF
 	sessionKeyFlash  = sessiondata.KeyFlash
+	sessionKeyEpoch  = sessiondata.KeyEpoch
 
 	// The two-factor login's pending state: who passed the password step
 	// (never sessionKeyUserID — pending is not logged in), whether they
@@ -26,6 +27,9 @@ const (
 	sessionKey2FAUserID   = "cms2FAUserID"
 	sessionKey2FARemember = "cms2FARemember"
 	sessionKey2FAExpires  = "cms2FAExpires"
+	// The SessionEpoch the password was checked under, so a password
+	// changed mid-challenge strands the half-login made with the old one.
+	sessionKey2FAEpoch = "cms2FAEpoch"
 
 	// A generated-but-unconfirmed enrollment secret on the settings page.
 	// It only moves to the database once a live code has confirmed the
@@ -38,6 +42,10 @@ const (
 	// reason as the 2FA keys — the public handler follows
 	// sessionKeyUserID and needs no say in who the session really is.
 	sessionKeyMasqueradeFrom = "cmsMasqueradeFrom"
+	// The owner's SessionEpoch as of the masquerade's start, so exiting
+	// does not hand back an account whose credentials changed meanwhile —
+	// that change ended the owner's other sessions, and this is one.
+	sessionKeyMasqueradeEpoch = "cmsMasqueradeEpoch"
 )
 
 // throttleLimits: what the three counters allow, and why.
@@ -187,7 +195,30 @@ func (s *server) loadSessionUser(r *http.Request, id int64) *auth.User {
 	if !u.Active {
 		return nil
 	}
+	// The account's password or two-factor setting changed since this
+	// session was granted: it is one of the sessions that change ended.
+	if !sessiondata.EpochCurrent(r.Context(), s.deps.Sessions, u.SessionEpoch) {
+		return nil
+	}
 	return u
+}
+
+// keepSession carries the request's own session across a credential
+// change it just made to userID's account. The change moved the account
+// to a new SessionEpoch, which ends every session it had — the point,
+// for the others, but not for the one that made it, whose holder has just
+// proved the password. The session gets a fresh token, the same as at
+// login, and the new epoch.
+func (s *server) keepSession(r *http.Request, userID int64) error {
+	u, err := s.deps.Users.GetByID(r.Context(), userID)
+	if err != nil {
+		return err
+	}
+	if err := s.deps.Sessions.RenewToken(r.Context()); err != nil {
+		return err
+	}
+	s.deps.Sessions.Put(r.Context(), sessionKeyEpoch, u.SessionEpoch)
+	return nil
 }
 
 // siteLocked reports whether the site is closed to everyone but
@@ -468,9 +499,40 @@ func (s *server) csrf(next http.Handler) http.Handler {
 	})
 }
 
+// afterWrites runs once a state-changing request's handler has returned,
+// and drops what is cached from the database — the sidebar's counts here,
+// and through Deps.Changed the CMS's own — so the redirect that follows a
+// save reads what the save wrote. Every unsafe method counts, refused or
+// not: clearing a cache that did not need it costs one query.
+func (s *server) afterWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return
+		}
+		if s.counts != nil {
+			s.counts.Clear()
+		}
+		if s.deps.Changed != nil {
+			s.deps.Changed()
+		}
+	})
+}
+
+// allowSiteAssets lifts the admin's Content-Security-Policy from a page
+// preview, the one admin response that is the public site rather than the
+// admin: it renders the host's own templates, which may load framework
+// CSS and JS from CDNs the admin's policy refuses. Each preview handler
+// calls it, so the exemption covers exactly those routes. It used to be
+// any path ending in /preview, decided before routing — which took in a
+// host's custom admin sections and paths that matched nothing at all.
+func allowSiteAssets(w http.ResponseWriter) {
+	w.Header().Del("Content-Security-Policy")
+}
+
 // secureHeaders sets conservative security headers on every admin response.
-// Page previews are exempt from the CSP: they render the host site's own
-// templates, which may legitimately load framework CSS/JS from CDNs.
+// Page previews lift the CSP for themselves (see allowSiteAssets).
 // capOrigin, when non-empty, is the Cap CAPTCHA server's origin; the login
 // page loads the widget script from it, the widget calls its challenge API
 // and runs a WASM solver in blob workers, so the CSP must admit all of that.
@@ -516,12 +578,6 @@ func secureHeaders(capOrigin string) func(http.Handler) http.Handler {
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("Referrer-Policy", "same-origin")
-			if strings.HasSuffix(r.URL.Path, "/preview") {
-				// Previews render the host site's own templates, which may
-				// legitimately load framework CSS/JS from CDNs.
-				next.ServeHTTP(w, r)
-				return
-			}
 			// Every page except the login form gets the strict policy —
 			// the same one a deployment without CAPTCHA serves everywhere.
 			if capOrigin == "" || !isLoginPath(r.URL.Path) {

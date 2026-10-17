@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -406,20 +407,43 @@ type ListOptions struct {
 	Query    string // case-insensitive substring match on filename
 	FolderID *int64 // only items in this folder
 	Unfiled  bool   // only items in no folder (ignored when FolderID set)
+	// Limit bounds how many records All returns, from Offset on; zero
+	// means all of them. Count ignores both.
+	Limit, Offset int
+	// Sort orders All by a key ValidSort accepts, ascending unless Desc; empty
+	// (or unknown) is newest first. A paged listing has to be ordered
+	// here: sorting the page in hand orders only that page.
+	Sort string
+	Desc bool
 }
 
-// All returns media records with alt text for locale, newest first,
-// filtered by opts.
-func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]Media, error) {
-	q := `
-		SELECT ` + mediaColumns + `
-		FROM cms_media m
-		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $1`
-	args := []any{locale}
-	where := []string{}
+// sortColumns are what ListOptions.Sort can order by. Names and
+// extensions compare case-insensitively on every engine, the way people
+// read them; ties fall back to the id, so the order is total and a page
+// boundary never shuffles.
+var sortColumns = map[string]string{
+	"name":  "LOWER(m.filename)",
+	"kind":  "LOWER(m.ext)",
+	"size":  "m.size",
+	"dims":  "m.width",
+	"added": "m.created_at",
+}
+
+// ValidSort reports whether key is a ListOptions.Sort that orders
+// something: name, kind, size, dims, or added.
+func ValidSort(key string) bool {
+	_, ok := sortColumns[key]
+	return ok
+}
+
+// where renders opts' filters as a WHERE clause (or nothing), appending
+// their values to args, whose placeholders it numbers after what args
+// already holds.
+func (m *Manager) where(opts ListOptions, args *[]any) string {
+	var where []string
 	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
+		*args = append(*args, v)
+		return "$" + strconv.Itoa(len(*args))
 	}
 	if opts.Kind != "" {
 		where = append(where, "m.kind = "+arg(opts.Kind))
@@ -436,10 +460,33 @@ func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]M
 	case opts.Unfiled:
 		where = append(where, "m.folder_id IS NULL")
 	}
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+	if len(where) == 0 {
+		return ""
 	}
-	q += ` ORDER BY m.created_at DESC, m.id DESC`
+	return " WHERE " + strings.Join(where, " AND ")
+}
+
+// All returns media records with alt text for locale, newest first,
+// filtered by opts — a window of them when opts.Limit is set.
+func (m *Manager) All(ctx context.Context, locale string, opts ListOptions) ([]Media, error) {
+	args := []any{locale}
+	q := `
+		SELECT ` + mediaColumns + `
+		FROM cms_media m
+		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $1` +
+		m.where(opts, &args)
+	if col, ok := sortColumns[opts.Sort]; ok {
+		dir := " ASC"
+		if opts.Desc {
+			dir = " DESC"
+		}
+		q += " ORDER BY " + col + dir + ", m.id" + dir
+	} else {
+		q += " ORDER BY m.created_at DESC, m.id DESC"
+	}
+	if opts.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d OFFSET %d", opts.Limit, max(opts.Offset, 0))
+	}
 	rows, err := m.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -461,13 +508,83 @@ func (m *Manager) Count(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// SetPoster attaches a poster frame to an existing video, processing the
-// still into the same web/thumb variants an upload-time poster gets and
-// updating the record's variant metadata. The admin uses it to backfill
-// videos uploaded without one — the server can't decode video, so the
-// frame is captured in a browser. Existing poster objects are overwritten
-// in place: the variant keys are deterministic, so a failure part-way
-// leaves nothing a retry won't replace. Non-video media is refused.
+// CountMatching returns how many records All would return for opts
+// without a Limit: the total a paged listing needs.
+func (m *Manager) CountMatching(ctx context.Context, opts ListOptions) (int, error) {
+	var args []any
+	var n int
+	err := m.db.QueryRow(ctx, "SELECT count(*) FROM cms_media m"+m.where(opts, &args), args...).Scan(&n)
+	return n, err
+}
+
+// CountByKind is CountMatching per kind, ignoring opts.Kind, in one query:
+// the media page's tab badges, which count every kind while the page
+// lists only one.
+func (m *Manager) CountByKind(ctx context.Context, opts ListOptions) (map[Kind]int, error) {
+	opts.Kind = ""
+	var args []any
+	rows, err := m.db.Query(ctx,
+		"SELECT m.kind, count(*) FROM cms_media m"+m.where(opts, &args)+" GROUP BY m.kind", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[Kind]int{}
+	for rows.Next() {
+		var k Kind
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
+		out[k] = n
+	}
+	return out, rows.Err()
+}
+
+// ByIDs returns the records with the given ids, with alt text for
+// locale, in one query — newest first, ids with no record left out.
+func (m *Manager) ByIDs(ctx context.Context, ids []int64, locale string) ([]Media, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := []any{locale}
+	marks := make([]string, len(ids))
+	for i, id := range ids {
+		args = append(args, id)
+		marks[i] = "$" + strconv.Itoa(len(args))
+	}
+	rows, err := m.db.Query(ctx, `
+		SELECT `+mediaColumns+`
+		FROM cms_media m
+		LEFT JOIN cms_media_meta t ON t.media_id = m.id AND t.locale = $1
+		WHERE m.id IN (`+strings.Join(marks, ", ")+`)
+		ORDER BY m.created_at DESC, m.id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (Media, error) {
+		md, err := scanMedia(row)
+		if err != nil {
+			return Media{}, err
+		}
+		return *md, nil
+	})
+}
+
+// SetPoster attaches a poster frame to a video that has none, processing
+// the still into the same web/thumb variants an upload-time poster gets
+// and updating the record's variant metadata. The admin uses it to
+// backfill videos uploaded without one — the server can't decode video,
+// so the frame is captured in a browser. The variant keys are
+// deterministic, so a failure part-way leaves nothing a retry won't
+// replace. Non-video media is refused.
+//
+// A video that already has a poster is refused with ErrPosterExists.
+// Media objects are served as immutable, and pages hold the poster's URL
+// in their markup, so a frame written over an existing one would reach
+// nobody whose browser or CDN had the old one — for a year. Nothing in the
+// admin replaces a poster; this keeps a hand-made request from making the
+// immutable promise false.
 func (m *Manager) SetPoster(ctx context.Context, id int64, locale string, poster []byte) (*Media, error) {
 	md, err := m.GetByID(ctx, id, locale)
 	if err != nil {
@@ -475,6 +592,9 @@ func (m *Manager) SetPoster(ctx context.Context, id int64, locale string, poster
 	}
 	if md.Kind != KindVideo {
 		return nil, ErrUnsupportedType
+	}
+	if md.VariantExt != "" {
+		return nil, ErrPosterExists
 	}
 	p, err := m.slottedPoster(ctx, poster)
 	if err != nil {
@@ -584,13 +704,24 @@ func (m *Manager) Delete(ctx context.Context, id int64, locale string) error {
 	if err := m.deleteManifest(ctx, md.ItemID()); err != nil {
 		return err
 	}
+	// Then the row, and only then the binaries. The other way round, a
+	// row delete that failed left a library entry pointing at objects
+	// already gone — broken for good, since a missing rendition is rebuilt
+	// from the original and the original was gone too. Failing here
+	// leaves the item whole instead: the manifest goes back, on a context
+	// of its own since ctx may be what failed, and the user can retry.
+	if _, err := m.db.Exec(ctx, "DELETE FROM cms_media WHERE id = $1", id); err != nil {
+		m.syncManifest(context.WithoutCancel(ctx), id)
+		return err
+	}
+	// Binaries are best-effort: one that will not delete is an orphan in
+	// the bucket, which costs storage and nothing else.
 	for _, key := range m.objectKeys(md) {
 		if err := m.objects.Delete(ctx, key); err != nil {
 			m.logger.Error("cms media: deleting object", "key", key, "err", err)
 		}
 	}
-	_, err = m.db.Exec(ctx, "DELETE FROM cms_media WHERE id = $1", id)
-	return err
+	return nil
 }
 
 // variants returns the rendition ladder md's derived objects follow —

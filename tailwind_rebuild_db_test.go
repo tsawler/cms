@@ -135,7 +135,7 @@ func TestBuildOnceCompilesAndStores(t *testing.T) {
 		c := tailwindCMS(t, db, stub, nil)
 		ctx := context.Background()
 
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 
 		if n := stub.builds(t); n != 1 {
 			t.Fatalf("the compiler ran %d times, want 1", n)
@@ -175,9 +175,9 @@ func TestBuildOnceSkipsWhenNothingChanged(t *testing.T) {
 		stub := newTailwindStub(t, writes(".generated{color:red}"))
 		c := tailwindCMS(t, db, stub, nil)
 
-		c.cssBuilder.buildOnce()
-		c.cssBuilder.buildOnce()
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
+		c.cssBuilder.buildOnce(context.Background())
+		c.cssBuilder.buildOnce(context.Background())
 
 		if n := stub.builds(t); n != 1 {
 			t.Errorf("the compiler ran %d times, want 1 — the rest had nothing to do", n)
@@ -201,7 +201,7 @@ func TestBuildOnceRebuildsWhenTheScannedSourcesChange(t *testing.T) {
 		sources := fstest.MapFS{"page.gohtml": &fstest.MapFile{Data: []byte(`<div class="p-4">`)}}
 		c := tailwindCMS(t, db, stub, sources)
 
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 		if n := stub.builds(t); n != 1 {
 			t.Fatalf("the compiler ran %d times, want 1", n)
 		}
@@ -210,7 +210,7 @@ func TestBuildOnceRebuildsWhenTheScannedSourcesChange(t *testing.T) {
 		c.cfg.Tailwind.Sources = fstest.MapFS{
 			"page.gohtml": &fstest.MapFile{Data: []byte(`<div class="p-4 lg:p-8">`)},
 		}
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 		if n := stub.builds(t); n != 2 {
 			t.Errorf("the compiler ran %d times, want 2 — a template edit is a build input", n)
 		}
@@ -226,7 +226,7 @@ func TestBuildOnceRefusesWhenTheSourcesCannotBeRead(t *testing.T) {
 		c := tailwindCMS(t, db, stub, nil)
 
 		c.cfg.Tailwind.Sources = unreadableFS{}
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 
 		if n := stub.builds(t); n != 0 {
 			t.Errorf("the compiler ran %d times, want 0", n)
@@ -257,7 +257,7 @@ func TestBuildFailureKeepsThePreviousStylesheet(t *testing.T) {
 		c := tailwindCMS(t, db, good, nil)
 		ctx := context.Background()
 
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 		hash, css, err := c.loadContentCSS(ctx)
 		if err != nil {
 			t.Fatalf("loadContentCSS: %v", err)
@@ -278,7 +278,7 @@ func TestBuildFailureKeepsThePreviousStylesheet(t *testing.T) {
 				c.cfg.Tailwind.Command = broken.command()
 				// A different command is a different build key, so this is
 				// a build that genuinely tries rather than one that skips.
-				c.cssBuilder.buildOnce()
+				c.cssBuilder.buildOnce(context.Background())
 
 				if n := broken.builds(t); n != 1 {
 					t.Fatalf("the failing compiler ran %d times, want 1", n)
@@ -424,7 +424,7 @@ func TestCurrentRereadsTheDatabaseOnceTheCacheIsStale(t *testing.T) {
 		c := tailwindCMS(t, db, stub, nil)
 		ctx := context.Background()
 
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 		if _, css := c.cssBuilder.current(ctx); css != ".mine{}" {
 			t.Fatalf("cached css = %q, want this instance's build", css)
 		}
@@ -478,10 +478,40 @@ func TestBuildOnceCompilesClassesFromStoredContent(t *testing.T) {
 			t.Fatalf("UpsertDraftBlock: %v", err)
 		}
 
-		c.cssBuilder.buildOnce()
+		c.cssBuilder.buildOnce(context.Background())
 
 		if seen := stub.contentSeen(t); !strings.Contains(seen, "text-invented-token") {
 			t.Errorf("the compiler was given %q, want the class from stored content", seen)
+		}
+	})
+}
+
+// "No stylesheet yet" is cached like any other answer. Only a non-empty
+// copy used to count as fresh, so a site whose build had not run asked
+// the database on every render to be told so again.
+func TestCurrentCachesTheAbsenceOfAStylesheet(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		stub := newTailwindStub(t, `exit 1`)
+		c := tailwindCMS(t, db, stub, nil)
+		ctx := context.Background()
+
+		if _, css := c.cssBuilder.current(ctx); css != "" {
+			t.Fatalf("css = %q before any build, want none", css)
+		}
+		// A build lands elsewhere. Inside the TTL this instance trusts
+		// its reading — that there was none — without asking again.
+		if err := c.storeContentCSS(ctx, "elsewhere", ".theirs{}"); err != nil {
+			t.Fatalf("storeContentCSS: %v", err)
+		}
+		if _, css := c.cssBuilder.current(ctx); css != "" {
+			t.Errorf("css = %q inside the TTL, want the cached absence (no second query)", css)
+		}
+
+		c.cssBuilder.cacheMu.Lock()
+		c.cssBuilder.cachedAt = time.Now().Add(-contentCSSCacheTTL - time.Second)
+		c.cssBuilder.cacheMu.Unlock()
+		if _, css := c.cssBuilder.current(ctx); css != ".theirs{}" {
+			t.Errorf("css = %q past the TTL, want the stored build", css)
 		}
 	})
 }

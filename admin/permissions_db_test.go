@@ -197,10 +197,29 @@ func TestRouteAccessByPermission(t *testing.T) {
 			{"blogs@example.com", "PUT", "/admin/api/settings", `{"siteName":"X"}`, 403},
 			{"pages@example.com", "PUT", "/admin/api/settings", `{"siteName":"X"}`, 200},
 
-			// Reads the editor needs stay open to every logged-in user.
-			{"none@example.com", "GET", "/admin/api/pages", "", 200},
-			{"none@example.com", "GET", "/admin/api/menu?menu=main", "", 200},
-			{"none@example.com", "GET", "/admin/api/settings", "", 200},
+			// The site-wide reads answer to pages like their writes: the
+			// page list names drafts and private pages, and only the menu
+			// editor and site settings read these.
+			{"pages@example.com", "GET", "/admin/api/pages", "", 200},
+			{"pages@example.com", "GET", "/admin/api/menu?menu=main", "", 200},
+			{"pages@example.com", "GET", "/admin/api/settings", "", 200},
+			{"admin@example.com", "GET", "/admin/api/pages", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/pages", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/settings", "", 403},
+			{"none@example.com", "GET", "/admin/api/pages", "", 403},
+			{"none@example.com", "GET", "/admin/api/menu?menu=main", "", 403},
+			{"none@example.com", "GET", "/admin/api/settings", "", 403},
+
+			// A page's metadata reads under the page's own permission,
+			// as its save does.
+			{"pages@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages/" + blogPageID + "/meta?locale=en", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 403},
+
+			// The snippet palette and the dashboard stay open to every
+			// logged-in user.
 			{"none@example.com", "GET", "/admin/api/snippets", "", 200},
 			{"none@example.com", "GET", "/admin/", "", 200},
 

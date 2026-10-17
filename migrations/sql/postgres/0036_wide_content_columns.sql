@@ -1,0 +1,4 @@
+-- No-op here: Postgres's TEXT has no practical length limit. The MySQL file
+-- of this version widens its content columns from TEXT (64 KiB) to
+-- LONGTEXT so the two engines accept the same content; the version exists
+-- on this side too so one number means one change on either engine.

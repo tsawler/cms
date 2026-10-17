@@ -280,3 +280,18 @@ the site's templates, stylesheets, or media — because any of those may be
 exactly what is broken. To brand it, set `Config.LockedHandler` to a
 handler of your own; the status and headers are already set when it is
 called, so write the body and leave the status alone.
+
+## Putting a cache or CDN in front
+
+Pages served to a signed-in user are sent `Cache-Control: private,
+no-store`. That covers private pages, which anonymous visitors get a 404
+for, and edit renders, which carry the draft and a CSRF token. A shared
+cache must not store them, and a CDN that respects `Cache-Control` won't.
+Don't override that header for signed-in traffic: a CDN rule that caches
+all HTML regardless would serve one editor's view of a page to the next
+visitor.
+
+Pages served to anonymous visitors carry no `Cache-Control` of their
+own, so how long they are cached is up to your CDN's rules. Every
+response also carries `Vary: Cookie` from the session middleware, but
+many CDNs ignore `Vary`, so don't rely on it alone.

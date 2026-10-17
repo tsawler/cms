@@ -43,25 +43,49 @@ func (MySQL) JSONText(col string) string { return col }
 // as identifier quoting under ANSI_QUOTES, which is not the default.
 func (MySQL) Quote(ident string) string { return "`" + ident + "`" }
 
+// BinaryText casts the column to binary, so it compares as its bytes
+// rather than under a case- and accent-insensitive collation.
+func (MySQL) BinaryText(col string) string { return "CAST(" + col + " AS BINARY)" }
+
 // Distinct uses the NULL-safe equality operator negated, since neither
-// engine has IS DISTINCT FROM.
-func (MySQL) Distinct(a, b string) string { return "NOT (" + a + " <=> " + b + ")" }
+// engine has IS DISTINCT FROM — on the columns' bytes, as Postgres's
+// IS DISTINCT FROM compares them, so a change of case or accent counts.
+func (m MySQL) Distinct(a, b string) string {
+	return "NOT (" + m.BinaryText(a) + " <=> " + m.BinaryText(b) + ")"
+}
 
 // SplitStatements breaks a migration into single statements, which the
 // driver requires unless multiStatements is enabled — and that conflicts
 // with prepared statements.
 func (MySQL) SplitStatements(script string) []string { return splitStatements(script) }
 
-// Lock takes a named advisory lock with GET_LOCK. The timeout is generous:
-// it only has to outlast another instance applying the same migrations.
+// lockPoll is how long one GET_LOCK call waits before Lock asks again.
+// A variable so tests need not wait it out.
+var lockPoll = 5 * time.Second
+
+// Lock takes a named advisory lock with GET_LOCK, waiting for as long as
+// ctx allows — the way Postgres's pg_advisory_lock waits. A single
+// GET_LOCK with a fixed timeout gave up after a minute, so an instance
+// starting while another ran a long migration (a FULLTEXT index build on
+// a big table, a media restore) failed to start at all. The wait is cut
+// into lockPoll rounds because the server does not see ctx: a round is
+// how long a cancelled ctx can go unnoticed.
 func (MySQL) Lock(ctx context.Context, ex Execer, key string) (func(), error) {
-	var got *int64
-	if err := ex.QueryRowContext(ctx, "SELECT GET_LOCK($1, $2)", key, 60).Scan(&got); err != nil {
-		return nil, fmt.Errorf("acquiring advisory lock: %w", err)
-	}
-	// GET_LOCK returns 1 on success, 0 on timeout, NULL on error.
-	if got == nil || *got != 1 {
-		return nil, fmt.Errorf("timed out waiting for advisory lock %q", key)
+	for {
+		var got *int64
+		if err := ex.QueryRowContext(ctx, "SELECT GET_LOCK($1, $2)", key, max(1, int(lockPoll/time.Second))).Scan(&got); err != nil {
+			return nil, fmt.Errorf("acquiring advisory lock: %w", err)
+		}
+		// GET_LOCK returns 1 on success, 0 on timeout, NULL on error.
+		if got == nil {
+			return nil, fmt.Errorf("acquiring advisory lock %q: GET_LOCK failed", key)
+		}
+		if *got == 1 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("waiting for advisory lock %q: %w", key, err)
+		}
 	}
 	return func() {
 		_, _ = ex.ExecContext(context.WithoutCancel(ctx), "SELECT RELEASE_LOCK($1)", key)
@@ -120,7 +144,12 @@ func (MySQL) SearchQuery(terms []SearchTerm) string {
 		} else {
 			b.WriteByte('+')
 		}
-		if t.Phrase {
+		// A hyphen or an apostrophe inside a word is an operator, or a
+		// word break, to the boolean-mode parser: +well-known reads as
+		// +well -known and excludes every page that says "known". As a
+		// phrase the term matches its words in order, which is what the
+		// index holds them as.
+		if t.Phrase || strings.ContainsAny(t.Text, "-'’") {
 			b.WriteByte('"')
 			b.WriteString(t.Text)
 			b.WriteByte('"')

@@ -118,6 +118,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		s.deps.Sessions.Put(r.Context(), sessionKey2FAUserID, u.ID)
 		s.deps.Sessions.Put(r.Context(), sessionKey2FARemember, r.PostFormValue("remember") == "1")
 		s.deps.Sessions.Put(r.Context(), sessionKey2FAExpires, time.Now().Add(twoFactorGrace).Unix())
+		s.deps.Sessions.Put(r.Context(), sessionKey2FAEpoch, u.SessionEpoch)
 		http.Redirect(w, r, s.deps.AdminPath+"/login/2fa", http.StatusSeeOther)
 		return
 	}
@@ -138,6 +139,7 @@ func (s *server) completeLogin(w http.ResponseWriter, r *http.Request, u *auth.U
 		return
 	}
 	s.deps.Sessions.Put(r.Context(), sessionKeyUserID, u.ID)
+	s.deps.Sessions.Put(r.Context(), sessionKeyEpoch, u.SessionEpoch)
 	if remember {
 		// Persistent cookie (survives browser restarts) with the
 		// remember duration as both cookie and server-side deadline.
@@ -174,9 +176,9 @@ func (s *server) twoFactorPending(r *http.Request) *auth.User {
 		return nil
 	}
 	// Re-checked here, not just at the password step: an account
-	// deactivated — or whose two-factor was reset — mid-challenge should
-	// not sail through on stale state.
-	if !u.Active || !u.TwoFactorEnabled() {
+	// deactivated — or whose password or two-factor changed —
+	// mid-challenge should not sail through on stale state.
+	if !u.Active || !u.TwoFactorEnabled() || s.deps.Sessions.GetInt64(ctx, sessionKey2FAEpoch) != u.SessionEpoch {
 		s.clearTwoFactorPending(r)
 		return nil
 	}
@@ -187,6 +189,7 @@ func (s *server) clearTwoFactorPending(r *http.Request) {
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FAUserID)
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FARemember)
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FAExpires)
+	s.deps.Sessions.Remove(r.Context(), sessionKey2FAEpoch)
 }
 
 func (s *server) twoFactorForm(w http.ResponseWriter, r *http.Request) {

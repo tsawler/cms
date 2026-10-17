@@ -112,17 +112,38 @@ function renderFolders(folders) {
 }
 
 var lastItems = [];
+// Whether the server holds more items past those loaded: the library
+// arrives a page at a time, and "Load more" asks for the next.
+var moreItems = false;
+// Counts loads, so an answer for a folder or search the editor has since
+// left is dropped rather than drawn over the one they are looking at.
+var loadSeq = 0;
 
-function loadMedia() {
+// loadMedia loads the first page of items for the current kind, folder
+// and search — or, with more, the next page, appended to those loaded.
+function loadMedia(more) {
     var grid = $("grid");
-    grid.innerHTML = '<span class="empty">Loading…</span>';
+    var seq = ++loadSeq;
+    if (!more) grid.innerHTML = '<span class="empty">Loading…</span>';
     var params = "?kind=" + pickerKind +
         (pickerQuery ? "&q=" + encodeURIComponent(pickerQuery) : "") +
-        (pickerFolder ? "&folder=" + encodeURIComponent(pickerFolder) : "");
+        (pickerFolder ? "&folder=" + encodeURIComponent(pickerFolder) : "") +
+        (more ? "&offset=" + lastItems.length : "");
     api("/media" + params, { method: "GET" }).then(function (body) {
-        lastItems = body.media || [];
+        if (seq !== loadSeq) return;
+        var page = body.media || [];
+        lastItems = more ? lastItems.concat(page) : page;
+        moreItems = !!body.more;
         renderItems(lastItems);
     }).catch(function (err) {
+        if (seq !== loadSeq) return;
+        // A failed next page keeps what is already showing, and its
+        // button, so the editor can try again.
+        if (more) {
+            renderItems(lastItems);
+            flash(err.message);
+            return;
+        }
         grid.innerHTML = "";
         var span = document.createElement("span");
         span.className = "empty";
@@ -186,6 +207,18 @@ function renderItems(items) {
         el.addEventListener("click", function () { pick(item); });
         grid.appendChild(el);
     });
+    if (moreItems) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "more";
+        btn.textContent = "Load more";
+        btn.addEventListener("click", function () {
+            btn.disabled = true;
+            btn.textContent = "Loading…";
+            loadMedia(true);
+        });
+        grid.appendChild(btn);
+    }
 }
 
 function pick(item) {

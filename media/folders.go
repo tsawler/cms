@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/cms/internal/dberr"
@@ -128,4 +129,33 @@ func (m *Manager) Move(ctx context.Context, mediaID int64, folderID *int64) erro
 	}
 	m.syncManifest(ctx, mediaID)
 	return nil
+}
+
+// MoveMany files every item in ids into folderID (nil for unfiled) with
+// one statement, and reports how many there were. Each item's manifest
+// is still rewritten on its own: the manifest is per item, in the bucket.
+func (m *Manager) MoveMany(ctx context.Context, ids []int64, folderID *int64) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := []any{folderID}
+	marks := make([]string, len(ids))
+	for i, id := range ids {
+		args = append(args, id)
+		marks[i] = "$" + strconv.Itoa(len(args))
+	}
+	if _, err := m.db.Exec(ctx,
+		"UPDATE cms_media SET folder_id = $1 WHERE id IN ("+strings.Join(marks, ", ")+")", args...); err != nil {
+		return 0, err
+	}
+	// The ids that still name an item: one gone since the page was drawn
+	// has no manifest to rewrite.
+	moved, err := m.ByIDs(ctx, ids, "")
+	if err != nil {
+		return 0, err
+	}
+	for _, md := range moved {
+		m.syncManifest(ctx, md.ID)
+	}
+	return len(moved), nil
 }

@@ -251,6 +251,15 @@ identifier and where reset links go. A name change alone needs no
 password. Role and active status are deliberately not on this page —
 nobody adjusts their own powers outside the admin-only `/admin/users`.
 
+**A credential change ends the account's other sessions.** Changing or
+resetting a password, an admin setting one, and turning two-factor on
+or off all sign the account out everywhere else, including any
+"remember me" session. A session someone stole therefore stops working
+once its owner changes their password. The session that made the
+change stays signed in, with a fresh token. A two-factor login left
+waiting for its code is stranded too: a valid code no longer completes
+it once the password has changed.
+
 Two-factor uses ordinary TOTP authenticator apps (Google Authenticator,
 1Password, Authy, …): the settings page shows a QR code and a
 manual-entry key, and enrollment only saves once a live code from the

@@ -315,3 +315,23 @@ func TestSecureHeadersCaptchaCSPIsLoginOnly(t *testing.T) {
 		t.Errorf("non-login admin page CSP missing %q: %s", want, csp)
 	}
 }
+
+// The CSP exemption belongs to the preview handlers alone. Decided by
+// path before routing, it used to cover anything ending in /preview — a
+// host's custom section, a path that matched nothing.
+func TestCSPIsNotLiftedByAPathEndingInPreview(t *testing.T) {
+	srv, client := newLoginTestServer(t, nil)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	for _, path := range []string{"/x/reports/preview", "/no/such/preview"} {
+		resp, err := client.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") {
+			t.Errorf("GET %s: CSP = %q, want the admin's policy", path, csp)
+		}
+	}
+}

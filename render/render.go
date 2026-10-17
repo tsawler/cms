@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
@@ -68,8 +69,9 @@ func LocalePrefix(locale, defaultLocale string) string {
 	return "/" + locale
 }
 
-// localeURL builds the site-relative URL of a page slug in a locale.
-func localeURL(slug, locale, defaultLocale string) string {
+// SlugURL builds the site-relative URL of a page slug in a locale: "/" for
+// the default locale's home page, "/fr" for another's, "/fr/about" for a page.
+func SlugURL(slug, locale, defaultLocale string) string {
 	prefix := LocalePrefix(locale, defaultLocale)
 	if slug == "" {
 		if prefix == "" {
@@ -95,7 +97,7 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 		if !includeDrafts && item.PageVisibility != nil && *item.PageVisibility == content.VisibilityPrivate {
 			return e, false
 		}
-		e.URL = localeURL(*item.PageSlug, locale, defaultLocale)
+		e.URL = SlugURL(*item.PageSlug, locale, defaultLocale)
 		e.Active = e.URL == current
 		return e, true
 	}
@@ -115,7 +117,7 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 // while editors keep it so they can fill it.
 // Menu entries carry the locale's labels and locale-prefixed page URLs.
 func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale string, includeDrafts bool) map[string][]MenuEntry {
-	current := localeURL(currentSlug, locale, defaultLocale)
+	current := SlugURL(currentSlug, locale, defaultLocale)
 	menus := map[string][]MenuEntry{}
 	// Rows arrive ordered by sort with children stored after their
 	// parent, so parents are placed before their children attach.
@@ -500,6 +502,7 @@ func (f *Pager) HTML() template.HTML {
 // there is nowhere to go, and it becomes a dimmed span rather than
 // vanishing, so the bar keeps its shape as the visitor pages through.
 func writePagerStep(sb *strings.Builder, class, url, label string) {
+	label = html.EscapeString(label)
 	if url == "" {
 		sb.WriteString(`<span class="cms-pager-step ` + class + ` cms-pager-off" aria-hidden="true">` +
 			label + `</span>`)
@@ -1061,7 +1064,13 @@ type EditInfo struct {
 // every page define the same block names (e.g. "content") without
 // colliding.
 type Renderer struct {
-	sets      map[string]*template.Template // keyed by PageTemplate.File
+	sets map[string]*template.Template // keyed by PageTemplate.File
+	// clones holds, per set, copies that have been executed before; see
+	// acquire.
+	clones map[string]*sync.Pool
+	// parse is what the sets were parsed against: every name a template
+	// may call. A render binds all of them; see bindFuncs.
+	parse     template.FuncMap
 	templates []PageTemplate
 	sections  *SectionStyles
 	// hostFuncs are the host application's own template functions, as
@@ -1103,13 +1112,15 @@ func NewWithFuncs(fsys fs.FS, shared []string, pages []PageTemplate, sections *S
 	if sections == nil {
 		sections = DefaultSectionStyles()
 	}
+	parse := parseFuncs(host)
 	r := &Renderer{
 		sets:      make(map[string]*template.Template, len(pages)+len(hidden)),
+		clones:    make(map[string]*sync.Pool, len(pages)+len(hidden)),
+		parse:     parse,
 		templates: pages,
 		sections:  sections,
 		hostFuncs: host,
 	}
-	parse := parseFuncs(host)
 	for _, pt := range append(append([]PageTemplate{}, pages...), hidden...) {
 		patterns := append(append([]string{}, shared...), pt.File)
 		set, err := template.New(path.Base(pt.File)).Funcs(parse).ParseFS(fsys, patterns...)
@@ -1123,8 +1134,47 @@ func NewWithFuncs(fsys fs.FS, shared []string, pages []PageTemplate, sections *S
 			return nil, fmt.Errorf("render: page template %s: %w", pt.File, err)
 		}
 		r.sets[pt.File] = set
+		r.clones[pt.File] = &sync.Pool{}
 	}
 	return r, nil
+}
+
+// acquire returns a copy of a template set that one render may use: one
+// that served an earlier render when the pool has one, a fresh clone of
+// the never-executed original otherwise. Hand it back with release.
+//
+// The pooling is the point. html/template works out how to escape a
+// template the first time a copy is executed, and that analysis — walking
+// every tree in the set — was most of what a render cost when every
+// render cloned afresh. A copy keeps its analysis, so a reused one goes
+// straight to execution. A copy is never shared between renders at once:
+// the functions bound to it are closures over one render's page.
+func (r *Renderer) acquire(file string, set *template.Template) (*template.Template, error) {
+	if c, ok := r.clones[file].Get().(*template.Template); ok {
+		return c, nil
+	}
+	return set.Clone()
+}
+
+// release returns a copy acquire gave out, for the next render of that
+// set.
+func (r *Renderer) release(file string, c *template.Template) {
+	r.clones[file].Put(c)
+}
+
+// bindFuncs binds one render's functions to a copy, and every other name
+// the templates were parsed against to its stand-in. Binding replaces
+// only the names it is given, so on a reused copy any name a render left
+// out would still call the previous render's function — a closure over
+// another page, and perhaps another visitor's request. Binding all of
+// them every time leaves nothing behind.
+func (r *Renderer) bindFuncs(c *template.Template, funcs template.FuncMap) {
+	for name, fn := range r.parse {
+		if _, ok := funcs[name]; !ok {
+			funcs[name] = fn
+		}
+	}
+	c.Funcs(funcs)
 }
 
 // PageTemplates returns the templates available for pages, for the admin UI.
@@ -1263,10 +1313,11 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	if !ok {
 		return fmt.Errorf("render: page %d uses unknown template %q", page.ID, page.TemplateName)
 	}
-	clone, err := set.Clone()
+	clone, err := r.acquire(page.TemplateName, set)
 	if err != nil {
 		return fmt.Errorf("render: cloning template set: %w", err)
 	}
+	defer r.release(page.TemplateName, clone)
 
 	// Custom-code blocks materialize here, before anything reads the
 	// content: every region kind then sees the real markup, wherever the
@@ -1372,6 +1423,10 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 		// footer, a contact strip — so a template can carry one on every
 		// page without an editor having to create it on each. The optional
 		// second argument is the markup to show while the region is empty.
+		// It is the template author's markup and goes out unescaped, as the
+		// template itself does: a template that passed it request data
+		// would have written itself an XSS hole. Stored shared content is
+		// what editors control, and it is sanitized on save.
 		"cmsShared": func(key string, fallback ...string) template.HTML {
 			return template.HTML(sharedRegion(key, fallback))
 		},
@@ -1593,7 +1648,7 @@ func (r *Renderer) Render(w io.Writer, in Input) error {
 	mergeFuncs(funcs, r.hostFuncs)
 	mergeFuncs(funcs, in.Funcs)
 
-	clone.Funcs(funcs)
+	r.bindFuncs(clone, funcs)
 
 	var buf bytes.Buffer
 	if err := clone.ExecuteTemplate(&buf, path.Base(page.TemplateName), PageData{
@@ -1873,7 +1928,7 @@ func (r *Renderer) injectEditorScript(page []byte, edit *EditInfo, filledImages 
 		` data-section-styles="` + html.EscapeString(string(sectionsJSON)) + `"` +
 		` data-page-templates="` + html.EscapeString(string(templatesJSON)) + `"></script>`
 
-	idx := strings.LastIndex(strings.ToLower(string(page)), "</body>")
+	idx := bytes.LastIndex(asciiLower(page), []byte("</body>"))
 	if idx < 0 {
 		return append(page, []byte(tag)...)
 	}
@@ -2423,7 +2478,7 @@ func localeLinks(in Input) []LocaleLink {
 	for _, code := range in.Locales {
 		out = append(out, LocaleLink{
 			Code:   code,
-			URL:    localeURL(in.Page.Slug, code, def),
+			URL:    SlugURL(in.Page.Slug, code, def),
 			Active: code == in.Locale,
 		})
 	}
@@ -2490,7 +2545,7 @@ func headHTML(p *content.Page, contentCSS string, in Input, bar notice) template
 				`" href="` + html.EscapeString(in.BaseURL+l.URL) + "\">\n")
 		}
 		sb.WriteString(`<link rel="alternate" hreflang="x-default" href="` +
-			html.EscapeString(in.BaseURL+localeURL(p.Slug, in.Locales[0], in.Locales[0])) + "\">\n")
+			html.EscapeString(in.BaseURL+SlugURL(p.Slug, in.Locales[0], in.Locales[0])) + "\">\n")
 	}
 	// Utilities generated from stored content. Before the page's own
 	// links and inline CSS, so page-specific rules can override them.

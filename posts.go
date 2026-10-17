@@ -139,8 +139,10 @@ func (c *CMS) serveFeed(w http.ResponseWriter, r *http.Request, feed content.Fee
 		Title: r.Host + " — " + string(feed),
 		Link:  base + "/" + string(feed),
 	}
+	// The listing page names the channel — unless it is private, when the
+	// feed, which anyone can fetch, must not say what it is called.
 	listing, err := c.content.GetBySlug(r.Context(), string(feed), locale, true)
-	if err == nil {
+	if err == nil && listing.Visibility != content.VisibilityPrivate {
 		if listing.Title != "" {
 			ch.Title = listing.Title
 		}

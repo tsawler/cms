@@ -887,8 +887,12 @@ export function initInlineEditor(el, onDirty, register) {
                     });
                 },
             });
-            ed.on("input change undo redo SetContent", function () {
-                if (ed.isDirty()) onDirty();
+            // "dirty" is TinyMCE's own clean-to-dirty signal. It matters
+            // for a single keystroke after a save: the keystroke's input
+            // event arrives before TinyMCE marks the editor dirty on
+            // keyup, so without it Save would stay disabled.
+            ed.on("input change undo redo SetContent dirty", function () {
+                if (ed.isDirty() && !tearingDown) onDirty();
             });
             // Undo, redo and any wholesale content replacement swap the
             // elements out for new ones, so every floating toolbar is
@@ -923,12 +927,26 @@ export function initInlineEditor(el, onDirty, register) {
     window.tinymce.init(opts);
 }
 
+// tearingDown silences the editors' dirty signal while they are being
+// removed. Leaving edit mode strips the editor's own marks from the
+// content (the active-column tint, the injected chrome) just before the
+// editors go, and TinyMCE takes that as an edit: on its way out it
+// records an undo level, sets itself dirty and fires "change". Nothing
+// anyone typed changed, so a page that was just saved or published
+// would read as unsaved, with Save and Publish back on the bar.
+var tearingDown = false;
+
 export function removeRichEditors() {
-    Object.keys(state.mceEditors).forEach(function (name) {
-        state.mceEditors[name].remove();
-    });
+    tearingDown = true;
+    try {
+        Object.keys(state.mceEditors).forEach(function (name) {
+            state.mceEditors[name].remove();
+        });
+        state.sectionEditors.forEach(function (s) { s.ed.remove(); });
+    } finally {
+        tearingDown = false;
+    }
     state.mceEditors = {};
-    state.sectionEditors.forEach(function (s) { s.ed.remove(); });
     state.sectionEditors = [];
     state.lastEditor = null;
     state.lastEditorDirty = null;

@@ -114,7 +114,7 @@ func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string)
 	query := strings.TrimSpace(r.URL.Query().Get(render.SearchQueryParam))
 
 	site := c.siteSettings(r.Context())
-	menuItems, err := c.content.MenuItems(r.Context(), "")
+	menuItems, err := c.menuItems(r.Context())
 	if err != nil {
 		c.cfg.Logger.Error("cms: loading menus", "err", err)
 		menuItems = nil
@@ -205,8 +205,7 @@ func (c *CMS) ReindexSearch(ctx context.Context) (int, error) {
 // the alternative, a marker row saying it has been done, would be a piece
 // of state to keep true.
 func (c *CMS) backfillSearchIndex() {
-	go func() {
-		ctx := context.Background()
+	c.background(func(ctx context.Context) {
 		empty, err := c.content.SearchIndexEmpty(ctx)
 		if err != nil {
 			c.cfg.Logger.Error("cms: checking the search index", "err", err)
@@ -223,5 +222,5 @@ func (c *CMS) backfillSearchIndex() {
 		if n > 0 {
 			c.cfg.Logger.Info("cms: built the site search index", "pages", n)
 		}
-	}()
+	})
 }

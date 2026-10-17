@@ -607,6 +607,10 @@ func (s *Store) RestoreVersion(ctx context.Context, pageID, versionID int64, opt
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return nil, err
+	}
+
 	if _, err := tx.Exec(ctx,
 		"DELETE FROM cms_blocks WHERE page_id = $1 AND status = 'draft'", pageID); err != nil {
 		return nil, err

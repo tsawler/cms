@@ -15,6 +15,10 @@ import (
 
 const minPasswordLength = 8
 
+// lastSuperadminMsg refuses a change that would leave the site with no
+// active superadmin; see lastActiveSuperadmin.
+const lastSuperadminMsg = "This is the only superadministrator left. Give somebody else the role first — a site with none cannot get one back."
+
 func (s *server) usersList(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	// The status tab. Validated to its known values here rather than
@@ -95,15 +99,13 @@ func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	form.PasswordHash = hash
 
-	if _, err := s.deps.Users.Insert(r.Context(), form); err != nil {
+	// The account and its grants land together or not at all.
+	if err := s.deps.Users.Save(r.Context(), auth.UserSave{User: form, Permissions: form.Permissions}); err != nil {
+		form.ID = 0 // nothing was created
 		if errors.Is(err, auth.ErrDuplicateEmail) {
 			s.renderUserForm(w, r, form, true, map[string]string{"email": s.tr(r, "That email address is already in use.")})
 			return
 		}
-		s.serverError(w, err)
-		return
-	}
-	if err := s.deps.Users.ReplacePermissions(r.Context(), form.ID, form.Permissions); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -175,7 +177,7 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	// useful thing to read.
 	if form.Role != auth.RoleSuperadmin || !form.Active {
 		if s.lastActiveSuperadmin(r, existing) {
-			msg := s.tr(r, "This is the only superadministrator left. Give somebody else the role first — a site with none cannot get one back.")
+			msg := s.tr(r, lastSuperadminMsg)
 			if form.Role != auth.RoleSuperadmin && errs["role"] == "" {
 				errs["role"] = msg
 			}
@@ -190,39 +192,46 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.deps.Users.Update(r.Context(), form); err != nil {
-		if errors.Is(err, auth.ErrDuplicateEmail) {
-			s.renderUserForm(w, r, form, false, map[string]string{"email": s.tr(r, "That email address is already in use.")})
-			return
-		}
-		s.serverError(w, err)
-		return
-	}
-	if err := s.deps.Users.ReplacePermissions(r.Context(), form.ID, form.Permissions); err != nil {
-		s.serverError(w, err)
-		return
-	}
-
+	save := auth.UserSave{User: form, Permissions: form.Permissions}
 	if password != "" {
 		hash, err := auth.HashPassword(password)
 		if err != nil {
 			s.serverError(w, err)
 			return
 		}
-		if err := s.deps.Users.UpdatePassword(r.Context(), form.ID, hash); err != nil {
-			s.serverError(w, err)
-			return
-		}
+		save.NewPasswordHash = hash
 	}
-
 	// The rescue for a lost phone: an admin clears the user's two-factor
 	// enrollment so their password alone logs them in again.
-	if r.PostFormValue("reset_totp") == "on" && existing.TwoFactorEnabled() {
-		if err := s.deps.Users.DisableTOTP(r.Context(), existing.ID); err != nil {
+	save.DisableTOTP = r.PostFormValue("reset_totp") == "on" && existing.TwoFactorEnabled()
+
+	// Profile, grants, password and two-factor in one transaction: a
+	// failure part-way used to leave the role changed and the rest not.
+	if err := s.deps.Users.Save(r.Context(), save); err != nil {
+		switch {
+		case errors.Is(err, auth.ErrDuplicateEmail):
+			s.renderUserForm(w, r, form, false, map[string]string{"email": s.tr(r, "That email address is already in use.")})
+		case errors.Is(err, auth.ErrLastSuperadmin):
+			// The check above passed, and another superadmin was
+			// demoted or deleted between it and this save.
+			s.renderUserForm(w, r, form, false, map[string]string{"role": s.tr(r, lastSuperadminMsg)})
+		default:
+			s.serverError(w, err)
+		}
+		return
+	}
+	if save.DisableTOTP {
+		s.deps.Logger.Info("cms admin: two-factor reset", "user", existing.Email, "by", s.currentUser(r).Email)
+	}
+
+	// Either change above ends the account's sessions. When the account
+	// is the editor's own, the session doing the editing carries on.
+	if self := s.currentUser(r); self != nil && self.ID == existing.ID &&
+		(password != "" || (r.PostFormValue("reset_totp") == "on" && existing.TwoFactorEnabled())) {
+		if err := s.keepSession(r, existing.ID); err != nil {
 			s.serverError(w, err)
 			return
 		}
-		s.deps.Logger.Info("cms admin: two-factor reset", "user", existing.Email, "by", s.currentUser(r).Email)
 	}
 
 	s.flash(r, s.tr(r, "User updated."))
@@ -260,11 +269,16 @@ func (s *server) userDelete(w http.ResponseWriter, r *http.Request) {
 	// who is therefore still there — but that is two other rules holding
 	// it up rather than the rule itself, so it is stated here too.
 	if s.lastActiveSuperadmin(r, target) {
-		s.flash(r, s.tr(r, "This is the only superadministrator left. Give somebody else the role first — a site with none cannot get one back."))
+		s.flash(r, s.tr(r, lastSuperadminMsg))
 		http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
 		return
 	}
 	if err := s.deps.Users.Delete(r.Context(), target.ID); err != nil {
+		if errors.Is(err, auth.ErrLastSuperadmin) {
+			s.flash(r, s.tr(r, lastSuperadminMsg))
+			http.Redirect(w, r, s.deps.AdminPath+"/users", http.StatusSeeOther)
+			return
+		}
 		s.serverError(w, err)
 		return
 	}
@@ -302,8 +316,9 @@ func (s *server) userMasquerade(w http.ResponseWriter, r *http.Request) {
 	// superadmin) keeps the original owner: exit always returns to the
 	// account that actually logged in.
 	owner := s.deps.Sessions.GetInt64(ctx, sessionKeyMasqueradeFrom)
+	ownerEpoch := s.deps.Sessions.GetInt64(ctx, sessionKeyMasqueradeEpoch)
 	if owner == 0 {
-		owner = actor.ID
+		owner, ownerEpoch = actor.ID, actor.SessionEpoch
 	}
 	// A fresh session token on privilege change, same as login. RenewToken
 	// keeps the session's data, so the parked owner survives it.
@@ -312,7 +327,9 @@ func (s *server) userMasquerade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Sessions.Put(ctx, sessionKeyMasqueradeFrom, owner)
+	s.deps.Sessions.Put(ctx, sessionKeyMasqueradeEpoch, ownerEpoch)
 	s.deps.Sessions.Put(ctx, sessionKeyUserID, target.ID)
+	s.deps.Sessions.Put(ctx, sessionKeyEpoch, target.SessionEpoch)
 	s.deps.Logger.Info("cms admin: masquerade started", "as", target.Email, "by", actor.Email)
 	http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
 }
@@ -332,9 +349,12 @@ func (s *server) masqueradeExit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	if err != nil || !owner.Active {
-		// The owner was deleted or deactivated mid-masquerade: there is
-		// nobody to return to, so the session ends like a logout.
+	if err != nil || !owner.Active ||
+		s.deps.Sessions.GetInt64(ctx, sessionKeyMasqueradeEpoch) != owner.SessionEpoch {
+		// The owner was deleted or deactivated mid-masquerade, or their
+		// credentials changed — which ended their sessions, this one
+		// included: there is nobody to return to, so the session ends
+		// like a logout.
 		if err := s.deps.Sessions.Destroy(ctx); err != nil {
 			s.serverError(w, err)
 			return
@@ -348,7 +368,9 @@ func (s *server) masqueradeExit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Sessions.Remove(ctx, sessionKeyMasqueradeFrom)
+	s.deps.Sessions.Remove(ctx, sessionKeyMasqueradeEpoch)
 	s.deps.Sessions.Put(ctx, sessionKeyUserID, owner.ID)
+	s.deps.Sessions.Put(ctx, sessionKeyEpoch, owner.SessionEpoch)
 	if masked != nil {
 		s.deps.Logger.Info("cms admin: masquerade ended", "user", owner.Email, "was", masked.Email)
 	}

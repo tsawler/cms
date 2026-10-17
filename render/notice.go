@@ -265,9 +265,9 @@ func insertAfterBodyTag(page []byte, markup string) []byte {
 // but legal, and the kind of thing a data attribute holding JSON does —
 // cannot be mistaken for the end of the tag.
 func bodyTagEnd(page []byte) int {
-	lower := strings.ToLower(string(page))
+	lower := asciiLower(page)
 	for i := 0; i < len(lower); {
-		j := strings.Index(lower[i:], "<body")
+		j := bytes.Index(lower[i:], []byte("<body"))
 		if j < 0 {
 			return -1
 		}
@@ -294,6 +294,24 @@ func bodyTagEnd(page []byte) int {
 		return -1
 	}
 	return -1
+}
+
+// asciiLower returns a copy of b with A–Z folded to a–z and every other
+// byte as it was. It is for finding tags in a page and then cutting the
+// page itself at what was found: HTML's tag and attribute names are
+// ASCII, so nothing more is needed to match them in any case, and the
+// copy is byte-for-byte as long as the original. strings.ToLower is not:
+// "İ" lowers to one byte fewer and "Ⱥ" to one more, so an offset found in
+// its output lands somewhere else in the page — mid-tag, or past the end.
+func asciiLower(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return out
 }
 
 // isTagBreak reports whether c can follow an element name inside a tag.

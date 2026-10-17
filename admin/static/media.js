@@ -1154,62 +1154,58 @@ function captureFrame(src, crossOrigin) {
     try { storedView = window.localStorage.getItem("cms-admin-media-view"); } catch (err) { /* private mode */ }
     applyView(storedView === "list" ? "list" : "grid");
 
-    var sortKey = "name";
-    var sortDir = 1;
+    // Sorting is the server's: the library arrives a page at a time, and
+    // ordering only the page in hand put "A" on whichever page held the
+    // newest files. Choosing a column loads the first page in that order,
+    // and remembers it in a cookie the server reads, so a plain link back
+    // to the library — the sidebar, a tab, a folder — keeps it too.
+    var sortHead = document.querySelector("[data-sort-key]");
+    var sortKey = sortHead ? sortHead.getAttribute("data-sort-key") : "name";
+    var sortDir = sortHead && sortHead.getAttribute("data-sort-dir") === "desc" ? -1 : 1;
+    var sortCookie = "cms_admin_media_sort";
+
+    function rememberSort(key, dir) {
+        document.cookie = sortCookie + "=" + key + ":" + (dir < 0 ? "desc" : "asc") +
+            "; path=/; max-age=31536000; samesite=lax";
+    }
+
+    function loadSorted(key, dir) {
+        rememberSort(key, dir);
+        var u = new URL(window.location.href);
+        u.searchParams.set("sort", key);
+        u.searchParams.set("dir", dir < 0 ? "desc" : "asc");
+        u.searchParams.delete("page"); // a new order starts at its beginning
+        window.location.assign(u.toString());
+    }
+
+    // The order used to live in localStorage, where the server cannot see
+    // it. A browser that still has it there carries it across once.
     try {
-        var stored = (window.localStorage.getItem("cms-admin-media-sort") || "").split(":");
-        if (stored[0]) { sortKey = stored[0]; sortDir = stored[1] === "-1" ? -1 : 1; }
+        var legacy = window.localStorage.getItem("cms-admin-media-sort");
+        if (legacy) {
+            window.localStorage.removeItem("cms-admin-media-sort");
+            var parts = legacy.split(":");
+            var hasChoice = new URL(window.location.href).searchParams.has("sort") ||
+                document.cookie.indexOf(sortCookie + "=") !== -1;
+            if (!hasChoice && parts[0] && (parts[0] !== sortKey || (parts[1] === "-1") !== (sortDir < 0))) {
+                loadSorted(parts[0], parts[1] === "-1" ? -1 : 1);
+                return;
+            }
+        }
     } catch (err) { /* private mode */ }
 
-    function value(el, key) {
-        switch (key) {
-            case "size": return Number(el.getAttribute("data-size") || 0);
-            case "added": return Number(el.getAttribute("data-added") || 0);
-            case "dims": return parseInt(el.getAttribute("data-dims") || "0", 10) || 0;
-            case "kind": return el.getAttribute("data-ext") || "";
-            default: return el.getAttribute("data-name") || "";
-        }
-    }
-
-    function applySort() {
-        var folders = items.filter(isFolder);
-        var files = items.filter(function (x) { return !isFolder(x); });
-        var cmp = function (a, b) {
-            var x = value(a, sortKey), y = value(b, sortKey);
-            if (typeof x === "string") return x.localeCompare(y) * sortDir;
-            return (x - y) * sortDir;
-        };
-        files.sort(cmp);
-        // Folders sort by name whatever the column: they have no size and
-        // no dimensions, so sorting them by one would just scramble them.
-        folders.sort(function (a, b) {
-            return (a.getAttribute("data-name") || "").localeCompare(b.getAttribute("data-name") || "") * sortDir;
-        });
-        folders.concat(files).forEach(function (el) { itemsEl.appendChild(el); });
-        refresh();
-
-        document.querySelectorAll("[data-sort]").forEach(function (btn) {
-            var on = btn.getAttribute("data-sort") === sortKey;
-            btn.classList.toggle("cms-active", on);
-            btn.setAttribute("aria-sort", on ? (sortDir === 1 ? "ascending" : "descending") : "none");
-        });
-        try {
-            window.localStorage.setItem("cms-admin-media-sort", sortKey + ":" + sortDir);
-        } catch (err) { /* private mode */ }
-    }
-
     document.querySelectorAll("[data-sort]").forEach(function (btn) {
+        var on = btn.getAttribute("data-sort") === sortKey;
+        btn.classList.toggle("cms-active", on);
+        btn.setAttribute("aria-sort", on ? (sortDir === 1 ? "ascending" : "descending") : "none");
         btn.addEventListener("click", function () {
             var key = btn.getAttribute("data-sort");
-            if (key === sortKey) sortDir = -sortDir;
-            else { sortKey = key; sortDir = 1; }
-            applySort();
+            loadSorted(key, key === sortKey ? -sortDir : 1);
         });
     });
 
-    applySort();
-    // After applySort, which is what fills `items`. Sorting re-appends the
-    // same nodes rather than rebuilding them, so wiring once holds.
+    refresh(); // the items, in the order the server sent them
+    // After refresh, which is what fills `items`.
     wireDropTargets();
     sync();
 })();

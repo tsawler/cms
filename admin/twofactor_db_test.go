@@ -269,6 +269,9 @@ func TestTwoFactorEnrollment(t *testing.T) {
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("wrong confirm code: status = %d, want 422", resp.StatusCode)
 		}
+		if !strings.Contains(page, "That code didn") {
+			t.Errorf("a wrong confirm code is refused without saying why:\n%s", page)
+		}
 		if got, _ := users.GetByID(context.Background(), u.ID); got.TwoFactorEnabled() {
 			t.Fatal("two-factor enabled by a wrong code")
 		}
@@ -336,6 +339,9 @@ func TestTwoFactorLogin(t *testing.T) {
 		})
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("wrong code: status = %d, want 422", resp.StatusCode)
+		}
+		if !strings.Contains(page, "That code didn") {
+			t.Errorf("a wrong login code is refused without saying why:\n%s", page)
 		}
 
 		// The right code logs in.

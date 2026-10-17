@@ -198,6 +198,17 @@ func TestFeedChannelDescribesItselfFromTheListingPage(t *testing.T) {
 		if doc.Channel.Description != "Dispatches from the deep" {
 			t.Errorf("channel description = %q, want the listing page's", doc.Channel.Description)
 		}
+
+		// A private listing page is a 404 to visitors, and the feed —
+		// which anyone can fetch — must not name it either.
+		if err := c.content.SetVisibility(ctx, id, content.VisibilityPrivate); err != nil {
+			t.Fatalf("SetVisibility: %v", err)
+		}
+		_, doc = fetchFeed(t, c, "/blog/rss.xml")
+		if doc.Channel.Title == "The Kraken Chronicle" || doc.Channel.Description != "" {
+			t.Errorf("a private listing page named the channel: title %q, description %q",
+				doc.Channel.Title, doc.Channel.Description)
+		}
 	})
 }
 

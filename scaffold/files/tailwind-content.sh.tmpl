@@ -16,6 +16,10 @@
 set -e
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
+# The CMS stops a build that overruns its timeout with a TERM to this
+# script and the CLI together. Exiting on it is what runs the cleanup
+# above: a shell killed by an untrapped signal skips its EXIT trap.
+trap 'exit 143' INT TERM
 cp "$1" "$dir/content.html"
 cp assets/theme.css "$dir/theme.css"
 cat > "$dir/input.css" <<'EOF'

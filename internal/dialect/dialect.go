@@ -64,6 +64,12 @@ type Dialect interface {
 	// the quoting character, so there is no shared spelling.
 	Quote(ident string) string
 
+	// BinaryText renders a text column for comparison byte for byte.
+	// Postgres compares text that way already; MySQL compares under the
+	// column's collation, which by default ignores case and accents — so
+	// an edit from "Iphone" to "iPhone" would compare equal.
+	BinaryText(col string) string
+
 	// Distinct renders a NULL-safe inequality between two columns —
 	// Postgres's IS DISTINCT FROM, which MySQL and MariaDB lack.
 	Distinct(a, b string) string

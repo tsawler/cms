@@ -57,6 +57,11 @@ type User struct {
 	// of the last accepted code; see Store.ConsumeTOTPStep.
 	TOTPSecret   string
 	TOTPLastStep int64
+	// SessionEpoch counts changes to how the account signs in — its
+	// password, its two-factor enrollment. A session is granted under the
+	// epoch current at login and honoured only while it still is, so a
+	// change ends every session the account had (see sessiondata.KeyEpoch).
+	SessionEpoch int64
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -69,7 +74,18 @@ var (
 	// ErrInvalidCredentials is returned by Authenticate for a bad email or
 	// password, or an inactive account. It deliberately does not say which.
 	ErrInvalidCredentials = errors.New("auth: invalid credentials")
+	// ErrLastSuperadmin is returned by Save and Delete for a change that
+	// would leave the site with no active superadmin.
+	ErrLastSuperadmin = errors.New("auth: the last active superadmin cannot lose the role")
 )
+
+// handle is what the user writes run against: the pool, or a
+// transaction that several of them share.
+type handle interface {
+	Exec(ctx context.Context, query string, args ...any) (sqldb.Result, error)
+	QueryRow(ctx context.Context, query string, args ...any) *sql.Row
+	InsertID(ctx context.Context, query string, args ...any) (int64, error)
+}
 
 // Store reads and writes users in Postgres.
 type Store struct {
@@ -93,11 +109,11 @@ func (s *Store) SetLogger(l *slog.Logger) {
 	}
 }
 
-const userColumns = "id, email, name, password_hash, role, active, totp_secret, totp_last_step, created_at, updated_at"
+const userColumns = "id, email, name, password_hash, role, active, totp_secret, totp_last_step, session_epoch, created_at, updated_at"
 
 func scanUser(row sqldb.Scanner) (*User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Active, &u.TOTPSecret, &u.TOTPLastStep, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Active, &u.TOTPSecret, &u.TOTPLastStep, &u.SessionEpoch, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -239,7 +255,11 @@ func (s *Store) Count(ctx context.Context) (int, error) {
 // Insert stores a new user and returns its id. Email is normalized to lower
 // case. Returns ErrDuplicateEmail if the address is taken.
 func (s *Store) Insert(ctx context.Context, u *User) (int64, error) {
-	id, err := s.db.InsertID(ctx, `
+	return insertUser(ctx, s.db, u)
+}
+
+func insertUser(ctx context.Context, h handle, u *User) (int64, error) {
+	id, err := h.InsertID(ctx, `
 		INSERT INTO cms_users (email, name, password_hash, role, active)
 		VALUES ($1, $2, $3, $4, $5)`,
 		strings.ToLower(strings.TrimSpace(u.Email)), u.Name, u.PasswordHash, u.Role, u.Active)
@@ -256,7 +276,11 @@ func (s *Store) Insert(ctx context.Context, u *User) (int64, error) {
 // Update saves email, name, role, and active for an existing user. It does
 // not touch the password; use UpdatePassword for that.
 func (s *Store) Update(ctx context.Context, u *User) error {
-	tag, err := s.db.Exec(ctx, `
+	return updateUser(ctx, s.db, u)
+}
+
+func updateUser(ctx context.Context, h handle, u *User) error {
+	tag, err := h.Exec(ctx, `
 		UPDATE cms_users
 		SET email = $1, name = $2, role = $3, active = $4, updated_at = now()
 		WHERE id = $5`,
@@ -277,21 +301,127 @@ func (s *Store) Update(ctx context.Context, u *User) error {
 // grants and password-reset tokens are dropped with the row, while media
 // uploads and posts survive with their user reference nulled. Returns
 // ErrNotFound when no such user exists.
+//
+// Deleting the last active superadmin is refused with ErrLastSuperadmin,
+// decided under the lock keepSuperadmin takes, so two superadmins
+// deleting each other at the same moment cannot both succeed.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	tag, err := s.db.Exec(ctx, "DELETE FROM cms_users WHERE id = $1", id)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := keepSuperadmin(ctx, tx, id); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, "DELETE FROM cms_users WHERE id = $1", id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	return tx.Commit(ctx)
+}
+
+// keepSuperadmin refuses, with ErrLastSuperadmin, a change that takes id
+// out of the active superadmins when it is the only one. It locks every
+// active superadmin row, in id order, before counting: two such changes
+// at once then queue on the same locks, and the second counts after the
+// first has committed. Counting without the lock let two superadmins
+// demote — or delete — each other at the same moment, each seeing the
+// other still there, and leave a site nobody can administer.
+func keepSuperadmin(ctx context.Context, tx *sqldb.Tx, id int64) error {
+	rows, err := tx.Query(ctx,
+		"SELECT id FROM cms_users WHERE role = $1 AND active ORDER BY id FOR UPDATE", RoleSuperadmin)
+	if err != nil {
+		return err
+	}
+	ids, err := sqldb.CollectRows(rows, func(row sqldb.Scanner) (int64, error) {
+		var v int64
+		err := row.Scan(&v)
+		return v, err
+	})
+	if err != nil {
+		return err
+	}
+	if len(ids) == 1 && ids[0] == id {
+		return ErrLastSuperadmin
+	}
 	return nil
 }
 
-// UpdatePassword replaces a user's password hash.
+// UserSave is one save of the admin's user form, which Save applies as a
+// whole or not at all.
+type UserSave struct {
+	// User is the account: ID zero creates it, and then PasswordHash on
+	// it is the new account's password. Otherwise its email, name, role
+	// and active flag are written over the stored ones.
+	User *User
+	// Permissions replaces the account's grants.
+	Permissions []Permission
+	// NewPasswordHash, on an update, replaces the password; empty keeps
+	// it. Like UpdatePassword it moves the account to a new SessionEpoch.
+	NewPasswordHash string
+	// DisableTOTP, on an update, turns two-factor off, as DisableTOTP does.
+	DisableTOTP bool
+}
+
+// Save applies a user-form save in one transaction. Done as separate
+// writes, a failure part-way left half a save: an account created with
+// no grants (and an "email already in use" on the retry), or a role
+// changed while the password the same form set was not.
+//
+// An update that ends the account's standing as an active superadmin is
+// refused with ErrLastSuperadmin when it is the last one; see
+// keepSuperadmin. Insert's and Update's errors carry through as theirs.
+func (s *Store) Save(ctx context.Context, in UserSave) error {
+	u := in.User
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if u.ID == 0 {
+		if _, err := insertUser(ctx, tx, u); err != nil {
+			return err
+		}
+	} else {
+		if u.Role != RoleSuperadmin || !u.Active {
+			if err := keepSuperadmin(ctx, tx, u.ID); err != nil {
+				return err
+			}
+		}
+		if err := updateUser(ctx, tx, u); err != nil {
+			return err
+		}
+		if in.NewPasswordHash != "" {
+			if err := setPassword(ctx, tx, u.ID, in.NewPasswordHash); err != nil {
+				return err
+			}
+		}
+		if in.DisableTOTP {
+			if err := disableTOTP(ctx, tx, u.ID); err != nil {
+				return err
+			}
+		}
+	}
+	if err := replacePermissions(ctx, tx, u.ID, in.Permissions); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdatePassword replaces a user's password hash, and moves the account
+// to a new SessionEpoch: every session it already has stops working.
 func (s *Store) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
-	tag, err := s.db.Exec(ctx,
-		"UPDATE cms_users SET password_hash = $1, updated_at = now() WHERE id = $2",
+	return setPassword(ctx, s.db, id, passwordHash)
+}
+
+func setPassword(ctx context.Context, h handle, id int64, passwordHash string) error {
+	tag, err := h.Exec(ctx,
+		"UPDATE cms_users SET password_hash = $1, session_epoch = session_epoch + 1, updated_at = now() WHERE id = $2",
 		passwordHash, id)
 	if err != nil {
 		return err

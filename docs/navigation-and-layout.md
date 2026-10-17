@@ -100,6 +100,14 @@ argument is markup to show while the region is empty, so a fresh site
 says something sensible; it disappears the moment an editor saves
 content, and comes back if they empty the region again.
 
+The fallback is written into the page exactly as given, unescaped, like
+the template around it. Pass it a literal you wrote, as above. Never pass
+it anything a visitor or an editor can influence, such as a query
+parameter or a field from your own database: that is a cross-site
+scripting hole on every page that carries the layout. The content
+editors save into the region is sanitized like any other; the fallback
+is not content, so nothing sanitizes it.
+
 Editing works exactly as it does for page content: an editor clicks into
 the footer on whichever page they are on, TinyMCE opens inline, snippets
 and images drop in, and **Save draft** stages the change. What differs is

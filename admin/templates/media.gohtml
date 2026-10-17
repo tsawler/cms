@@ -13,11 +13,11 @@
 <div class="cms-browser-bar">
     <p class="cms-tabs">
         <a {{if eq .MediaTab "images"}}class="cms-active"{{end}}
-           href="{{.AdminPath}}/media?tab=images{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Images"}} <span class="cms-tab-count">{{len .Media}}</span></a>
+           href="{{.AdminPath}}/media?tab=images{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Images"}} <span class="cms-tab-count">{{.MediaCounts.Images}}</span></a>
         <a {{if eq .MediaTab "documents"}}class="cms-active"{{end}}
-           href="{{.AdminPath}}/media?tab=documents{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Documents"}} <span class="cms-tab-count">{{len .Documents}}</span></a>
+           href="{{.AdminPath}}/media?tab=documents{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Documents"}} <span class="cms-tab-count">{{.MediaCounts.Documents}}</span></a>
         <a {{if eq .MediaTab "videos"}}class="cms-active"{{end}}
-           href="{{.AdminPath}}/media?tab=videos{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Videos"}} <span class="cms-tab-count">{{len .Videos}}</span></a>
+           href="{{.AdminPath}}/media?tab=videos{{if .MediaQuery}}&q={{.MediaQuery}}{{end}}">{{.T "Videos"}} <span class="cms-tab-count">{{.MediaCounts.Videos}}</span></a>
     </p>
     <form method="get" action="{{.AdminPath}}/media" class="cms-browser-search" role="search">
         <input type="hidden" name="tab" value="{{.MediaTab}}">
@@ -197,7 +197,10 @@
     <div class="cms-browser-body">
         <div class="cms-items-wrap">
             {{- /* Column headings, list view only. Clicking one sorts. */}}
-            <div class="cms-items-head">
+            {{- /* The server orders the items (mediaOrderFor); the script
+                   marks the column and asks for another order. */}}
+            <div class="cms-items-head" data-sort-key="{{.MediaOrder.Key}}"
+                 data-sort-dir="{{if .MediaOrder.Desc}}desc{{else}}asc{{end}}">
                 <span class="cms-col-thumb"></span>
                 <button type="button" class="cms-col-name" data-sort="name">{{.T "Name"}}</button>
                 <button type="button" class="cms-col-kind" data-sort="kind">{{.T "Type"}}</button>
@@ -300,6 +303,9 @@
                 {{else}}{{.T "No images here yet. Drop files on this page, or use Upload."}}{{end}}
             </p>
             {{end}}
+            {{- /* A page of the tab's items at a time (mediaPerPage); the
+                   same pagination bar the other admin lists use. */}}
+            {{with .Pager}}{{.HTML}}{{end}}
         </div>
 
         {{- /* Inspector: everything about one file, which is where alt text

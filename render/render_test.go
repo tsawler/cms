@@ -1011,8 +1011,8 @@ func TestLocaleURLsAndLinks(t *testing.T) {
 		{"blog/post", "fr", "/fr/blog/post"},
 	}
 	for _, tc := range cases {
-		if got := localeURL(tc.slug, tc.locale, "en"); got != tc.want {
-			t.Errorf("localeURL(%q, %q) = %q, want %q", tc.slug, tc.locale, got, tc.want)
+		if got := SlugURL(tc.slug, tc.locale, "en"); got != tc.want {
+			t.Errorf("SlugURL(%q, %q) = %q, want %q", tc.slug, tc.locale, got, tc.want)
 		}
 	}
 
@@ -1352,5 +1352,29 @@ func TestRenderSiteName(t *testing.T) {
 	}
 	if want := `<p data-name="Acme &#34;Tools&#34; &lt;b&gt;">Acme &#34;Tools&#34; &lt;b&gt;</p>`; !strings.Contains(out, want) {
 		t.Errorf("saved name in body: want %q in:\n%s", want, out)
+	}
+}
+
+// The pager's captions are text — a translation, a host's own wording —
+// and go into the markup escaped, at both ends of the bar and whether or
+// not the step is live.
+func TestPagerLabelsAreEscaped(t *testing.T) {
+	p := NewPager(2, 10, 30, func(n int) string { return "/blog?page=" + strconv.Itoa(n) })
+	p.PrevLabel, p.NextLabel = "Newer & <b>fresher</b>", `Older "posts"`
+	out := string(p.HTML())
+	for _, raw := range []string{"<b>", `"posts"`, "& <"} {
+		if strings.Contains(out, raw) {
+			t.Errorf("pager markup carries %q unescaped:\n%s", raw, out)
+		}
+	}
+	if !strings.Contains(out, "Newer &amp; &lt;b&gt;fresher&lt;/b&gt;") || !strings.Contains(out, "Older &#34;posts&#34;") {
+		t.Errorf("escaped labels missing:\n%s", out)
+	}
+
+	// The dimmed end of the bar, too.
+	first := NewPager(1, 10, 30, func(n int) string { return "/blog?page=" + strconv.Itoa(n) })
+	first.PrevLabel = "<i>none</i>"
+	if strings.Contains(string(first.HTML()), "<i>") {
+		t.Error("the dimmed step's label went in unescaped")
 	}
 }

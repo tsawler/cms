@@ -110,6 +110,7 @@
             {{end}}
         </select>
         <input type="hidden" name="thumbnail_url" value="{{.FormPost.ThumbnailURL}}">
+        {{if .MoreImages}}<p class="cms-hint">{{.T "Only the newest images are listed here; the in-place editor's image picker can browse them all."}}</p>{{end}}
         {{if .IsNew}}
         <p class="cms-hint">{{.T "This image also starts the banner at the top of the post — open the post on the site to restyle or remove it."}}</p>
         {{end}}

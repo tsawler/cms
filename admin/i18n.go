@@ -11,6 +11,7 @@ package admin
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -137,11 +138,29 @@ func (s *server) setLang(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	dest := r.Header.Get("Referer")
-	if !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
-		dest = s.deps.AdminPath + "/"
+	http.Redirect(w, r, s.backTo(r), http.StatusSeeOther)
+}
+
+// backTo is where setLang sends the user: the admin page they switched
+// language on, read from the Referer. Browsers send it as an absolute
+// URL, so it counts only when its host is the request's own and its
+// path is inside the admin; anything else — no Referer, another site,
+// the public site — lands on the dashboard. Only the path and query are
+// kept, so the redirect cannot leave the site whatever the header said.
+func (s *server) backTo(r *http.Request) string {
+	home := s.deps.AdminPath + "/"
+	ref, err := url.Parse(r.Header.Get("Referer"))
+	if err != nil || ref.Host != r.Host || ref.Path == "" {
+		return home
 	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	if ref.Path != s.deps.AdminPath && !strings.HasPrefix(ref.Path, s.deps.AdminPath+"/") {
+		return home
+	}
+	dest := ref.EscapedPath()
+	if ref.RawQuery != "" {
+		dest += "?" + ref.RawQuery
+	}
+	return dest
 }
 
 // frStrings maps every admin UI string (English, exactly as written at its
@@ -463,6 +482,7 @@ var frStrings = map[string]string{
 	"(optional — shown on listing cards)": "(facultatif — affichée sur les cartes des listes)",
 	"— no thumbnail —":                    "— aucune vignette —",
 	"(current image)":                     "(image actuelle)",
+	"Only the newest images are listed here; the in-place editor's image picker can browse them all.":               "Seules les images les plus récentes sont listées ici; le sélecteur d'images de l'éditeur sur place les parcourt toutes.",
 	"This image also starts the banner at the top of the post — open the post on the site to restyle or remove it.": "Cette image sert aussi de point de départ à la bannière en haut du billet — ouvrez le billet sur le site pour la restyler ou la retirer.",
 	"Choose from the":                                  "Choisissez dans la",
 	"media library":                                    "médiathèque",
@@ -700,6 +720,8 @@ var frStrings = map[string]string{
 	"Unknown media kind.":                                              "Type de média inconnu.",
 	"Could not load the media library.":                                "Impossible de charger la médiathèque.",
 	"That file could not be processed.":                                "Ce fichier n'a pas pu être traité.",
+	"This video already has a poster frame.":                           "Cette vidéo a déjà une image d'aperçu.",
+	"Select at most %d files at a time.":                               "Sélectionnez au plus %d fichiers à la fois.",
 	"Could not load folders.":                                          "Impossible de charger les dossiers.",
 	"Could not read the folder name.":                                  "Impossible de lire le nom du dossier.",
 	"Could not create the folder.":                                     "Impossible de créer le dossier.",

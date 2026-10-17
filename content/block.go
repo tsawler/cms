@@ -80,10 +80,15 @@ func (s *Store) EffectiveBlocks(ctx context.Context, pageID int64, locale string
 // so both come from the dialect.
 func (s *Store) HasUnpublishedChanges(ctx context.Context, pageID int64) (bool, error) {
 	d := s.db.Dialect()
-	blockSet := `SELECT region, locale, sort, kind, coalesce(snippet_key, ''), content, ` +
-		d.JSONText("settings") + `
+	// Text compared as bytes (BinaryText), so an edit that only changes
+	// case or accents — "Iphone" to "iPhone", "resume" to "résumé" —
+	// counts on MySQL as it does on Postgres.
+	bin := d.BinaryText
+	blockSet := `SELECT ` + bin("region") + `, ` + bin("locale") + `, sort, ` + bin("kind") + `, ` +
+		bin("coalesce(snippet_key, '')") + `, ` + bin("content") + `, ` + d.JSONText("settings") + `
 		FROM cms_blocks WHERE page_id = $1 AND status = `
-	const metaSet = `SELECT locale, title, description, meta_description
+	metaSet := `SELECT ` + bin("locale") + `, ` + bin("title") + `, ` + bin("description") + `, ` +
+		bin("meta_description") + `
 		FROM cms_page_meta WHERE page_id = $1 AND status = `
 	var changed bool
 	err := s.db.QueryRow(ctx, `
@@ -113,6 +118,10 @@ func (s *Store) DeleteLocaleContent(ctx context.Context, pageID int64, locale st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM cms_blocks WHERE page_id = $1 AND locale = $2 AND status = 'draft'`,
 		pageID, locale); err != nil {
@@ -140,6 +149,10 @@ func (s *Store) ReplaceDraftSections(ctx context.Context, pageID int64, region, 
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM cms_blocks
@@ -171,4 +184,20 @@ func (s *Store) UpsertDraftBlock(ctx context.Context, pageID int64, region, loca
 		DO UPDATE SET content = EXCLUDED.content, kind = EXCLUDED.kind, updated_at = now()`,
 		pageID, region, locale, kind, content)
 	return err
+}
+
+// PageHTML returns the content of every HTML block the page holds, in any
+// region, locale or status — the markup as stored, for questions about
+// what the page already carries rather than what it shows.
+func (s *Store) PageHTML(ctx context.Context, pageID int64) ([]string, error) {
+	rows, err := s.db.Query(ctx,
+		"SELECT content FROM cms_blocks WHERE page_id = $1 AND kind = 'html'", pageID)
+	if err != nil {
+		return nil, err
+	}
+	return sqldb.CollectRows(rows, func(row sqldb.Scanner) (string, error) {
+		var html string
+		err := row.Scan(&html)
+		return html, err
+	})
 }

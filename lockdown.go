@@ -204,7 +204,7 @@ func (c *CMS) superadminContext(r *http.Request) (context.Context, bool) {
 		return nil, false
 	}
 	u, err := c.users.GetByID(ctx, id)
-	if err != nil || !u.Active || !u.Role.IsSuperadmin() {
+	if err != nil || !u.Active || !u.Role.IsSuperadmin() || !sessiondata.EpochCurrent(ctx, c.sessions, u.SessionEpoch) {
 		return nil, false
 	}
 	return ctx, true
@@ -223,14 +223,45 @@ func (c *CMS) serveLocked(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", robotsDirective)
 	w.Header().Set("Cache-Control", "no-store")
 	if c.cfg.LockedHandler != nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		c.cfg.LockedHandler.ServeHTTP(w, r)
+		lw := &lockedWriter{ResponseWriter: w}
+		c.cfg.LockedHandler.ServeHTTP(lw, r)
+		lw.commit(http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	_, _ = w.Write(lockedPage)
 }
+
+// lockedWriter is the ResponseWriter a LockedHandler writes through. It
+// holds the 503 back until the handler's first Write or WriteHeader, so
+// the headers the handler sets — its Content-Type, its own caching — are
+// still open to it when it sets them. Sending the status before calling
+// the handler froze the headers there, and the handler's were dropped.
+// A status the handler sets explicitly is its own to choose.
+type lockedWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+// commit sends status unless something already has.
+func (lw *lockedWriter) commit(status int) {
+	if !lw.wrote {
+		lw.wrote = true
+		lw.ResponseWriter.WriteHeader(status)
+	}
+}
+
+func (lw *lockedWriter) WriteHeader(status int) { lw.commit(status) }
+
+func (lw *lockedWriter) Write(b []byte) (int, error) {
+	lw.commit(http.StatusServiceUnavailable)
+	return lw.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer — to
+// flush, or to set a deadline — as it would without the wrapper.
+func (lw *lockedWriter) Unwrap() http.ResponseWriter { return lw.ResponseWriter }
 
 // lockedPage is the built-in notice, kept deliberately plain: it is
 // served by a site whose own templates, stylesheet, and media may be

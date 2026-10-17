@@ -244,27 +244,39 @@ export function hideSnipUI() {
 // Called by the smaller pill once it knows where it is going, which is
 // also the order the click handler and the scroll listener place them
 // in: the block chrome first, then whatever rides alongside it. Returns
-// the top the caller should use — its own, normally, or a lower one for
-// the case where there is no room above to lift anything into.
+// the { top, left } the caller should use — its own, normally, or a
+// spot beside the block chrome for the case where there is no room
+// above to lift anything into.
 var CHROME_GAP = 6;
 function clearSnipUI(left, top, width, height) {
+    var keep = { top: top, left: left };
     var snip = $("snip-ui");
-    if (!snip.classList.contains("on")) return top;
+    if (!snip.classList.contains("on")) return keep;
     var s = snip.getBoundingClientRect();
-    if (!s.width) return top;
+    if (!s.width) return keep;
     // Side by side with a gap between them, or already stacked: nothing
     // is covering anything. The gap is on the horizontal test only —
     // two pills that merely touch read as one long pill, while the
     // vertical stack this produces is meant to sit close.
-    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return top;
-    if (s.bottom <= top || s.top >= top + height) return top;
+    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return keep;
+    if (s.bottom <= top || s.top >= top + height) return keep;
     var lift = top - s.height - CHROME_GAP;
+    if (lift >= 64) {
+        snip.style.top = lift + "px";
+        return keep;
+    }
     // Lifting the block chrome under TinyMCE's toolbar is no better than
-    // leaving it underneath the pill. With no room above, the smaller
-    // pill takes the lower lane instead and sits inside its element.
-    if (lift < 64) return s.bottom + CHROME_GAP;
-    snip.style.top = lift + "px";
-    return top;
+    // leaving it underneath the pill. With no room above, the block
+    // chrome has already dropped into its block's top padding, and a
+    // pill stacked below it lands on the first line of text — the very
+    // thing it is there to help edit. So the pill gives up its centring
+    // instead and moves alongside, on whichever side has room; the tint
+    // on the active cell still says which column it acts on.
+    var maxLeft = window.innerWidth - width - 8;
+    if (s.right + CHROME_GAP <= maxLeft) return { top: top, left: s.right + CHROME_GAP };
+    if (s.left - CHROME_GAP - width >= 8) return { top: top, left: s.left - CHROME_GAP - width };
+    // Too narrow for both side by side: the lower lane, inside its element.
+    return { top: s.bottom + CHROME_GAP, left: left };
 }
 
 // moveBlock trades a block with its neighbour above or below. Sections
@@ -498,9 +510,11 @@ function placeColUI() {
     var left = Math.max(8, Math.min(r.left + (r.width - box.width) / 2,
         window.innerWidth - box.width - 8));
     // A narrow column centres this pill on top of the block chrome; one
-    // of the two has to move, and it is not this one.
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    // of the two has to move, and it is the block chrome unless there is
+    // no room above to lift it into.
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
 }
 
 // markActiveCell tints the one column every button on the toolbar acts
@@ -653,8 +667,9 @@ function placeFaqUI() {
         window.innerWidth - box.width - 8));
     // Right-aligned is clear of the block chrome in anything but a
     // narrow column, where the two edges are the same edge.
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
 }
 
 function showFaqUI(block, target) {
@@ -734,8 +749,9 @@ function placeTeamUI() {
         window.innerWidth - box.width - 8));
     // A card only a little wider than the pill puts it over the block
     // chrome, the same way a narrow column does.
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
 }
 
 function showTeamUI(root, target) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -311,6 +312,11 @@ func TestMediaSetPoster(t *testing.T) {
 			t.Fatalf("URL(poster) before SetPoster = %q, want empty", url)
 		}
 
+		// Undecodable poster data is refused and leaves the record alone.
+		if _, err := m.SetPoster(ctx, md.ID, "en", []byte("not an image")); err == nil {
+			t.Error("SetPoster(garbage) succeeded, want an error")
+		}
+
 		got, err := m.SetPoster(ctx, md.ID, "en", testImage(t, 100, 50, "png"))
 		if err != nil {
 			t.Fatalf("SetPoster: %v", err)
@@ -339,9 +345,23 @@ func TestMediaSetPoster(t *testing.T) {
 			}
 		}
 
-		// Undecodable poster data is refused and leaves the record alone.
-		if _, err := m.SetPoster(ctx, md.ID, "en", []byte("not an image")); err == nil {
-			t.Error("SetPoster(garbage) succeeded, want an error")
+		// A poster is never replaced: objects are served immutable and
+		// pages hold the poster's URL, so a new frame under the same keys
+		// would not reach anyone who had the old one. The stored frame and
+		// record stay as they were.
+		webKey := "media/" + md.StoreKey + "/web.webp"
+		before, _, _ := objects.Get(ctx, webKey)
+		was, _ := io.ReadAll(before)
+		if _, err := m.SetPoster(ctx, md.ID, "en", testImage(t, 60, 60, "png")); !errors.Is(err, ErrPosterExists) {
+			t.Errorf("replacing a poster: err = %v, want ErrPosterExists", err)
+		}
+		after, _, _ := objects.Get(ctx, webKey)
+		now, _ := io.ReadAll(after)
+		if !bytes.Equal(was, now) {
+			t.Error("a refused replacement rewrote the poster object")
+		}
+		if again, _ := m.GetByID(ctx, md.ID, "en"); again.Width != 100 || again.Height != 50 {
+			t.Errorf("a refused replacement changed the record to %dx%d", again.Width, again.Height)
 		}
 
 		// Only videos take a poster.
@@ -484,6 +504,78 @@ func TestMediaDelete(t *testing.T) {
 		}
 		if err := m.Delete(ctx, md.ID, "en"); !errors.Is(err, ErrNotFound) {
 			t.Errorf("Delete(already gone) = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// trippingStore is a memStore whose Delete can be made to fail on the
+// way through: by cancelling the context the caller is using once the
+// manifest is gone — so the next database statement fails — or by
+// refusing to delete a binary.
+type trippingStore struct {
+	*memStore
+	manifestDeleted func() // called once the manifest is deleted
+	failObjects     bool
+}
+
+func (s *trippingStore) Delete(ctx context.Context, key string) error {
+	if strings.HasSuffix(key, ".json") {
+		err := s.memStore.Delete(ctx, key)
+		if s.manifestDeleted != nil {
+			s.manifestDeleted()
+		}
+		return err
+	}
+	if s.failObjects {
+		return errors.New("bucket says no")
+	}
+	return s.memStore.Delete(ctx, key)
+}
+
+// A delete that fails part-way leaves the item whole, never a library
+// entry pointing at objects already gone: the row goes before the
+// binaries, and a row that will not delete gets its manifest back. A
+// binary that will not delete is only an orphan in the bucket.
+func TestMediaDeleteFailingPartWay(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		store := &trippingStore{memStore: newMemStore()}
+		m := NewManager(db, store, newTestLogger())
+		md, err := m.Upload(ctx, "kept.png", testImage(t, 10, 10, "png"), 0, nil)
+		if err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		objectsBefore := store.len()
+
+		// The row delete fails: the context dies between the manifest
+		// and the row.
+		dying, cancel := context.WithCancel(ctx)
+		store.manifestDeleted = cancel
+		if err := m.Delete(dying, md.ID, "en"); err == nil {
+			t.Fatal("Delete succeeded although its row delete could not run")
+		}
+		store.manifestDeleted = nil
+		if _, err := m.GetByID(ctx, md.ID, "en"); err != nil {
+			t.Fatalf("the row is gone after a failed delete: %v", err)
+		}
+		if got := store.len(); got != objectsBefore {
+			t.Errorf("a failed delete left %d of %d objects (manifest included)", got, objectsBefore)
+		}
+		if len(store.keys(m.manifestKey(md.ItemID()))) == 0 {
+			t.Error("a failed delete did not put the manifest back")
+		}
+
+		// The binaries will not delete: the item is still gone from the
+		// library, and the delete succeeds.
+		store.failObjects = true
+		if err := m.Delete(ctx, md.ID, "en"); err != nil {
+			t.Fatalf("Delete with undeletable binaries: %v", err)
+		}
+		if _, err := m.GetByID(ctx, md.ID, "en"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("GetByID after Delete = %v, want ErrNotFound", err)
+		}
+		if len(store.keys(m.manifestKey(md.ItemID()))) != 0 {
+			t.Error("the manifest outlived the row")
 		}
 	})
 }
@@ -716,6 +808,126 @@ func TestMediaUploadedByReferencesUser(t *testing.T) {
 		}
 		if got.UploadedBy == nil || *got.UploadedBy != userID {
 			t.Errorf("uploaded_by = %v, want %d", got.UploadedBy, userID)
+		}
+	})
+}
+
+// The listing reads a window at a time, counts what the window is out
+// of, counts per kind for the tabs, and fetches or moves a selection in
+// one statement.
+func TestMediaPagingCountsAndSelections(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		m, _ := newTestManager(db)
+		var images []*Media
+		for i := range 5 {
+			md, err := m.Upload(ctx, fmt.Sprintf("img-%d.png", i), testImage(t, 10, 10, "png"), 0, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			images = append(images, md)
+		}
+		doc, err := m.Upload(ctx, "notes.txt", []byte("plain words"), 0, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		imagesOnly := ListOptions{Kind: KindImage}
+		if n, err := m.CountMatching(ctx, imagesOnly); err != nil || n != 5 {
+			t.Fatalf("CountMatching(images) = %d, %v; want 5", n, err)
+		}
+		var seen []int64
+		for offset := 0; offset < 5; offset += 2 {
+			opts := imagesOnly
+			opts.Limit, opts.Offset = 2, offset
+			page, err := m.All(ctx, "en", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := min(2, 5-offset); len(page) != want {
+				t.Errorf("window at %d holds %d items, want %d", offset, len(page), want)
+			}
+			for _, md := range page {
+				seen = append(seen, md.ID)
+			}
+		}
+		if len(seen) != 5 || seen[0] != images[4].ID {
+			t.Errorf("paging through gave %v, want all five, newest first", seen)
+		}
+
+		byKind, err := m.CountByKind(ctx, ListOptions{Kind: KindImage, Unfiled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if byKind[KindImage] != 5 || byKind[KindFile] != 1 || byKind[KindVideo] != 0 {
+			t.Errorf("CountByKind = %v, want 5 images and 1 file whatever opts.Kind says", byKind)
+		}
+
+		picked, err := m.ByIDs(ctx, []int64{images[0].ID, doc.ID, 999999}, "en")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(picked) != 2 {
+			t.Errorf("ByIDs found %d items, want the 2 that exist", len(picked))
+		}
+
+		folder, err := m.CreateFolder(ctx, "Batch", KindImage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := m.MoveMany(ctx, []int64{images[0].ID, images[1].ID, 999999}, &folder.ID)
+		if err != nil || n != 2 {
+			t.Fatalf("MoveMany = %d, %v; want the 2 that exist moved", n, err)
+		}
+		if inFolder, _ := m.CountMatching(ctx, ListOptions{FolderID: &folder.ID}); inFolder != 2 {
+			t.Errorf("folder holds %d items after MoveMany, want 2", inFolder)
+		}
+	})
+}
+
+// A paged listing is ordered by the database, by the chosen column, on
+// every engine alike: names regardless of case, either direction, the id
+// breaking ties; with no column, newest first.
+func TestMediaListingOrders(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		m, _ := newTestManager(db)
+		// Uploaded in an order that is neither alphabetical nor by size.
+		for _, up := range []struct {
+			name string
+			w    int
+		}{{"banana.png", 30}, {"Cherry.png", 10}, {"apple.png", 20}} {
+			if _, err := m.Upload(ctx, up.name, testImage(t, up.w, 10, "png"), 0, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		names := func(opts ListOptions) string {
+			t.Helper()
+			items, err := m.All(ctx, "en", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, md := range items {
+				out = append(out, strings.TrimSuffix(md.Filename, ".png"))
+			}
+			return strings.Join(out, " ")
+		}
+		cases := []struct {
+			opts ListOptions
+			want string
+		}{
+			{ListOptions{}, "apple Cherry banana"},
+			{ListOptions{Sort: "name"}, "apple banana Cherry"},
+			{ListOptions{Sort: "name", Desc: true}, "Cherry banana apple"},
+			{ListOptions{Sort: "dims"}, "Cherry apple banana"},
+			{ListOptions{Sort: "name", Limit: 2, Offset: 1}, "banana Cherry"},
+			{ListOptions{Sort: "no-such-column"}, "apple Cherry banana"},
+		}
+		for _, c := range cases {
+			if got := names(c.opts); got != c.want {
+				t.Errorf("%+v: got %q, want %q", c.opts, got, c.want)
+			}
 		}
 	})
 }

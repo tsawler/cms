@@ -648,3 +648,54 @@ func TestAPIWriteHandlersOnAMissingPage(t *testing.T) {
 		}
 	})
 }
+
+// An editor's section keeps ordinary classes, arbitrary-value ones the
+// host's snippets vouch for, and ones the page already carries — and
+// loses any arbitrary-value class of their own making, which would
+// otherwise compile into the site-wide stylesheet. An admin's markup is
+// stored as sent.
+func TestAPISaveSectionsDropsUnvouchedArbitraryClasses(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := formServer(t, db)
+		s.deps.VouchedClasses = func(context.Context) (map[string]bool, error) {
+			return map[string]bool{"shadow-[0_6px_22px_rgba(51,48,46,0.07)]": true}, nil
+		}
+		editor := formEditor(t, s)
+		admin := formAdmin(t, s)
+		page := seedPage(t, s, &content.Page{Slug: "sections-classes", Title: "Classes"})
+
+		// An administrator's markup is already on the page.
+		rec := httptest.NewRecorder()
+		s.apiSaveSections(rec, jsonReq(t, s, admin, http.MethodPost, "/api/x",
+			`{"region":"main","sections":[{"html":"<h2 class=\"text-[23px]\">Hello</h2>"}]}`, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("admin save = %d: %s", rec.Code, rec.Body.String())
+		}
+
+		hostile := `<h2 class=\"text-[23px] shadow-[0_6px_22px_rgba(51,48,46,0.07)] [background:url(//evil/x)] bg-[url(//evil/y)] font-bold\">Hello</h2>` +
+			`<div class=\"[body:has(&)_*]:hidden\">x</div>`
+		body := `{"region":"main","sections":[{"html":"` + hostile + `"}]}`
+		rec = httptest.NewRecorder()
+		s.apiSaveSections(rec, jsonReq(t, s, editor, http.MethodPost, "/api/x", body, page.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("editor save = %d: %s", rec.Code, rec.Body.String())
+		}
+		got := sectionsOf(t, s, page.ID, "main", "en")[0].Content
+		for _, bad := range []string{"evil", "body:has"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("an editor's arbitrary class %q survived: %q", bad, got)
+			}
+		}
+		for _, kept := range []string{"text-[23px]", "shadow-[0_6px_22px_rgba(51,48,46,0.07)]", "font-bold"} {
+			if !strings.Contains(got, kept) {
+				t.Errorf("class %q was dropped: %q", kept, got)
+			}
+		}
+
+		rec = httptest.NewRecorder()
+		s.apiSaveSections(rec, jsonReq(t, s, admin, http.MethodPost, "/api/x", body, page.ID))
+		if got := sectionsOf(t, s, page.ID, "main", "en")[0].Content; !strings.Contains(got, "[background:url(//evil/x)]") {
+			t.Errorf("an admin's classes = %q, want them stored as sent", got)
+		}
+	})
+}

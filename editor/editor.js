@@ -2783,16 +2783,22 @@
   }
   var CHROME_GAP = 6;
   function clearSnipUI(left, top, width, height) {
+    var keep = { top, left };
     var snip = $("snip-ui");
-    if (!snip.classList.contains("on")) return top;
+    if (!snip.classList.contains("on")) return keep;
     var s = snip.getBoundingClientRect();
-    if (!s.width) return top;
-    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return top;
-    if (s.bottom <= top || s.top >= top + height) return top;
+    if (!s.width) return keep;
+    if (s.right + CHROME_GAP <= left || s.left >= left + width + CHROME_GAP) return keep;
+    if (s.bottom <= top || s.top >= top + height) return keep;
     var lift = top - s.height - CHROME_GAP;
-    if (lift < 64) return s.bottom + CHROME_GAP;
-    snip.style.top = lift + "px";
-    return top;
+    if (lift >= 64) {
+      snip.style.top = lift + "px";
+      return keep;
+    }
+    var maxLeft = window.innerWidth - width - 8;
+    if (s.right + CHROME_GAP <= maxLeft) return { top, left: s.right + CHROME_GAP };
+    if (s.left - CHROME_GAP - width >= 8) return { top, left: s.left - CHROME_GAP - width };
+    return { top: s.bottom + CHROME_GAP, left };
   }
   function moveBlock(dir) {
     if (!activeSnip) return;
@@ -2947,8 +2953,9 @@
       r.left + (r.width - box.width) / 2,
       window.innerWidth - box.width - 8
     ));
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
   }
   function markActiveCell(cell) {
     document.querySelectorAll(".cms-col-active").forEach(function(el) {
@@ -3047,8 +3054,9 @@
       r.right - box.width,
       window.innerWidth - box.width - 8
     ));
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
   }
   function showFaqUI(block, target) {
     var info = faqTarget(block, target);
@@ -3096,8 +3104,9 @@
       r.left + (r.width - box.width) / 2,
       window.innerWidth - box.width - 8
     ));
-    ui.style.top = clearSnipUI(left, top, box.width, box.height) + "px";
-    ui.style.left = left + "px";
+    var at = clearSnipUI(left, top, box.width, box.height);
+    ui.style.top = at.top + "px";
+    ui.style.left = at.left + "px";
   }
   function showTeamUI(root, target) {
     var info = teamTarget(root, target);
@@ -4762,8 +4771,8 @@
             });
           }
         });
-        ed.on("input change undo redo SetContent", function() {
-          if (ed.isDirty()) onDirty();
+        ed.on("input change undo redo SetContent dirty", function() {
+          if (ed.isDirty() && !tearingDown) onDirty();
         });
         ed.on("undo redo SetContent", function() {
           hideChrome();
@@ -4782,14 +4791,20 @@
     }].concat(styleFormats);
     window.tinymce.init(opts);
   }
+  var tearingDown = false;
   function removeRichEditors() {
-    Object.keys(state.mceEditors).forEach(function(name) {
-      state.mceEditors[name].remove();
-    });
+    tearingDown = true;
+    try {
+      Object.keys(state.mceEditors).forEach(function(name) {
+        state.mceEditors[name].remove();
+      });
+      state.sectionEditors.forEach(function(s) {
+        s.ed.remove();
+      });
+    } finally {
+      tearingDown = false;
+    }
     state.mceEditors = {};
-    state.sectionEditors.forEach(function(s) {
-      s.ed.remove();
-    });
     state.sectionEditors = [];
     state.lastEditor = null;
     state.lastEditorDirty = null;
@@ -6636,14 +6651,26 @@
     side.appendChild(newf);
   }
   var lastItems = [];
-  function loadMedia() {
+  var moreItems = false;
+  var loadSeq = 0;
+  function loadMedia(more) {
     var grid = $("grid");
-    grid.innerHTML = '<span class="empty">Loading\u2026</span>';
-    var params = "?kind=" + pickerKind + (pickerQuery ? "&q=" + encodeURIComponent(pickerQuery) : "") + (pickerFolder ? "&folder=" + encodeURIComponent(pickerFolder) : "");
+    var seq = ++loadSeq;
+    if (!more) grid.innerHTML = '<span class="empty">Loading\u2026</span>';
+    var params = "?kind=" + pickerKind + (pickerQuery ? "&q=" + encodeURIComponent(pickerQuery) : "") + (pickerFolder ? "&folder=" + encodeURIComponent(pickerFolder) : "") + (more ? "&offset=" + lastItems.length : "");
     api("/media" + params, { method: "GET" }).then(function(body) {
-      lastItems = body.media || [];
+      if (seq !== loadSeq) return;
+      var page = body.media || [];
+      lastItems = more ? lastItems.concat(page) : page;
+      moreItems = !!body.more;
       renderItems(lastItems);
     }).catch(function(err) {
+      if (seq !== loadSeq) return;
+      if (more) {
+        renderItems(lastItems);
+        flash(err.message);
+        return;
+      }
       grid.innerHTML = "";
       var span = document.createElement("span");
       span.className = "empty";
@@ -6704,6 +6731,18 @@
       });
       grid.appendChild(el);
     });
+    if (moreItems) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "more";
+      btn.textContent = "Load more";
+      btn.addEventListener("click", function() {
+        btn.disabled = true;
+        btn.textContent = "Loading\u2026";
+        loadMedia(true);
+      });
+      grid.appendChild(btn);
+    }
   }
   function pick(item2) {
     if (pickerHandler) pickerHandler(item2);
@@ -7685,7 +7724,20 @@
     });
     return out;
   }
+  function settleTyping(ed) {
+    var um = ed.undoManager;
+    if (um && um.typing) {
+      um.typing = false;
+      um.add();
+    }
+  }
   function save() {
+    Object.keys(state.mceEditors).forEach(function(name) {
+      settleTyping(state.mceEditors[name]);
+    });
+    state.sectionEditors.forEach(function(s) {
+      settleTyping(s.ed);
+    });
     var values = collect();
     var secRegions = Object.keys(state.sectionsDirty);
     var titleDirty = state.titleDirty;
@@ -8176,6 +8228,9 @@ background:#f4f5f7;border-radius:6px;font-size:20px;flex-shrink:0}
 .items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .items.list .sz{color:#667085;font-size:12px;white-space:nowrap}
 .empty{color:#667085;font-size:13px}
+/* The next page of the library: a full row of its own under the tiles. */
+.items .more{grid-column:1/-1;justify-self:center;margin:6px 0}
+.items.list .more{display:block;margin:10px auto}
 
 /* ---- snippet drawer: slides out leftward from beside the tool
    rail (non-modal, so drag-and-drop can reach the page) ---- */
