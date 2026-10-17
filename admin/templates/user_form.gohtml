@@ -16,17 +16,23 @@
         {{with index .FormErrors "name"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
+    {{- /* Read-only rather than disabled, so the unchanged address is
+         still submitted: the handler refuses a locked account's form if
+         the email differs from the stored one. */}}
     <div class="cms-field">
         <label for="email">{{.T "Email"}}</label>
-        <input type="email" id="email" name="email" value="{{.FormUser.Email}}" autocomplete="off" required>
+        <input type="email" id="email" name="email" value="{{.FormUser.Email}}" autocomplete="off" required {{if .CredentialsLocked}}readonly{{end}}>
         {{with index .FormErrors "email"}}<p class="cms-field-error">{{.}}</p>{{end}}
+        {{if .CredentialsLocked}}<p class="cms-hint">{{.T "This account holds permissions you don't, so only someone who holds them can change its email, password or two-factor authentication."}}</p>{{end}}
     </div>
 
+    {{if not .CredentialsLocked}}
     <div class="cms-field">
         <label for="password">{{if .IsNew}}{{.T "Password"}}{{else}}{{.T "New password"}} <span class="cms-muted">{{.T "(leave blank to keep current)"}}</span>{{end}}</label>
         <input type="password" id="password" name="password" autocomplete="new-password" {{if .IsNew}}required{{end}}>
         {{with index .FormErrors "password"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
+    {{end}}
 
     <div class="cms-field">
         <label for="role">{{.T "Role"}}</label>
@@ -90,7 +96,7 @@
         {{with index .FormErrors "active"}}<p class="cms-field-error">{{.}}</p>{{end}}
     </div>
 
-    {{if and (not .IsNew) .FormUser.TwoFactorEnabled}}
+    {{if and (not .IsNew) (not .CredentialsLocked) .FormUser.TwoFactorEnabled}}
     <div class="cms-field cms-field-check">
         <label>
             <input type="checkbox" name="reset_totp">

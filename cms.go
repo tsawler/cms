@@ -42,6 +42,7 @@ import (
 	"github.com/tsawler/cms/internal/redisstore"
 	"github.com/tsawler/cms/internal/sessiondata"
 	"github.com/tsawler/cms/internal/sessionstore"
+	"github.com/tsawler/cms/internal/shortcache"
 	"github.com/tsawler/cms/internal/sqldb"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/migrations"
@@ -144,8 +145,12 @@ type Config struct {
 	// driver DB was opened with — database/sql does not expose that, so it
 	// cannot be detected.
 	//
-	// MySQL DSNs must set parseTime=true so timestamps scan into time.Time;
-	// the CMS sets the session time zone to UTC itself.
+	// A MySQL or MariaDB DSN must carry
+	// parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true:
+	// timestamps scanning into time.Time as UTC, a server session that
+	// agrees with them, and UPDATEs that report rows matched rather than
+	// rows changed. The CMS cannot set these itself, so Migrate checks
+	// for them and fails, naming whichever are missing.
 	Dialect string
 
 	// Locales lists the content locales the site supports, e.g.
@@ -215,10 +220,12 @@ type Config struct {
 	// visitor sees while the site is closed. nil, the default, serves a
 	// plain built-in notice.
 	//
-	// Whatever it writes, Lockdown has already set the status to 503 and
-	// the headers that go with it; a handler that writes its own status
-	// overrides that, which is almost always a mistake — a closed site
-	// answering 200 is a closed site being indexed.
+	// Lockdown sets Retry-After, X-Robots-Tag: noindex and
+	// Cache-Control: no-store before calling it, and the handler may add
+	// to or change any header until it first writes. The response is a
+	// 503 unless the handler calls WriteHeader with a status of its own,
+	// which is almost always a mistake — a closed site answering 200 is a
+	// closed site being indexed.
 	LockedHandler http.Handler
 
 	// SessionLifetime is how long a login session lasts. Defaults to 24h.
@@ -600,6 +607,11 @@ const MinSeedPasswordLength = 8
 // a dashboard that charts a week, at a negligible storage cost.
 const pageViewRetentionDays = 90
 
+// pageViewFlushInterval is how often counted page views are added to the
+// database. A crash loses at most this much of the count — of a chart
+// that shows days. A variable so tests need not wait it out.
+var pageViewFlushInterval = 30 * time.Second
+
 // CMS is the root object of the module. Create one with New.
 type CMS struct {
 	cfg Config
@@ -628,13 +640,28 @@ type CMS struct {
 	closers   []func() error
 	closeOnce sync.Once
 
+	// The work the CMS starts on its own after New — the search backfill,
+	// stylesheet rebuilds — runs under bgCtx, which Close cancels before
+	// waiting on bgWait. See background.
+	bgMu     sync.Mutex
+	bgCtx    context.Context
+	bgStop   context.CancelFunc
+	bgClosed bool
+	bgWait   sync.WaitGroup
+
+	// Public page views, counted in memory and added to the database in
+	// batches. See countPageView.
+	viewsMu    sync.Mutex
+	views      map[pageViewKey]int
+	viewsStart sync.Once
+
 	// The site settings, cached: every public response consults the site
 	// mode, including the media and asset routes that read no settings
 	// otherwise. See siteSettings.
-	siteMu  sync.Mutex
-	siteVal content.SiteSettings
-	siteAt  time.Time
-	siteOK  bool // whether siteVal is a reading rather than a zero value
+	siteCache *shortcache.Cache[content.SiteSettings]
+	// The menus, cached the same way: every page render draws them. See
+	// menuItems.
+	menuCache *shortcache.Cache[[]content.MenuItem]
 
 	// The sitemap, cached in two halves, because they cost differently
 	// and go stale for different reasons. See serveSitemap.
@@ -785,6 +812,18 @@ func New(cfg Config) (*CMS, error) {
 	// than rediscovered later, so a thing that outlives the CMS has to be
 	// added here to exist at all.
 	var closers []func() error
+	// A New that fails part-way stops what it had already started: the
+	// session store's cleanup goroutine, or the Redis client's pool. A
+	// host that retries New, and every test that expects it to fail,
+	// would otherwise pile them up.
+	built := false
+	defer func() {
+		if !built {
+			for _, closer := range closers {
+				_ = closer()
+			}
+		}
+	}()
 	if cfg.Redis != nil {
 		if cfg.Redis.Addr == "" {
 			return nil, errors.New("cms: Config.Redis.Addr is required when Redis is set")
@@ -881,16 +920,18 @@ func New(cfg Config) (*CMS, error) {
 	}
 
 	c := &CMS{
-		cfg:      cfg,
-		db:       db,
-		closers:  closers,
-		sessions: sessions,
-		users:    users,
-		content:  contentStore,
-		renderer: renderer,
-		code:     codeStore,
-		media:    mediaManager,
-		objects:  objects,
+		cfg:       cfg,
+		db:        db,
+		closers:   closers,
+		siteCache: shortcache.New[content.SiteSettings](siteModeCacheTTL),
+		menuCache: shortcache.New[[]content.MenuItem](siteModeCacheTTL),
+		sessions:  sessions,
+		users:     users,
+		content:   contentStore,
+		renderer:  renderer,
+		code:      codeStore,
+		media:     mediaManager,
+		objects:   objects,
 	}
 	if cfg.Tailwind != nil {
 		c.cssBuilder = &cssRebuilder{c: c}
@@ -898,6 +939,7 @@ func New(cfg Config) (*CMS, error) {
 	c.admin = admin.New(admin.Deps{
 		// Nil-safe: schedule is a no-op when Tailwind isn't configured.
 		ContentChanged: c.cssBuilder.schedule,
+		Changed:        c.clearCaches,
 		// The same briefly-cached reading the public side stamps its
 		// responses from, so the sidebar and the site cannot disagree
 		// about which mode the site is in.
@@ -918,6 +960,7 @@ func New(cfg Config) (*CMS, error) {
 		Captcha:        capClient,
 		Mailer:         cfg.Mailer,
 		ConfigSnippets: cfg.Snippets,
+		VouchedClasses: c.vouchedClasses,
 		SectionStyles:  cfg.SectionStyles,
 		PostTemplate:   cfg.PostTemplate,
 		SearchTemplate: cfg.SearchTemplate,
@@ -939,6 +982,7 @@ func New(cfg Config) (*CMS, error) {
 		MaxRequestBytes: cfg.AdminMaxRequestBytes,
 		Version:         Version(),
 	})
+	built = true
 	return c, nil
 }
 
@@ -1025,6 +1069,14 @@ func collectPermissions(declared []PermissionDef, sections []AdminSection) ([]Pe
 func (c *CMS) Migrate(ctx context.Context) error {
 	if err := migrations.Run(ctx, c.db, c.cfg.Logger); err != nil {
 		return err
+	}
+	// MySQL's correctness hangs on DSN settings only the host can make;
+	// a missing one fails here, at startup, rather than as sessions that
+	// expire hours early or saves that report "not found".
+	if sc, ok := c.db.Dialect().(dialect.SessionChecker); ok {
+		if err := sc.CheckSession(ctx, c.db.Execer()); err != nil {
+			return fmt.Errorf("cms: %w", err)
+		}
 	}
 	// Traffic counters past their retention. Startup is the one moment
 	// every deployment reliably has, and a miss just waits for the next
@@ -1168,11 +1220,13 @@ func (c *CMS) SeedHomePage(ctx context.Context, templateName, title string) (boo
 	return true, nil
 }
 
-// Close releases what New started in the background: the session store's
-// expiry sweep, and the Redis connection pool when sessions live there.
-// It is safe to call more than once, and safe not to call at all in a
-// process that is about to exit anyway — which is why nothing has needed
-// it until now.
+// Close releases what the CMS started in the background: the session
+// store's expiry sweep, the Redis connection pool when sessions live
+// there, and work begun since New — a stylesheet rebuild, the one-time
+// search backfill — which it cancels and waits for, so none of it
+// outlives the call. It is safe to call more than once, and safe not to
+// call at all in a process that is about to exit anyway — which is why
+// nothing has needed it until now.
 //
 // Where it does matter is a process that builds more than one CMS: tests,
 // and hosts that rebuild on reload. Each one used to leave a goroutine
@@ -1187,6 +1241,23 @@ func (c *CMS) SeedHomePage(ctx context.Context, templateName, title string) (boo
 func (c *CMS) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
+		// Background work first: it queries the database through the
+		// stores, and it is told to stop and waited for before anything
+		// it might still be using goes away.
+		c.bgMu.Lock()
+		c.bgClosed = true
+		if c.bgStop != nil {
+			c.bgStop()
+		}
+		c.bgMu.Unlock()
+		c.bgWait.Wait()
+		// What was counted since the last flush goes in now, while the
+		// stores are still open. A context of its own: the background
+		// one has just been cancelled.
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		c.flushPageViews(flushCtx)
+		cancel()
+
 		errs := make([]error, 0, len(c.closers))
 		for _, closer := range c.closers {
 			errs = append(errs, closer())
@@ -1194,6 +1265,28 @@ func (c *CMS) Close() error {
 		err = errors.Join(errs...)
 	})
 	return err
+}
+
+// background runs f in a goroutine of the CMS's own, under a context that
+// Close cancels, and reports whether it started it. Close then waits for
+// it, so nothing the CMS began outlives it — a rebuild or a backfill no
+// longer runs on against a pool the host has since closed. After Close,
+// nothing starts.
+func (c *CMS) background(f func(ctx context.Context)) bool {
+	c.bgMu.Lock()
+	defer c.bgMu.Unlock()
+	if c.bgClosed {
+		return false
+	}
+	if c.bgCtx == nil {
+		c.bgCtx, c.bgStop = context.WithCancel(context.Background())
+	}
+	c.bgWait.Add(1)
+	go func() {
+		defer c.bgWait.Done()
+		f(c.bgCtx)
+	}()
+	return true
 }
 
 // AdminPath is where the admin area lives: Config.AdminPath, normalized
@@ -1441,28 +1534,49 @@ const siteModeCacheTTL = 5 * time.Second
 // being crawled, and an unfinished site landing in an index is the
 // mistake that is hard to take back.
 func (c *CMS) siteSettings(ctx context.Context) content.SiteSettings {
-	if c.content == nil {
+	if c.content == nil || c.siteCache == nil {
 		return content.SiteSettings{} // no store to ask; a hand-built CMS in a test
 	}
-	c.siteMu.Lock()
-	got, at, ok := c.siteVal, c.siteAt, c.siteOK
-	c.siteMu.Unlock()
-	if ok && time.Since(at) < siteModeCacheTTL {
-		return got
-	}
-
-	site, err := c.content.SiteSettings(ctx)
+	// One query when the cached copy expires, however many requests
+	// arrive at that moment — and on a context the first of them cannot
+	// cancel for the rest.
+	site, stale, err := c.siteCache.Get(func() (content.SiteSettings, error) {
+		return c.content.SiteSettings(context.WithoutCancel(ctx))
+	})
 	if err != nil {
 		c.cfg.Logger.Error("cms: reading the site settings", "err", err)
-		if ok {
-			return got
+		if !stale {
+			return content.SiteSettings{Mode: content.ModeDevelopment}
 		}
-		return content.SiteSettings{Mode: content.ModeDevelopment}
 	}
-	c.siteMu.Lock()
-	c.siteVal, c.siteAt, c.siteOK = site, time.Now(), true
-	c.siteMu.Unlock()
 	return site
+}
+
+// menuItems returns every menu's items, from a copy kept for
+// siteModeCacheTTL: each page render draws the menus, and they change
+// far less often than they are read. An admin write on this instance
+// clears it at once (see clearCaches); one made elsewhere shows within
+// the TTL, as a settings change does.
+func (c *CMS) menuItems(ctx context.Context) ([]content.MenuItem, error) {
+	if c.menuCache == nil {
+		return c.content.MenuItems(ctx, "")
+	}
+	items, _, err := c.menuCache.Get(func() ([]content.MenuItem, error) {
+		return c.content.MenuItems(context.WithoutCancel(ctx), "")
+	})
+	return items, err
+}
+
+// clearCaches drops the cached site settings and menus, so the next read
+// sees what an admin request just wrote. The admin calls it after every
+// state-changing request (admin.Deps.Changed).
+func (c *CMS) clearCaches() {
+	if c.siteCache != nil {
+		c.siteCache.Clear()
+	}
+	if c.menuCache != nil {
+		c.menuCache.Clear()
+	}
 }
 
 // developmentMode reports whether the site is in development; it is what
@@ -1521,6 +1635,27 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := c.sessionUser(r)
+	// Whatever answers a signed-in user is theirs alone, and nobody
+	// else's to be handed from a cache: a private page anonymous visitors
+	// get a 404 for, a draft, an edit render carrying a CSRF token. A
+	// shared cache keys on the URL, so without this a proxy or CDN set to
+	// cache HTML would serve the next visitor whatever the last signed-in
+	// user saw. The session middleware's Vary: Cookie is not enough on
+	// its own: many CDNs ignore Vary, or drop cookies from the cache key.
+	// private keeps intermediaries out, and no-store keeps the browser
+	// from reusing the page either.
+	//
+	// The edit render has a second reason: its editor script's URL
+	// carries a digest of the bundle (see editor.Version), and a page a
+	// browser cached heuristically goes on naming a previous build's
+	// script — served immutable back when it was current — so the old
+	// editor survives rebuilds and reloads alike.
+	//
+	// Anonymous responses are left cacheable: they are the same for every
+	// visitor.
+	if user != nil {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	// Edit mode is per-page, decided by the slug's permission: blog/…
 	// and news/… answer to their feed, everything else to pages. A
 	// logged-in user without the page's permission gets the published
@@ -1570,7 +1705,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	menuItems, err := c.content.MenuItems(r.Context(), "")
+	menuItems, err := c.menuItems(r.Context())
 	if err != nil {
 		// Navigation failing shouldn't take the page down; render without.
 		c.cfg.Logger.Error("cms: loading menus", "err", err)
@@ -1645,25 +1780,6 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// An editor's copy of a page must never be cached, and the editor
-	// script is why. Its URL carries a digest of the bundle so a new
-	// build is a new address (see editor.Version) — but that address
-	// lives in this HTML, and with no Cache-Control here a browser is
-	// free to cache the page heuristically. It then goes on naming the
-	// previous build's URL, which was served as immutable back when it
-	// was current, so the old script comes off the browser's own shelf
-	// and is never requested again. The symptom is an editor that does
-	// not match the code, surviving a rebuild, a restart, and every
-	// reload that does not bypass the cache — which is exactly the trap
-	// the digest was meant to close.
-	//
-	// The response is per-editor anyway: it carries a CSRF token, the
-	// draft rather than the published content, and whatever this user's
-	// permissions let them see. Vary: Cookie asks an intermediary to
-	// keep those apart; no-store settles it.
-	if edit != nil {
-		w.Header().Set("Cache-Control", "no-store")
-	}
 	if err := c.renderer.Render(w, render.Input{
 		Page:      page,
 		Blocks:    blocks,
@@ -1703,15 +1819,83 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One page served to an ordinary visitor is one impression, counted
-	// after the response so the write never delays it. Logged-in CMS
-	// users are the site's staff, not its traffic, and crawlers that
-	// announce themselves aren't either. A failed write loses one count,
-	// which is not worth more than a log line.
+	// One page served to an ordinary visitor is one impression. Logged-in
+	// CMS users are the site's staff, not its traffic, and crawlers that
+	// announce themselves aren't either. Counted under the page's own
+	// address rather than the request's, so /about/ and /about are the
+	// same page on the chart.
 	if user == nil && r.Method == http.MethodGet && !likelyBot(r.UserAgent()) {
-		if err := c.content.RecordPageView(r.Context(), time.Now().UTC(), r.URL.Path); err != nil {
-			c.cfg.Logger.Error("cms: recording page view", "slug", slug, "err", err)
+		c.countPageView(render.SlugURL(page.Slug, locale, c.cfg.Locales[0]))
+	}
+}
+
+// pageViewKey is one counter: a UTC day and a page address.
+type pageViewKey struct {
+	day  time.Time
+	path string
+}
+
+// countPageView adds one view of path to today's count, in memory.
+//
+// It used to be an upsert on the request path. That held the response
+// until the database answered, and every visitor to one page took the same
+// row lock — so a busy home page queued its visitors behind each other's
+// counter. The count now costs a map increment, and a background loop adds
+// it to the database every pageViewFlushInterval, as one statement per
+// page however many views it holds. Several instances each add their own;
+// the upsert sums them.
+func (c *CMS) countPageView(path string) {
+	c.viewsStart.Do(func() { c.background(c.flushPageViewsEvery) })
+	now := time.Now().UTC()
+	key := pageViewKey{day: time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), path: path}
+	c.viewsMu.Lock()
+	if c.views == nil {
+		c.views = make(map[pageViewKey]int)
+	}
+	c.views[key]++
+	c.viewsMu.Unlock()
+}
+
+// flushPageViewsEvery flushes on every tick until ctx ends. The last
+// flush is Close's.
+func (c *CMS) flushPageViewsEvery(ctx context.Context) {
+	tick := time.NewTicker(pageViewFlushInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			c.flushPageViews(ctx)
 		}
+	}
+}
+
+// flushPageViews adds what has been counted to the database. A count
+// that fails to land goes back into the tally for the next flush, so a
+// database that is briefly away costs nothing; the tally stays small
+// meanwhile, since it holds a number per page and day, not per view.
+func (c *CMS) flushPageViews(ctx context.Context) {
+	c.viewsMu.Lock()
+	batch := c.views
+	c.views = nil
+	c.viewsMu.Unlock()
+
+	var failed int
+	var lastErr error
+	for key, n := range batch {
+		if err := c.content.RecordPageViews(ctx, key.day, key.path, n); err != nil {
+			failed, lastErr = failed+1, err
+			c.viewsMu.Lock()
+			if c.views == nil {
+				c.views = make(map[pageViewKey]int)
+			}
+			c.views[key] += n
+			c.viewsMu.Unlock()
+		}
+	}
+	if failed > 0 {
+		c.cfg.Logger.Error("cms: recording page views; keeping them for the next try", "pages", failed, "err", lastErr)
 	}
 }
 
@@ -1761,7 +1945,7 @@ func (c *CMS) sessionUser(r *http.Request) *auth.User {
 		return nil
 	}
 	u, err := c.users.GetByID(r.Context(), id)
-	if err != nil || !u.Active {
+	if err != nil || !u.Active || !sessiondata.EpochCurrent(r.Context(), c.sessions, u.SessionEpoch) {
 		return nil
 	}
 	return u

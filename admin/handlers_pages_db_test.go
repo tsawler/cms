@@ -574,10 +574,17 @@ func TestPagePreviewRendersTheDraft(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
+		// As the admin's middleware leaves it: the preview lifts the
+		// policy itself, being the public site's page rather than the
+		// admin's.
+		rec.Header().Set("Content-Security-Policy", "default-src 'self'")
 		s.pagePreview(rec, formReqTo(t, s, u, http.MethodGet, "/admin/pages/x/preview", nil, idParams(page.ID)))
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if csp := rec.Header().Get("Content-Security-Policy"); csp != "" {
+			t.Errorf("the preview kept the admin's CSP %q, which would block the site's own CDN assets", csp)
 		}
 		if !strings.Contains(rec.Body.String(), "not yet live") {
 			t.Errorf("the preview does not show the unpublished content: %q", rec.Body.String())
@@ -669,6 +676,30 @@ func TestPageUpdateSanitizesRegionHTMLForNonAdmins(t *testing.T) {
 		s.pageUpdate(rec, formReq(t, s, admin, form, idParams(page.ID)))
 		if got := draftHTML(t, s, page.ID, "body", "en"); !strings.Contains(got, "<script>") {
 			t.Errorf("an admin's markup = %q, want it stored as typed", got)
+		}
+	})
+}
+
+// The page form's region save filters an editor's classes the same way
+// the in-place editor's does.
+func TestPageUpdateDropsAnEditorsArbitraryClasses(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		s := formServer(t, db)
+		editor := formEditor(t, s)
+		page := seedPage(t, s, &content.Page{Slug: "classes-form", Title: "Classes",
+			TemplateName: "plain.gohtml"})
+
+		form := pageForm()
+		form.Set("title", "Classes")
+		form.Set("slug", "classes-form")
+		form.Set("template_name", "plain.gohtml")
+		form.Set("regions_template", "plain.gohtml")
+		form.Set("region-body", `<p class="[background:url(//evil/x)] font-bold">hi</p>`)
+
+		rec := httptest.NewRecorder()
+		s.pageUpdate(rec, formReq(t, s, editor, form, idParams(page.ID)))
+		if got := draftHTML(t, s, page.ID, "body", "en"); got != `<p class="font-bold">hi</p>` {
+			t.Errorf("an editor's region = %q, want the arbitrary class gone and the rest kept", got)
 		}
 	})
 }

@@ -221,6 +221,7 @@ func (s *server) postUnpublish(w http.ResponseWriter, r *http.Request) {
 // postPreview renders the post's draft content with the real site
 // templates, post data included.
 func (s *server) postPreview(w http.ResponseWriter, r *http.Request) {
+	allowSiteAssets(w)
 	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
@@ -402,12 +403,12 @@ func (s *server) renderPostForm(w http.ResponseWriter, r *http.Request, post *co
 	// The thumbnail picker (and any image regions) chooses from the
 	// media library.
 	if s.deps.Media != nil {
-		items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{Kind: media.KindImage})
+		views, more, err := s.imageChoices(r.Context(), post.ThumbnailMediaIDValue())
 		if err != nil {
 			s.serverError(w, err)
 			return
 		}
-		data.Media = s.deps.Media.Views(items)
+		data.Media, data.MoreImages = views, more
 		data.FormPostThumb = s.postImagePreview(r.Context(), post.Thumbnail, post.ThumbnailMediaID, post.ThumbnailURL)
 	}
 

@@ -34,6 +34,7 @@ func (s *server) pageVersions(w http.ResponseWriter, r *http.Request) {
 // templates.
 // GET /pages/{id}/versions/{vid}/preview
 func (s *server) pageVersionPreview(w http.ResponseWriter, r *http.Request) {
+	allowSiteAssets(w)
 	page, ok := s.sitePageFromURL(w, r)
 	if !ok {
 		return
@@ -63,6 +64,7 @@ func (s *server) postVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) postVersionPreview(w http.ResponseWriter, r *http.Request) {
+	allowSiteAssets(w)
 	post, ok := s.postFromURLCan(w, r)
 	if !ok {
 		return
@@ -211,7 +213,12 @@ func (s *server) restoreVersion(w http.ResponseWriter, r *http.Request, page *co
 	if !ok {
 		return
 	}
-	res, err := s.deps.Content.RestoreVersion(r.Context(), page.ID, v.ID)
+	opts, err := s.restoreOptions(r, page.ID)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	res, err := s.deps.Content.RestoreVersion(r.Context(), page.ID, v.ID, opts)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -248,7 +255,29 @@ func (s *server) codeNote(r *http.Request, res *content.RestoreResult) string {
 		out += " " + s.tr(r, "These custom-code blocks have changed since and were left as they are:") +
 			" " + strings.Join(res.CodeChanged, ", ") + "."
 	}
+	if len(res.CodeMissing) > 0 {
+		out += " " + s.tr(r, "Custom-code blocks this version used have been deleted, and only an administrator can put them back:") +
+			" " + strings.Join(res.CodeMissing, ", ") + "."
+	}
+	if res.PageCodeKept {
+		out += " " + s.tr(r, "The page's custom CSS and JavaScript were kept as they are — only an administrator can restore them.")
+	}
 	return out
+}
+
+// restoreOptions bounds a restore by who is running it. Page code and the
+// custom-code library are admin-only, and so is unsanitized HTML; an
+// edition an administrator wrote can hold all three, so restoring it is
+// held to the same rules as any other save by this user.
+func (s *server) restoreOptions(r *http.Request, pageID int64) (content.RestoreOptions, error) {
+	if s.currentUser(r).Role.IsAdmin() {
+		return content.RestoreOptions{}, nil
+	}
+	sanitize, err := s.editorSanitizer(r.Context(), pageID)
+	if err != nil {
+		return content.RestoreOptions{}, err
+	}
+	return content.RestoreOptions{KeepCode: true, SanitizeHTML: sanitize}, nil
 }
 
 // versionJSON is one edition as the in-place editor's History dialog reads
@@ -313,7 +342,13 @@ func (s *server) apiRestoreVersion(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, s.tr(r, "Could not read the edit — try again."))
 		return
 	}
-	res, err := s.deps.Content.RestoreVersion(r.Context(), page.ID, id)
+	opts, err := s.restoreOptions(r, page.ID)
+	if err != nil {
+		s.deps.Logger.Error("cms admin: api restoring version", "page", page.ID, "version", id, "err", err)
+		jsonError(w, http.StatusInternalServerError, s.tr(r, "Restoring failed — try again."))
+		return
+	}
+	res, err := s.deps.Content.RestoreVersion(r.Context(), page.ID, id, opts)
 	if err != nil {
 		if errors.Is(err, content.ErrNotFound) {
 			jsonError(w, http.StatusNotFound, s.tr(r, "That version is no longer available."))

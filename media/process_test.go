@@ -2,13 +2,18 @@ package media
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testImage(t *testing.T, width, height int, encodeAs string) []byte {
@@ -213,5 +218,87 @@ func TestUndecodableFilesAreDistinguishable(t *testing.T) {
 	_, err := process(truncated, "image/png", DefaultWebPQuality)
 	if !strings.Contains(err.Error(), "decoding image") {
 		t.Errorf("the wrapped detail was lost: %v", err)
+	}
+}
+
+// pngDeclaring returns a PNG that is nothing but a header declaring
+// width×height RGBA pixels — a few dozen bytes that a decoder trusting
+// the header would allocate width×height×4 bytes for.
+func pngDeclaring(width, height uint32) []byte {
+	ihdr := binary.BigEndian.AppendUint32(nil, width)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, height)
+	ihdr = append(ihdr, 8, 6, 0, 0, 0) // 8-bit RGBA, no interlace
+	chunk := func(kind string, data []byte) []byte {
+		out := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+		out = append(out, kind...)
+		out = append(out, data...)
+		return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(append([]byte(kind), data...)))
+	}
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = append(out, chunk("IHDR", ihdr)...)
+	return append(out, chunk("IEND", nil)...)
+}
+
+// An image is refused on the pixels its header declares, before anything
+// is allocated for them: the byte cap alone let a tiny PNG declaring
+// 60000×60000 pixels ask the decoder for some 14 GB.
+func TestProcessRejectsImagesOverThePixelCap(t *testing.T) {
+	bomb := pngDeclaring(60000, 60000)
+	for name, run := range map[string]func([]byte) error{
+		"process": func(b []byte) error { _, err := process(b, "image/png", DefaultWebPQuality); return err },
+		"poster":  func(b []byte) error { _, err := processPoster(b, "image/png", DefaultWebPQuality); return err },
+	} {
+		err := run(bomb)
+		if !errors.Is(err, ErrTooManyPixels) {
+			t.Errorf("%s: err = %v, want ErrTooManyPixels", name, err)
+		}
+		// Callers that only know the byte caps still see "too large".
+		if !errors.Is(err, ErrTooLarge) {
+			t.Errorf("%s: err = %v, want it to match ErrTooLarge too", name, err)
+		}
+		if errors.Is(err, ErrUndecodable) {
+			t.Errorf("%s: an oversized image reads as a damaged one", name)
+		}
+	}
+
+	// The cap itself is allowed: a header declaring exactly MaxImagePixels
+	// gets past the check, and fails only because no pixel data follows.
+	side := uint32(math.Sqrt(MaxImagePixels))
+	if side*side != MaxImagePixels {
+		t.Fatalf("MaxImagePixels %d is not a square; pick another boundary", MaxImagePixels)
+	}
+	if _, err := process(pngDeclaring(side, side), "image/png", DefaultWebPQuality); errors.Is(err, ErrTooManyPixels) {
+		t.Errorf("an image of exactly MaxImagePixels was refused: %v", err)
+	}
+}
+
+// Every decode of an upload waits for one of the image slots, so a burst
+// of large uploads can't decode more images at once than the slots allow.
+// With every slot held, an upload gives up when its context does rather
+// than decoding anyway.
+func TestImageDecodesWaitForASlot(t *testing.T) {
+	store := newMemStore()
+	m := NewManager(nil, store, newTestLogger())
+	for range cap(m.imageSlots) {
+		m.imageSlots <- struct{}{}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := m.Upload(ctx, "photo.png", testImage(t, 40, 20, "png"), 0, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("upload with every slot held: err = %v, want context.DeadlineExceeded", err)
+	}
+	if _, err := m.slottedPoster(ctx, testImage(t, 40, 20, "png")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("poster with every slot held: err = %v, want context.DeadlineExceeded", err)
+	}
+
+	// Freeing a slot lets the next decode through.
+	<-m.imageSlots
+	p, err := m.slottedPoster(context.Background(), testImage(t, 40, 20, "png"))
+	if err != nil || p.Width != 40 {
+		t.Fatalf("poster with a slot free: %+v, %v", p, err)
+	}
+	if len(m.imageSlots) != cap(m.imageSlots)-1 {
+		t.Errorf("a finished decode kept its slot: %d of %d held", len(m.imageSlots), cap(m.imageSlots))
 	}
 }

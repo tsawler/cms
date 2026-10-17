@@ -25,7 +25,11 @@ const modulePath = "github.com/tsawler/cms"
 // binary was actually built from — there is no constant to bump when
 // tagging a release.
 func Version() string {
-	info, ok := debug.ReadBuildInfo()
+	return versionOf(debug.ReadBuildInfo())
+}
+
+// versionOf is Version for a given reading of the build info.
+func versionOf(info *debug.BuildInfo, ok bool) string {
 	if !ok {
 		return "unknown"
 	}
@@ -37,6 +41,12 @@ func Version() string {
 			continue
 		}
 		if dep.Replace != nil {
+			// A replace by a module version has one; a replace by a
+			// directory — a local checkout — has none, and that is
+			// what "(devel)" says.
+			if dep.Replace.Version == "" {
+				return "(devel)"
+			}
 			return dep.Replace.Version
 		}
 		return dep.Version

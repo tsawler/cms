@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -22,6 +24,28 @@ const (
 	argonSaltLen = 16
 )
 
+// argonSlots bounds how many argon2id derivations run at once. Each one
+// allocates argonMemory — 64 MiB — for as long as it runs, and a login
+// form takes as many concurrent POSTs as anyone cares to send, every one
+// of them a derivation whether or not the address exists (the dummy hash
+// in Authenticate makes sure of it). Unbounded, a few hundred at once is
+// tens of gigabytes. Each derivation already keeps argonThreads cores
+// busy, so more slots than cores/argonThreads buys no throughput, only
+// memory; the floor of two keeps one slow login from stalling the rest.
+var argonSlots = make(chan struct{}, max(2, runtime.NumCPU()/argonThreads))
+
+// idKey is argon2.IDKey under one of the argonSlots, waiting for a slot
+// until ctx ends.
+func idKey(ctx context.Context, password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	select {
+	case argonSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-argonSlots }()
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen), nil
+}
+
 // ErrInvalidHash is returned by VerifyPassword when the stored hash is
 // neither a well-formed argon2id PHC string nor a usable bcrypt hash.
 var ErrInvalidHash = errors.New("auth: stored password hash is malformed")
@@ -30,12 +54,24 @@ var ErrInvalidHash = errors.New("auth: stored password hash is malformed")
 // string format, e.g. $argon2id$v=19$m=65536,t=1,p=4$<salt>$<hash>. Every
 // hash this CMS writes — new accounts, password changes, resets — is
 // argon2id; bcrypt is verified but never issued.
+//
+// It waits for a free derivation slot if all of them are busy; see
+// argonSlots.
 func HashPassword(password string) (string, error) {
+	return hashPassword(context.Background(), password)
+}
+
+// hashPassword is HashPassword, giving up on a derivation slot when ctx
+// ends.
+func hashPassword(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("auth: generating salt: %w", err)
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key, err := idKey(ctx, []byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -52,7 +88,15 @@ func HashPassword(password string) (string, error) {
 //
 // The argon2id comparison is constant time in the derived key; bcrypt's
 // is constant time in the package.
+//
+// Like HashPassword it waits for a free derivation slot; see argonSlots.
 func VerifyPassword(password, hash string) (bool, error) {
+	return verifyPassword(context.Background(), password, hash)
+}
+
+// verifyPassword is VerifyPassword, giving up on a derivation slot when
+// ctx ends — the client has gone, so nobody is waiting for the answer.
+func verifyPassword(ctx context.Context, password, hash string) (bool, error) {
 	if isBcryptHash(hash) {
 		err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 		switch {
@@ -71,7 +115,10 @@ func VerifyPassword(password, hash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	got := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, uint32(len(want)))
+	got, err := idKey(ctx, []byte(password), salt, p.time, p.memory, p.threads, uint32(len(want)))
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 

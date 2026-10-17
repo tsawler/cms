@@ -29,6 +29,13 @@ type Row interface {
 	Scan(dest ...any) error
 }
 
+// SessionChecker is implemented by a dialect whose correctness depends on
+// connection settings the CMS cannot apply itself. CheckSession runs once
+// the migrations have, and reports what is missing.
+type SessionChecker interface {
+	CheckSession(ctx context.Context, ex Execer) error
+}
+
 // Dialect translates canonical (Postgres-flavoured) SQL for one engine.
 type Dialect interface {
 	// Name identifies the engine, e.g. "postgres" or "mysql".
@@ -56,6 +63,12 @@ type Dialect interface {
 	// cms_settings.key, which MySQL reserves. The two engines disagree on
 	// the quoting character, so there is no shared spelling.
 	Quote(ident string) string
+
+	// BinaryText renders a text column for comparison byte for byte.
+	// Postgres compares text that way already; MySQL compares under the
+	// column's collation, which by default ignores case and accents — so
+	// an edit from "Iphone" to "iPhone" would compare equal.
+	BinaryText(col string) string
 
 	// Distinct renders a NULL-safe inequality between two columns —
 	// Postgres's IS DISTINCT FROM, which MySQL and MariaDB lack.

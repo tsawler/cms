@@ -134,7 +134,24 @@ function collectSections(region) {
     return out;
 }
 
+// settleTyping closes the undo level TinyMCE holds open while someone
+// types. Left open, it is closed later — on blur, or when Publish and
+// Done remove the editor — and closing it sets the editor dirty and
+// fires "change", so a page that was just saved reads as unsaved again
+// and Save and Publish come back. Closed here, before the editors are
+// marked clean, it is part of what this save covers. (TinyMCE has no
+// public call for this; its own paste handling does the same two steps.)
+function settleTyping(ed) {
+    var um = ed.undoManager;
+    if (um && um.typing) {
+        um.typing = false;
+        um.add();
+    }
+}
+
 export function save() {
+    Object.keys(state.mceEditors).forEach(function (name) { settleTyping(state.mceEditors[name]); });
+    state.sectionEditors.forEach(function (s) { settleTyping(s.ed); });
     var values = collect();
     var secRegions = Object.keys(state.sectionsDirty);
     var titleDirty = state.titleDirty;

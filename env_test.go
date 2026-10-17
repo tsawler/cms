@@ -2,6 +2,9 @@ package cms
 
 import (
 	tls13 "crypto/tls"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -436,4 +439,25 @@ func TestConfigFromEnvS3PublicSettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ConfigFromEnv's documentation is the list of every variable it reads,
+// so it has to reach go doc. It once ran straight into envBool's comment
+// above envBool, which go doc then attached to envBool instead.
+func TestConfigFromEnvIsDocumented(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), "env.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "ConfigFromEnv" {
+			continue
+		}
+		if fn.Doc == nil || !strings.HasPrefix(fn.Doc.Text(), "ConfigFromEnv returns") {
+			t.Errorf("ConfigFromEnv's doc comment is missing or detached: %q", fn.Doc.Text())
+		}
+		return
+	}
+	t.Fatal("ConfigFromEnv not found in env.go")
 }

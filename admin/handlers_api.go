@@ -839,13 +839,18 @@ func (s *server) apiSaveSections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isAdmin := s.currentUser(r).Role.IsAdmin()
+	sanitize := func(h string) string { return h }
+	if !s.currentUser(r).Role.IsAdmin() {
+		var err error
+		if sanitize, err = s.editorSanitizer(r.Context(), page.ID); err != nil {
+			s.deps.Logger.Error("cms admin: api sections save", "page", page.ID, "err", err)
+			jsonError(w, http.StatusInternalServerError, s.tr(r, "Saving failed — try again."))
+			return
+		}
+	}
 	inputs := make([]content.SectionInput, len(body.Sections))
 	for i, sec := range body.Sections {
-		html := sec.HTML
-		if !isAdmin {
-			html = editorHTMLPolicy.Sanitize(html)
-		}
+		html := sanitize(sec.HTML)
 		// Custom-code blocks go back to their empty placeholder whatever
 		// the client sent (see render.CollapseCodePlaceholders).
 		html = render.CollapseCodePlaceholders(html)
@@ -961,9 +966,12 @@ const maxMetaBody = 8192
 // locale, as stored rather than as resolved: a translation that has none
 // of its own reads back empty, with the default locale's words alongside
 // under "inherited" for the dialog to show as a placeholder.
+//
+// Read under the same per-page permission as the save: draft titles are
+// not for a user who could not edit the page.
 // GET /api/pages/{id}/meta?locale=fr
 func (s *server) apiGetPageMeta(w http.ResponseWriter, r *http.Request) {
-	page, ok := s.pageFromURL(w, r)
+	page, ok := s.pageFromURLCan(w, r)
 	if !ok {
 		return
 	}
@@ -1177,23 +1185,49 @@ func (s *server) apiMediaList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	folderID, unfiled := parseFolderParam(r.URL.Query().Get("folder"))
-	items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, media.ListOptions{
+	opts := media.ListOptions{
 		Kind:     kind,
 		Query:    strings.TrimSpace(r.URL.Query().Get("q")),
 		FolderID: folderID,
 		Unfiled:  unfiled,
-	})
+	}
+	// A window at a time: the picker asks for the next one when the
+	// editor scrolls to "Load more", rather than every item at once.
+	opts.Limit = queryInt(r, "limit", mediaPerPage, 1, maxMediaPage)
+	opts.Offset = queryInt(r, "offset", 0, 0, 1<<30)
+	total, err := s.deps.Media.CountMatching(r.Context(), opts)
+	if err == nil {
+		var items []media.Media
+		items, err = s.deps.Media.All(r.Context(), s.deps.DefaultLocale, opts)
+		if err == nil {
+			views := s.deps.Media.Views(items)
+			out := make([]mediaJSON, len(views))
+			for i, v := range views {
+				out[i] = toMediaJSON(v)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"media": out,
+				"total": total,
+				"more":  opts.Offset+len(out) < total,
+			})
+			return
+		}
+	}
+	s.deps.Logger.Error("cms admin: api listing media", "err", err)
+	jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the media library."))
+}
+
+// maxMediaPage bounds the window apiMediaList will return in one answer.
+const maxMediaPage = 500
+
+// queryInt reads an integer query parameter, falling back to def when it
+// is absent or unreadable and clamping it to [lo, hi].
+func queryInt(r *http.Request, name string, def, lo, hi int) int {
+	n, err := strconv.Atoi(r.URL.Query().Get(name))
 	if err != nil {
-		s.deps.Logger.Error("cms admin: api listing media", "err", err)
-		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the media library."))
-		return
+		return def
 	}
-	views := s.deps.Media.Views(items)
-	out := make([]mediaJSON, len(views))
-	for i, v := range views {
-		out[i] = toMediaJSON(v)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"media": out})
+	return min(max(n, lo), hi)
 }
 
 // apiMediaUpload accepts a multipart media upload and returns its record.
@@ -1228,6 +1262,8 @@ func (s *server) apiMediaUpload(w http.ResponseWriter, r *http.Request) {
 	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, poster, s.currentUser(r).ID, folderID)
 	if err != nil {
 		switch {
+		case errors.Is(err, media.ErrTooManyPixels):
+			jsonError(w, http.StatusRequestEntityTooLarge, s.tooManyPixelsMsg(r))
 		case errors.Is(err, media.ErrTooLarge):
 			jsonError(w, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):
@@ -1282,6 +1318,9 @@ func (s *server) apiMediaSetPoster(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, media.ErrNotFound):
 		jsonError(w, http.StatusNotFound, s.tr(r, "That file could not be processed."))
+		return
+	case errors.Is(err, media.ErrPosterExists):
+		jsonError(w, http.StatusConflict, s.tr(r, "This video already has a poster frame."))
 		return
 	case err != nil:
 		s.deps.Logger.Error("cms admin: api setting video poster", "id", id, "err", err)

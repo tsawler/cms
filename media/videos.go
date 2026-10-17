@@ -11,6 +11,10 @@ import (
 // (SetMaxVideoBytes) for videos.
 var ErrTooLarge = errors.New("media: file too large")
 
+// ErrPosterExists is returned by SetPoster for a video that already has a
+// poster frame; see SetPoster for why one is never replaced.
+var ErrPosterExists = errors.New("media: video already has a poster")
+
 const (
 	// MaxImageDocBytes caps image and document uploads, which are
 	// buffered in memory for validation and processing.

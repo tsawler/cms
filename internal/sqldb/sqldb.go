@@ -88,6 +88,9 @@ func (db *DB) InsertID(ctx context.Context, query string, args ...any) (int64, e
 	return db.d.InsertID(ctx, execer{db.db, db.d}, query, args...)
 }
 
+// Execer exposes the pool to the dialect helpers.
+func (db *DB) Execer() dialect.Execer { return execer{db.db, db.d} }
+
 // Conn reserves a single connection from the pool. Session-scoped state —
 // an advisory lock, a SET — only means anything when taken and released on
 // one connection, which a pool otherwise gives no guarantee of.

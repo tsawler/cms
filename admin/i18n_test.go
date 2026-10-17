@@ -2,6 +2,7 @@ package admin
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -188,5 +189,35 @@ func TestAdminLangCookieWins(t *testing.T) {
 	r.Header.Set("Accept-Language", "fr")
 	if got := frSite.adminLang(r); got != "fr" {
 		t.Errorf("invalid cookie should fall back to Accept-Language, got %q", got)
+	}
+}
+
+// Switching language returns the user to the admin page they were on.
+// Browsers send the Referer as an absolute URL, which the old check —
+// a path starting with "/" — never accepted, so every switch landed on
+// the dashboard. Anything not this site's admin still does.
+func TestSetLangReturnsToTheAdminPage(t *testing.T) {
+	s := &server{deps: Deps{AdminPath: "/admin", Locales: []string{"en", "fr"}}}
+	cases := []struct{ referer, want string }{
+		{"https://example.com/admin/pages?page=2", "/admin/pages?page=2"},
+		{"https://example.com/admin", "/admin"},
+		{"https://elsewhere.example/admin/pages", "/admin/"},
+		{"https://example.com/about", "/admin/"},
+		{"https://example.com/administrators", "/admin/"},
+		{"/admin/pages", "/admin/"},
+		{"", "/admin/"},
+		{"://not a url", "/admin/"},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(http.MethodPost, "https://example.com/admin/lang", strings.NewReader("to=fr"))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if c.referer != "" {
+			r.Header.Set("Referer", c.referer)
+		}
+		rec := httptest.NewRecorder()
+		s.setLang(rec, r)
+		if got := rec.Header().Get("Location"); got != c.want {
+			t.Errorf("Referer %q: redirected to %q, want %q", c.referer, got, c.want)
+		}
 	}
 }

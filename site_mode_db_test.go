@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/internal/dbtest"
@@ -48,9 +47,7 @@ func setRobots(t *testing.T, c *CMS, body string) {
 }
 
 func expireSiteCache(c *CMS) {
-	c.siteMu.Lock()
-	c.siteAt = time.Time{}
-	c.siteMu.Unlock()
+	c.clearCaches()
 }
 
 func TestPagesRobotsFollowSiteMode(t *testing.T) {

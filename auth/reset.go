@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -96,8 +97,10 @@ func (s *Store) ConsumeReset(ctx context.Context, token string) (*User, error) {
 	return u, nil
 }
 
-// prefixedUserColumns is userColumns qualified for the join above.
-const prefixedUserColumns = "u.id, u.email, u.name, u.password_hash, u.role, u.active, u.totp_secret, u.totp_last_step, u.created_at, u.updated_at"
+// prefixedUserColumns is userColumns qualified for the join above —
+// derived rather than copied, so a column added there cannot be missed
+// here.
+var prefixedUserColumns = "u." + strings.ReplaceAll(userColumns, ", ", ", u.")
 
 // hashResetToken is the stored form of a token. Plain SHA-256 rather than
 // argon2: these are 256-bit random strings, not passwords, so there is

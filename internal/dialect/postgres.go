@@ -36,6 +36,10 @@ func (Postgres) JSONText(col string) string { return col + "::text" }
 func (Postgres) Quote(ident string) string { return `"` + ident + `"` }
 
 // Distinct uses IS DISTINCT FROM.
+// BinaryText returns the column as-is: Postgres's default collations
+// compare text exactly.
+func (Postgres) BinaryText(col string) string { return col }
+
 func (Postgres) Distinct(a, b string) string { return a + " IS DISTINCT FROM " + b }
 
 // SplitStatements returns the script whole: Postgres executes a

@@ -23,7 +23,7 @@ import (
 	"github.com/tsawler/cms/internal/sqldb"
 )
 
-const lastSuperadminMsg = "only superadministrator left"
+const lastSuperadminText = "only superadministrator left"
 
 // editForm is the user form filled in as an edit of u, with the caller's
 // changes applied on top.
@@ -58,7 +58,7 @@ func TestLastSuperadminCannotDemoteThemselves(t *testing.T) {
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("self-demotion: status = %d, want 422", resp.StatusCode)
 		}
-		if !strings.Contains(page, lastSuperadminMsg) {
+		if !strings.Contains(page, lastSuperadminText) {
 			t.Errorf("self-demotion: missing the explanation:\n%s", page)
 		}
 
@@ -125,7 +125,7 @@ func TestDeactivatedSuperadminDoesNotCountAsTheOneLeft(t *testing.T) {
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("self-demotion with only a deactivated superadmin left: status = %d, want 422", resp.StatusCode)
 		}
-		if !strings.Contains(page, lastSuperadminMsg) {
+		if !strings.Contains(page, lastSuperadminText) {
 			t.Errorf("missing the explanation:\n%s", page)
 		}
 	})
@@ -164,7 +164,7 @@ func TestMasqueradeCannotDrainTheSuperadmins(t *testing.T) {
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("demoting the last superadmin from a masquerade: status = %d, want 422", resp.StatusCode)
 		}
-		if !strings.Contains(page, lastSuperadminMsg) {
+		if !strings.Contains(page, lastSuperadminText) {
 			t.Errorf("missing the explanation:\n%s", page)
 		}
 

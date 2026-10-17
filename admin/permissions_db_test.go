@@ -197,10 +197,29 @@ func TestRouteAccessByPermission(t *testing.T) {
 			{"blogs@example.com", "PUT", "/admin/api/settings", `{"siteName":"X"}`, 403},
 			{"pages@example.com", "PUT", "/admin/api/settings", `{"siteName":"X"}`, 200},
 
-			// Reads the editor needs stay open to every logged-in user.
-			{"none@example.com", "GET", "/admin/api/pages", "", 200},
-			{"none@example.com", "GET", "/admin/api/menu?menu=main", "", 200},
-			{"none@example.com", "GET", "/admin/api/settings", "", 200},
+			// The site-wide reads answer to pages like their writes: the
+			// page list names drafts and private pages, and only the menu
+			// editor and site settings read these.
+			{"pages@example.com", "GET", "/admin/api/pages", "", 200},
+			{"pages@example.com", "GET", "/admin/api/menu?menu=main", "", 200},
+			{"pages@example.com", "GET", "/admin/api/settings", "", 200},
+			{"admin@example.com", "GET", "/admin/api/pages", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/pages", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/settings", "", 403},
+			{"none@example.com", "GET", "/admin/api/pages", "", 403},
+			{"none@example.com", "GET", "/admin/api/menu?menu=main", "", 403},
+			{"none@example.com", "GET", "/admin/api/settings", "", 403},
+
+			// A page's metadata reads under the page's own permission,
+			// as its save does.
+			{"pages@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages/" + blogPageID + "/meta?locale=en", "", 200},
+			{"blogs@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 403},
+			{"userperm@example.com", "GET", "/admin/api/pages/" + pageID + "/meta?locale=en", "", 403},
+
+			// The snippet palette and the dashboard stay open to every
+			// logged-in user.
 			{"none@example.com", "GET", "/admin/api/snippets", "", 200},
 			{"none@example.com", "GET", "/admin/", "", 200},
 
@@ -386,6 +405,100 @@ func TestUserManagementEscalationGuards(t *testing.T) {
 		}
 		if got, _ := users.GetByID(ctx, target.ID); got.Role != auth.RoleAdmin {
 			t.Errorf("target role after admin save = %q, want admin", got.Role)
+		}
+	})
+}
+
+// A user manager may still open, rename and deactivate an editor who holds
+// grants they don't, but not change what that editor signs in with —
+// otherwise resetting the password and logging in as them would hand the
+// manager every grant mergeGrants keeps them from giving themselves.
+func TestUserManagerCannotTakeOverBroaderAccount(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		srv, users, _ := permTestServer(t, db)
+		ctx := context.Background()
+
+		seedPermUser(t, users, "manager@example.com", auth.RoleEditor, auth.PermUsers, auth.PermBlogs)
+		broader := seedPermUser(t, users, "pages@example.com", auth.RoleEditor, auth.PermPages)
+		covered := seedPermUser(t, users, "blogger@example.com", auth.RoleEditor, auth.PermBlogs)
+		if err := users.EnableTOTP(ctx, broader.ID, "JBSWY3DPEHPK3PXP", 1); err != nil {
+			t.Fatal(err)
+		}
+
+		client := newClient(t)
+		logIn(t, srv, client, "manager@example.com", "password123")
+		csrf := csrfFrom(t, srv, client, "/admin/")
+		broaderPath := "/admin/users/" + strconv.FormatInt(broader.ID, 10)
+		coveredPath := "/admin/users/" + strconv.FormatInt(covered.ID, 10)
+
+		// The form opens, with the email read-only and neither the
+		// password nor the two-factor reset on offer.
+		resp, page := getPage(t, srv, client, broaderPath)
+		if resp.StatusCode != 200 {
+			t.Fatalf("GET broader account = %d, want 200", resp.StatusCode)
+		}
+		if strings.Contains(page, `name="password"`) || strings.Contains(page, `name="reset_totp"`) {
+			t.Error("locked form still offers a password or two-factor reset")
+		}
+		if !strings.Contains(page, "readonly") {
+			t.Error("locked form's email field is not read-only")
+		}
+
+		base := func() url.Values {
+			return url.Values{
+				"csrf_token": {csrf}, "name": {"Pages Person"}, "email": {"pages@example.com"},
+				"role": {"editor"}, "active": {"on"},
+			}
+		}
+		forged := map[string]func(url.Values){
+			"password":  func(v url.Values) { v.Set("password", "hijacked-pass") },
+			"email":     func(v url.Values) { v.Set("email", "mine@example.com") },
+			"2fa reset": func(v url.Values) { v.Set("reset_totp", "on") },
+		}
+		for name, tweak := range forged {
+			form := base()
+			tweak(form)
+			if resp, _ := postForm(t, srv, client, broaderPath, form); resp.StatusCode != 403 {
+				t.Errorf("forged %s change = %d, want 403", name, resp.StatusCode)
+			}
+		}
+		got, err := users.GetByID(ctx, broader.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Email != "pages@example.com" || !got.TwoFactorEnabled() {
+			t.Errorf("credentials changed: email %q, two-factor %v", got.Email, got.TwoFactorEnabled())
+		}
+		if _, err := users.Authenticate(ctx, "pages@example.com", "password123"); err != nil {
+			t.Error("password was changed by a manager who lacks the account's grants")
+		}
+
+		// Everything else on the form still works: rename and deactivate.
+		form := base()
+		form.Set("name", "Departed")
+		form.Del("active")
+		if resp, _ := postForm(t, srv, client, broaderPath, form); resp.StatusCode != 200 {
+			t.Fatalf("renaming and deactivating = %d, want 200 after redirect", resp.StatusCode)
+		}
+		if got, _ := users.GetByID(ctx, broader.ID); got.Name != "Departed" || got.Active {
+			t.Errorf("after save: name %q, active %v; want Departed, inactive", got.Name, got.Active)
+		}
+
+		// An account whose grants the manager holds keeps the full form.
+		resp, page = getPage(t, srv, client, coveredPath)
+		if resp.StatusCode != 200 || !strings.Contains(page, `name="password"`) {
+			t.Fatalf("covered account form = %d, password field present %v", resp.StatusCode, strings.Contains(page, `name="password"`))
+		}
+		resp, _ = postForm(t, srv, client, coveredPath, url.Values{
+			"csrf_token": {csrf}, "name": {"Blogger"}, "email": {"blogger@example.com"},
+			"role": {"editor"}, "active": {"on"}, "perm": {string(auth.PermBlogs)},
+			"password": {"a-new-password"},
+		})
+		if resp.StatusCode != 200 {
+			t.Fatalf("resetting a covered account's password = %d, want 200 after redirect", resp.StatusCode)
+		}
+		if _, err := users.Authenticate(ctx, "blogger@example.com", "a-new-password"); err != nil {
+			t.Error("manager could not reset the password of an account whose grants they hold")
 		}
 	})
 }

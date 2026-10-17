@@ -21,6 +21,7 @@ import (
 	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/captcha"
 	"github.com/tsawler/cms/content"
+	"github.com/tsawler/cms/internal/shortcache"
 	"github.com/tsawler/cms/media"
 	"github.com/tsawler/cms/render"
 	"github.com/tsawler/cms/snippets"
@@ -61,9 +62,14 @@ type Deps struct {
 	// blocks pages reference by key. Nil leaves the editor's code API
 	// unmounted, so the drawer offers no code blocks.
 	CodeSnippets   *snippets.CodeStore
-	Captcha        *captcha.Client       // nil when login CAPTCHA is not configured
-	Mailer         Mailer                // nil disables the forgot-password flow
-	ConfigSnippets []snippets.Snippet    // host-registered palette entries
+	Captcha        *captcha.Client    // nil when login CAPTCHA is not configured
+	Mailer         Mailer             // nil disables the forgot-password flow
+	ConfigSnippets []snippets.Snippet // host-registered palette entries
+	// VouchedClasses returns the class tokens the host and the snippet
+	// library put on pages — the ones a non-admin's content may carry in
+	// Tailwind's arbitrary-value form (see editorSanitizer). Nil vouches
+	// for nothing beyond the page's own stored content.
+	VouchedClasses func(context.Context) (map[string]bool, error)
 	SectionStyles  *render.SectionStyles // curated section settings
 	Sections       []Section             // host-registered admin pages, already validated
 	Permissions    []PermissionDef       // host-declared custom permissions, already validated
@@ -179,6 +185,13 @@ type Deps struct {
 	// snippet changes. The CMS uses it to rebuild the generated
 	// Tailwind stylesheet.
 	ContentChanged func()
+
+	// Changed, when set, is called after every state-changing admin
+	// request — any method but GET, HEAD and OPTIONS — once its handler
+	// has returned. The CMS uses it to drop what it caches from the
+	// database (site settings, menus), so an editor sees a change the
+	// moment they make it rather than when the cache next expires.
+	Changed func()
 }
 
 // requestLocale validates a submitted locale code against the configured
@@ -243,6 +256,9 @@ type server struct {
 	deps      Deps
 	templates map[string]*template.Template
 
+	// The sidebar's counts, shared across admin pages; see navCounts.
+	counts *shortcache.Cache[navCounts]
+
 	// Three counters, because "too many attempts" is three different
 	// questions and one key cannot answer them all. See throttleLimits.
 	throttle    *auth.Throttle // per account *and* source
@@ -267,6 +283,7 @@ func New(d Deps) http.Handler {
 		throttle:    auth.NewThrottle(perSourceLimit, throttleWindow),
 		acctAttempt: auth.NewThrottle(perAccountPasswordLimit, throttleWindow),
 		acctCode:    auth.NewThrottle(perAccountCodeLimit, throttleWindow),
+		counts:      shortcache.New[navCounts](navCountsTTL),
 	}
 	s.templates = parseTemplates()
 
@@ -285,6 +302,7 @@ func New(d Deps) http.Handler {
 	// Before anything that asks who is signed in — which is most things.
 	r.Use(s.withUserCache)
 	r.Use(s.csrf)
+	r.Use(s.afterWrites)
 	r.Use(secureHeaders(capOrigin))
 
 	// The module's pagination styles, served as a real stylesheet rather
@@ -353,18 +371,22 @@ func New(d Deps) http.Handler {
 				r.Post("/pages/{id}/versions/{vid}/restore", s.pageVersionRestore)
 			})
 
-			// JSON API for the in-place editor. Reads stay open to
-			// every logged-in user (the post editor's link dialog
-			// lists pages), and the {id} mutations are gated inside
-			// the handlers by the page's slug — a post's backing
-			// page answers to its feed permission, not to pages.
-			r.Get("/api/pages", s.apiListPages)
-			r.With(s.requireAnyPerm(auth.PermPages)).Post("/api/pages", s.apiCreatePage)
+			// JSON API for the in-place editor. The {id} routes are
+			// gated inside the handlers by the page's slug — a post's
+			// backing page answers to its feed permission, not to
+			// pages. The site-wide reads answer to pages, like the
+			// writes beside them: the page list names every page,
+			// drafts and private ones included, and only the menu
+			// editor and the site settings dialog read these, both of
+			// which the editor offers to pages holders alone.
+			pagesPerm := s.requireAnyPerm(auth.PermPages)
+			r.With(pagesPerm).Get("/api/pages", s.apiListPages)
+			r.With(pagesPerm).Post("/api/pages", s.apiCreatePage)
 			r.Delete("/api/pages/{id}", s.apiDeletePage)
-			r.Get("/api/menu", s.apiGetMenu)
-			r.With(s.requireAnyPerm(auth.PermPages)).Put("/api/menu", s.apiSaveMenu)
-			r.Get("/api/settings", s.apiGetSettings)
-			r.With(s.requireAnyPerm(auth.PermPages)).Put("/api/settings", s.apiSaveSettings)
+			r.With(pagesPerm).Get("/api/menu", s.apiGetMenu)
+			r.With(pagesPerm).Put("/api/menu", s.apiSaveMenu)
+			r.With(pagesPerm).Get("/api/settings", s.apiGetSettings)
+			r.With(pagesPerm).Put("/api/settings", s.apiSaveSettings)
 			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
 			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
 			r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
@@ -573,6 +595,10 @@ type templateData struct {
 	FormUser   *auth.User
 	FormErrors map[string]string
 	IsNew      bool
+	// CredentialsLocked keeps the user form's email, password and
+	// two-factor reset out of the viewer's hands: the account holds a
+	// permission the viewer may not change (see mayResetCredentials).
+	CredentialsLocked bool
 	// Permissions lists the host-declared custom permissions, for the
 	// user form's grant checkboxes (built-ins are rendered literally).
 	Permissions []PermissionDef
@@ -627,9 +653,14 @@ type templateData struct {
 	// open to this user — it drives the sidebar link, and offering one the
 	// route answers with a 403 would be worse than not offering it.
 	MediaEnabled bool
-	Media        []media.View // images
-	Videos       []media.View
-	Documents    []media.View // files (PDFs, office docs, ...)
+	MediaCounts  mediaCounts // the media page's tab badges
+	// MoreImages reports that a form's image <select> lists only the
+	// newest images (see imageChoices).
+	MoreImages bool
+	MediaOrder mediaOrder   // how the media page is ordered
+	Media      []media.View // images
+	Videos     []media.View
+	Documents  []media.View // files (PDFs, office docs, ...)
 	// Entries is the active tab's bucket — what the listing actually
 	// renders. The three kind slices above stay populated so the tabs can
 	// show a count for each without a second query.
@@ -920,7 +951,40 @@ func navCurrent(path string) string {
 // areas the user's permissions hide from the nav. A failed count is
 // logged and rendered as zero rather than failing the page.
 func (s *server) navCounts(r *http.Request, u *auth.User) navCounts {
-	ctx := r.Context()
+	all := s.countAll(r.Context())
+	// One set of totals serves everyone; what each user is shown of it
+	// is decided here.
+	if u == nil || !u.Role.IsSuperadmin() {
+		all.Snippets = 0
+	}
+	if !u.Can(auth.PermUsers) {
+		all.Users = 0
+	}
+	return all
+}
+
+// countAll is every sidebar total, from a copy kept for navCountsTTL:
+// each admin page shows them, and counting four tables on every page view
+// was most of what an admin page asked the database. A write through the
+// admin clears the copy (see afterWrites), so whoever adds or removes
+// something sees the count move at once; a change made elsewhere shows
+// within the TTL.
+func (s *server) countAll(ctx context.Context) navCounts {
+	if s.counts == nil {
+		return s.countNow(ctx)
+	}
+	c, _, _ := s.counts.Get(func() (navCounts, error) {
+		return s.countNow(context.WithoutCancel(ctx)), nil
+	})
+	return c
+}
+
+// navCountsTTL bounds how stale the sidebar's counts can be after a
+// change made somewhere other than this instance's admin.
+const navCountsTTL = 30 * time.Second
+
+// countNow counts every sidebar total, regardless of who will see it.
+func (s *server) countNow(ctx context.Context) navCounts {
 	var c navCounts
 	if s.deps.Renderer != nil && s.deps.Content != nil {
 		var err error
@@ -928,7 +992,7 @@ func (s *server) navCounts(r *http.Request, u *auth.User) navCounts {
 			s.deps.Logger.Error("cms admin: counting pages and posts", "err", err)
 		}
 	}
-	if s.deps.Renderer != nil && s.deps.Snippets != nil && u != nil && u.Role.IsSuperadmin() {
+	if s.deps.Renderer != nil && s.deps.Snippets != nil {
 		c.Snippets = len(s.deps.ConfigSnippets)
 		if n, err := s.deps.Snippets.Count(ctx); err != nil {
 			s.deps.Logger.Error("cms admin: counting snippets", "err", err)
@@ -942,7 +1006,7 @@ func (s *server) navCounts(r *http.Request, u *auth.User) navCounts {
 			s.deps.Logger.Error("cms admin: counting media", "err", err)
 		}
 	}
-	if u.Can(auth.PermUsers) && s.deps.Users != nil {
+	if s.deps.Users != nil {
 		var err error
 		if c.Users, err = s.deps.Users.Count(ctx); err != nil {
 			s.deps.Logger.Error("cms admin: counting users", "err", err)

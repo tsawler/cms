@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"image"
 	"path"
 	"runtime"
 	"strings"
@@ -34,13 +33,28 @@ import (
 // than logging a failure.
 var ErrNoRendition = errors.New("media: not a rebuildable rendition")
 
-// rebuildSlots bounds how many renditions are re-encoded at once. Decoding
-// and Lanczos-resizing a large image is the most CPU-hungry thing this
-// package does, and a cold cache under traffic can ask for many at once;
-// the cap keeps that from crowding out request serving. Rebuilds are rare
-// and one-off, so a small share of the machine is enough.
-func rebuildSlots() int {
+// imageSlotCount bounds how many images are decoded and re-encoded at
+// once, across uploads, poster frames and rendition rebuilds alike.
+// Decoding and Lanczos-resizing a large image is the most CPU- and
+// memory-hungry thing this package does — up to a few hundred megabytes
+// each at MaxImagePixels — and a burst of uploads or a cold cache under
+// traffic can ask for many at once; the cap keeps that from crowding out
+// request serving or exhausting memory. A small share of the machine is
+// enough.
+func imageSlotCount() int {
 	return min(max(runtime.NumCPU()/2, 1), 4)
+}
+
+// acquireImageSlot waits for one of the imageSlotCount slots, or for ctx
+// to end. On success the caller must call release when its decode and
+// encode are done.
+func (m *Manager) acquireImageSlot(ctx context.Context) (release func(), err error) {
+	select {
+	case m.imageSlots <- struct{}{}:
+		return func() { <-m.imageSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // EnsureRendition builds the derived object at rest, a media-root-relative
@@ -83,12 +97,11 @@ func (m *Manager) rebuild(ctx context.Context, itemID, file string, spec variant
 		return ErrNoRendition
 	}
 
-	select {
-	case m.rebuildOK <- struct{}{}:
-		defer func() { <-m.rebuildOK }()
-	case <-ctx.Done():
-		return ctx.Err()
+	release, err := m.acquireImageSlot(ctx)
+	if err != nil {
+		return err
 	}
+	defer release()
 
 	source, err := m.getObject(ctx, m.abs(md.StoreKey+"/original"+md.Ext))
 	if err != nil {
@@ -100,7 +113,7 @@ func (m *Manager) rebuild(ctx context.Context, itemID, file string, spec variant
 	if md.Ext == ".svg" {
 		return m.objects.Put(ctx, key, svgContentType, bytes.NewReader(source))
 	}
-	img, _, err := image.Decode(bytes.NewReader(source))
+	img, err := decodeImage(source)
 	if err != nil {
 		return err
 	}

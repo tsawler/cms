@@ -91,6 +91,10 @@ func (s *Store) ReindexPage(ctx context.Context, pageID int64) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return err
+	}
 	if err := s.reindexPage(ctx, tx, pageID); err != nil {
 		return err
 	}

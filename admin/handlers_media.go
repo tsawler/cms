@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/cms/media"
+	"github.com/tsawler/cms/render"
 )
 
 // uploadLimit is the request-body cap for media uploads: big enough for
@@ -30,6 +32,14 @@ func (s *server) uploadLimit() int64 {
 func (s *server) uploadTooLargeMsg(r *http.Request) string {
 	return fmt.Sprintf(s.tr(r, "That file is too large — images and documents must be under %d MB, videos under %d MB."),
 		media.MaxImageDocBytes>>20, s.deps.Media.MaxVideoBytes()>>20)
+}
+
+// tooManyPixelsMsg is uploadTooLargeMsg for an image whose bytes are
+// within the cap but whose dimensions are not: the fix is resizing it,
+// which the byte-size message would never suggest.
+func (s *server) tooManyPixelsMsg(r *http.Request) string {
+	return fmt.Sprintf(s.tr(r, "That image's dimensions are too large to process — it must be under %d megapixels. Resize it and try again."),
+		media.MaxImagePixels/1_000_000)
 }
 
 const unsupportedTypeMsg = "That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP."
@@ -79,6 +89,106 @@ func kindForTab(tab string) media.Kind {
 	return media.KindImage
 }
 
+// formImageChoices bounds the image <select> on the page and post forms:
+// the newest this many images, rather than the whole library rendered
+// into one control. The in-place editor's picker pages through them all.
+var formImageChoices = 200
+
+// imageChoices returns the newest images for a form's <select>, plus
+// whether there are more than it holds. keep names a library image the
+// form already has chosen, which is listed whatever its age: a choice
+// missing from the options would be dropped by the browser, and saving
+// the form would then clear it.
+func (s *server) imageChoices(ctx context.Context, keep int64) ([]media.View, bool, error) {
+	items, err := s.deps.Media.All(ctx, s.deps.DefaultLocale,
+		media.ListOptions{Kind: media.KindImage, Limit: formImageChoices + 1})
+	if err != nil {
+		return nil, false, err
+	}
+	more := len(items) > formImageChoices
+	items = items[:min(len(items), formImageChoices)]
+	if keep != 0 && !slices.ContainsFunc(items, func(md media.Media) bool { return md.ID == keep }) {
+		if kept, err := s.deps.Media.ByIDs(ctx, []int64{keep}, s.deps.DefaultLocale); err == nil {
+			items = append(items, kept...)
+		} else {
+			return nil, false, err
+		}
+	}
+	return s.deps.Media.Views(items), more, nil
+}
+
+// mediaPerPage is how many items one page of the media library shows: a
+// grid of thumbnails takes more at a glance than a table of rows does.
+// A variable so tests can page through a handful.
+var mediaPerPage = 100
+
+// mediaCounts are the media page's tab badges, one per kind.
+type mediaCounts struct {
+	Images, Documents, Videos int
+}
+
+// mediaPageURL builds the media library's page links. Always on /media,
+// whatever handled the request — the page is also drawn as the answer to
+// a refused upload, whose own path is no place to page through — with
+// the tab, search, folder and order kept.
+func (s *server) mediaPageURL(tab, query, folder string, order mediaOrder) func(int) string {
+	return func(n int) string {
+		q := url.Values{}
+		q.Set("tab", tab)
+		if query != "" {
+			q.Set("q", query)
+		}
+		if folder != "" {
+			q.Set("folder", folder)
+		}
+		q.Set("sort", order.Key)
+		q.Set("dir", order.dir())
+		if n > 1 {
+			q.Set("page", strconv.Itoa(n))
+		}
+		return s.deps.AdminPath + "/media?" + q.Encode()
+	}
+}
+
+// mediaOrder is how the media page orders its items: a column and a
+// direction.
+type mediaOrder struct {
+	Key  string // name, kind, size, dims, or added
+	Desc bool
+}
+
+func (o mediaOrder) dir() string {
+	if o.Desc {
+		return "desc"
+	}
+	return "asc"
+}
+
+// mediaSortCookie remembers the order chosen on the media page, which the
+// page's script sets when a column is clicked. It lets a plain link to
+// the library — the sidebar, a folder, a tab — come back in that order.
+const mediaSortCookie = "cms_admin_media_sort"
+
+// mediaOrderFor is the order a media page request asks for: ?sort= and
+// ?dir= when the URL carries them, the remembered choice otherwise, and
+// by name, A to Z, when neither says anything usable.
+//
+// The server orders the library because a page holds only mediaPerPage
+// items: sorted in the browser, "by name" meant by name within whichever
+// hundred items the page happened to hold.
+func mediaOrderFor(r *http.Request) mediaOrder {
+	key, dir := r.URL.Query().Get("sort"), r.URL.Query().Get("dir")
+	if key == "" {
+		if c, err := r.Cookie(mediaSortCookie); err == nil {
+			key, dir, _ = strings.Cut(c.Value, ":")
+		}
+	}
+	if !media.ValidSort(key) {
+		return mediaOrder{Key: "name"}
+	}
+	return mediaOrder{Key: key, Desc: dir == "desc"}
+}
+
 func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status int, formError string) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	folderParam := r.URL.Query().Get("folder")
@@ -98,7 +208,7 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 	// directory — the root (unfiled items plus the folder entries) or
 	// one folder's contents. A search spans every folder and lists
 	// results flat.
-	opts := media.ListOptions{Query: query}
+	opts := media.ListOptions{Query: query, Kind: kind}
 	if query == "" {
 		if folderID != nil {
 			// Only this tab's kind resolves: a folder link carried over
@@ -119,11 +229,30 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 		}
 	}
 
+	// The tab's own kind, a page at a time; the badges on the other tabs
+	// come from one grouped count. The page used to load every item of
+	// every kind and keep one kind's worth.
+	byKind, err := s.deps.Media.CountByKind(r.Context(), opts)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	order := mediaOrderFor(r)
+	opts.Sort, opts.Desc = order.Key, order.Desc
+	pager := render.NewPager(listPage(r), mediaPerPage, byKind[kind], s.mediaPageURL(tab, query, folderParam, order))
+	pager.PrevLabel, pager.NextLabel = s.tr(r, "Previous"), s.tr(r, "Next")
+	opts.Limit, opts.Offset = pager.PerPage, pager.Offset()
 	items, err := s.deps.Media.All(r.Context(), s.deps.DefaultLocale, opts)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
+	data.MediaCounts = mediaCounts{
+		Images:    byKind[media.KindImage],
+		Documents: byKind[media.KindFile],
+		Videos:    byKind[media.KindVideo],
+	}
+	data.Pager = pager
 
 	// Each tab lists only its own kind's folders, and new folders are
 	// created in the kind being browsed.
@@ -133,6 +262,12 @@ func (s *server) renderMediaList(w http.ResponseWriter, r *http.Request, status 
 			folders = append(folders, f)
 		}
 	}
+	// Folders come by name whatever the column — they have no size and no
+	// dimensions to sort by — but follow the chosen direction.
+	if order.Desc {
+		slices.Reverse(folders)
+	}
+	data.MediaOrder = order
 	for _, v := range s.deps.Media.Views(items) {
 		switch v.Kind {
 		case media.KindFile:
@@ -228,6 +363,8 @@ func (s *server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 	md, err := s.deps.Media.UploadFrom(r.Context(), sanitizeFilename(header.Filename), file, header.Size, nil, user.ID, folderID)
 	if err != nil {
 		switch {
+		case errors.Is(err, media.ErrTooManyPixels):
+			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.tooManyPixelsMsg(r))
 		case errors.Is(err, media.ErrTooLarge):
 			s.renderMediaList(w, r, http.StatusRequestEntityTooLarge, s.uploadTooLargeMsg(r))
 		case errors.Is(err, media.ErrUnsafeSVG):
@@ -422,12 +559,32 @@ func selectedIDs(r *http.Request) []int64 {
 	}
 	raw := r.PostForm["id"]
 	ids := make([]int64, 0, len(raw))
+	seen := make(map[int64]bool, len(raw))
 	for _, v := range raw {
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil && id > 0 {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil && id > 0 && !seen[id] {
+			seen[id] = true
 			ids = append(ids, id)
 		}
 	}
 	return ids
+}
+
+// maxBulk bounds one bulk action. Each item still costs work in the
+// bucket — a manifest rewritten, objects deleted, an original streamed —
+// so the selection a request can carry is capped rather than left to the
+// request-size limit, which admits hundreds of thousands of ids. A page
+// shows mediaPerPage items, so any selection made on the page fits.
+const maxBulk = 500
+
+// tooManySelected refuses a selection over maxBulk, back on the library
+// with the reason, and reports whether it did.
+func (s *server) tooManySelected(w http.ResponseWriter, r *http.Request, ids []int64) bool {
+	if len(ids) <= maxBulk {
+		return false
+	}
+	s.flash(r, fmt.Sprintf(s.tr(r, "Select at most %d files at a time."), maxBulk))
+	s.backToMedia(w, r)
+	return true
 }
 
 // mediaBulkMove refiles every selected item ("" form value = unfiled).
@@ -435,14 +592,16 @@ func selectedIDs(r *http.Request) []int64 {
 // on the selection rather than on one row at a time.
 func (s *server) mediaBulkMove(w http.ResponseWriter, r *http.Request) {
 	ids := selectedIDs(r)
-	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
-	for _, id := range ids {
-		if err := s.deps.Media.Move(r.Context(), id, folderID); err != nil {
-			s.serverError(w, err)
-			return
-		}
+	if s.tooManySelected(w, r, ids) {
+		return
 	}
-	if n := len(ids); n == 1 {
+	folderID, _ := parseFolderParam(r.PostFormValue("folder"))
+	n, err := s.deps.Media.MoveMany(r.Context(), ids, folderID)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if n == 1 {
 		s.flash(r, s.tr(r, "1 file moved."))
 	} else if n > 1 {
 		s.flash(r, fmt.Sprintf(s.tr(r, "%d files moved."), n))
@@ -454,6 +613,9 @@ func (s *server) mediaBulkMove(w http.ResponseWriter, r *http.Request) {
 // error: two tabs open on the same folder can both submit the same id.
 func (s *server) mediaBulkDelete(w http.ResponseWriter, r *http.Request) {
 	ids := selectedIDs(r)
+	if s.tooManySelected(w, r, ids) {
+		return
+	}
 	deleted := 0
 	for _, id := range ids {
 		err := s.deps.Media.Delete(r.Context(), id, s.deps.DefaultLocale)
@@ -492,17 +654,17 @@ func (s *server) mediaBulkDelete(w http.ResponseWriter, r *http.Request) {
 // already gone out, and the other files are still worth having.
 func (s *server) mediaBulkDownload(w http.ResponseWriter, r *http.Request) {
 	ids := selectedIDs(r)
-	items := make([]*media.Media, 0, len(ids))
-	for _, id := range ids {
-		md, err := s.deps.Media.GetByID(r.Context(), id, s.deps.DefaultLocale)
-		if errors.Is(err, media.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			s.serverError(w, err)
-			return
-		}
-		items = append(items, md)
+	if s.tooManySelected(w, r, ids) {
+		return
+	}
+	found, err := s.deps.Media.ByIDs(r.Context(), ids, s.deps.DefaultLocale)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	items := make([]*media.Media, len(found))
+	for i := range found {
+		items[i] = &found[i]
 	}
 	if len(items) == 0 {
 		http.NotFound(w, r)

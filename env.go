@@ -71,24 +71,6 @@ import (
 //	cfg.DB = pool
 //	cfg.TemplateFS = templateFS
 //	c, err := cms.New(cfg)
-//
-// envBool reads a true/false variable into dst. An unset or empty
-// variable leaves dst alone; a malformed one is a configuration mistake
-// and is reported rather than read as false — "S3_PUBLIC_READ=yes"
-// quietly meaning "no" is the failure these variables are prone to.
-func envBool(key string, dst *bool) error {
-	v := os.Getenv(key)
-	if v == "" {
-		return nil
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return fmt.Errorf("cms: %s %q is not a true/false value", key, v)
-	}
-	*dst = b
-	return nil
-}
-
 func ConfigFromEnv() (Config, error) {
 	var cfg Config
 
@@ -252,4 +234,21 @@ func ConfigFromEnv() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// envBool reads a true/false variable into dst. An unset or empty
+// variable leaves dst alone; a malformed one is a configuration mistake
+// and is reported rather than read as false — "S3_PUBLIC_READ=yes"
+// quietly meaning "no" is the failure these variables are prone to.
+func envBool(key string, dst *bool) error {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fmt.Errorf("cms: %s %q is not a true/false value", key, v)
+	}
+	*dst = b
+	return nil
 }

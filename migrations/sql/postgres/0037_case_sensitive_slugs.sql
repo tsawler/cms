@@ -1,0 +1,4 @@
+-- No-op here: Postgres compares slugs exactly already. The MySQL file of
+-- this version gives cms_pages.slug a binary collation so the two engines
+-- match page addresses the same way; the version exists on this side too
+-- so one number means one change on either engine.

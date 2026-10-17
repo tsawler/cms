@@ -277,6 +277,9 @@ background:#f4f5f7;border-radius:6px;font-size:20px;flex-shrink:0}
 .items.list .nm{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .items.list .sz{color:#667085;font-size:12px;white-space:nowrap}
 .empty{color:#667085;font-size:13px}
+/* The next page of the library: a full row of its own under the tiles. */
+.items .more{grid-column:1/-1;justify-self:center;margin:6px 0}
+.items.list .more{display:block;margin:10px auto}
 
 /* ---- snippet drawer: slides out leftward from beside the tool
    rail (non-modal, so drag-and-drop can reach the page) ---- */

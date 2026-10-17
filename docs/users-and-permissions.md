@@ -49,8 +49,15 @@ an upgrade changes nothing until you start unticking boxes.
 editor with that grant manages editor accounts only: admin accounts are
 out of reach entirely (including their passwords and two-factor
 resets), the role select offers only "editor", and they can neither
-grant nor revoke a permission they don't hold themselves. Escalation by
-way of the users page is a dead end.
+grant nor revoke a permission they don't hold themselves. Nor can they
+change the email, password or two-factor enrollment of an account that
+holds a permission they don't: signing in as that account would hand
+them the permission anyway. They can still rename or deactivate it.
+Escalation by way of the users page is a dead end.
+
+The same credential rule binds admins over grants marked
+`AdminsNeedGrant`: an admin who doesn't hold such a grant can't reset
+the password of an account that does.
 
 Deployments can declare **custom permissions** for functionality they
 gate themselves — either implicitly through an admin section's
@@ -243,6 +250,15 @@ require the current password, because the address is the login
 identifier and where reset links go. A name change alone needs no
 password. Role and active status are deliberately not on this page —
 nobody adjusts their own powers outside the admin-only `/admin/users`.
+
+**A credential change ends the account's other sessions.** Changing or
+resetting a password, an admin setting one, and turning two-factor on
+or off all sign the account out everywhere else, including any
+"remember me" session. A session someone stole therefore stops working
+once its owner changes their password. The session that made the
+change stays signed in, with a fresh token. A two-factor login left
+waiting for its code is stranded too: a valid code no longer completes
+it once the password has changed.
 
 Two-factor uses ordinary TOTP authenticator apps (Google Authenticator,
 1Password, Authy, …): the settings page shows a QR code and a

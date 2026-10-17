@@ -11,6 +11,7 @@ package admin
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -137,11 +138,29 @@ func (s *server) setLang(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	dest := r.Header.Get("Referer")
-	if !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
-		dest = s.deps.AdminPath + "/"
+	http.Redirect(w, r, s.backTo(r), http.StatusSeeOther)
+}
+
+// backTo is where setLang sends the user: the admin page they switched
+// language on, read from the Referer. Browsers send it as an absolute
+// URL, so it counts only when its host is the request's own and its
+// path is inside the admin; anything else — no Referer, another site,
+// the public site — lands on the dashboard. Only the path and query are
+// kept, so the redirect cannot leave the site whatever the header said.
+func (s *server) backTo(r *http.Request) string {
+	home := s.deps.AdminPath + "/"
+	ref, err := url.Parse(r.Header.Get("Referer"))
+	if err != nil || ref.Host != r.Host || ref.Path == "" {
+		return home
 	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	if ref.Path != s.deps.AdminPath && !strings.HasPrefix(ref.Path, s.deps.AdminPath+"/") {
+		return home
+	}
+	dest := ref.EscapedPath()
+	if ref.RawQuery != "" {
+		dest += "?" + ref.RawQuery
+	}
+	return dest
 }
 
 // frStrings maps every admin UI string (English, exactly as written at its
@@ -324,8 +343,9 @@ var frStrings = map[string]string{
 	"Choose a role.":                                "Choisissez un rôle.",
 	"Password is required.":                         "Le mot de passe est obligatoire.",
 	"Password must be at least 8 characters.":       "Le mot de passe doit contenir au moins 8 caractères.",
-	"Reset two-factor authentication — for someone locked out of their authenticator app": "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
-	"They'll log in with just their password until they set it up again.":                 "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
+	"Reset two-factor authentication — for someone locked out of their authenticator app":                                                   "Réinitialiser l'authentification à deux facteurs — pour quelqu'un qui n'a plus accès à son application d'authentification",
+	"They'll log in with just their password until they set it up again.":                                                                   "La personne se connectera avec son seul mot de passe jusqu'à ce qu'elle la reconfigure.",
+	"This account holds permissions you don't, so only someone who holds them can change its email, password or two-factor authentication.": "Ce compte détient des permissions que vous n'avez pas : seule une personne qui les détient peut modifier son courriel, son mot de passe ou son authentification à deux facteurs.",
 
 	// Permission grants (user form) and permission-denied messages.
 	// "News" is translated with the posts strings further down.
@@ -361,6 +381,8 @@ var frStrings = map[string]string{
 	"Version restored and published — it is live on the site again.":                                                                                                     "Version restaurée et publiée — elle est de nouveau en ligne sur le site.",
 	"Custom-code blocks this version used had been deleted and were put back:":                                                                                           "Des blocs de code personnalisé utilisés par cette version avaient été supprimés et ont été rétablis :",
 	"These custom-code blocks have changed since and were left as they are:":                                                                                             "Ces blocs de code personnalisé ont changé depuis et ont été laissés tels quels :",
+	"Custom-code blocks this version used have been deleted, and only an administrator can put them back:":                                                               "Des blocs de code personnalisé utilisés par cette version ont été supprimés, et seul un administrateur peut les rétablir :",
+	"The page's custom CSS and JavaScript were kept as they are — only an administrator can restore them.":                                                               "Le CSS et le JavaScript personnalisés de la page ont été conservés tels quels — seul un administrateur peut les restaurer.",
 
 	// Pages list.
 	"New page":   "Nouvelle page",
@@ -460,6 +482,7 @@ var frStrings = map[string]string{
 	"(optional — shown on listing cards)": "(facultatif — affichée sur les cartes des listes)",
 	"— no thumbnail —":                    "— aucune vignette —",
 	"(current image)":                     "(image actuelle)",
+	"Only the newest images are listed here; the in-place editor's image picker can browse them all.":               "Seules les images les plus récentes sont listées ici; le sélecteur d'images de l'éditeur sur place les parcourt toutes.",
 	"This image also starts the banner at the top of the post — open the post on the site to restyle or remove it.": "Cette image sert aussi de point de départ à la bannière en haut du billet — ouvrez le billet sur le site pour la restyler ou la retirer.",
 	"Choose from the":                                  "Choisissez dans la",
 	"media library":                                    "médiathèque",
@@ -590,6 +613,7 @@ var frStrings = map[string]string{
 
 	// Media handlers.
 	"That file is too large — images and documents must be under %d MB, videos under %d MB.":                                               "Ce fichier est trop volumineux — les images et documents doivent faire moins de %d Mo, les vidéos moins de %d Mo.",
+	"That image's dimensions are too large to process — it must be under %d megapixels. Resize it and try again.":                          "Les dimensions de cette image sont trop grandes pour être traitées — elle doit faire moins de %d mégapixels. Redimensionnez-la et réessayez.",
 	"That file type isn't supported. Use an image (JPEG, PNG, GIF, WebP, SVG), video (MP4, WebM), PDF, office document, text/CSV, or ZIP.": "Ce type de fichier n'est pas pris en charge. Utilisez une image (JPEG, PNG, GIF, WebP, SVG), une vidéo (MP4, WebM), un PDF, un document bureautique, du texte/CSV ou un ZIP.",
 	"That SVG can't be used — it contains scripts or other active content.":                                                                "Ce SVG ne peut pas être utilisé — il contient des scripts ou d'autres contenus actifs.",
 	"Choose a file to upload.":                "Choisissez un fichier à téléverser.",
@@ -696,6 +720,8 @@ var frStrings = map[string]string{
 	"Unknown media kind.":                                              "Type de média inconnu.",
 	"Could not load the media library.":                                "Impossible de charger la médiathèque.",
 	"That file could not be processed.":                                "Ce fichier n'a pas pu être traité.",
+	"This video already has a poster frame.":                           "Cette vidéo a déjà une image d'aperçu.",
+	"Select at most %d files at a time.":                               "Sélectionnez au plus %d fichiers à la fois.",
 	"Could not load folders.":                                          "Impossible de charger les dossiers.",
 	"Could not read the folder name.":                                  "Impossible de lire le nom du dossier.",
 	"Could not create the folder.":                                     "Impossible de créer le dossier.",

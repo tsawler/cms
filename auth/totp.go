@@ -111,11 +111,12 @@ func (u *User) TwoFactorEnabled() bool { return u.TOTPSecret != "" }
 // EnableTOTP stores a confirmed secret, turning two-factor on for the
 // user. confirmedStep is the step of the code that proved the enrollment;
 // recording it spends that code, so it cannot be replayed at the next
-// login.
+// login. Like any change to how the account signs in, it moves the
+// account to a new SessionEpoch.
 func (s *Store) EnableTOTP(ctx context.Context, id int64, secret string, confirmedStep int64) error {
 	tag, err := s.db.Exec(ctx, `
 		UPDATE cms_users
-		SET totp_secret = $1, totp_last_step = $2, updated_at = now()
+		SET totp_secret = $1, totp_last_step = $2, session_epoch = session_epoch + 1, updated_at = now()
 		WHERE id = $3`,
 		secret, confirmedStep, id)
 	if err != nil {
@@ -128,11 +129,16 @@ func (s *Store) EnableTOTP(ctx context.Context, id int64, secret string, confirm
 }
 
 // DisableTOTP turns two-factor off for the user — their own choice on the
-// settings page, or an admin rescuing somebody who lost their phone.
+// settings page, or an admin rescuing somebody who lost their phone —
+// and moves the account to a new SessionEpoch.
 func (s *Store) DisableTOTP(ctx context.Context, id int64) error {
-	tag, err := s.db.Exec(ctx, `
+	return disableTOTP(ctx, s.db, id)
+}
+
+func disableTOTP(ctx context.Context, h handle, id int64) error {
+	tag, err := h.Exec(ctx, `
 		UPDATE cms_users
-		SET totp_secret = '', totp_last_step = 0, updated_at = now()
+		SET totp_secret = '', totp_last_step = 0, session_epoch = session_epoch + 1, updated_at = now()
 		WHERE id = $1`,
 		id)
 	if err != nil {

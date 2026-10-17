@@ -20,10 +20,19 @@
         {{if $.MediaEnabled}}
         <select id="region-{{.Name}}" name="region-{{.Name}}">
             <option value="">{{$.T "— no image —"}}</option>
+            {{- /* An image the list does not hold — older than the newest
+                   listed, or from outside the library — stays chosen.
+                   With no option for it the browser would select "no
+                   image", and saving the form would clear the region. */}}
+            {{$listed := false}}{{range $.Media}}{{if eq .WebURL $current}}{{$listed = true}}{{end}}{{end}}
+            {{if and $current (not $listed)}}
+            <option value="{{$current}}" selected>{{$.T "(current image)"}}</option>
+            {{end}}
             {{range $.Media}}
             <option value="{{.WebURL}}" {{if eq .WebURL $current}}selected{{end}}>{{.Filename}} ({{.Width}}×{{.Height}})</option>
             {{end}}
         </select>
+        {{if $.MoreImages}}<p class="cms-hint">{{$.T "Only the newest images are listed here; the in-place editor's image picker can browse them all."}}</p>{{end}}
         <p class="cms-hint">{{$.T "Choose from the"}} <a href="{{$.AdminPath}}/media">{{$.T "media library"}}</a>{{$.T "; upload new images there first."}}</p>
         {{else}}
         <p class="cms-hint">{{$.T "Image uploads are not configured for this site."}}</p>

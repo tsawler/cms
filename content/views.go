@@ -1,9 +1,10 @@
 package content
 
 // Public-site traffic, kept as one counter per day and path. Recording is
-// a single upsert on the page-serving path and reading is a single
-// aggregate on the admin dashboard, so the table needs no more shape than
-// that: no sessions, no visitors, no user agents — page impressions only.
+// an upsert adding a batch counted in memory off the page-serving path,
+// and reading is a single aggregate on the admin dashboard, so the table
+// needs no more shape than that: no sessions, no visitors, no user agents
+// — page impressions only.
 
 import (
 	"context"
@@ -20,10 +21,13 @@ const viewPathMax = 512
 // dayFormat is how days are keyed: dates, in UTC, no clock.
 const dayFormat = "2006-01-02"
 
-// RecordPageView adds one to the counter for path on the given day
-// (taken as a UTC date). Concurrent instances land on the same row; the
-// upsert makes the increment atomic.
-func (s *Store) RecordPageView(ctx context.Context, day time.Time, path string) error {
+// RecordPageViews adds n to the counter for path on the given day, so a
+// batch counted in memory lands as one statement per page rather than one
+// per view. n below one adds nothing.
+func (s *Store) RecordPageViews(ctx context.Context, day time.Time, path string, n int) error {
+	if n < 1 {
+		return nil
+	}
 	if len(path) > viewPathMax {
 		path = path[:viewPathMax]
 	}
@@ -31,10 +35,17 @@ func (s *Store) RecordPageView(ctx context.Context, day time.Time, path string) 
 	// table name: Postgres calls a bare "views" ambiguous here, and the
 	// qualified form means the same thing on MySQL and MariaDB.
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO cms_page_views (day, path, views) VALUES ($1, $2, 1)
-		ON CONFLICT (day, path) DO UPDATE SET views = cms_page_views.views + 1`,
-		day.UTC().Format(dayFormat), path)
+		INSERT INTO cms_page_views (day, path, views) VALUES ($1, $2, $3)
+		ON CONFLICT (day, path) DO UPDATE SET views = cms_page_views.views + $3`,
+		day.UTC().Format(dayFormat), path, n)
 	return err
+}
+
+// RecordPageView adds one to the counter for path on the given day
+// (taken as a UTC date). Concurrent instances land on the same row; the
+// upsert makes the increment atomic.
+func (s *Store) RecordPageView(ctx context.Context, day time.Time, path string) error {
+	return s.RecordPageViews(ctx, day, path, 1)
 }
 
 // PageViewsByDay sums the recorded views per day over [from, to], both

@@ -168,6 +168,15 @@ func TestAPIMediaUploadRejectionsAreJSON(t *testing.T) {
 		if out := decodeAPI(t, rec); out["error"] == nil {
 			t.Errorf("body = %v, want an error message", out)
 		}
+
+		rec = httptest.NewRecorder()
+		s.apiMediaUpload(rec, uploadReq(t, s, u, "bomb.png", pngDeclaring(60000, 60000), nil))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d for an image over the pixel cap, want 413", rec.Code)
+		}
+		if msg, _ := decodeAPI(t, rec)["error"].(string); !strings.Contains(msg, "megapixels") {
+			t.Errorf("error = %q, want it to explain the pixel cap", msg)
+		}
 	})
 }
 
@@ -270,6 +279,22 @@ func TestAPIMediaSetPosterRefusals(t *testing.T) {
 		s.apiMediaSetPoster(rec, r)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("status = %d for a missing item, want 404 (body %q)", rec.Code, rec.Body.String())
+		}
+
+		// A video that already has a poster keeps it: 409, and a JSON
+		// error the inspector can show.
+		video, err := s.deps.Media.UploadFrom(context.Background(), "clip.mp4",
+			strings.NewReader("\x00\x00\x00\x18ftypmp42 a video body"), 21, smallPNG(t), u.ID, nil)
+		if err != nil {
+			t.Fatalf("uploading a video with a poster: %v", err)
+		}
+		rec = httptest.NewRecorder()
+		s.apiMediaSetPoster(rec, posterReq(t, s, u, smallPNG(t), video.ID))
+		if rec.Code != http.StatusConflict {
+			t.Errorf("status = %d for replacing a poster, want 409 (body %q)", rec.Code, rec.Body.String())
+		}
+		if out := decodeAPI(t, rec); out["error"] == nil {
+			t.Errorf("body = %v, want an error message", out)
 		}
 	})
 }

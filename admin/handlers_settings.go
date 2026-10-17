@@ -170,6 +170,11 @@ func (s *server) settingsPassword(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Every other session this account had ends here; this one goes on.
+	if err := s.keepSession(r, u.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
 	s.throttle.Reset(throttleKey)
 	s.deps.Logger.Info("cms admin: password changed", "user", u.Email)
 	s.flash(r, s.tr(r, "Your password has been changed."))
@@ -228,6 +233,10 @@ func (s *server) totpConfirm(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	if err := s.keepSession(r, u.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
 	s.deps.Sessions.Remove(r.Context(), sessionKeyTOTPSetup)
 	s.deps.Logger.Info("cms admin: two-factor enabled", "user", u.Email)
 	s.flash(r, s.tr(r, "Two-factor authentication is on. You'll be asked for a code when you log in."))
@@ -265,6 +274,10 @@ func (s *server) totpDisable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.deps.Users.DisableTOTP(r.Context(), u.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if err := s.keepSession(r, u.ID); err != nil {
 		s.serverError(w, err)
 		return
 	}

@@ -63,15 +63,6 @@ func versionsServer(t *testing.T, db *sqldb.DB) *server {
 // the session to attribute a publish.
 func versionRequest(t *testing.T, s *server, method, body string, pageID, versionID int64) *http.Request {
 	t.Helper()
-	r := httptest.NewRequest(method, "/admin/pages/x/versions", strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", strconv.FormatInt(pageID, 10))
-	if versionID != 0 {
-		rctx.URLParams.Add("vid", strconv.FormatInt(versionID, 10))
-	}
-	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
-
 	ctx := context.Background()
 	u, err := s.deps.Users.GetByEmail(ctx, "history@example.com")
 	if errors.Is(err, auth.ErrNotFound) {
@@ -82,6 +73,21 @@ func versionRequest(t *testing.T, s *server, method, body string, pageID, versio
 	if err != nil {
 		t.Fatalf("seeding the session user: %v", err)
 	}
+	return versionRequestAs(t, s, u, method, body, pageID, versionID)
+}
+
+// versionRequestAs is versionRequest signed in as u.
+func versionRequestAs(t *testing.T, s *server, u *auth.User, method, body string, pageID, versionID int64) *http.Request {
+	t.Helper()
+	r := httptest.NewRequest(method, "/admin/pages/x/versions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", strconv.FormatInt(pageID, 10))
+	if versionID != 0 {
+		rctx.URLParams.Add("vid", strconv.FormatInt(versionID, 10))
+	}
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+
 	sctx, err := s.deps.Sessions.Load(r.Context(), "")
 	if err != nil {
 		t.Fatalf("loading a session: %v", err)
@@ -396,6 +402,130 @@ func TestAPIRestoreVersionRefusesAnotherPagesVersion(t *testing.T) {
 			t.Errorf("Content-Type = %q, want JSON so the editor can read the error", ct)
 		}
 	})
+}
+
+// Restoring is a write by whoever clicks it. An editor rolling back to an
+// edition from before an administrator removed a script, the page's code
+// or a code-library block gets the edition's content without any of
+// those; an administrator restoring the same edition gets all of it.
+func TestVersionRestoreByEditorKeepsAdminCode(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := versionsServer(t, db)
+		code := snippets.NewCodeStore(db)
+
+		if _, err := code.Insert(ctx, &snippets.CodeSnippet{Key: "widget", Name: "Widget", HTML: "<script>widget()</script>"}); err != nil {
+			t.Fatalf("seeding code: %v", err)
+		}
+		page := &content.Page{Slug: "cleaned", TemplateName: "page.gohtml", Title: "Cleaned",
+			HeadCSS: "body{background:url(//evil/x)}", BodyJS: "track()"}
+		if _, err := s.deps.Content.Insert(ctx, page, "en"); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+		if err := s.deps.Content.UpsertDraftBlock(ctx, page.ID, "main", "en", content.KindHTML,
+			`<div data-cms-code="widget"></div><script>evil()</script><p>hello</p>`); err != nil {
+			t.Fatalf("UpsertDraftBlock: %v", err)
+		}
+		if err := s.deps.Content.Publish(ctx, page.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		versions, err := s.deps.Content.Versions(ctx, page.ID)
+		if err != nil {
+			t.Fatalf("Versions: %v", err)
+		}
+		edition := versions[0]
+
+		// An administrator removes all three.
+		if err := code.Delete(ctx, "widget"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		clean, err := s.deps.Content.GetByID(ctx, page.ID, "en")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		clean.HeadCSS, clean.BodyJS = "", ""
+		if err := s.deps.Content.Update(ctx, clean, "en"); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if err := s.deps.Content.UpsertDraftBlock(ctx, page.ID, "main", "en", content.KindHTML, "<p>clean</p>"); err != nil {
+			t.Fatalf("UpsertDraftBlock: %v", err)
+		}
+		if err := s.deps.Content.Publish(ctx, page.ID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+
+		editor := &auth.User{Email: "pages-editor@example.com", Name: "Ed", PasswordHash: "x", Role: auth.RoleEditor, Active: true}
+		if _, err := s.deps.Users.Insert(ctx, editor); err != nil {
+			t.Fatalf("seeding editor: %v", err)
+		}
+		if err := s.deps.Users.ReplacePermissions(ctx, editor.ID, []auth.Permission{auth.PermPages}); err != nil {
+			t.Fatalf("granting pages: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		s.apiRestoreVersion(rec, versionRequestAs(t, s, editor, "POST", "", page.ID, edition.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("editor restore status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Note string `json:"note"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding %q: %v", rec.Body.String(), err)
+		}
+		if !strings.Contains(body.Note, "widget") || !strings.Contains(body.Note, "CSS and JavaScript") {
+			t.Errorf("note = %q, want it to name the missing block and the kept page code", body.Note)
+		}
+		if _, err := code.ByKey(ctx, "widget"); !errors.Is(err, snippets.ErrNotFound) {
+			t.Errorf("ByKey(widget) after an editor's restore = %v, want it still deleted", err)
+		}
+		draft, err := s.deps.Content.GetByID(ctx, page.ID, "en")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if draft.HeadCSS != "" || draft.BodyJS != "" {
+			t.Errorf("draft code after an editor's restore = %q / %q, want it left empty", draft.HeadCSS, draft.BodyJS)
+		}
+		main := draftMain(t, s, page.ID)
+		if strings.Contains(main, "evil()") {
+			t.Errorf("editor's restore brought back the removed script: %q", main)
+		}
+		if !strings.Contains(main, `data-cms-code="widget"`) || !strings.Contains(main, "<p>hello</p>") {
+			t.Errorf("editor's restore lost the edition's content: %q", main)
+		}
+
+		// The same edition restored by an administrator comes back whole.
+		rec = httptest.NewRecorder()
+		s.apiRestoreVersion(rec, versionRequest(t, s, "POST", "", page.ID, edition.ID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("admin restore status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		if _, err := code.ByKey(ctx, "widget"); err != nil {
+			t.Errorf("ByKey(widget) after an admin's restore = %v, want it put back", err)
+		}
+		if draft, _ := s.deps.Content.GetByID(ctx, page.ID, "en"); draft.BodyJS != "track()" {
+			t.Errorf("draft JS after an admin's restore = %q, want the edition's", draft.BodyJS)
+		}
+		if main := draftMain(t, s, page.ID); !strings.Contains(main, "evil()") {
+			t.Errorf("admin's restore did not restore the edition's HTML as it was: %q", main)
+		}
+	})
+}
+
+// draftMain is the draft content of a versionsServer page's one region.
+func draftMain(t *testing.T, s *server, pageID int64) string {
+	t.Helper()
+	blocks, err := s.deps.Content.BlocksFor(context.Background(), pageID, "en", content.StatusDraft)
+	if err != nil {
+		t.Fatalf("BlocksFor: %v", err)
+	}
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Region == "main" {
+			sb.WriteString(b.Content)
+		}
+	}
+	return sb.String()
 }
 
 // The restore handlers tell whoever clicked what became of the page's

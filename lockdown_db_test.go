@@ -351,3 +351,67 @@ func TestLockdownExemptSurvivesPagesEnforcement(t *testing.T) {
 		}
 	})
 }
+
+// A LockedHandler can set its own headers — the 503 waits for its first
+// write — and the lock's own headers are there unless it changes them.
+// The status is 503 whether the handler writes a body or nothing at all,
+// and only an explicit WriteHeader of its own changes it.
+func TestLockedHandlerKeepsItsHeaders(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		c := newSeedTestCMS(t, db)
+		if err := c.Migrate(ctx); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		setLocked(t, c, true)
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("the site"))
+		})
+		// The response as a client receives it. A recorder's Header() is
+		// its live map, which still shows headers set after the status
+		// went out; Result() holds them as they stood when it did, which
+		// is what a real server sends.
+		get := func(handler http.HandlerFunc) (*http.Response, string) {
+			c.cfg.LockedHandler = handler
+			rec := httptest.NewRecorder()
+			c.Lockdown(next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/inventory", nil))
+			return rec.Result(), rec.Body.String()
+		}
+
+		res, text := get(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Maintenance", "until-noon")
+			_, _ = w.Write([]byte(`{"closed":true}`))
+		})
+		if res.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want 503", res.StatusCode)
+		}
+		if got := res.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q, want the handler's application/json", got)
+		}
+		if got := res.Header.Get("X-Maintenance"); got != "until-noon" {
+			t.Errorf("X-Maintenance = %q, want the handler's header", got)
+		}
+		if res.Header.Get("Retry-After") == "" || res.Header.Get("X-Robots-Tag") == "" {
+			t.Error("the lock's own headers are missing")
+		}
+		if text != `{"closed":true}` {
+			t.Errorf("body = %q, want the handler's", text)
+		}
+
+		// A handler that writes nothing still answers 503.
+		if res, _ := get(func(http.ResponseWriter, *http.Request) {}); res.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("silent handler: status = %d, want 503", res.StatusCode)
+		}
+
+		// An explicit status is the handler's to choose, as documented.
+		res, _ = get(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "https://status.example.com/")
+			w.WriteHeader(http.StatusFound)
+		})
+		if res.StatusCode != http.StatusFound || res.Header.Get("Location") == "" {
+			t.Errorf("redirecting handler: status = %d, Location %q; want 302 with its Location",
+				res.StatusCode, res.Header.Get("Location"))
+		}
+	})
+}

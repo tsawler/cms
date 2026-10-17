@@ -217,6 +217,11 @@ Written out (note `'+00:00'` is URL-encoded):
 cms:cms@tcp(localhost:3307)/cms?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&clientFoundRows=true
 ```
 
+`Migrate` checks the connection for all four and refuses to start without
+them, naming whichever are missing. A server whose own time zone is UTC
+already passes the `time_zone` check, but set it anyway: the check only
+sees the server as it is today.
+
 **One operational difference to know now:** on MySQL and MariaDB, DDL commits
 as it goes. Postgres runs each migration in a transaction and rolls back on
 failure; these engines can leave a migration half-applied, needing manual
@@ -404,7 +409,9 @@ Conventions worth knowing:
   gives every page an editable footer without anyone creating it page by
   page. It takes optional fallback markup —
   `{{cmsShared "footer" "<p>&copy; My Site</p>"}}` — shown until an
-  editor fills it in. Publishing any page publishes shared edits with it.
+  editor fills it in. The fallback goes into the page unescaped, so give
+  it a literal you wrote, never data from a request or your database.
+  Publishing any page publishes shared edits with it.
 - Templates are parsed at startup — restart the server after editing
   them. The file extension is your choice (`.gohtml` plays best with
   editor tooling), but pages store their template's *path*, so renaming
@@ -1229,6 +1236,16 @@ own input CSS tells it. A site that customizes `@theme` must therefore
 give the wrapper script the same tokens the site build uses, or the two
 stylesheets will disagree — see [custom fonts](#custom-fonts) in step 6
 for the shared-theme-file pattern and what it prevents.
+
+Arbitrary-value classes such as `bg-[url(...)]`, `[mask:none]` or
+`[&_p]:hidden` spell out raw CSS, and this build compiles them into a
+stylesheet every page loads. Content saved by admins keeps them as
+written. Content saved by editors keeps only those already vouched for:
+classes your `Snippets`, `EditorStyles` or `SectionStyles` carry, classes
+in the snippet library, and classes already in the page's stored content.
+Any other arbitrary-value class an editor adds is dropped on save. Plain
+utility classes like `font-bold` and `sm:grid-cols-2` are never
+affected.
 
 ### Other knobs
 

@@ -44,7 +44,20 @@ const (
 	KeyUserID = "cmsUserID"
 	KeyCSRF   = "cmsCSRFToken"
 	KeyFlash  = "cmsFlash"
+	// KeyEpoch is the SessionEpoch of the account KeyUserID names, as it
+	// was when the session was granted. See EpochCurrent.
+	KeyEpoch = "cmsSessionEpoch"
 )
+
+// EpochCurrent reports whether the session was granted under the
+// account's current SessionEpoch. Every check that turns a session into a
+// signed-in user asks it, so a password change or a two-factor change
+// ends all of the account's other sessions at their next request. A
+// session from before epochs existed holds none, which reads as 0 — the
+// epoch every account starts at.
+func EpochCurrent(ctx context.Context, sessions *scs.SessionManager, epoch int64) bool {
+	return sessions.GetInt64(ctx, KeyEpoch) == epoch
+}
 
 // EnsureCSRF returns the session's CSRF token, generating and storing one
 // if the session doesn't have one yet.

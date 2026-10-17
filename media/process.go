@@ -31,6 +31,21 @@ var ErrUnsupportedType = errors.New("media: unsupported file type")
 // errors.Is finds them under the detail.
 var ErrUndecodable = errors.New("media: file could not be read as its own type")
 
+// ErrTooManyPixels is returned for a raster image whose declared size is
+// over MaxImagePixels. It always arrives wrapped together with
+// ErrTooLarge, so a caller that only knows about the byte caps still
+// answers it as an upload that is too big.
+var ErrTooManyPixels = errors.New("media: image has too many pixels")
+
+// MaxImagePixels caps the width × height of a raster image this package
+// will decode. The byte cap (MaxImageDocBytes) says nothing about this:
+// a PNG of a few hundred kilobytes can declare 60000×60000 pixels of
+// compressed zeroes, and decoding it allocates some 14 GB up front — a
+// process-killing out-of-memory rather than an error. 100 megapixels
+// admits any camera or phone photo in ordinary use, at a worst-case
+// decode of a few hundred megabytes.
+const MaxImagePixels = 100_000_000
+
 const (
 	// webMaxWidth is the largest width served to pages: the rendition a
 	// header image or a full-width body image uses.
@@ -156,15 +171,34 @@ func processPoster(data []byte, mime string, quality float64) (*processed, error
 	return processVariants(data, mime, quality, posterVariants)
 }
 
+// decodeImage decodes a raster image after checking, from its header
+// alone, that the pixels it declares are within MaxImagePixels. Every
+// decode of bytes someone uploaded goes through here; only IsDark skips
+// it, since the thumbnail it reads is one this package encoded itself.
+func decodeImage(data []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%w: decoding image: %w", ErrUndecodable, err)
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxImagePixels {
+		return nil, fmt.Errorf("%w: %w: %d×%d", ErrTooLarge, ErrTooManyPixels, cfg.Width, cfg.Height)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%w: decoding image: %w", ErrUndecodable, err)
+	}
+	return img, nil
+}
+
 func processVariants(data []byte, mime string, quality float64, specs []variantSpec) (*processed, error) {
 	ext, ok := allowedMimes[mime]
 	if !ok {
 		return nil, ErrUnsupportedType
 	}
 
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := decodeImage(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: decoding image: %w", ErrUndecodable, err)
+		return nil, err
 	}
 	bounds := img.Bounds()
 	p := &processed{Width: bounds.Dx(), Height: bounds.Dy(), Ext: ext, VariantExt: ".webp"}

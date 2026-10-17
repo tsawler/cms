@@ -8,6 +8,8 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"hash/crc32"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -172,6 +174,17 @@ func TestMediaUploadRejections(t *testing.T) {
 		s.mediaUpload(rec, uploadReq(t, s, u, "notes.xyz", []byte("just some bytes"), nil))
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("status = %d for an unsupported type, want 422", rec.Code)
+		}
+
+		// A small file declaring more pixels than the cap is too large,
+		// and the message says it is the dimensions, not the bytes.
+		rec = httptest.NewRecorder()
+		s.mediaUpload(rec, uploadReq(t, s, u, "bomb.png", pngDeclaring(60000, 60000), nil))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d for an image over the pixel cap, want 413", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "megapixels") {
+			t.Error("the re-rendered library does not explain the pixel cap")
 		}
 
 		items, err := s.deps.Media.All(context.Background(), "en", media.ListOptions{})
@@ -569,4 +582,21 @@ func posterReq(t *testing.T, s *server, u *auth.User, poster []byte, id int64) *
 	r := httptest.NewRequest(http.MethodPost, "/api/media/x/poster", &buf)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 	return withRouteAndSession(t, s, u, r, idParams(id))
+}
+
+// pngDeclaring returns a PNG that is nothing but a header declaring
+// width×height RGBA pixels, with no pixel data behind it.
+func pngDeclaring(width, height uint32) []byte {
+	ihdr := binary.BigEndian.AppendUint32(nil, width)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, height)
+	ihdr = append(ihdr, 8, 6, 0, 0, 0) // 8-bit RGBA, no interlace
+	chunk := func(kind string, data []byte) []byte {
+		out := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+		out = append(out, kind...)
+		out = append(out, data...)
+		return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(append([]byte(kind), data...)))
+	}
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = append(out, chunk("IHDR", ihdr)...)
+	return append(out, chunk("IEND", nil)...)
 }

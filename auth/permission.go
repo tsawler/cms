@@ -141,7 +141,13 @@ func (s *Store) ReplacePermissions(ctx context.Context, userID int64, perms []Pe
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := replacePermissions(ctx, tx, userID, perms); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
+func replacePermissions(ctx context.Context, tx *sqldb.Tx, userID int64, perms []Permission) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM cms_user_permissions WHERE user_id = $1", userID); err != nil {
 		return err
 	}
@@ -156,5 +162,5 @@ func (s *Store) ReplacePermissions(ctx context.Context, userID int64, perms []Pe
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }

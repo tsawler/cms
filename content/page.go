@@ -637,6 +637,10 @@ func (s *Store) PublishAs(ctx context.Context, pageID int64, by *int64) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx,
 		"DELETE FROM cms_blocks WHERE page_id = $1 AND status = 'published'", pageID); err != nil {
 		return err
@@ -691,6 +695,28 @@ func (s *Store) PublishAs(ctx context.Context, pageID int64, by *int64) error {
 	return tx.Commit(ctx)
 }
 
+// lockPage takes the page row's lock for the rest of tx, and is the first
+// statement of every transaction that deletes a page's rows and writes
+// them again — publishing, discarding, restoring, saving a sections
+// region, dropping a locale, reindexing. Without it two of those on one
+// page at once both delete the rows they found, then both insert: the
+// second trips a unique key (cms_blocks' position, cms_search_docs'
+// page and locale) or, on MySQL, deadlocks — and an editor double-
+// clicking Publish gets an error for it. With it the second waits for the
+// first to commit and then runs against what it left.
+//
+// The transactions that open with an UPDATE of the page row (Update,
+// SetVisibility, Unpublish, UpdatePost) hold the same lock from their
+// first statement, so they queue the same way without asking.
+func lockPage(ctx context.Context, h handle, pageID int64) error {
+	var id int64
+	err := h.QueryRow(ctx, "SELECT id FROM cms_pages WHERE id = $1 FOR UPDATE", pageID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // DiscardDraft throws away a page's unpublished edits: the draft blocks
 // and metadata are replaced by copies of the currently published ones and
 // the staged page-level fields revert to the page row, so the editor
@@ -702,6 +728,10 @@ func (s *Store) DiscardDraft(ctx context.Context, pageID int64) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockPage(ctx, tx, pageID); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx,
 		"DELETE FROM cms_blocks WHERE page_id = $1 AND status = 'draft'", pageID); err != nil {
