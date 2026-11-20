@@ -46,7 +46,13 @@ func (s *Store) MenuItems(ctx context.Context, menu string) ([]MenuItem, error) 
 		q += ` WHERE mi.menu = $1`
 		args = append(args, menu)
 	}
-	q += ` ORDER BY mi.menu, mi.sort`
+	// id breaks ties. ReplaceMenu never writes two rows of a menu with
+	// the same sort, but nothing in the schema enforces that (the index
+	// is not unique), and rows written some other way — an importer, a
+	// hand-written INSERT — can share one. Without a tiebreak their order
+	// is whatever the engine happens to return, which can change between
+	// queries.
+	q += ` ORDER BY mi.menu, mi.sort, mi.id`
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err

@@ -351,26 +351,48 @@ func (s *server) apiGetMenu(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, s.tr(r, "Could not load the menu."))
 		return
 	}
-	out := []menuItemJSON{}
-	byID := map[int64]int{} // item id -> index in out, for attaching children
-	for _, item := range items {
+	writeJSON(w, http.StatusOK, map[string]any{"menu": menu, "items": menuTree(items)})
+}
+
+// menuTree arranges stored rows into the one-level tree the editor edits.
+//
+// Two passes — top-level rows first, then children by ParentID — rather
+// than relying on each parent's row arriving before its children's. That
+// order holds for menus ReplaceMenu wrote but nothing enforces it, and
+// here a missed child is worse than on the public render: the editor
+// saves the whole tree back through ReplaceMenu, so a child left out of
+// what it loaded would be deleted by the next save. Within each level
+// rows keep their arrival order (sort, then id).
+func menuTree(items []content.MenuItem) []menuItemJSON {
+	toJSON := func(item content.MenuItem) menuItemJSON {
 		j := menuItemJSON{ID: item.ID, Label: item.Label, Labels: item.Labels, URL: item.URL, NewTab: item.NewTab}
 		if item.PageID != nil {
 			j.PageID = *item.PageID
 		}
+		return j
+	}
+	out := []menuItemJSON{}
+	byID := map[int64]int{} // item id -> index in out, for attaching children
+	for _, item := range items {
 		if item.ParentID != nil {
-			// Rows are ordered by sort and children are stored after
-			// their parent, so the parent is always already in out.
-			if pi, ok := byID[*item.ParentID]; ok {
-				out[pi].Children = append(out[pi].Children, j)
-			}
 			continue
 		}
+		j := toJSON(item)
 		j.Dropdown = j.PageID == 0 && j.URL == ""
 		byID[item.ID] = len(out)
 		out = append(out, j)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"menu": menu, "items": out})
+	for _, item := range items {
+		if item.ParentID == nil {
+			continue
+		}
+		// Children of top-level rows only; a grandchild is outside the
+		// one-level model, as before.
+		if pi, ok := byID[*item.ParentID]; ok {
+			out[pi].Children = append(out[pi].Children, toJSON(item))
+		}
+	}
+	return out
 }
 
 // validMenuURL accepts site-relative paths, same-page anchors, and the
