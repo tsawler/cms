@@ -137,6 +137,35 @@ func TestMenuItemsScopedByMenu(t *testing.T) {
 	})
 }
 
+// Rows sharing a sort — which ReplaceMenu never writes, but nothing in the
+// schema prevents — come back in id order, the same on every query and
+// every engine, rather than in whatever order the engine picks.
+func TestMenuItemsTiesOrderByID(t *testing.T) {
+	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
+		ctx := context.Background()
+		s := content.NewStore(db, defaultLocale)
+		items := []content.MenuItemInput{
+			{Label: "First", URL: "/1"}, {Label: "Second", URL: "/2"},
+			{Label: "Third", URL: "/3"}, {Label: "Fourth", URL: "/4"},
+		}
+		if err := s.ReplaceMenu(ctx, "main", items); err != nil {
+			t.Fatalf("ReplaceMenu: %v", err)
+		}
+		if _, err := db.Exec(ctx, "UPDATE cms_menu_items SET sort = 0 WHERE menu = $1", "main"); err != nil {
+			t.Fatalf("flattening sort: %v", err)
+		}
+		got, err := s.MenuItems(ctx, "main")
+		if err != nil {
+			t.Fatalf("MenuItems: %v", err)
+		}
+		for i, want := range []string{"First", "Second", "Third", "Fourth"} {
+			if i >= len(got) || got[i].Label != want {
+				t.Fatalf("order = %+v, want ids ascending (First..Fourth)", got)
+			}
+		}
+	})
+}
+
 func TestSiteSettingsRoundTrip(t *testing.T) {
 	dbtest.Each(t, func(t *testing.T, db *sqldb.DB) {
 		ctx := context.Background()

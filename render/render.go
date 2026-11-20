@@ -119,33 +119,50 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale string, includeDrafts bool) map[string][]MenuEntry {
 	current := SlugURL(currentSlug, locale, defaultLocale)
 	menus := map[string][]MenuEntry{}
-	// Rows arrive ordered by sort with children stored after their
-	// parent, so parents are placed before their children attach.
+	// Two passes: every top-level item is placed first, then children
+	// attach to their parent by ParentID. A single pass relied on each
+	// parent's row arriving before its children's, which holds for menus
+	// ReplaceMenu wrote (one sort sequence, children right after their
+	// parent) but nothing enforces — and a child read before its parent
+	// was silently dropped, often taking its now-empty dropdown with it.
+	// Within each level rows keep the order they arrived in (sort, then
+	// id), so a ReplaceMenu-written menu renders exactly as before.
 	type parentPos struct {
 		menu string
 		idx  int
 	}
 	parents := map[int64]parentPos{}
 	for _, item := range items {
+		if item.ParentID != nil {
+			continue
+		}
 		e, ok := buildEntry(item, current, locale, defaultLocale, includeDrafts)
 		if !ok {
 			continue
 		}
-		if item.ParentID != nil {
-			if e.URL == "" {
-				continue // label-only rows are only meaningful at top level
-			}
-			if p, found := parents[*item.ParentID]; found {
-				list := menus[p.menu]
-				list[p.idx].Children = append(list[p.idx].Children, e)
-			}
-			continue
-		}
 		if e.URL == "" {
 			// Dropdown parent; remember where it lands for its children.
+			// Only these take children: a child of a linked item, or of
+			// another child, is outside the one-level menu model and is
+			// not rendered.
 			parents[item.ID] = parentPos{menu: item.Menu, idx: len(menus[item.Menu])}
 		}
 		menus[item.Menu] = append(menus[item.Menu], e)
+	}
+	for _, item := range items {
+		if item.ParentID == nil {
+			continue
+		}
+		p, found := parents[*item.ParentID]
+		if !found {
+			continue
+		}
+		e, ok := buildEntry(item, current, locale, defaultLocale, includeDrafts)
+		if !ok || e.URL == "" {
+			continue // label-only rows are only meaningful at top level
+		}
+		list := menus[p.menu]
+		list[p.idx].Children = append(list[p.idx].Children, e)
 	}
 	if !includeDrafts {
 		for key, list := range menus {
