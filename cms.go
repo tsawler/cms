@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -382,6 +383,20 @@ type Config struct {
 	// moment it was switched back on — so turning it on later costs
 	// nothing but the template.
 	SearchTemplate PageTemplate
+
+	// PrivateMenuItemsForSignedIn shows menu items that link to private
+	// pages to every signed-in user, readers included, rather than only
+	// to those who may edit the page.
+	//
+	// Off by default, which suits a public site with a few staff-only
+	// pages: there, a private page is a working draft or an internal
+	// note, and its menu item is something only its editors need. On
+	// suits an intranet, where private is the normal state of a page and
+	// every signed-in reader may open it — leaving the items out would
+	// hand readers a menu with nothing in it. Either way the page itself
+	// is served to any signed-in user; this only decides whether the
+	// menu says so. Anonymous visitors never see these items.
+	PrivateMenuItemsForSignedIn bool
 
 	// SearchPath is where results are served, as a slug without slashes
 	// around it. "" uses DefaultSearchPath ("search"). A page with this
@@ -1674,7 +1689,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		// host app — the CMS claims an address only when nothing else
 		// answers at it.
 		if c.searchEnabled() && slug == c.cfg.SearchPath {
-			c.serveSearch(w, r, locale)
+			c.serveSearch(w, r, locale, user)
 			return
 		}
 		c.notFound(w)
@@ -1711,7 +1726,7 @@ func (c *CMS) servePage(w http.ResponseWriter, r *http.Request) {
 		c.cfg.Logger.Error("cms: loading menus", "err", err)
 		menuItems = nil
 	}
-	menus := render.BuildMenus(menuItems, page.Slug, locale, c.cfg.Locales[0], editing)
+	menus := render.BuildMenusWith(menuItems, page.Slug, locale, c.cfg.Locales[0], c.menuOptions(user, editing))
 
 	// The same cached reading the response headers were stamped from a
 	// moment ago, so a render and its headers cannot describe two
@@ -1935,6 +1950,31 @@ func (c *CMS) requestFuncs(r *http.Request) template.FuncMap {
 		return nil
 	}
 	return c.cfg.RequestFuncs(r)
+}
+
+// menuOptions decides which menu items a render shows: everything for
+// someone editing the page, private pages' items too for any signed-in
+// user when the site asks for that, and only public ones otherwise.
+func (c *CMS) menuOptions(user *auth.User, editing bool) render.MenuOptions {
+	return render.MenuOptions{
+		Drafts:  editing,
+		Private: editing || (user != nil && c.cfg.PrivateMenuItemsForSignedIn),
+	}
+}
+
+// LoginURL is the admin login page, set to return to next once the
+// visitor has signed in — for a host that turns a signed-out visitor
+// away from a private page and wants them back on it afterwards.
+//
+// next should be a site-relative path, typically r.URL.RequestURI().
+// The login page re-checks it and ignores anything that is not a path
+// on this site, so passing something else is harmless but pointless.
+func (c *CMS) LoginURL(next string) string {
+	login := c.cfg.AdminPath + "/login"
+	if next == "" {
+		return login
+	}
+	return login + "?next=" + url.QueryEscape(next)
 }
 
 // sessionUser returns the logged-in, active CMS user for a public page

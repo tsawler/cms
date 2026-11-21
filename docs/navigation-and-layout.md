@@ -59,7 +59,11 @@ on the others. "＋" chips add items, and dragging
 rearranges them, including into and out of a dropdown. Items linking to
 draft pages show only for logged-in editors until the page is published,
 and items linking to private pages (visibility "Private" in the page
-form) stay editor-only even after publishing.
+form) stay editor-only even after publishing — unless the site sets
+`Config.PrivateMenuItemsForSignedIn`, which shows them to every
+signed-in user, readers included. That is the setting for an intranet,
+where nearly every page is private and readers need a menu to find them;
+anonymous visitors never see these items either way.
 Menu changes have no draft state — every change applies to the whole
 site immediately.
 

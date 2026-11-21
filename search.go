@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tsawler/cms/auth"
 	"github.com/tsawler/cms/content"
 	"github.com/tsawler/cms/render"
 )
@@ -110,7 +111,7 @@ func pageSlugURL(prefix, slug string) string {
 // <title> of a page that exists to hold a box, and a host that wants
 // otherwise writes it in the template, where {{cmsSearch}}'s .Query is to
 // hand.
-func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string) {
+func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string, user *auth.User) {
 	query := strings.TrimSpace(r.URL.Query().Get(render.SearchQueryParam))
 
 	site := c.siteSettings(r.Context())
@@ -122,7 +123,7 @@ func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string)
 	// The results page is not in any menu, so nothing on the bar is
 	// current while a visitor is on it — which is what passing a slug no
 	// page has says.
-	menus := render.BuildMenus(menuItems, c.cfg.SearchPath, locale, c.cfg.Locales[0], false)
+	menus := render.BuildMenusWith(menuItems, c.cfg.SearchPath, locale, c.cfg.Locales[0], c.menuOptions(user, false))
 
 	// The site's shared regions — the footer and the notice bar the
 	// results page draws like every other page. It has no blocks of its
@@ -147,6 +148,12 @@ func (c *CMS) serveSearch(w http.ResponseWriter, r *http.Request, locale string)
 	// found, not a page listing it. The header is the half that reaches
 	// a crawler whatever the template says.
 	w.Header().Set("X-Robots-Tag", "noindex, follow")
+	// The menu may carry private pages' items for a signed-in user (see
+	// Config.PrivateMenuItemsForSignedIn), so their copy is theirs alone;
+	// see servePage for why the header and not just Vary.
+	if user != nil {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	if err := c.renderer.Render(w, render.Input{
 		Page:          page,
 		Shared:        shared,

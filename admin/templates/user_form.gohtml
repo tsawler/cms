@@ -37,6 +37,7 @@
     <div class="cms-field">
         <label for="role">{{.T "Role"}}</label>
         <select id="role" name="role">
+            <option value="reader" {{if eq .FormUser.Role "reader"}}selected{{end}}>{{.T "Reader — can sign in to read private pages"}}</option>
             <option value="editor" {{if eq .FormUser.Role "editor"}}selected{{end}}>{{.T "Editor — can edit content"}}</option>
             {{if .IsAdmin}}
             <option value="admin" {{if eq .FormUser.Role "admin"}}selected{{end}}>{{.T "Admin — can also manage users"}}</option>
@@ -57,7 +58,7 @@
              role as well, so the hint only claims admins hold everything
              when nothing here says otherwise. */ -}}
         {{$gated := false}}{{range .Permissions}}{{if .AdminsNeedGrant}}{{$gated = true}}{{end}}{{end}}
-        <p class="cms-hint">{{.T "What an editor may work on. Admins and superadmins always hold every permission."}}{{if $gated}} {{.T "Exception: some grants here bind admins too and must be ticked for them as well — only superadmins hold everything regardless."}}{{end}}</p>
+        <p class="cms-hint">{{.T "What an editor may work on. Readers hold none; admins and superadmins always hold every permission."}}{{if $gated}} {{.T "Exception: some grants here bind admins too and must be ticked for them as well — only superadmins hold everything regardless."}}{{end}}</p>
         <div class="cms-field-check">
             <label><input type="checkbox" name="perm" value="blogs"
                 {{if .GrantChecked "blogs"}}checked{{end}} {{if not (.Can "blogs")}}disabled{{end}}>

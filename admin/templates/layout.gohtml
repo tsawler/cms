@@ -31,7 +31,7 @@
 {{if .User}}
 <aside class="cms-sidebar">
     <div class="cms-sidebar-head">
-        <a class="cms-brand" href="{{.AdminPath}}/">CMS</a>
+        <a class="cms-brand" href="{{if .IsReader}}/{{else}}{{.AdminPath}}/{{end}}">CMS</a>
         {{- /* Collapses the sidebar to a rail of icons, for working
                room. admin.js flips the class and keeps the state in
                localStorage; nav-state.js reapplies it on the next page
@@ -64,6 +64,7 @@
            rail shows it alone, with the full label as a tooltip put on
            by admin.js. */}}
     <nav class="cms-nav">
+        {{- if not .IsReader}}
         <a {{if eq .NavCurrent "dashboard"}}class="cms-active" aria-current="page"{{end}} href="{{.AdminPath}}/">
             <span class="cms-nav-glyph" aria-hidden="true">{{template "icon-dashboard"}}</span><span class="cms-nav-label">{{.T "Dashboard"}}</span></a>
         {{- template "navsections" .NavSectionsAt "dashboard"}}
@@ -93,6 +94,7 @@
         {{end}}
         {{- template "navsections" .NavSectionsAt "users"}}
         {{- template "navsections" .NavSectionsAt ""}}
+        {{- end}}
         <a href="/"><span class="cms-nav-glyph" aria-hidden="true">{{template "icon-site"}}</span><span class="cms-nav-label">{{.T "Public Site"}}</span></a>
     </nav>
     <div class="cms-sidebar-foot">

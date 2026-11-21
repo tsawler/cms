@@ -4,8 +4,17 @@ Who can do what: the role model, the dashboard, and the account features — bot
 
 ## Roles & permissions
 
-Accounts have one of three **roles**, which encode trust:
+Accounts have one of four **roles**, which encode trust:
 
+- **reader** — signs in to read the site's private pages and does
+  nothing else: no permissions (any stored for the account are ignored,
+  and saving it as a reader removes them), no in-place editor, and no
+  admin beyond its own account page (name, email, password, two-factor).
+  Signing in lands a reader on the site, not the dashboard; any other
+  admin address sends them back to the site, and every admin write is
+  refused. The role for an intranet's staff — pair it with
+  `Config.PrivateMenuItemsForSignedIn` so their menu shows the private
+  pages they can open. Anyone who may manage users can create readers.
 - **editor** — works on content, gated by per-user permissions (below).
 - **admin** — everything: all permissions implicitly, plus site-wide and
   per-page CSS/JS (written into pages unsanitized), the custom-code block
@@ -46,13 +55,16 @@ A migration grants existing editors the three content permissions, so
 an upgrade changes nothing until you start unticking boxes.
 
 **User management without the admin role is deliberately bounded.** An
-editor with that grant manages editor accounts only: admin accounts are
+editor with that grant manages editor and reader accounts only: admin accounts are
 out of reach entirely (including their passwords and two-factor
 resets), the role select offers only "editor", and they can neither
 grant nor revoke a permission they don't hold themselves. Nor can they
 change the email, password or two-factor enrollment of an account that
 holds a permission they don't: signing in as that account would hand
 them the permission anyway. They can still rename or deactivate it.
+Making an account a reader removes every grant it holds, so it is
+allowed under the same rule: only when each of those grants is one the
+manager could take away directly.
 Escalation by way of the users page is a dead end.
 
 The same credential rule binds admins over grants marked
@@ -84,6 +96,28 @@ an editor, and only superadmins hold it regardless. Check these in your
 own handlers with `auth.User.HasGrant` rather than `Can`. Every
 declaration of one key must agree on the flag; `cms.New` refuses a
 mismatch.
+
+## Returning to the page after signing in
+
+The login page takes a return address, `?next=/some/page`, and sends the
+visitor there once they are signed in — through the two-factor step too,
+where it waits in the session rather than on the challenge's URL. Without
+one, readers land on the site's front page and everyone else on the
+dashboard.
+
+A host that turns signed-out visitors away from private pages builds the
+link with `c.LoginURL(r.URL.RequestURI())`. The CMS itself answers a
+signed-out request for a private page with a 404, as before, so that
+outsiders cannot tell which private pages exist; redirecting to the login
+form instead is the host's call to make.
+
+`next` is checked on the way in and again before the redirect, and only a
+path on this site is accepted: anything naming a scheme or a host,
+anything starting `//` or `/\`, and anything with a backslash, a space or
+a control character (browsers strip tabs and newlines out of URLs, so
+`/<tab>/evil.example` is `//evil.example` by the time it is followed) is
+ignored and the visitor lands on the ordinary page instead. The login
+page cannot be made into an open redirect.
 
 ## The dashboard
 

@@ -86,6 +86,9 @@ func (s *server) userNew(w http.ResponseWriter, r *http.Request) {
 func (s *server) userCreate(w http.ResponseWriter, r *http.Request) {
 	form, password, errs := s.parseUserForm(r, true)
 	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, nil, s.gatedPermissions())
+	if form.Role.IsReader() {
+		form.Permissions = nil // readers hold none; see auth.RoleReader
+	}
 
 	if len(errs) > 0 {
 		s.renderUserForm(w, r, form, true, errs)
@@ -146,6 +149,17 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	form.ID = existing.ID
 	form.Permissions = mergeGrants(s.currentUser(r), form.Permissions, existing.Permissions, s.gatedPermissions())
+	if form.Role.IsReader() {
+		// Making an account a reader takes every grant it holds, so it
+		// is allowed exactly when taking each of them one by one would
+		// be — the rule that bounds credential resets, for the same
+		// reason. Otherwise a manager holding only the users grant could
+		// strip a pages editor of a permission they could never revoke.
+		if !existing.Role.IsReader() && s.credentialsLocked(r, existing) && errs["role"] == "" {
+			errs["role"] = s.tr(r, "This account holds permissions you cannot remove, so you cannot make it a reader.")
+		}
+		form.Permissions = nil
+	}
 	// Carried over so an error re-render still shows the two-factor
 	// reset checkbox; Update never writes this field.
 	form.TOTPSecret = existing.TOTPSecret
@@ -188,6 +202,14 @@ func (s *server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(errs) > 0 {
+		// A refused change to reader cleared the grants above; the form
+		// goes back showing what the account still holds, or the boxes
+		// come back unticked (the disabled ones too, unlocking the
+		// credential fields with them) and saving it again as an editor
+		// would quietly revoke whatever the manager did not re-tick.
+		if form.Role.IsReader() {
+			form.Permissions = existing.Permissions
+		}
 		s.renderUserForm(w, r, form, false, errs)
 		return
 	}
@@ -439,7 +461,7 @@ func canManageUser(actor, target *auth.User) bool {
 	if target.Role == auth.RoleSuperadmin {
 		return false
 	}
-	return actor.Role.IsAdmin() || target.Role == auth.RoleEditor
+	return actor.Role.IsAdmin() || target.Role == auth.RoleEditor || target.Role == auth.RoleReader
 }
 
 // mayResetCredentials reports whether actor may change target's email,
@@ -584,7 +606,7 @@ func (s *server) parseUserForm(r *http.Request, isNew bool) (*auth.User, string,
 		errs["role"] = s.tr(r, "Only administrators can assign admin roles.")
 	case u.Role == auth.RoleSuperadmin && !actor.Role.IsSuperadmin():
 		errs["role"] = s.tr(r, "Only superadministrators can assign the superadmin role.")
-	case u.Role != auth.RoleEditor && !actor.Role.IsAdmin():
+	case u.Role != auth.RoleEditor && u.Role != auth.RoleReader && !actor.Role.IsAdmin():
 		errs["role"] = s.tr(r, "Only administrators can assign admin roles.")
 	}
 	if isNew && password == "" {

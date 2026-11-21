@@ -30,6 +30,10 @@ const (
 	// The SessionEpoch the password was checked under, so a password
 	// changed mid-challenge strands the half-login made with the old one.
 	sessionKey2FAEpoch = "cms2FAEpoch"
+	// Where to go once the code is accepted: the login form's validated
+	// next, held here so the challenge's URL carries nothing to tamper
+	// with. Validated again when it is used.
+	sessionKey2FANext = "cms2FANext"
 
 	// A generated-but-unconfirmed enrollment secret on the settings page.
 	// It only moves to the database once a live code has confirmed the
@@ -267,6 +271,41 @@ func (s *server) requireUser(next http.Handler) http.Handler {
 	})
 }
 
+// requireStaff keeps readers out of the admin. It must be nested inside
+// requireUser.
+//
+// A reader who lands here — following an old bookmark to the dashboard,
+// say — is sent to the site's front page rather than shown a 403: they
+// did nothing wrong, and the site is what their account is for. Anything
+// but a plain read is refused outright; no reader has a form here to
+// submit.
+func (s *server) requireStaff(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u := s.currentUser(r)
+		if u == nil {
+			http.Redirect(w, r, s.deps.AdminPath+"/login", http.StatusSeeOther)
+			return
+		}
+		if u.Role.IsReader() {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				// A superadmin masquerading as a reader goes to the
+				// account page instead: it carries the banner that ends
+				// the masquerade, and the public site has no such way
+				// back.
+				to := "/"
+				if s.deps.Sessions.GetInt64(r.Context(), sessionKeyMasqueradeFrom) != 0 {
+					to = s.deps.AdminPath + "/settings"
+				}
+				http.Redirect(w, r, to, http.StatusSeeOther)
+				return
+			}
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // renderLocked answers a signed-in non-superadmin while the site is
 // locked. 503 rather than 403: nothing is wrong with their account and
 // nothing about their permissions has changed — the site is shut, and it
@@ -409,6 +448,17 @@ const (
 // logged in", and requireUser does the real check downstream.
 func (s *server) maxRequestBytes(r *http.Request) int64 {
 	if s.deps.Sessions.GetInt64(r.Context(), sessionKeyUserID) == 0 {
+		return maxAnonRequestBytes
+	}
+	// A reader posts nothing bigger than a signed-out visitor does —
+	// their account page and the logout button — and the body is read
+	// here, before requireStaff turns them away. The user lookup is the
+	// one requireUser makes next anyway, remembered for the request. A
+	// server built by hand without a user store (tests of this middleware
+	// alone) has nobody to look up, and keeps the signed-in ceiling.
+	if s.deps.Users == nil {
+		// fall through
+	} else if u := s.currentUser(r); u != nil && u.Role.IsReader() {
 		return maxAnonRequestBytes
 	}
 	if s.deps.MaxRequestBytes > 0 {

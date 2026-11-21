@@ -331,7 +331,10 @@ func New(d Deps) http.Handler {
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireUser)
-		r.Get("/", s.dashboard)
+		// What follows, up to the staff group, is everything a reader
+		// may reach: signing out, the language switch, ending a
+		// masquerade (a superadmin wearing a reader must be able to
+		// take it off), and their own account page.
 		r.Post("/logout", s.logout)
 		r.Post("/lang", s.setLang)
 		// Ends a superadmin's masquerade (started from the users list).
@@ -348,157 +351,166 @@ func New(d Deps) http.Handler {
 		r.Post("/settings/2fa/cancel", s.totpCancel)
 		r.Post("/settings/2fa/disable", s.totpDisable)
 
-		if d.Renderer != nil {
-			// The Pages section is superadmin-only, like snippets:
-			// editors and admins do all their page work in place on
-			// the public site, and a second door to the same features
-			// only confuses. The pages permission lives on in the
-			// editor API below, where it gates pages, menus, and site
-			// settings.
-			r.Group(func(r chi.Router) {
-				r.Use(s.requireSuperadmin)
-				r.Get("/pages", s.pagesList)
-				r.Get("/pages/new", s.pageNew)
-				r.Post("/pages/new", s.pageCreate)
-				r.Get("/pages/{id}", s.pageEdit)
-				r.Post("/pages/{id}", s.pageUpdate)
-				r.Post("/pages/{id}/delete", s.pageDelete)
-				r.Post("/pages/{id}/discard", s.pageDiscard)
-				r.Post("/pages/{id}/unpublish", s.pageUnpublish)
-				r.Get("/pages/{id}/preview", s.pagePreview)
-				r.Get("/pages/{id}/versions", s.pageVersions)
-				r.Get("/pages/{id}/versions/{vid}/preview", s.pageVersionPreview)
-				r.Post("/pages/{id}/versions/{vid}/restore", s.pageVersionRestore)
-			})
+		// Everything else is staff only: readers are sent back to the
+		// site. One gate around the lot rather than a check per route,
+		// so a route added later is closed to readers by default
+		// instead of open until someone remembers.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireStaff)
+			r.Get("/", s.dashboard)
 
-			// JSON API for the in-place editor. The {id} routes are
-			// gated inside the handlers by the page's slug — a post's
-			// backing page answers to its feed permission, not to
-			// pages. The site-wide reads answer to pages, like the
-			// writes beside them: the page list names every page,
-			// drafts and private ones included, and only the menu
-			// editor and the site settings dialog read these, both of
-			// which the editor offers to pages holders alone.
-			pagesPerm := s.requireAnyPerm(auth.PermPages)
-			r.With(pagesPerm).Get("/api/pages", s.apiListPages)
-			r.With(pagesPerm).Post("/api/pages", s.apiCreatePage)
-			r.Delete("/api/pages/{id}", s.apiDeletePage)
-			r.With(pagesPerm).Get("/api/menu", s.apiGetMenu)
-			r.With(pagesPerm).Put("/api/menu", s.apiSaveMenu)
-			r.With(pagesPerm).Get("/api/settings", s.apiGetSettings)
-			r.With(pagesPerm).Put("/api/settings", s.apiSaveSettings)
-			r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
-			r.Post("/api/pages/{id}/sections", s.apiSaveSections)
-			r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
-			r.Put("/api/pages/{id}/meta", s.apiSavePageMeta)
-			r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
-			r.Post("/api/pages/{id}/duplicate", s.apiDuplicatePage)
-			r.Post("/api/pages/{id}/publish", s.apiPublish)
-			r.Post("/api/pages/{id}/unpublish", s.apiUnpublish)
-			r.Post("/api/pages/{id}/discard", s.apiDiscard)
-			r.Get("/api/pages/{id}/versions", s.apiPageVersions)
-			r.Post("/api/pages/{id}/versions/{vid}/restore", s.apiRestoreVersion)
-			r.Put("/api/pages/{id}/visibility", s.apiSetVisibility)
-			r.Get("/api/snippets", s.apiSnippetsList)
-
-			// Per-page CSS/JS is written raw into pages: admin-only.
-			// So is the custom-code library, for the same reason — a
-			// page's placeholder only names an entry, and this is the
-			// door to what the entry actually runs.
-			r.Group(func(r chi.Router) {
-				r.Use(s.requireAdmin)
-				r.Get("/api/pages/{id}/code", s.apiGetPageCode)
-				r.Put("/api/pages/{id}/code", s.apiSavePageCode)
-				if d.CodeSnippets != nil {
-					r.Get("/api/code", s.apiCodeList)
-					r.Post("/api/code", s.apiCodeCreate)
-					r.Get("/api/code/{key}", s.apiCodeGet)
-					r.Put("/api/code/{key}", s.apiCodeSave)
-					r.Delete("/api/code/{key}", s.apiCodeDelete)
-				}
-			})
-
-			// Blog & news, when a post template is configured. Either
-			// feed permission opens the section; which feeds a user
-			// can actually touch is enforced per-post in the handlers.
-			if d.PostTemplate.File != "" {
+			if d.Renderer != nil {
+				// The Pages section is superadmin-only, like snippets:
+				// editors and admins do all their page work in place on
+				// the public site, and a second door to the same features
+				// only confuses. The pages permission lives on in the
+				// editor API below, where it gates pages, menus, and site
+				// settings.
 				r.Group(func(r chi.Router) {
-					r.Use(s.requireAnyPerm(auth.PermBlogs, auth.PermNews))
-					r.Get("/posts", s.postsList)
-					r.Get("/posts/new", s.postNew)
-					r.Post("/posts/new", s.postCreate)
-					r.Get("/posts/{id}", s.postEdit)
-					r.Post("/posts/{id}", s.postUpdate)
-					r.Post("/posts/{id}/delete", s.postDelete)
-					r.Post("/posts/{id}/discard", s.postDiscard)
-					r.Post("/posts/{id}/unpublish", s.postUnpublish)
-					r.Get("/posts/{id}/preview", s.postPreview)
-					r.Get("/posts/{id}/versions", s.postVersions)
-					r.Get("/posts/{id}/versions/{vid}/preview", s.postVersionPreview)
-					r.Post("/posts/{id}/versions/{vid}/restore", s.postVersionRestore)
-					r.Post("/api/posts", s.apiCreatePost)
-					r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
+					r.Use(s.requireSuperadmin)
+					r.Get("/pages", s.pagesList)
+					r.Get("/pages/new", s.pageNew)
+					r.Post("/pages/new", s.pageCreate)
+					r.Get("/pages/{id}", s.pageEdit)
+					r.Post("/pages/{id}", s.pageUpdate)
+					r.Post("/pages/{id}/delete", s.pageDelete)
+					r.Post("/pages/{id}/discard", s.pageDiscard)
+					r.Post("/pages/{id}/unpublish", s.pageUnpublish)
+					r.Get("/pages/{id}/preview", s.pagePreview)
+					r.Get("/pages/{id}/versions", s.pageVersions)
+					r.Get("/pages/{id}/versions/{vid}/preview", s.pageVersionPreview)
+					r.Post("/pages/{id}/versions/{vid}/restore", s.pageVersionRestore)
+				})
+
+				// JSON API for the in-place editor. The {id} routes are
+				// gated inside the handlers by the page's slug — a post's
+				// backing page answers to its feed permission, not to
+				// pages. The site-wide reads answer to pages, like the
+				// writes beside them: the page list names every page,
+				// drafts and private ones included, and only the menu
+				// editor and the site settings dialog read these, both of
+				// which the editor offers to pages holders alone.
+				pagesPerm := s.requireAnyPerm(auth.PermPages)
+				r.With(pagesPerm).Get("/api/pages", s.apiListPages)
+				r.With(pagesPerm).Post("/api/pages", s.apiCreatePage)
+				r.Delete("/api/pages/{id}", s.apiDeletePage)
+				r.With(pagesPerm).Get("/api/menu", s.apiGetMenu)
+				r.With(pagesPerm).Put("/api/menu", s.apiSaveMenu)
+				r.With(pagesPerm).Get("/api/settings", s.apiGetSettings)
+				r.With(pagesPerm).Put("/api/settings", s.apiSaveSettings)
+				r.Post("/api/pages/{id}/regions", s.apiSaveRegions)
+				r.Post("/api/pages/{id}/sections", s.apiSaveSections)
+				r.Get("/api/pages/{id}/meta", s.apiGetPageMeta)
+				r.Put("/api/pages/{id}/meta", s.apiSavePageMeta)
+				r.Post("/api/pages/{id}/revert-locale", s.apiRevertLocale)
+				r.Post("/api/pages/{id}/duplicate", s.apiDuplicatePage)
+				r.Post("/api/pages/{id}/publish", s.apiPublish)
+				r.Post("/api/pages/{id}/unpublish", s.apiUnpublish)
+				r.Post("/api/pages/{id}/discard", s.apiDiscard)
+				r.Get("/api/pages/{id}/versions", s.apiPageVersions)
+				r.Post("/api/pages/{id}/versions/{vid}/restore", s.apiRestoreVersion)
+				r.Put("/api/pages/{id}/visibility", s.apiSetVisibility)
+				r.Get("/api/snippets", s.apiSnippetsList)
+
+				// Per-page CSS/JS is written raw into pages: admin-only.
+				// So is the custom-code library, for the same reason — a
+				// page's placeholder only names an entry, and this is the
+				// door to what the entry actually runs.
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireAdmin)
+					r.Get("/api/pages/{id}/code", s.apiGetPageCode)
+					r.Put("/api/pages/{id}/code", s.apiSavePageCode)
+					if d.CodeSnippets != nil {
+						r.Get("/api/code", s.apiCodeList)
+						r.Post("/api/code", s.apiCodeCreate)
+						r.Get("/api/code/{key}", s.apiCodeGet)
+						r.Put("/api/code/{key}", s.apiCodeSave)
+						r.Delete("/api/code/{key}", s.apiCodeDelete)
+					}
+				})
+
+				// Blog & news, when a post template is configured. Either
+				// feed permission opens the section; which feeds a user
+				// can actually touch is enforced per-post in the handlers.
+				if d.PostTemplate.File != "" {
+					r.Group(func(r chi.Router) {
+						r.Use(s.requireAnyPerm(auth.PermBlogs, auth.PermNews))
+						r.Get("/posts", s.postsList)
+						r.Get("/posts/new", s.postNew)
+						r.Post("/posts/new", s.postCreate)
+						r.Get("/posts/{id}", s.postEdit)
+						r.Post("/posts/{id}", s.postUpdate)
+						r.Post("/posts/{id}/delete", s.postDelete)
+						r.Post("/posts/{id}/discard", s.postDiscard)
+						r.Post("/posts/{id}/unpublish", s.postUnpublish)
+						r.Get("/posts/{id}/preview", s.postPreview)
+						r.Get("/posts/{id}/versions", s.postVersions)
+						r.Get("/posts/{id}/versions/{vid}/preview", s.postVersionPreview)
+						r.Post("/posts/{id}/versions/{vid}/restore", s.postVersionRestore)
+						r.Post("/api/posts", s.apiCreatePost)
+						r.Put("/api/posts/{id}", s.apiUpdatePostSettings)
+					})
+				}
+
+				// Snippet management (palette entries) is superadmin-only:
+				// snippets are raw HTML injected into every editor.
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireSuperadmin)
+					r.Get("/snippets", s.snippetsList)
+					r.Get("/snippets/new", s.snippetNew)
+					r.Post("/snippets/new", s.snippetCreate)
+					r.Get("/snippets/{id}", s.snippetEdit)
+					r.Post("/snippets/{id}", s.snippetUpdate)
+					r.Post("/snippets/{id}/delete", s.snippetDelete)
 				})
 			}
 
-			// Snippet management (palette entries) is superadmin-only:
-			// snippets are raw HTML injected into every editor.
+			// The media library, for anyone who edits something that carries
+			// media — see mediaPermissions. Gated as a group rather than per
+			// route: the picker's read endpoints matter as much as the bulk
+			// delete, since a library listing is a list of what the site holds.
+			if d.Media != nil {
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireMedia)
+
+					r.Get("/media", s.mediaList)
+					r.Get("/media/{id}/download", s.mediaDownload)
+					r.Post("/media/upload", s.mediaUpload)
+					r.Post("/media/{id}/alt", s.mediaUpdateAlt)
+					r.Post("/media/{id}/rename", s.mediaRename)
+					r.Post("/media/{id}/delete", s.mediaDelete)
+					r.Post("/media/{id}/move", s.mediaMove)
+					r.Post("/media/bulk/move", s.mediaBulkMove)
+					r.Post("/media/bulk/delete", s.mediaBulkDelete)
+					r.Post("/media/bulk/download", s.mediaBulkDownload)
+					r.Post("/media/folders/new", s.mediaFolderCreate)
+					r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
+
+					r.Get("/api/media", s.apiMediaList)
+					r.Post("/api/media", s.apiMediaUpload)
+					r.Post("/api/media/{id}/poster", s.apiMediaSetPoster)
+					r.Get("/api/media/folders", s.apiFoldersList)
+					r.Post("/api/media/folders", s.apiFolderCreate)
+				})
+			}
+
+			// Host-registered sections, behind the same session, CSRF, and
+			// login middleware as everything else in this group.
+			for _, sec := range d.Sections {
+				r.Mount(SectionPathPrefix+"/"+sec.Path, s.sectionHandler(sec))
+			}
+
 			r.Group(func(r chi.Router) {
-				r.Use(s.requireSuperadmin)
-				r.Get("/snippets", s.snippetsList)
-				r.Get("/snippets/new", s.snippetNew)
-				r.Post("/snippets/new", s.snippetCreate)
-				r.Get("/snippets/{id}", s.snippetEdit)
-				r.Post("/snippets/{id}", s.snippetUpdate)
-				r.Post("/snippets/{id}/delete", s.snippetDelete)
+				r.Use(s.requireAnyPerm(auth.PermUsers))
+				r.Get("/users", s.usersList)
+				r.Get("/users/new", s.userNew)
+				r.Post("/users/new", s.userCreate)
+				r.Get("/users/{id}", s.userEdit)
+				r.Post("/users/{id}", s.userUpdate)
+				r.Post("/users/{id}/delete", s.userDelete)
+				r.With(s.requireSuperadmin).Post("/users/{id}/masquerade", s.userMasquerade)
 			})
-		}
-
-		// The media library, for anyone who edits something that carries
-		// media — see mediaPermissions. Gated as a group rather than per
-		// route: the picker's read endpoints matter as much as the bulk
-		// delete, since a library listing is a list of what the site holds.
-		if d.Media != nil {
-			r.Group(func(r chi.Router) {
-				r.Use(s.requireMedia)
-
-				r.Get("/media", s.mediaList)
-				r.Get("/media/{id}/download", s.mediaDownload)
-				r.Post("/media/upload", s.mediaUpload)
-				r.Post("/media/{id}/alt", s.mediaUpdateAlt)
-				r.Post("/media/{id}/rename", s.mediaRename)
-				r.Post("/media/{id}/delete", s.mediaDelete)
-				r.Post("/media/{id}/move", s.mediaMove)
-				r.Post("/media/bulk/move", s.mediaBulkMove)
-				r.Post("/media/bulk/delete", s.mediaBulkDelete)
-				r.Post("/media/bulk/download", s.mediaBulkDownload)
-				r.Post("/media/folders/new", s.mediaFolderCreate)
-				r.Post("/media/folders/{id}/delete", s.mediaFolderDelete)
-
-				r.Get("/api/media", s.apiMediaList)
-				r.Post("/api/media", s.apiMediaUpload)
-				r.Post("/api/media/{id}/poster", s.apiMediaSetPoster)
-				r.Get("/api/media/folders", s.apiFoldersList)
-				r.Post("/api/media/folders", s.apiFolderCreate)
-			})
-		}
-
-		// Host-registered sections, behind the same session, CSRF, and
-		// login middleware as everything else in this group.
-		for _, sec := range d.Sections {
-			r.Mount(SectionPathPrefix+"/"+sec.Path, s.sectionHandler(sec))
-		}
-
-		r.Group(func(r chi.Router) {
-			r.Use(s.requireAnyPerm(auth.PermUsers))
-			r.Get("/users", s.usersList)
-			r.Get("/users/new", s.userNew)
-			r.Post("/users/new", s.userCreate)
-			r.Get("/users/{id}", s.userEdit)
-			r.Post("/users/{id}", s.userUpdate)
-			r.Post("/users/{id}/delete", s.userDelete)
-			r.With(s.requireSuperadmin).Post("/users/{id}/masquerade", s.userMasquerade)
-		})
+		}) // staff
 	})
 
 	return r
@@ -528,6 +540,10 @@ type templateData struct {
 	CSRFToken string
 	Flash     string
 	Error     string // form-level error message
+
+	// Next is the login form's validated return address (see safeNext),
+	// carried as a hidden field. Empty everywhere else.
+	Next string
 
 	// MasqueradeFrom is the superadmin a masquerading session belongs
 	// to — the account the layout's banner switches back to. nil when
@@ -827,15 +843,21 @@ func (s *server) newTemplateData(r *http.Request) templateData {
 			Nonce:     scriptNonce(r),
 		}
 	}
-	td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.User, r.URL.Path)
+	// A reader's admin is their account page and nothing else; the
+	// staff nav would be a list of doors that send them away.
+	if td.User == nil || !td.User.Role.IsReader() {
+		td.NavSections = navSectionsFor(s.deps.Sections, s.deps.AdminPath, td.User, r.URL.Path)
+	}
 	// Outside the block below, unlike the development stamp: the login
 	// page has no user and is exactly where this has to show — someone
 	// standing at a door that will not open for them should be told so
 	// before they type, not after.
 	td.SiteLocked = s.siteLocked(r.Context())
 	if td.User != nil {
-		td.NavCounts = s.navCounts(r, td.User)
-		s.fillNavCounts(r.Context(), td.NavSections)
+		if !td.User.Role.IsReader() {
+			td.NavCounts = s.navCounts(r, td.User)
+			s.fillNavCounts(r.Context(), td.NavSections)
+		}
 		td.NavCurrent = navCurrent(r.URL.Path)
 		if s.deps.SiteDevelopment != nil {
 			td.SiteDevelopment = s.deps.SiteDevelopment(r.Context())
@@ -1013,6 +1035,12 @@ func (s *server) countNow(ctx context.Context) navCounts {
 		}
 	}
 	return c
+}
+
+// IsReader reports whether the logged-in user is a reader, whose admin
+// is their own account page alone.
+func (td templateData) IsReader() bool {
+	return td.User != nil && td.User.Role.IsReader()
 }
 
 // IsAdmin reports whether the logged-in user has admin powers (admin or

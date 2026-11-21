@@ -85,16 +85,16 @@ func SlugURL(slug, locale, defaultLocale string) string {
 // buildEntry converts one stored item, resolving page links from the
 // current slug. ok is false when the item should not render (vanished
 // page, or draft or private page on a public render).
-func buildEntry(item content.MenuItem, current, locale, defaultLocale string, includeDrafts bool) (MenuEntry, bool) {
+func buildEntry(item content.MenuItem, current, locale, defaultLocale string, opts MenuOptions) (MenuEntry, bool) {
 	e := MenuEntry{ID: item.ID, Label: item.LabelFor(locale), NewTab: item.NewTab}
 	if item.PageID != nil {
 		if item.PageSlug == nil {
 			return e, false // page vanished; FK cascade should prevent this
 		}
-		if !includeDrafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
+		if !opts.Drafts && (item.PageStatus == nil || *item.PageStatus != content.StatusPublished) {
 			return e, false
 		}
-		if !includeDrafts && item.PageVisibility != nil && *item.PageVisibility == content.VisibilityPrivate {
+		if !opts.Drafts && !opts.Private && item.PageVisibility != nil && *item.PageVisibility == content.VisibilityPrivate {
 			return e, false
 		}
 		e.URL = SlugURL(*item.PageSlug, locale, defaultLocale)
@@ -117,6 +117,24 @@ func buildEntry(item content.MenuItem, current, locale, defaultLocale string, in
 // while editors keep it so they can fill it.
 // Menu entries carry the locale's labels and locale-prefixed page URLs.
 func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale string, includeDrafts bool) map[string][]MenuEntry {
+	return BuildMenusWith(items, currentSlug, locale, defaultLocale, MenuOptions{Drafts: includeDrafts})
+}
+
+// MenuOptions says which page-linked menu items a render may show.
+type MenuOptions struct {
+	// Drafts keeps items whose page is unpublished or private, and keeps
+	// empty dropdowns so they can be filled: the editor's view.
+	Drafts bool
+	// Private keeps items whose page is published but private, without
+	// the rest of the editor's view. For a signed-in reader, who may open
+	// those pages and so should be able to find them; see
+	// cms.Config.PrivateMenuItemsForSignedIn. Implied by Drafts.
+	Private bool
+}
+
+// BuildMenusWith is BuildMenus with the visibility rules spelled out.
+func BuildMenusWith(items []content.MenuItem, currentSlug, locale, defaultLocale string, opts MenuOptions) map[string][]MenuEntry {
+	includeDrafts := opts.Drafts
 	current := SlugURL(currentSlug, locale, defaultLocale)
 	menus := map[string][]MenuEntry{}
 	// Two passes: every top-level item is placed first, then children
@@ -136,7 +154,7 @@ func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale str
 		if item.ParentID != nil {
 			continue
 		}
-		e, ok := buildEntry(item, current, locale, defaultLocale, includeDrafts)
+		e, ok := buildEntry(item, current, locale, defaultLocale, opts)
 		if !ok {
 			continue
 		}
@@ -157,7 +175,7 @@ func BuildMenus(items []content.MenuItem, currentSlug, locale, defaultLocale str
 		if !found {
 			continue
 		}
-		e, ok := buildEntry(item, current, locale, defaultLocale, includeDrafts)
+		e, ok := buildEntry(item, current, locale, defaultLocale, opts)
 		if !ok || e.URL == "" {
 			continue // label-only rows are only meaningful at top level
 		}

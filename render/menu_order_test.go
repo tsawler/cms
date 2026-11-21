@@ -2,6 +2,7 @@ package render
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tsawler/cms/content"
@@ -92,5 +93,44 @@ func TestBuildMenusStillDropsOutOfModelRows(t *testing.T) {
 	want = []string{"About", "More", "More>Child", "Empty"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("editor menu = %v, want %v", got, want)
+	}
+}
+
+// MenuOptions.Private shows a private page's item without the rest of the
+// editor's view: drafts stay hidden, and so do empty dropdowns.
+func TestBuildMenusWithPrivate(t *testing.T) {
+	pid := func(id int64) *int64 { return &id }
+	slug := func(s string) *string { return &s }
+	status := func(s content.Status) *content.Status { return &s }
+	private := content.VisibilityPrivate
+
+	items := []content.MenuItem{
+		{ID: 1, Menu: "main", Label: "Staff", PageID: pid(1), PageSlug: slug("staff"), PageStatus: status(content.StatusPublished), PageVisibility: &private},
+		{ID: 2, Menu: "main", Label: "Draft", PageID: pid(2), PageSlug: slug("draft"), PageStatus: status(content.StatusDraft), PageVisibility: &private},
+		{ID: 3, Menu: "main", Label: "HR"},
+		{ID: 4, Menu: "main", ParentID: pid(3), Label: "Forms", PageID: pid(4), PageSlug: slug("forms"), PageStatus: status(content.StatusPublished), PageVisibility: &private},
+		{ID: 5, Menu: "main", Label: "Empty"},
+	}
+	labels := func(entries []MenuEntry) []string {
+		var out []string
+		for _, e := range entries {
+			out = append(out, e.Label)
+			for _, c := range e.Children {
+				out = append(out, e.Label+"/"+c.Label)
+			}
+		}
+		return out
+	}
+
+	if got := labels(BuildMenusWith(items, "", "en", "en", MenuOptions{})["main"]); len(got) != 0 {
+		t.Errorf("public render shows %v, want nothing", got)
+	}
+	got := labels(BuildMenusWith(items, "", "en", "en", MenuOptions{Private: true})["main"])
+	want := []string{"Staff", "HR", "HR/Forms"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("signed-in render shows %v, want %v", got, want)
+	}
+	if got := labels(BuildMenusWith(items, "", "en", "en", MenuOptions{Drafts: true})["main"]); len(got) != 5 {
+		t.Errorf("editor render shows %v, want all five", got)
 	}
 }
