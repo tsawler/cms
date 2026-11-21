@@ -13,7 +13,8 @@ import (
 )
 
 // The public side reads the admin's session too — sessionUser for the
-// in-place editor, superadminContext for the site lock's bypass — and
+// in-place editor, superadminContext for the site lock's bypass, SignedIn
+// for the host — and
 // both must drop a session a credential change has ended, as the admin
 // does.
 func TestPublicSessionChecksFollowTheEpoch(t *testing.T) {
@@ -49,6 +50,9 @@ func TestPublicSessionChecksFollowTheEpoch(t *testing.T) {
 		if _, ok := c.superadminContext(request()); !ok {
 			t.Fatal("superadminContext refused a current session")
 		}
+		if !c.SignedIn(request()) {
+			t.Fatal("SignedIn refused a current session")
+		}
 
 		if err := users.UpdatePassword(ctx, u.ID, "new-hash"); err != nil {
 			t.Fatal(err)
@@ -58,6 +62,9 @@ func TestPublicSessionChecksFollowTheEpoch(t *testing.T) {
 		}
 		if _, ok := c.superadminContext(request()); ok {
 			t.Error("superadminContext honoured a session the password change ended")
+		}
+		if c.SignedIn(request()) {
+			t.Error("SignedIn honoured a session the password change ended")
 		}
 	})
 }

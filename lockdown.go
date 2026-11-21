@@ -31,8 +31,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-
-	"github.com/tsawler/cms/internal/sessiondata"
 )
 
 // lockedRetryAfter is what a refused response tells a crawler to wait
@@ -187,24 +185,8 @@ func (c *CMS) refuseLocked(r *http.Request) (*http.Request, bool) {
 // is what masquerade means, and the way out is to end it — the exit
 // button is in the admin, which is never locked.
 func (c *CMS) superadminContext(r *http.Request) (context.Context, bool) {
-	if c.sessions == nil || c.users == nil {
-		return nil, false
-	}
-	token := ""
-	if ck, err := r.Cookie(c.sessions.Cookie.Name); err == nil {
-		token = ck.Value
-	}
-	ctx, err := c.sessions.Load(r.Context(), token)
-	if err != nil {
-		c.cfg.Logger.Error("cms: reading the session for the site lock", "err", err)
-		return nil, false
-	}
-	id := c.sessions.GetInt64(ctx, sessiondata.KeyUserID)
-	if id == 0 {
-		return nil, false
-	}
-	u, err := c.users.GetByID(ctx, id)
-	if err != nil || !u.Active || !u.Role.IsSuperadmin() || !sessiondata.EpochCurrent(ctx, c.sessions, u.SessionEpoch) {
+	ctx, u := c.cookieUser(r)
+	if u == nil || !u.Role.IsSuperadmin() {
 		return nil, false
 	}
 	return ctx, true

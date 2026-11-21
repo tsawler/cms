@@ -111,6 +111,32 @@ signed-out request for a private page with a 404, as before, so that
 outsiders cannot tell which private pages exist; redirecting to the login
 form instead is the host's call to make.
 
+## Asking whether a visitor is signed in
+
+`c.SignedIn(r)` reports whether a request comes from a signed-in user, any
+role: a session naming an active account that has not been logged out or
+ended by a password or two-factor change. Use it for what the host shows,
+such as a staff menu or a sign-in link, and for deciding whether to send a
+visitor to `LoginURL`:
+
+```go
+cfg.RequestFuncs = func(r *http.Request) template.FuncMap {
+	return template.FuncMap{"signedIn": func() bool { return c.SignedIn(r) }}
+}
+```
+
+Don't decide this from whether the session cookie is present. The cookie
+outlives the sign-in: logging out destroys the session, but the login page
+it lands on starts a new one for its CSRF token. So a browser that has just
+logged out still sends a session cookie, and so does any visitor who has
+loaded a form.
+
+`SignedIn` reads the session from the cookie itself, so it works in
+middleware wrapped around `c.Handler()` as well as in templates. A request
+without a session cookie costs nothing to check; one with a cookie costs a
+session read and a user lookup. It decides presentation only: the CMS
+still enforces who may read private pages and use the admin.
+
 `next` is checked on the way in and again before the redirect, and only a
 path on this site is accepted: anything naming a scheme or a host,
 anything starting `//` or `/\`, and anything with a backslash, a space or
