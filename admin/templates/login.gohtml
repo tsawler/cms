@@ -33,6 +33,7 @@ window.CAP_SCRIPT_NONCE = {{.Captcha.Nonce}};
     {{with .Error}}<div class="cms-alert">{{.}}</div>{{end}}
     <form method="post" action="{{.AdminPath}}/login" novalidate{{if and .Captcha (not .Captcha.Visible)}} data-cap-endpoint="{{.Captcha.Endpoint}}"{{end}}>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        {{with .Next}}<input type="hidden" name="next" value="{{.}}">{{end}}
         <div class="cms-field">
             <label for="email">{{.T "Email"}}</label>
             <input type="email" id="email" name="email" autocomplete="username" required autofocus>

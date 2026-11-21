@@ -26,10 +26,22 @@ const (
 	RoleAdmin Role = "admin"
 	// RoleEditor may create and edit content but not manage users.
 	RoleEditor Role = "editor"
+	// RoleReader signs in to read the site — its private pages, and its
+	// private menu items where Config.PrivateMenuItemsForSignedIn is on —
+	// and nothing else. It holds no permissions whatever is stored for
+	// it, never gets the in-place editor, and reaches only its own
+	// account page in the admin. The role for an intranet's staff.
+	RoleReader Role = "reader"
 )
 
 // Valid reports whether r is a role the CMS knows about.
-func (r Role) Valid() bool { return r == RoleSuperadmin || r == RoleAdmin || r == RoleEditor }
+func (r Role) Valid() bool {
+	return r == RoleSuperadmin || r == RoleAdmin || r == RoleEditor || r == RoleReader
+}
+
+// IsReader reports whether the role is the read-only one: no
+// permissions, no editor, no admin beyond the account's own settings.
+func (r Role) IsReader() bool { return r == RoleReader }
 
 // IsAdmin reports whether the role carries admin powers (user management,
 // unsanitized content, page CSS/JS). Superadmin is a superset of admin.
@@ -407,7 +419,15 @@ func (s *Store) Save(ctx context.Context, in UserSave) error {
 			}
 		}
 	}
-	if err := replacePermissions(ctx, tx, u.ID, in.Permissions); err != nil {
+	// A reader holds no grants. Stored ones would be dormant — Can and
+	// HasGrant refuse readers outright — but dormant grants come back to
+	// life the day the account is made an editor again, which is not
+	// something the person making it a reader would expect.
+	perms := in.Permissions
+	if u.Role == RoleReader {
+		perms = nil
+	}
+	if err := replacePermissions(ctx, tx, u.ID, perms); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

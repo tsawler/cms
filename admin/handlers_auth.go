@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -12,21 +13,101 @@ import (
 	"github.com/tsawler/cms/captcha"
 )
 
+// nextParam names where to go once signed in: a query parameter on the
+// login page, carried through the form as a hidden field of the same
+// name. A host that turns a signed-out visitor away from a private page
+// sends them to AdminPath + "/login?next=" + the page's path; see
+// LoginURL.
+const nextParam = "next"
+
+// maxNextLen bounds a return address. Any real page path fits many times
+// over; the bound only keeps a hostile one from being carried around in
+// the session.
+const maxNextLen = 2048
+
+// safeNext returns next when it is a path on this site worth returning
+// to, and "" otherwise. "" means the ordinary landing page — see
+// landingFor — so every refusal here is quiet and harmless.
+//
+// This is the whole defence against the login page becoming an open
+// redirect: an attacker's link to /admin/login?next=https://evil.example
+// signs the victim in for real and then forwards them, from a page they
+// just trusted with a password, to a convincing copy asking for it
+// again. So only a site-relative path is accepted, and the checks are
+// written against how *browsers* read a Location header, which is more
+// generously than url.Parse does:
+//
+//   - It must start with exactly one slash. "//evil.example" is a
+//     scheme-relative URL — another host — and so is "/\evil.example",
+//     because browsers treat a backslash in a URL as a slash.
+//   - No backslashes or control characters anywhere. Browsers delete
+//     tabs and newlines from URLs before parsing them, so "/	/evil" is
+//     "//evil" by the time it is followed; and CR/LF have no business
+//     anywhere near a response header.
+//   - After all that, url.Parse must agree that it names no scheme, host
+//     or user — belt and braces for whatever the list above missed.
+//
+// The login flow's own pages are refused too, not for safety but so a
+// stale link cannot loop someone back to the form they just filled in.
+func (s *server) safeNext(next string) string {
+	if next == "" || len(next) > maxNextLen || next[0] != '/' {
+		return ""
+	}
+	if len(next) > 1 && (next[1] == '/' || next[1] == '\\') {
+		return ""
+	}
+	for i := 0; i < len(next); i++ {
+		if c := next[i]; c < 0x21 || c == 0x7f || c == '\\' {
+			return ""
+		}
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" {
+		return ""
+	}
+	for _, p := range []string{"/login", "/logout", "/forgot-password", "/reset-password"} {
+		if u.Path == s.deps.AdminPath+p || strings.HasPrefix(u.Path, s.deps.AdminPath+p+"/") {
+			return ""
+		}
+	}
+	return next
+}
+
+// landingFor is where a sign-in ends up: the return address when there
+// is a good one, and otherwise the front of the site for a reader (the
+// admin holds nothing for them) and the dashboard for staff.
+func (s *server) landingFor(u *auth.User, next string) string {
+	if next != "" {
+		return next
+	}
+	if u != nil && u.Role.IsReader() {
+		return "/"
+	}
+	return s.deps.AdminPath + "/"
+}
+
 func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
-	if s.currentUser(r) != nil {
-		http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
+	next := s.safeNext(r.URL.Query().Get(nextParam))
+	if u := s.currentUser(r); u != nil {
+		http.Redirect(w, r, s.landingFor(u, next), http.StatusSeeOther)
 		return
 	}
-	s.render(w, http.StatusOK, "login", s.newTemplateData(r))
+	data := s.newTemplateData(r)
+	data.Next = next
+	s.render(w, http.StatusOK, "login", data)
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(r.PostFormValue("email"))
 	password := r.PostFormValue("password")
+	// Validated now and again at the redirect: the form field is as
+	// attacker-controlled as the query string it came from.
+	next := s.safeNext(r.PostFormValue(nextParam))
 
 	fail := func(status int, msg string) {
 		data := s.newTemplateData(r)
 		data.Error = msg
+		data.Next = next
 		s.render(w, status, "login", data)
 	}
 
@@ -119,16 +200,19 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		s.deps.Sessions.Put(r.Context(), sessionKey2FARemember, r.PostFormValue("remember") == "1")
 		s.deps.Sessions.Put(r.Context(), sessionKey2FAExpires, time.Now().Add(twoFactorGrace).Unix())
 		s.deps.Sessions.Put(r.Context(), sessionKey2FAEpoch, u.SessionEpoch)
+		// In the session rather than on the challenge's URL, so nothing
+		// between here and the code form can swap it.
+		s.deps.Sessions.Put(r.Context(), sessionKey2FANext, next)
 		http.Redirect(w, r, s.deps.AdminPath+"/login/2fa", http.StatusSeeOther)
 		return
 	}
 
-	s.completeLogin(w, r, u, r.PostFormValue("remember") == "1")
+	s.completeLogin(w, r, u, r.PostFormValue("remember") == "1", next)
 }
 
 // completeLogin grants the session: the shared tail of the plain login
 // and the two-factor challenge.
-func (s *server) completeLogin(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool) {
+func (s *server) completeLogin(w http.ResponseWriter, r *http.Request, u *auth.User, remember bool, next string) {
 	// The backstop for the check in login above: this is where both
 	// login paths meet, so a two-factor challenge that was pending when
 	// the site closed is refused here even though nothing refused it on
@@ -147,7 +231,7 @@ func (s *server) completeLogin(w http.ResponseWriter, r *http.Request, u *auth.U
 		s.deps.Sessions.SetDeadline(r.Context(), time.Now().Add(s.deps.RememberFor))
 	}
 	s.deps.Logger.Info("cms admin: login", "user", u.Email)
-	http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
+	http.Redirect(w, r, s.landingFor(u, s.safeNext(next)), http.StatusSeeOther)
 }
 
 // twoFactorGrace is how long the code challenge stays open after a
@@ -190,11 +274,12 @@ func (s *server) clearTwoFactorPending(r *http.Request) {
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FARemember)
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FAExpires)
 	s.deps.Sessions.Remove(r.Context(), sessionKey2FAEpoch)
+	s.deps.Sessions.Remove(r.Context(), sessionKey2FANext)
 }
 
 func (s *server) twoFactorForm(w http.ResponseWriter, r *http.Request) {
-	if s.currentUser(r) != nil {
-		http.Redirect(w, r, s.deps.AdminPath+"/", http.StatusSeeOther)
+	if u := s.currentUser(r); u != nil {
+		http.Redirect(w, r, s.landingFor(u, ""), http.StatusSeeOther)
 		return
 	}
 	if s.twoFactorPending(r) == nil {
@@ -255,6 +340,7 @@ func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
 	s.throttle.Reset(throttleKey)
 	s.acctCode.Reset(account)
 	remember := s.deps.Sessions.GetBool(r.Context(), sessionKey2FARemember)
+	next := s.deps.Sessions.GetString(r.Context(), sessionKey2FANext)
 	s.clearTwoFactorPending(r)
 	// A fresh token again on the pending → logged-in promotion, same as
 	// the password step: each privilege change gets its own session id.
@@ -262,7 +348,7 @@ func (s *server) twoFactorSubmit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.completeLogin(w, r, u, remember)
+	s.completeLogin(w, r, u, remember, next)
 }
 
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {

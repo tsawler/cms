@@ -76,9 +76,10 @@ func PermissionForFeed(feed string) Permission {
 
 // Can reports whether the user holds the permission. Admin and
 // superadmin roles hold every permission; editors hold what has been
-// granted to them. Safe to call on a nil user (false).
+// granted to them; readers hold none, whatever is stored. Safe to call
+// on a nil user (false).
 func (u *User) Can(p Permission) bool {
-	if u == nil {
+	if u == nil || u.Role.IsReader() {
 		return false
 	}
 	if u.Role.IsAdmin() {
@@ -93,7 +94,7 @@ func (u *User) Can(p Permission) bool {
 // user whatever their role: unlike Can, the admin role earns nothing
 // implicitly here. Safe to call on a nil user (false).
 func (u *User) HasGrant(p Permission) bool {
-	if u == nil {
+	if u == nil || u.Role.IsReader() {
 		return false
 	}
 	if u.Role.IsSuperadmin() {
