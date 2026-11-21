@@ -1977,6 +1977,60 @@ func (c *CMS) LoginURL(next string) string {
 	return login + "?next=" + url.QueryEscape(next)
 }
 
+// SignedIn reports whether r comes from a signed-in CMS user: a session
+// naming an active account, granted under that account's current session
+// epoch — so not logged out, and not ended by a password or two-factor
+// change. Readers count; anyone the admin would let in counts.
+//
+// It is for a host deciding what to show — a sign-in link or a staff
+// menu — or whether to send a visitor to LoginURL. Do not decide that
+// from the presence of the session cookie. The cookie outlives the
+// sign-in: logging out destroys the session, but the login page it lands
+// on starts a fresh one for its CSRF token, so a browser that has just
+// logged out still carries a session cookie, and every visitor who has
+// seen a form does too.
+//
+// It reads the session from the request's cookie itself, so it answers
+// the same in middleware wrapped around Handler as in a template func
+// bound by Config.RequestFuncs. A request with no session cookie costs
+// nothing; one with a cookie costs a session read and a user lookup.
+//
+// This is for presentation and routing only. The CMS enforces who may
+// read a private page and who may use the admin, whatever the host shows.
+func (c *CMS) SignedIn(r *http.Request) bool {
+	_, u := c.cookieUser(r)
+	return u != nil
+}
+
+// cookieUser is the signed-in, active user named by the session in r's
+// cookie, with the context that session is loaded into; nil when there is
+// none. Unlike sessionUser it does not need the session middleware to
+// have run, which is what lets host middleware ask (SignedIn, and the
+// site lock's superadmin check).
+func (c *CMS) cookieUser(r *http.Request) (context.Context, *auth.User) {
+	if c.sessions == nil || c.users == nil {
+		return nil, nil
+	}
+	ck, err := r.Cookie(c.sessions.Cookie.Name)
+	if err != nil || ck.Value == "" {
+		return nil, nil
+	}
+	ctx, err := c.sessions.Load(r.Context(), ck.Value)
+	if err != nil {
+		c.cfg.Logger.Error("cms: reading the session", "err", err)
+		return nil, nil
+	}
+	id := c.sessions.GetInt64(ctx, sessiondata.KeyUserID)
+	if id == 0 {
+		return ctx, nil
+	}
+	u, err := c.users.GetByID(ctx, id)
+	if err != nil || !u.Active || !sessiondata.EpochCurrent(ctx, c.sessions, u.SessionEpoch) {
+		return ctx, nil
+	}
+	return ctx, u
+}
+
 // sessionUser returns the logged-in, active CMS user for a public page
 // request, or nil for ordinary visitors.
 func (c *CMS) sessionUser(r *http.Request) *auth.User {
